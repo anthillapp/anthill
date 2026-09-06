@@ -16,3 +16,7 @@ apps/desktop/release/
 
 # Local copy of the design prototype, for reference while implementing it.
 .design-preview/
+
+# Exploratory QA memory: coverage map, session records, pending bug reports.
+# Local notes about test runs, not source.
+qa-exploration/

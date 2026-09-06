@@ -121,6 +121,22 @@ This builds every workspace package and then opens the Electron window. Expect
 about a minute the first time. The window is the Anthill launcher: the app mark
 and three ways to start on the left, your workflows and agents on the right.
 
+Development uses a separate application profile. On macOS, its data lives in
+`~/Library/Application Support/@anthill/desktop-dev`; the installed application
+keeps `~/Library/Application Support/@anthill/desktop`. You can run both at once
+to test the dev window while watching its QA session in the installed app.
+The first dev launch starts with fresh settings, agents and recents; existing
+data is not copied or moved. Workflow files explicitly opened from disk remain
+shared files, so use a dedicated test folder for QA documents.
+
+Each profile still permits only one running instance. The temporary
+`ANTHILL_DEV_ALLOW_MULTIPLE` bypass is no longer supported. CLI authentication,
+session records and local hook input remain in their existing locations; each
+Anthill profile keeps its own observation journal. Harness hook installation
+still changes shared CLI configuration, so review it before enabling or disabling
+hooks in either instance. For manual dev QA, target the native Electron window,
+not the renderer URL in a browser.
+
 To check the tree without running it:
 
 ```bash
@@ -230,8 +246,11 @@ a list hand-copied into our source. Both are read-only, both are local.
 Check with `curl -s -o /dev/null -w '%{http_code}' http://localhost:5173/` and
 restart `npm run dev:desktop` if it is not answering.
 
-**`npm run dev:desktop` exits immediately.** A packaged `Anthill.app` is already
-running and holds the single-instance lock. Quit it and try again.
+**`npm run dev:desktop` exits immediately.** Another dev instance may already
+hold the development profile's single-instance lock. Check that instance and
+the startup log. The installed `Anthill.app` uses a separate profile and may
+stay open. After upgrading from a dev build that shared installed data, quit
+the old dev instance before restarting it with the new code.
 
 **`ERR_DLOPEN_FAILED` or a `NODE_MODULE_VERSION` mismatch at startup.** The
 Electron build of `better-sqlite3` is missing. Re-run

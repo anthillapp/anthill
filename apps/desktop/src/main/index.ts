@@ -54,6 +54,7 @@ import { detectInterpreters, runDraft, signInToInterpreter } from "./interpreter
 import { readCodexModels } from "./codex-models.js";
 import { readCodexAgentSupport } from "./codex-capability.js";
 import { adoptUserPath } from "./user-path.js";
+import { desktopUserDataPath } from "./user-data.js";
 import { LiveSessionService, type LiveSessionSnapshot } from "./live/service.js";
 import { ObservationSetupService } from "./live/setup.js";
 import { AgentLibraryStore } from "./agent-library.js";
@@ -85,11 +86,11 @@ import {
  * ran: a packaged build does exactly that, and the read would have captured
  * the new, empty directory and pinned the app to it (ANT-13).
  *
- * This is the deliberate choice the packaging work had to make, recorded
- * where the next person will meet it: keep the existing location, rather than
- * move to one named after the app and owe everyone a migration.
+ * Packaged builds retain that existing location without a migration. Dev
+ * builds use desktop-dev so QA cannot share stores or the instance lock with
+ * the installed app. Select this before taking the lock or creating stores.
  */
-const USER_DATA_DIR = join(app.getPath("appData"), "@anthill", "desktop");
+const USER_DATA_DIR = desktopUserDataPath(app.getPath("appData"), app.isPackaged);
 app.setName("Anthill");
 app.setPath("userData", USER_DATA_DIR);
 

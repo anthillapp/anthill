@@ -514,7 +514,10 @@ function LaunchIntro({
     <>
       <AnthillMark className="launch-mark" size={104} />
       <h1>Anthill</h1>
-      <p className="launch-version">Version 0.4 · local-first</p>
+      {/* From package.json at build time. It was a literal, and it drifted —
+          the screen said 0.4 while the manifest said 0.0.1, and the disk image
+          was named after the manifest. */}
+      <p className="launch-version">Version {__ANTHILL_VERSION__} · local-first</p>
       <p className="launch-blurb">
         Design a workflow for AI coding agents, then hand the workflow to the agent
         that carries it out.

@@ -53,6 +53,7 @@ import { createServices, detectRuntimes, startRun, type RunServices } from "./se
 import { detectInterpreters, runDraft, signInToInterpreter } from "./interpreters.js";
 import { readCodexModels } from "./codex-models.js";
 import { readCodexAgentSupport } from "./codex-capability.js";
+import { adoptUserPath } from "./user-path.js";
 import { LiveSessionService, type LiveSessionSnapshot } from "./live/service.js";
 import { ObservationSetupService } from "./live/setup.js";
 import { AgentLibraryStore } from "./agent-library.js";
@@ -169,6 +170,25 @@ function electronSqliteBinding(): string | undefined {
       ];
   return candidates.find((candidate) => existsSync(candidate));
 }
+
+/**
+ * Learning the author's real PATH, started at once and awaited where it counts.
+ *
+ * A double-clicked app is started by launchd rather than by a shell, so it
+ * inherits a bare system PATH with none of the places a coding CLI lives —
+ * `~/.local/bin`, Homebrew, any version manager. Every "Claude Code was not
+ * found" that produces is false, and it cannot appear in development, where
+ * Electron is started from a shell that already has the right PATH.
+ *
+ * Kicked off here rather than awaited before the window: asking a login shell
+ * costs however long somebody's rc file takes, and a window that waits on that
+ * is a window that looks broken. Nothing before the first "what is installed?"
+ * needs it, and that question waits on this promise instead.
+ *
+ * It cannot fail in a way that matters — no shell, a slow one, or a strange
+ * answer all leave the PATH exactly as it was.
+ */
+const userPath = adoptUserPath().catch(() => false);
 
 /**
  * Passive observation of sessions the user starts themselves.
@@ -593,15 +613,16 @@ function registerIpcHandlers(): void {
   });
 
   // Prompt-to-Workflow. Detection and drafting only — nothing here runs a workflow.
-  handle(
-    IpcChannel.interpretersDetect,
-    async (): Promise<InterpreterInfo[]> => detectInterpreters(),
-  );
+  handle(IpcChannel.interpretersDetect, async (): Promise<InterpreterInfo[]> => {
+    await userPath;
+    return detectInterpreters();
+  });
 
   // Read-only, and nothing is run: Codex keeps its own model catalogue on this
   // machine, and a hand-kept copy in Anthill's source would go stale on
   // somebody else's release schedule.
   handle(IpcChannel.codexModels, async () => {
+    await userPath;
     const [catalog, agentSupport] = await Promise.all([
       readCodexModels(),
       readCodexAgentSupport(),

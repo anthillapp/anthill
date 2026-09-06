@@ -20,6 +20,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const manifest = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as {
+  version: string;
   build: {
     files: string[];
     asarUnpack: string[];
@@ -48,6 +49,32 @@ describe("the native binding survives packaging", () => {
   /* Kept as a second candidate so an `extraResources` layout still works. */
   it("still tries the extraResources location as well", () => {
     expect(main).toContain('join(process.resourcesPath, "native/better_sqlite3.node")');
+  });
+});
+
+/**
+ * The version people read and the version things are named after.
+ *
+ * These were two numbers: the launch screen carried `Version 0.4` as a literal
+ * while this manifest said `0.0.1`, and the disk image was named after the
+ * manifest. A number maintained in two places disagrees with itself eventually,
+ * and the copy on screen is the one that goes stale — it is the one nothing
+ * else depends on.
+ */
+describe("the version is one number", () => {
+  it("is not written into the launch screen by hand", () => {
+    const launch = readFileSync(resolve("src/renderer/LaunchWindow.tsx"), "utf8");
+    expect(launch).toContain("__ANTHILL_VERSION__");
+    expect(launch).not.toMatch(/Version \d+\.\d+/);
+  });
+
+  it("reaches the screen as the manifest's own value", () => {
+    // The build and the tests inject the same constant, so this is what ships.
+    expect(__ANTHILL_VERSION__).toBe(manifest.version);
+  });
+
+  it("is a release version rather than the scaffold's placeholder", () => {
+    expect(manifest.version).not.toBe("0.0.1");
   });
 });
 

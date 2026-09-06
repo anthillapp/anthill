@@ -1,5 +1,9 @@
+import { createRequire } from "node:module";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+
+/** The same version the build injects, so tests see what ships. */
+const { version } = createRequire(import.meta.url)("./package.json") as { version: string };
 
 /**
  * Two kinds of test live in this app, so two environments.
@@ -11,6 +15,7 @@ import react from "@vitejs/plugin-react";
  */
 export default defineConfig({
   plugins: [react()],
+  define: { __ANTHILL_VERSION__: JSON.stringify(version) },
   test: {
     globals: true,
     environment: "node",

@@ -328,11 +328,11 @@ describe("writing an agent", () => {
   it("opens the editor in place of the intro, with the list still there", async () => {
     stub([profile()]);
     await openAgents();
-    expect(screen.getByText("Version 0.4 · local-first")).toBeTruthy();
+    expect(screen.getByText(`Version ${__ANTHILL_VERSION__} · local-first`)).toBeTruthy();
 
     fireEvent.click(await screen.findByText("Reviewer"));
 
-    expect(screen.queryByText("Version 0.4 · local-first")).toBeNull();
+    expect(screen.queryByText(`Version ${__ANTHILL_VERSION__} · local-first`)).toBeNull();
     expect(screen.getByText("Agent profile")).toBeTruthy();
     expect(screen.getAllByText("Reviewer").length).toBe(2);
   });
@@ -344,7 +344,7 @@ describe("writing an agent", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Workflows\b/ }));
     expect(screen.queryByText("Agent profile")).toBeNull();
-    expect(screen.getByText("Version 0.4 · local-first")).toBeTruthy();
+    expect(screen.getByText(`Version ${__ANTHILL_VERSION__} · local-first`)).toBeTruthy();
   });
 
   it("holds a rename until Save, then keeps the id", async () => {
@@ -584,7 +584,7 @@ describe("leaving an agent with unsaved changes", () => {
     expect(api.agentsUpdate).not.toHaveBeenCalled();
     expect(held()[0].name).toBe("Reviewer");
     // Closed, and the intro is back.
-    expect(screen.getByText("Version 0.4 · local-first")).toBeTruthy();
+    expect(screen.getByText(`Version ${__ANTHILL_VERSION__} · local-first`)).toBeTruthy();
   });
 
   it("stays put, with the draft untouched, when the author changes their mind", async () => {
@@ -618,7 +618,7 @@ describe("leaving an agent with unsaved changes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close the agent" }));
 
     expect(screen.queryByRole("group", { name: "Unsaved changes" })).toBeNull();
-    expect(screen.getByText("Version 0.4 · local-first")).toBeTruthy();
+    expect(screen.getByText(`Version ${__ANTHILL_VERSION__} · local-first`)).toBeTruthy();
   });
 });
 

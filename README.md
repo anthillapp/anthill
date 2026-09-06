@@ -238,9 +238,12 @@ Electron build of `better-sqlite3` is missing. Re-run
 `node apps/desktop/scripts/fetch-electron-sqlite.mjs`. Re-running is safe; it
 never writes into `node_modules`.
 
-**A CLI shows as "not found" that you know is installed.** Anthill resolves it on
-the `PATH` its own process inherited, which is not your shell's if you launched
-the app from Finder. Start it from a terminal to check.
+**A CLI shows as "not found" that you know is installed.** Anthill asks your
+login shell for its `PATH` at startup, because an app launched from Finder is
+started by launchd and inherits a bare system `PATH` with none of the places a
+CLI lives. If it still cannot see one, check that the command works in a *new*
+terminal window — if the `PATH` that makes it work is set somewhere an
+interactive login shell does not read, Anthill will not see it either.
 
 **A CLI shows as "signed out" and you are not.** Anthill asks the CLI, and takes
 an unclear answer as unclear rather than as a no. If it says *signed out*, the

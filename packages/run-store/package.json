@@ -1,0 +1,22 @@
+{
+  "name": "@anthill/run-store",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "dependencies": {
+    "@anthill/workflow-schema": "*",
+    "better-sqlite3": "~12.11.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "~9.6.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}

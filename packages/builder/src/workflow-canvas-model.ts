@@ -1,0 +1,285 @@
+/**
+ * The canvas's view of a workflow: block boxes, ports, and the paths between them.
+ *
+ * Pure — it turns a `Workflow` into everything the canvas needs to draw, so the
+ * component itself only has to render and handle pointers. That also makes the
+ * layout decisions testable, which the rendering is not.
+ */
+
+import type { Workflow, WorkflowNode } from "@anthill/workflow-schema";
+import {
+  agentConfig,
+  actionDefinition,
+  outputsOf,
+  type ActionCategory,
+  type BlockOutput,
+} from "@anthill/workflow";
+
+import {
+  entryPoint,
+  labelHalfSize,
+  labelSpot,
+  portFromAnchor,
+  portPoint,
+  portSideToward,
+  route,
+  unconnectedStub,
+  type CurveGeometry,
+  type Point,
+  type PortPoint,
+  type Rect,
+} from "./geometry";
+
+/** Half the size of the bend handle drawn at the middle of a selected line. */
+const HANDLE_HALF = 9;
+
+/** Step cards and control pills are different sizes. */
+export const STEP_SIZE = { w: 196, h: 100 };
+export const PILL_SIZE = { w: 108, h: 40 };
+
+/** Colour per block category. Meaning, not decoration — red is reserved. */
+export const CATEGORY_COLORS: Record<ActionCategory | "control" | "approval" | "end", string> = {
+  understand: "#56aee0",
+  build: "#6b5bd2",
+  verify: "#d8a21a",
+  deliver: "#2f8f5f",
+  control: "#605d5d",
+  approval: "#ec3013",
+  end: "#bab6b6",
+};
+
+/** Amber on white reads badly, so verify labels use a darker ink. */
+export const CATEGORY_INK: Partial<Record<string, string>> = { verify: "#8a6a08" };
+
+export type OutcomeStyle = {
+  color: string;
+  dash?: string;
+  width: number;
+};
+
+export const OUTCOME_STYLES: Record<BlockOutput["kind"], OutcomeStyle> = {
+  next: { color: "#7d7979", width: 1.75 },
+  rework: { color: "#d8a21a", dash: "7 5", width: 1.75 },
+  question: { color: "#56aee0", dash: "2 5", width: 2 },
+  stop: { color: "#ec3013", dash: "7 5", width: 1.75 },
+};
+
+export function blockSize(node: WorkflowNode): { w: number; h: number } {
+  return node.type === "start" || node.type === "end" ? PILL_SIZE : STEP_SIZE;
+}
+
+export function blockRect(node: WorkflowNode): Rect {
+  const size = blockSize(node);
+  return {
+    left: node.position?.x ?? 0,
+    top: node.position?.y ?? 0,
+    w: size.w,
+    h: size.h,
+  };
+}
+
+/** Which colour a block is drawn in. */
+export function blockColor(node: WorkflowNode): string {
+  if (node.type === "start") return CATEGORY_COLORS.control;
+  if (node.type === "end") return CATEGORY_COLORS.end;
+  if (node.type === "approval") return CATEGORY_COLORS.approval;
+
+  const kind = agentConfig(node).actionKind;
+  if (!kind) return CATEGORY_COLORS.control;
+  return CATEGORY_COLORS[actionDefinition(kind).category];
+}
+
+export type ConnectedPath = {
+  nodeId: string;
+  output: BlockOutput;
+  /** Index among the block's outputs, which decides the port position. */
+  index: number;
+  geometry: CurveGeometry;
+  label: Point;
+  style: OutcomeStyle;
+  port: PortPoint;
+};
+
+export type PendingPath = {
+  nodeId: string;
+  output: BlockOutput;
+  index: number;
+  port: PortPoint;
+  /** Straight stub drawn where the arrow would go once it is routed. */
+  path: string;
+  label: Point;
+  style: OutcomeStyle;
+};
+
+export type CanvasModel = {
+  rects: Map<string, Rect>;
+  connected: ConnectedPath[];
+  pending: PendingPath[];
+};
+
+/**
+ * Work out every port, path and label position for a workflow.
+ *
+ * Labels are placed last and against every block, so a label pushed off one
+ * curve does not land on a card belonging to another.
+ */
+export function buildCanvasModel(workflow: Workflow): CanvasModel {
+  const rects = new Map<string, Rect>();
+  for (const node of workflow.nodes) rects.set(node.id, blockRect(node));
+
+  const blocks = [...rects.values()];
+  const connected: ConnectedPath[] = [];
+  const pending: PendingPath[] = [];
+
+  for (const node of workflow.nodes) {
+    const outputs = outputsOf(workflow, node.id);
+    const rect = rects.get(node.id);
+    if (!rect) continue;
+
+    // Ports the author has placed are fixed; the rest are spread along the
+    // edge they leave from, among the others leaving that same edge — so
+    // moving one does not shuffle the others, and a block with two forward
+    // outputs and one rework output shows two ports on the right and one on
+    // the left rather than three on the right.
+    const automatic = outputs.filter((output) => !output.port);
+    const sideOf = new Map<(typeof outputs)[number], "left" | "right">();
+    for (const output of automatic) {
+      const targetRect = output.target === null ? undefined : rects.get(output.target);
+      // An output with nowhere to go leaves forwards: there is no target to
+      // read a direction from, and forwards is what it will most likely become.
+      sideOf.set(output, targetRect ? (portSideToward(rect, targetRect) as "left" | "right") : "right");
+    }
+
+    outputs.forEach((output, index) => {
+      const side = sideOf.get(output) ?? "right";
+      const sharing = automatic.filter((item) => sideOf.get(item) === side);
+      const port = output.port
+        ? portFromAnchor(rect, output.port)
+        : portPoint(rect, sharing.indexOf(output), sharing.length, side);
+      const style = OUTCOME_STYLES[output.kind];
+
+      if (output.target === null) {
+        const stub = unconnectedStub(port);
+        pending.push({
+          nodeId: node.id,
+          output,
+          index,
+          port,
+          path: stub.path,
+          label: stub.label,
+          style,
+        });
+        return;
+      }
+
+      const targetRect = rects.get(output.target);
+      if (!targetRect) return;
+
+      const landing = entryPoint(targetRect, port, output.anchor);
+      const geometry = route(port, landing, {
+        routing: output.routing,
+        bend: output.bend,
+        // What the line has to get past. Without this the router has no idea
+        // anything is in the way, and a connection reaching past several
+        // blocks is drawn straight through them.
+        blocks,
+      });
+      const { halfW, halfH } = labelHalfSize(output.label || " ", {
+        quiet: output.kind === "next" && !output.condition,
+        hasCondition: Boolean(output.condition),
+      });
+
+      // The bend handle sits at the middle of the line, which is also where a
+      // label would like to be. Treat it as something to keep clear of, so the
+      // handle stays grabbable and the label does not shift when selected.
+      const handleSpot: Rect = {
+        left: geometry.mid.x - HANDLE_HALF,
+        top: geometry.mid.y - HANDLE_HALF,
+        w: HANDLE_HALF * 2,
+        h: HANDLE_HALF * 2,
+      };
+
+      connected.push({
+        nodeId: node.id,
+        output,
+        index,
+        geometry,
+        label: labelSpot(geometry, halfW, halfH, [...blocks, handleSpot]),
+        style,
+        port,
+      });
+    });
+  }
+
+  return { rects, connected, pending };
+}
+
+/**
+ * How far outside a block still counts as aiming at it.
+ *
+ * Generous enough that an arrowhead released near a block lands on it —
+ * dropping a connection is a gesture, not a click on a 196-pixel rectangle —
+ * and well short of the 132-pixel gap the generated layout leaves between
+ * columns, so two neighbours never both claim the same release point.
+ */
+export const SNAP_RADIUS = 48;
+
+/** How far a point is from a rectangle. Zero when it is inside. */
+export function distanceToRect(point: Point, rect: Rect): number {
+  const dx = Math.max(rect.left - point.x, 0, point.x - (rect.left + rect.w));
+  const dy = Math.max(rect.top - point.y, 0, point.y - (rect.top + rect.h));
+  return Math.hypot(dx, dy);
+}
+
+export type SnapCandidate = { node: WorkflowNode; rect: Rect; distance: number };
+
+/**
+ * The block an arrowhead released here should connect to.
+ *
+ * Nearest wins rather than first-found, so releasing between two blocks picks
+ * the one actually being aimed at instead of whichever happens to be drawn on
+ * top. `eligible` decides what may be connected to at all, and a point outside
+ * every eligible block's reach comes back undefined — a release in open space
+ * must not be quietly attached to something.
+ */
+export function snapTarget(
+  point: Point,
+  nodes: readonly WorkflowNode[],
+  eligible: (node: WorkflowNode) => boolean,
+  radius = SNAP_RADIUS,
+): SnapCandidate | undefined {
+  let best: SnapCandidate | undefined;
+  for (const node of nodes) {
+    if (!eligible(node)) continue;
+    const rect = blockRect(node);
+    const distance = distanceToRect(point, rect);
+    if (distance > radius) continue;
+    if (!best || distance < best.distance) best = { node, rect, distance };
+  }
+  return best;
+}
+
+/** Snap a dropped position to the dot grid the canvas draws. */
+export const GRID = 22;
+
+export function snapToGrid(value: number): number {
+  return Math.round(value / GRID) * GRID;
+}
+
+/**
+ * Where a block dropped at `point` should sit.
+ *
+ * The cursor holds the middle of the card, and the result is kept inside the
+ * canvas so a block cannot be dropped where it cannot be seen.
+ */
+export function dropPosition(
+  point: Point,
+  canvas: { width: number; height: number },
+): Point {
+  const x = point.x - STEP_SIZE.w / 2;
+  const y = point.y - STEP_SIZE.h / 2;
+  return {
+    x: snapToGrid(Math.min(Math.max(x, 12), Math.max(12, canvas.width - STEP_SIZE.w - 12))),
+    y: snapToGrid(Math.min(Math.max(y, 56), Math.max(56, canvas.height - STEP_SIZE.h - 12))),
+  };
+}

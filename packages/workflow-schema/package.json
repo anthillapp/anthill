@@ -1,0 +1,20 @@
+{
+  "name": "@anthill/workflow-schema",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}

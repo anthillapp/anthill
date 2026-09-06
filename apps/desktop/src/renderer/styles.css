@@ -1,0 +1,7454 @@
+/**
+ * Anthill desktop styles.
+ *
+ * Tokens are from the design handoff in
+ * anthill-sources/design_handoff_planner_canvas. The app chrome is dark and the
+ * work surface is light: the canvas is where attention belongs, so everything
+ * around it recedes.
+ */
+
+:root {
+  /* Chrome */
+  --chrome-deep: #1f1e1d;
+  --chrome-bar: #262424;
+  --chrome-panel: #2d2b2b;
+  --on-dark: #f8f4f4;
+  --on-dark-2: #e6e2e2;
+  --on-dark-dim: #8a8584;
+  --on-dark-dimmer: #7d7979;
+  --dark-border: rgba(255, 255, 255, 0.18);
+  --dark-divider: rgba(255, 255, 255, 0.11);
+  --dark-hover: rgba(255, 255, 255, 0.08);
+  --dark-inset: rgba(255, 255, 255, 0.06);
+
+  /* Work surface */
+  --canvas: #f8f7f7;
+  --surface: #ffffff;
+  --border: #e2dfdf;
+  --field-border: #d7d3d3;
+  --ink: #201e1d;
+  --ink-2: #444141;
+  --ink-3: #605d5d;
+  --ink-dim: #8a8584;
+  --ink-quiet: #bab6b6;
+  --chip: #f3f2f2;
+  --row-hover: #f5f3f3;
+
+  /* Accent. Red means exactly two things: the plan stopping for a person,
+     and a problem. */
+  --accent: #ec3013;
+  --accent-600: #dd2b0f;
+  --accent-700: #ae1800;
+  --accent-100: #fff2ef;
+  --accent-300: #ffc4b8;
+  --on-dark-accent: #ffc4b8;
+  --on-dark-accent-dot: #ff9783;
+
+  --ok: #3f8f5e;
+  --ok-soft: #eaf6ee;
+
+  --radius-control: 7px;
+  --radius-card: 8px;
+  --radius-slab: 10px;
+
+  --shadow-card: 0 1px 2px rgba(32, 30, 29, 0.1);
+  --shadow-raised: 0 6px 18px rgba(32, 30, 29, 0.1);
+
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  font-family: Archivo, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color: var(--ink);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--canvas);
+  font-size: 13px;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ---------------- dark bars ---------------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 14px;
+  background: var(--chrome-bar);
+  color: var(--on-dark);
+  /* One row, always. Wrapping put the actions on a second line and pushed the
+     canvas down. */
+  flex-wrap: nowrap;
+  overflow: hidden;
+  flex: none;
+}
+
+.topbar > * {
+  flex: none;
+  white-space: nowrap;
+}
+
+.topbar .spacer {
+  flex: 1 1 auto;
+}
+
+.topbar .divider {
+  width: 1px;
+  height: 22px;
+  background: var(--dark-divider);
+}
+
+.brand {
+  font-weight: 800;
+  letter-spacing: -0.015em;
+}
+
+/* The mark takes the colour it sits on; only the hill is accent. No tile,
+   no radius, no shadow — the silhouette carries itself. */
+.logo-mark {
+  flex: none;
+  color: var(--on-dark);
+}
+
+.statusbar {
+  height: 28px;
+  flex: none;
+  background: var(--chrome-deep);
+  color: var(--on-dark-dim);
+  font-size: 11.5px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 14px;
+}
+
+.statusbar .path {
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusbar .spacer {
+  flex: 1;
+}
+
+/* ---------------- buttons ---------------- */
+
+button {
+  font: inherit;
+  padding: 6px 11px;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--row-hover);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-600);
+}
+
+.topbar button,
+.subbar button {
+  background: transparent;
+  border-color: var(--dark-border);
+  color: var(--on-dark-2);
+}
+
+.topbar button:hover:not(:disabled),
+.subbar button:hover:not(:disabled) {
+  background: var(--dark-hover);
+}
+
+.topbar button.primary,
+.subbar button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Blocked, not disabled. A `disabled` button cannot be clicked, so it cannot
+   send the author anywhere — this one looks unavailable and takes them to the
+   problems that made it so. What it must never do is open the handover. */
+.topbar button.primary.is-blocked,
+.subbar button.primary.is-blocked {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: transparent;
+  color: var(--on-dark-dim);
+  cursor: not-allowed;
+}
+
+.topbar button.primary.is-blocked:hover,
+.subbar button.primary.is-blocked:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.icon-button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+button.link {
+  border: none;
+  background: none;
+  padding: 0;
+  text-align: left;
+  color: var(--accent-700);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-300);
+  font-size: 12px;
+  /* Used inside a sentence, so it has to behave like a word: a zero-padding
+     button gets squeezed by the inline box and paints its label over the
+     text either side of it. */
+  white-space: nowrap;
+  line-height: 1.55;
+  vertical-align: baseline;
+}
+
+button.link:hover {
+  background: none;
+}
+
+/* ---------------- pills & chips ---------------- */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.pill.on {
+  border-color: #cfe9d8;
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.pill.off {
+  border-color: var(--border);
+  background: var(--chip);
+  color: var(--on-dark-dimmer);
+}
+
+.pill.dirty,
+.pill.problems {
+  border-color: rgba(255, 151, 131, 0.45);
+  background: rgba(255, 151, 131, 0.12);
+  color: var(--on-dark-accent);
+}
+
+.pill.problems {
+  cursor: pointer;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--on-dark-accent-dot);
+  flex: none;
+}
+
+/* ---------------- layout ---------------- */
+
+.body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.canvas-area {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+/* ---------------- block library (dark, left) ---------------- */
+
+.library {
+  width: 238px;
+  flex: none;
+  background: var(--chrome-panel);
+  color: var(--on-dark);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 10px;
+  gap: 8px;
+  min-height: 0;
+}
+
+.library .kicker {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--on-dark-dim);
+}
+
+.library .search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--on-dark-dim);
+}
+
+.library .search input {
+  border: none;
+  background: none;
+  color: var(--on-dark);
+  padding: 0;
+  font-size: 12.5px;
+}
+
+.library .search input:focus {
+  box-shadow: none;
+}
+
+.library .search input::placeholder {
+  color: var(--on-dark-dimmer);
+}
+
+.library select {
+  height: 32px;
+  background: rgba(255, 255, 255, 0.07);
+  border-color: var(--dark-border);
+  color: var(--on-dark);
+}
+
+.library select option {
+  color: var(--ink);
+}
+
+.library-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.library-item {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 8px;
+  border: none;
+  background: none;
+  color: var(--on-dark);
+  border-radius: var(--radius-control);
+  cursor: grab;
+}
+
+.library-item:hover:not(:disabled) {
+  background: var(--dark-hover);
+}
+
+.library-item strong {
+  font-size: 13px;
+  font-weight: 600;
+  display: block;
+}
+
+.library-item small {
+  display: block;
+  color: var(--on-dark-dim);
+  font-size: 11.5px;
+  margin-top: 2px;
+  line-height: 1.35;
+}
+
+.library .hint {
+  color: var(--on-dark-dimmer);
+  font-size: 11.5px;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.add-custom {
+  border: 1px dashed var(--dark-border);
+  background: none;
+  color: var(--on-dark-2);
+}
+
+.swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-top: 4px;
+  flex: none;
+}
+
+/* ---------------- inspector (light, right) ---------------- */
+
+.inspector {
+  /* Fixed, and safe to be: the window's own `minWidth` is 1024, so this always
+     fits beside the rail and the canvas. What has to give on a narrow window
+     is the canvas, which can. */
+  width: 428px;
+  flex: none;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The panel used to open with six tabs. It has one job now — whatever is
+   selected — so it opens with a line naming that instead. */
+.inspector-top {
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.inspector-top h2 {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  flex: 1;
+}
+
+.inspector-top .count {
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--ink-3);
+}
+
+.tab-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 18px;
+}
+
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--chip);
+  border-radius: var(--radius-card);
+  margin: 12px 0 14px;
+}
+
+.segmented button {
+  flex: 1;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  font-size: 12.5px;
+  padding: 6px 4px;
+  color: var(--ink-3);
+}
+
+.segmented button.active {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: var(--shadow-card);
+}
+
+.inspector h2,
+.sheet h2,
+.panel h2 {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  margin: 0 0 6px;
+}
+
+.inspector h3 {
+  font-size: 23px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin: 2px 0 8px;
+}
+
+.chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.chip {
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+/* ---------------- forms ---------------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 13px;
+}
+
+.field.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0;
+}
+
+.field > span,
+.field-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* A field the chosen action calls out as typical — a hint, not a gate; every
+   field stays editable either way. Normal case and weight so it reads as an
+   aside next to the field's own uppercase label. */
+.field-hint {
+  text-transform: none;
+  font-weight: 400;
+  letter-spacing: 0;
+  font-style: italic;
+  color: var(--ink-quiet);
+  margin-left: 6px;
+}
+
+/* Two side by side while each half has room to be a usable control, stacked
+   the moment it does not — a select showing three characters is not a
+   control. */
+.two-up {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 9px;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--ink);
+  width: 100%;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent-300);
+  box-shadow: 0 0 0 3px var(--accent-100);
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.title-input {
+  width: 230px;
+  height: 32px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--on-dark);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.title-input:hover {
+  border-color: var(--dark-border);
+}
+
+.title-input:focus {
+  border-color: var(--accent);
+  background: var(--dark-inset);
+  box-shadow: none;
+}
+
+.harness {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--dark-border);
+  border-radius: var(--radius-control);
+  padding: 3px 8px;
+}
+
+.harness > span {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--on-dark-dim);
+}
+
+.harness select {
+  background: transparent;
+  border: none;
+  color: var(--on-dark);
+  width: auto;
+  padding: 2px 4px;
+}
+
+.harness select:focus {
+  box-shadow: none;
+}
+
+.harness select option {
+  color: var(--ink);
+}
+
+.hint {
+  color: var(--ink-dim);
+  font-size: 12px;
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+
+.hint.warn {
+  color: var(--accent-700);
+}
+
+.note {
+  border: 1px solid var(--accent-300);
+  background: var(--accent-100);
+  color: var(--accent-700);
+  border-radius: var(--radius-control);
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+/* Red is reserved for problems. A note that is merely telling the author
+   something true about their plan should not look like one. */
+.note.calm {
+  border-color: var(--border);
+  background: var(--chip);
+  color: var(--ink-2);
+}
+
+.note.calm .link {
+  color: var(--ink);
+}
+
+code,
+.mono {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.empty {
+  color: var(--ink-dim);
+  line-height: 1.5;
+}
+
+/* ---------------- problems ---------------- */
+
+.problem {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-control);
+  padding: 9px 11px;
+  margin-bottom: 8px;
+  background: var(--surface);
+  display: block;
+}
+
+.problem .where {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.problem .what {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.45;
+}
+
+.problem .code {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-quiet);
+  margin-top: 4px;
+}
+
+/* ---------------- prompt ---------------- */
+
+.prompt {
+  margin: 0 0 12px;
+  padding: 12px;
+  background: var(--chrome-panel);
+  color: var(--on-dark-2);
+  border-radius: var(--radius-card);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+details summary {
+  cursor: pointer;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+/* ---------------- sub bar & sheets ---------------- */
+
+.subbar {
+  height: 52px;
+  background: var(--chrome-bar);
+  color: var(--on-dark);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  flex: none;
+}
+
+.subbar .spacer {
+  flex: 1;
+}
+
+.sheet-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 26px 32px;
+  background: var(--canvas);
+}
+
+.slab {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-slab);
+  box-shadow: 0 2px 8px rgba(32, 30, 29, 0.06);
+  padding: 22px 26px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.slab h1 {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  margin: 0 0 4px;
+}
+
+.three-up {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 22px;
+  margin-top: 18px;
+}
+
+/* ---------------- mode select ---------------- */
+
+.mode-select {
+  display: flex;
+  height: 100%;
+}
+
+.mode-aside {
+  width: 300px;
+  flex: none;
+  background: var(--chrome-panel);
+  color: var(--on-dark);
+  padding: 26px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mode-aside .brand-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.mode-aside .logo-mark {
+  width: 22px;
+  height: 22px;
+}
+
+.mode-aside p {
+  margin: 0;
+  color: var(--ink-quiet);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.mode-aside hr {
+  border: none;
+  border-top: 1px solid var(--dark-divider);
+  margin: 4px 0;
+  width: 100%;
+}
+
+.mode-aside .disclaimer {
+  margin-top: auto;
+  font-size: 11.5px;
+  color: var(--on-dark-dimmer);
+}
+
+.mode-main {
+  flex: 1;
+  min-width: 0;
+  padding: 54px 60px;
+  overflow-y: auto;
+}
+
+.mode-main h1 {
+  font-size: 38px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 6px;
+}
+
+.lede {
+  color: var(--ink-3);
+  font-size: 14px;
+  line-height: 1.55;
+  margin: 0 0 26px;
+  max-width: 62ch;
+}
+
+.modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  max-width: 860px;
+}
+
+.mode-card {
+  text-align: left;
+  padding: 22px;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-slab);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.mode-card:hover:not(:disabled) {
+  border-color: var(--accent-300);
+  box-shadow: var(--shadow-raised);
+  background: var(--surface);
+}
+
+.mode-card .head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mode-card .glyph {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-card);
+  background: var(--accent-100);
+  flex: none;
+}
+
+.mode-card h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  flex: 1;
+}
+
+.mode-card p {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+
+.mode-card:disabled {
+  opacity: 1;
+  background: #fbfafa;
+  border-color: var(--border);
+}
+
+.mode-card:disabled .glyph {
+  background: var(--chip);
+}
+
+.mode-card:disabled h2,
+.mode-card:disabled p {
+  color: var(--ink-dim);
+}
+
+/* ---------------- template picker ---------------- */
+
+.template-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 38px 48px;
+  background: var(--surface);
+}
+
+.template-body h1 {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 6px;
+}
+
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  max-width: 1100px;
+}
+
+.template-card {
+  min-height: 190px;
+  text-align: left;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-slab);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.template-card:hover {
+  border-color: var(--accent-300);
+  box-shadow: var(--shadow-raised);
+  background: var(--surface);
+}
+
+.template-card .head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.template-card .kicker {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-700);
+  background: var(--accent-100);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.template-card .number {
+  font-size: 12px;
+  color: var(--ink-quiet);
+  font-variant-numeric: tabular-nums;
+}
+
+.template-card h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.template-card p {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.45;
+}
+
+.template-card small {
+  color: var(--ink-dim);
+  line-height: 1.45;
+  margin-top: auto;
+}
+
+/* The little diagram showing the shape of a template. */
+.shape {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 2px 0 4px;
+}
+
+.shape i {
+  display: block;
+  flex: none;
+}
+
+.shape .s-start {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+
+.shape .s-end {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--ink-quiet);
+}
+
+.shape .s-step {
+  width: 22px;
+  height: 12px;
+  border-radius: 4px;
+  background: var(--border);
+}
+
+.shape .s-gate {
+  width: 12px;
+  height: 12px;
+  background: var(--accent);
+  transform: rotate(45deg);
+}
+
+.shape .s-loop {
+  width: 20px;
+  height: 13px;
+  border: 1.5px solid var(--accent-300);
+  border-radius: 999px;
+}
+
+/* ---------------- canvas overlays ---------------- */
+
+.canvas-chips {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  gap: 8px;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.canvas-legend {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--ink-dim);
+  background: rgba(248, 247, 247, 0.9);
+  padding: 6px 10px;
+  border-radius: var(--radius-control);
+  z-index: 4;
+  pointer-events: none;
+}
+
+.canvas-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-line {
+  width: 18px;
+  border-top-width: 2px;
+  border-top-style: solid;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  background: var(--accent-100);
+  border-bottom: 1px solid var(--accent-300);
+  color: var(--accent-700);
+  font-size: 12.5px;
+  line-height: 1.5;
+  flex: none;
+}
+
+.banner span {
+  flex: 1;
+}
+
+/* Kept for the orchestrator screen, which still uses React Flow: it disables
+   pointer events on edge labels, so clicking a label fell through to the canvas
+   and cleared the selection. */
+.react-flow__edge-textwrapper {
+  pointer-events: all;
+  cursor: pointer;
+}
+
+/* ---------------- orchestrator screen ---------------- */
+
+.side {
+  width: 380px;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.side section {
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  padding: 10px 12px;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid #f1f2f4;
+}
+
+.list li:last-child {
+  border-bottom: none;
+}
+
+.node-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attempt {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--ink-3);
+}
+
+.status.running {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.status.success {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.status.failed {
+  background: var(--accent-100);
+  color: var(--accent-700);
+}
+
+.status.paused {
+  background: #fef3c7;
+  color: #8a6a08;
+}
+
+.workspace {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--on-dark-dim);
+  max-width: 460px;
+  overflow: hidden;
+}
+
+.workspace code {
+  color: var(--on-dark-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval {
+  border: 1px solid var(--accent-300);
+  background: var(--accent-100);
+  border-radius: var(--radius-card);
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.approval p {
+  margin: 0 0 8px;
+}
+
+.approval .actions {
+  display: flex;
+  gap: 8px;
+}
+
+.error-box {
+  padding: 9px 11px;
+  border: 1px solid var(--accent-300);
+  background: var(--accent-100);
+  color: var(--accent-700);
+  border-radius: var(--radius-control);
+  font-size: 12px;
+  white-space: pre-wrap;
+  margin-bottom: 10px;
+}
+
+.history-item {
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid #f1f2f4;
+  border-radius: 0;
+  background: transparent;
+  padding: 7px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-item .when {
+  color: var(--ink-dim);
+  font-size: 11px;
+}
+
+.summary {
+  color: var(--ink-dim);
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+
+.zoom-group {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 3px;
+  z-index: 5;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.zoom-group button {
+  padding: 3px 8px;
+  border: none;
+  background: none;
+  font-size: 12px;
+}
+
+.zoom-group span {
+  min-width: 40px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------- agents ---------------- */
+
+.agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 10px;
+}
+
+.agent-row {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.agent-row.active {
+  border-left-color: var(--accent);
+  box-shadow: var(--shadow-card);
+}
+
+.agent-row .agent-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.agent-row .agent-role {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.agent-row .agent-meta {
+  display: flex;
+  gap: 5px;
+  margin-top: 3px;
+}
+
+/* An agent nobody has assigned yet: still valid, just not doing anything. */
+.chip.idle {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--ink-3);
+}
+
+/* The editor is the inspector's whole scroll region, so it inherits
+   `.tab-body`'s padding and overflow and adds only its own rules. It used to
+   sit below other panel content, which is where the top border came from; it
+   has been the panel's only occupant for a while. */
+.agent-editor .back-link {
+  position: sticky;
+  top: -16px;
+  z-index: 1;
+  align-self: flex-start;
+  padding: 6px 0;
+  margin: -16px 0 0;
+  background: var(--surface);
+}
+
+/* A generated path or a long description must wrap rather than widen the
+   panel — a sidebar that scrolls sideways is a sidebar nobody can read. */
+.agent-editor .hint,
+.agent-editor h3 {
+  overflow-wrap: anywhere;
+}
+
+.agent-uses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 4px 0 12px;
+}
+
+/* `button.link` is nowrap because it is usually a word inside a sentence.
+   Here each one is a whole step name, standing on its own, so it wraps like
+   the prose it is — and `min-width` lets the flex item actually shrink to the
+   panel rather than pushing past its edge. */
+.agent-uses .link {
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* ---------------- prompt to plan ---------------- */
+
+.prompt-card {
+  width: 100%;
+  text-align: left;
+  padding: 18px 20px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-slab);
+  background: var(--surface);
+}
+
+.prompt-card .head {
+  margin-bottom: 6px;
+}
+
+.prompt-card .kicker {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.prompt-card h2 {
+  font-size: 19px;
+  margin: 0 0 6px;
+  color: var(--ink);
+}
+
+.prompt-card p {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--ink-2);
+  max-width: 62ch;
+}
+
+.prompt-card small {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.prompt-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 13.5px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.interpreter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.interpreter-row {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.interpreter-row.active {
+  border-left-color: var(--accent);
+  box-shadow: var(--shadow-card);
+}
+
+/* Still listed, so it is clear the option exists and simply is not installed. */
+.interpreter-row.missing {
+  opacity: 0.72;
+}
+
+.interpreter-row .interpreter-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.interpreter-row .interpreter-why {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  max-width: 74ch;
+}
+
+.command-line,
+.reply-dump {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  background: var(--chip);
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 4px 0 10px;
+}
+
+.reply-dump {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+ul.plain {
+  margin: 4px 0 10px;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+
+.step-preview {
+  margin: 4px 0 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.step-preview li {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.step-preview .step-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  color: var(--ink);
+}
+
+.step-preview .step-task {
+  max-width: 78ch;
+  white-space: pre-wrap;
+}
+
+.step-preview .step-links {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+/* Connection colours match the canvas, so the preview reads as the same plan. */
+.link-chip {
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--ink-3);
+}
+
+.link-chip.k-rework {
+  border-color: #d8a21a;
+  color: #8a6a08;
+}
+
+.link-chip.k-question {
+  border-color: #56aee0;
+  color: #2c6f95;
+}
+
+.link-chip.k-stop {
+  border-color: var(--accent-300);
+  color: var(--accent-700);
+}
+
+/* ---------------- inline validation ---------------- */
+
+.issues {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 14px;
+}
+
+.issue {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* Red for what blocks the plan; amber for what merely weakens it. Two levels
+   that mean two different things, not decoration. */
+.issue.error {
+  border-left-color: var(--accent);
+  background: var(--accent-100);
+}
+
+.issue.advisory {
+  border-left-color: #d8a21a;
+  background: #fdf8ec;
+}
+
+.issue .issue-severity {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.issue.error .issue-severity {
+  color: var(--accent-700);
+}
+
+.issue.advisory .issue-severity {
+  color: #8a6a08;
+}
+
+.issue .issue-message {
+  color: var(--ink);
+}
+
+.issue .link {
+  grid-column: 2;
+  justify-self: start;
+  margin-top: 2px;
+}
+
+/* ---------------- staged progress ---------------- */
+
+.stage-list {
+  list-style: none;
+  margin: 8px 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.stage {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.stage .stage-mark {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  flex: none;
+}
+
+.stage.done {
+  color: var(--ink-2);
+}
+
+.stage.done .stage-mark {
+  background: var(--ink-3);
+  border-color: var(--ink-3);
+}
+
+.stage.now {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.stage.now .stage-mark {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.stage .stage-note {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--ink-3);
+}
+
+/* ---------------- generated-plan assembly ---------------- */
+
+.reveal {
+  transition: opacity 260ms ease, transform 260ms ease;
+}
+
+.reveal.pending {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.reveal.revealed {
+  opacity: 1;
+  transform: none;
+}
+
+/* Movement is decoration here: every stage is named in text, so removing it
+   costs nothing. */
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .reveal.pending,
+  .reveal.revealed {
+    transition: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.context-value {
+  margin: 2px 0 10px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+}
+
+.link-condition {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  font-style: normal;
+  opacity: 0.85;
+}
+
+/* An advisory in the problems index reads as amber, matching the inspector. */
+.problem.advisory {
+  border-left-color: #d8a21a;
+}
+
+.problem .where {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chip.error {
+  background: var(--accent-100);
+  color: var(--accent-700);
+}
+
+.chip.advisory {
+  background: #fdf8ec;
+  color: #8a6a08;
+}
+
+/* ---------------- prompt flow: three steps ---------------- */
+
+/* Amber is "unclear, needs an answer"; green is "answered". Red stays reserved
+   for a plan stopping for a person, and for a problem. */
+:root {
+  --unclear: #d8a21a;
+  --unclear-fill: #fdf8ec;
+  --unclear-border: #eddfbc;
+  --unclear-ink: #8a6a08;
+  --settled: #3f8f5e;
+  --settled-fill: #f6faf7;
+  --settled-border: #cfe6d8;
+  --settled-ink: #2f6b48;
+}
+
+.wizard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wizard-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  white-space: nowrap;
+  color: #9b9797;
+}
+
+.wizard-step i {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-style: normal;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.wizard-step.done {
+  color: #e6e2e2;
+}
+
+.wizard-step.done i {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: transparent;
+  color: #e6e2e2;
+}
+
+.wizard-step.now {
+  color: #f8f4f4;
+  font-weight: 600;
+}
+
+.wizard-step.now i {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+}
+
+/* The scroll region centres the column; it must never take the column's own
+   width, or everything wider than 760px is clipped rather than centred. */
+.prompt-flow {
+  display: flex;
+  justify-content: center;
+}
+
+.prompt-column {
+  width: 760px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* The way back in when a CLI says nobody is signed in. Anthill hands over the
+   command rather than running it: signing in needs the author's own browser
+   and account, and their credentials are not this app's to handle. */
+.signed-out {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.signed-out-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.signed-out-row code {
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: var(--chip);
+  font-size: 12.5px;
+}
+
+/* `.slab` carries `margin: 0 auto` to centre itself on a wide page. As a flex
+   item that auto margin cancels the column's stretch and sizes the panel to
+   its own text instead — so a short message came out narrower than, and offset
+   from, the card above it. In this column the column owns the width. */
+.prompt-column > .slab {
+  margin: 0;
+  max-width: none;
+}
+
+/* The textarea is the card. A bordered field inside a bordered card is two
+   boxes saying the same thing. */
+.prompt-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-slab);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+}
+
+.prompt-card textarea {
+  width: 100%;
+  padding: 14px 15px;
+  font-size: 14px;
+  line-height: 1.65;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  resize: vertical;
+  font-family: inherit;
+  outline: none;
+}
+
+.prompt-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 6px;
+  border-top: 1px solid #f0eeee;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.prompt-card-foot .count {
+  font-size: 11.5px;
+  color: #bab6b6;
+  font-variant-numeric: tabular-nums;
+}
+
+.prompt-recap {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-slab);
+  background: var(--surface);
+}
+
+.prompt-recap:hover {
+  border-color: var(--ink-3);
+}
+
+.prompt-recap .kicker {
+  padding-top: 2px;
+}
+
+/* Two lines of it: enough to recognise, not enough to re-read. */
+.prompt-recap .recap-text {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.prompt-recap .recap-edit {
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--accent-700);
+  padding-top: 2px;
+}
+
+.interpreter-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.interpreter-grid.single {
+  grid-template-columns: 1fr;
+}
+
+.interpreter-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  text-align: left;
+  padding: 15px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-slab);
+  background: var(--surface);
+}
+
+.interpreter-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 2px 10px rgba(236, 48, 19, 0.1);
+}
+
+/* One installed tool is not a choice, so it does not behave like one. */
+.interpreter-card.fixed {
+  cursor: default;
+}
+
+.interpreter-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.interpreter-logo {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border-radius: 9px;
+  object-fit: cover;
+}
+
+.interpreter-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.interpreter-version {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--settled);
+}
+
+.interpreter-why {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+.radio {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+}
+
+.radio.on {
+  border: 5px solid var(--accent);
+}
+
+/* ---------------- drafting animation ---------------- */
+
+.drafting-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.drafting-card h2 {
+  margin: 6px 0 0;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  text-transform: none;
+  color: var(--ink);
+}
+
+/* The canvas's own grid, so the wait previews the thing being built. */
+.drafting-graph {
+  position: relative;
+  width: 560px;
+  height: 250px;
+  margin-top: 14px;
+  border-radius: 10px;
+  background: var(--canvas);
+  background-image: radial-gradient(rgba(32, 30, 29, 0.13) 1px, transparent 1px);
+  background-size: 22px 22px;
+  overflow: hidden;
+}
+
+.drafting-graph svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+/* Every edge is normalised to `pathLength="1"`, so one keyframe draws a short
+   connection and a long rework return at the same rate instead of one snapping
+   while the other lags. */
+.drafting-graph .anim-edge {
+  stroke: #7d7979;
+  stroke-width: 1.75;
+  fill: none;
+  stroke-dasharray: 1;
+  animation: edge-in 5.2s ease-in-out infinite both;
+}
+
+.drafting-graph .anim-edge.tone-rework {
+  stroke: var(--unclear);
+}
+
+.drafting-graph .anim-edge.tone-question {
+  stroke: #56aee0;
+  stroke-width: 2;
+}
+
+/* The arrowhead is a marker on the connection itself, so it travels with it and
+   cannot be left behind pointing at nothing. */
+.drafting-graph .draft-arrow path { fill: #7d7979; }
+.drafting-graph .draft-arrow.tone-rework path { fill: var(--unclear); }
+.drafting-graph .draft-arrow.tone-question path { fill: #56aee0; }
+
+.drafting-graph .anim-node {
+  animation: node-in 5.2s cubic-bezier(0.2, 0.7, 0.2, 1) infinite both;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.drafting-graph .anim-node-body {
+  fill: var(--surface);
+  stroke: #d7d3d3;
+  stroke-width: 1;
+}
+
+.drafting-graph .anim-node-rule.tone-build { fill: #6b5bd2; }
+.drafting-graph .anim-node-rule.tone-verify { fill: var(--unclear); }
+.drafting-graph .anim-node-rule.tone-question { fill: #56aee0; }
+
+.drafting-graph .anim-sweep {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 120px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  animation: sweep 2.6s linear infinite;
+}
+
+@keyframes node-in {
+  0%, 4% { opacity: 0; transform: translateY(6px) scale(0.96); }
+  14%, 92% { opacity: 1; transform: none; }
+  100% { opacity: 0; }
+}
+
+/* Opacity finishes with the stroke rather than ahead of it: the arrowhead is
+   part of the same rendered element, and fading it up early would show it
+   waiting at a block the line has not reached. */
+@keyframes edge-in {
+  0%, 8% { stroke-dashoffset: 1; opacity: 0; }
+  34%, 92% { stroke-dashoffset: 0; opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes sweep {
+  0% { transform: translateX(-140px); }
+  100% { transform: translateX(700px); }
+}
+
+/* An accepted draft assembles on the real canvas: geometry final from the
+   first frame, only the timing of appearance staged. Each element carries its
+   own moment as --assembly-delay; `both` keeps it invisible until then. */
+.canvas-assemble {
+  animation: canvas-assemble-in 340ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: var(--assembly-delay, 0s);
+}
+
+@keyframes canvas-assemble-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* The graph is decoration around a stage list that is already words. */
+@media (prefers-reduced-motion: reduce) {
+  .canvas-assemble {
+    animation: none;
+  }
+  .drafting-graph .anim-node,
+  .drafting-graph .anim-edge,
+  .drafting-graph .anim-sweep {
+    animation: none !important;
+    opacity: 1 !important;
+    stroke-dashoffset: 0 !important;
+    transform: none !important;
+  }
+  .drafting-graph .anim-sweep { display: none; }
+}
+
+.stage-note.done {
+  color: var(--settled);
+}
+
+/* ---------------- clarification ---------------- */
+
+.open-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border: 1px solid rgba(216, 162, 26, 0.5);
+  border-radius: 999px;
+  background: rgba(216, 162, 26, 0.16);
+  font-size: 12px;
+  white-space: nowrap;
+  color: #f0d288;
+}
+
+.open-pill i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--unclear);
+}
+
+.open-pill.settled {
+  border-color: rgba(63, 143, 94, 0.5);
+  background: rgba(63, 143, 94, 0.16);
+  color: #a9dcc0;
+}
+
+.open-pill.settled i {
+  background: var(--settled);
+}
+
+.context-field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 4px;
+}
+
+.context-value.empty-value {
+  color: var(--ink-dim);
+  font-style: italic;
+}
+
+/* ------------------------------------------------------------------ */
+/* The Draft screen: one open question at a time                        */
+/* ------------------------------------------------------------------ */
+
+/* A sheet, not the three-pane shell: there is nothing here to inspect and
+   nothing to drag. */
+.draft-clarify .clarify-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 30px 24px 40px;
+  background: var(--canvas);
+}
+
+.clarify-head,
+.clarify-card,
+.clarify-done,
+.clarify-foot {
+  width: 700px;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.clarify-head {
+  text-align: center;
+  margin-bottom: 22px;
+}
+
+.clarify-head h1 {
+  margin: 0 0 8px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+.clarify-head p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+
+/* Amber, because amber already means "Anthill is not sure" everywhere else —
+   the ambiguous-match chip, the observation-lost plaque, the unmapped row. An
+   open question is the same claim in a different place. Red never appears on
+   this screen: a question is not a problem, and validation errors are red and
+   wait on the canvas. */
+.clarify-card {
+  background: #fdf8ec;
+  border: 1px solid #eddfbc;
+  border-left: 4px solid #d8a21a;
+  border-radius: 12px;
+  padding: 24px 28px;
+}
+
+.clarify-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.clarify-card-head .spacer {
+  flex: 1;
+}
+
+/* Where in the draft the question came from. This is what earns the right not
+   to show the draft at all. */
+.clarify-where {
+  font-size: 11px;
+  color: var(--ink-dim);
+  text-align: right;
+}
+
+.clarify-question {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.clarify-why {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #605d5d;
+}
+
+.clarify-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 14px;
+}
+
+.clarify-picks button {
+  border: 1px solid var(--border);
+  background: #ffffff;
+  color: #444141;
+  border-radius: 999px;
+  padding: 6px 13px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.clarify-picks button:hover {
+  border-color: #3f8f5e;
+  background: #e6f3ec;
+  color: #2f6b48;
+  font-weight: 600;
+}
+
+.clarify-own {
+  display: flex;
+  gap: 8px;
+}
+
+.clarify-own input {
+  flex: 1;
+  height: 36px;
+  border: 1px solid #e0d6bb;
+  border-radius: 8px;
+  padding: 0 11px;
+  font: inherit;
+  font-size: 13px;
+  background: #ffffff;
+}
+
+/* An amber-family disabled state: grey on this card reads as broken rather
+   than as waiting for something. */
+.clarify-own button.primary:disabled {
+  background: #a99b6e;
+  border-color: #a99b6e;
+  color: #e5dcc4;
+  cursor: not-allowed;
+}
+
+.clarify-done {
+  background: var(--surface);
+  border: 1px solid #cfe6d8;
+  border-radius: 12px;
+  padding: 26px 28px;
+  text-align: center;
+}
+
+.clarify-tick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #e6f3ec;
+  color: var(--settled-ink);
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+
+.clarify-done-title {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.clarify-done-note {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+
+.clarify-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.clarify-dots {
+  display: flex;
+  gap: 7px;
+}
+
+.clarify-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e0d6bb;
+}
+
+.clarify-dots i.is-answered {
+  background: #d8a21a;
+}
+
+.clarify-dots i.is-current {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px #d8a21a;
+}
+
+/* A link, never a button: always available, never competing with the answer.
+   `button.link` is accent-700, and red is the one colour this screen must not
+   use — a question is not a problem — so this overrides it rather than
+   inheriting the app's link colour. */
+button.link.clarify-skip {
+  font-size: 12px;
+  color: var(--ink-dim);
+  text-decoration-color: #d7d3d3;
+}
+
+button.link.clarify-skip:hover {
+  color: var(--ink-dim);
+}
+
+.clarify-mark {
+  color: #f8f4f4;
+}
+
+.clarify-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(216, 162, 26, 0.5);
+  background: rgba(216, 162, 26, 0.16);
+  color: #f0d288;
+  font-size: 11.5px;
+}
+
+.clarify-progress i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #d8a21a;
+}
+
+.chip.unclear {
+  background: #f7ecd0;
+  color: var(--unclear-ink);
+}
+
+/* ---------------- launch window ---------------- */
+
+/* A launch panel, not the main window: no dark chrome bar, so the panes run to
+   the top and the window's own title bar is the only one. */
+.launch {
+  height: 100vh;
+  display: flex;
+  min-height: 0;
+}
+
+.launch-left {
+  width: 52%;
+  flex: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 64px;
+  background: var(--canvas);
+}
+
+.launch-mark {
+  color: var(--ink);
+}
+
+.launch-left h1 {
+  margin: 26px 0 0;
+  font-size: 44px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+
+.launch-version {
+  margin: 6px 0 0;
+  font-size: 14px;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+
+.launch-blurb {
+  margin: 14px 0 0;
+  max-width: 340px;
+  text-align: center;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+.launch-actions {
+  width: 100%;
+  max-width: 376px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 38px;
+}
+
+.launch-action {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: #f0eeee;
+  text-align: left;
+}
+
+.launch-action:hover {
+  background: #ebe9e9;
+}
+
+.launch-action > i {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid #d7d3d3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-style: normal;
+  line-height: 1;
+  color: var(--ink-2);
+}
+
+.launch-action > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.launch-action-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.launch-action-sub {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.launch-foot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 20px;
+  margin: 0;
+  text-align: center;
+  font-size: 11.5px;
+  color: #bab6b6;
+}
+
+.launch-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+}
+
+/* ------------------------------------------------------------------ */
+/* Launch: two libraries in one pane                                    */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Every selector here is scoped to the launch window's own panes.
+ *
+ * `.agent-row`, `.agent-list`, `.agent-editor` and `.agent-name` are also the
+ * workflow inspector's, up in the agents section, and an unscoped rule down
+ * here would silently reach into that panel — the later definition winning for
+ * every property the two share. The scope is the whole reason these names can
+ * stay the ones the design uses.
+ */
+
+/* The header both lists share: tabs, the filter, and — on Agents only — the
+   one create action. */
+.launch-list-head {
+  height: 52px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.launch-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Ink-filled, not accent-filled: the accent belongs to actions, and a tab is
+   a view. */
+.launch-tab {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 400;
+  white-space: nowrap;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+
+.launch-tab:hover {
+  background: var(--chip);
+}
+
+.launch-tab[aria-current="true"] {
+  background: var(--chip);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.launch-tab-count {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  background: var(--canvas);
+  color: var(--ink-dim);
+}
+
+.launch-tab[aria-current="true"] .launch-tab-count {
+  background: var(--accent-100);
+  color: var(--accent-700);
+}
+
+.btn-new-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 7px 13px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.btn-new-agent:hover {
+  background: var(--accent-600);
+}
+
+/* ---- the list ---- */
+
+.launch-right .agent-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 12px 10px 16px 8px;
+}
+
+.agent-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 8px;
+}
+
+/* The same heading the workflow list uses, so the two lists in one pane read
+   as one pane. */
+.agent-group-head .rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.agent-group-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-quiet);
+}
+
+/* The heading carries the absence, which is why no row has to. */
+.agent-group-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+
+.agent-group-label.is-ready {
+  color: var(--ink-dim);
+}
+
+/* The whole row is the control: one button, nothing interactive nested inside
+   it, and no trailing "Edit" label duplicating what a click already does. */
+.launch-right .agent-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 14px 12px 10px;
+  border: 0;
+  border-radius: var(--radius-card);
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.launch-right .agent-row:hover {
+  background: var(--row-hover);
+}
+
+.launch-right .agent-row[aria-current="true"] {
+  background: var(--chip);
+}
+
+/* Provenance, as a rule rather than an icon tile: it says that one thing
+   without adding a second visual system to the row. */
+.agent-mark {
+  width: 3px;
+  align-self: stretch;
+  flex: none;
+  border-radius: 999px;
+  background: var(--ink-2);
+}
+
+.agent-mark.is-ready {
+  background: var(--ink-quiet);
+}
+
+.agent-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.agent-row-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.launch-right .agent-name {
+  font-size: 14.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+}
+
+/* An unnamed profile must not look like a finished one. */
+.launch-right .agent-name.is-unnamed {
+  font-weight: 400;
+  font-style: italic;
+  color: var(--ink-dim);
+}
+
+.agent-needs-name {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--unclear-ink);
+}
+
+/* The model is the one field that changes how the agent behaves, so a chosen
+   one is called out and the default is not. */
+.agent-model {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--canvas);
+  color: var(--ink-2);
+}
+
+.agent-model.is-explicit {
+  background: #eef1f8;
+  color: #41508a;
+}
+
+.agent-summary {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Stated only where there is usage. */
+.agent-usage {
+  font-size: 11.5px;
+  white-space: nowrap;
+  color: var(--settled-ink);
+}
+
+/* ---- the editor, in the left pane ---- */
+
+.launch-left.is-editing {
+  padding: 0;
+  align-items: stretch;
+  justify-content: flex-start;
+  background: var(--surface);
+}
+
+.launch-left .agent-editor {
+  position: relative; /* the setup sheet is anchored to this pane, not the window */
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.agent-editor-head {
+  height: 52px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.agent-editor-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 24px 26px;
+}
+
+/* Quiet on purpose. It is there to be found when somebody looks for it, not
+   to announce every keystroke. */
+.agent-save {
+  font-size: 11.5px;
+  white-space: nowrap;
+  color: var(--ink-quiet);
+}
+
+.agent-save.is-failed {
+  font-weight: 600;
+  color: var(--accent-700);
+}
+
+/* The question every exit from a dirty editor asks. A bar at the foot of the
+   pane rather than a dialog: the draft behind it stays readable, which is the
+   thing being decided about. */
+.agent-leaving {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--unclear-fill);
+  font-size: 12.5px;
+  color: var(--unclear-ink);
+}
+
+.agent-leaving .spacer {
+  flex: 1;
+}
+
+.agent-editor-title {
+  margin: 0 0 18px;
+  font-size: 23px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.agent-editor-title.is-unnamed {
+  font-weight: 400;
+  font-style: italic;
+  color: var(--ink-dim);
+}
+
+.agent-field {
+  margin-bottom: 2px;
+}
+
+.agent-two-up {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.launch-left .agent-editor .field-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+
+/* Amber while it has no name — the same "not finished" colour the rest of the
+   app uses. Not red: nothing is wrong, and the profile saves either way. */
+.launch-left .agent-editor .field-input.needs-name {
+  border-color: var(--unclear-border);
+}
+
+.launch-left .agent-editor textarea.field-input {
+  height: auto;
+  padding: 10px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.launch-left .agent-editor .field-note {
+  margin: 5px 0 16px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+
+.launch-left .agent-editor .field-note.needs-name {
+  color: var(--unclear-ink);
+}
+
+.launch-left .agent-editor .field-note.is-warn {
+  color: var(--unclear-ink);
+}
+
+/* ---- the model, per tool ---- */
+
+/*
+ * Two cards, not two dropdowns: the reader has to see at a glance which tools
+ * are connected and what the next move is, and two selects side by side cannot
+ * say that.
+ *
+ * The handoff's own token names (`--muted`, `--line`, `--line-2`, `--surface-2`)
+ * are mapped onto this app's here rather than declared alongside them. A second
+ * set of names for the same greys is how the activity feed ended up with rules
+ * that referenced properties nobody defined — and an undefined custom property
+ * does not warn, it throws the whole declaration away.
+ */
+
+/* One field, above the cards. Two pickers side by side read as two answers,
+   as though the agent could run on Opus under one tool and something else
+   under the other; a profile carries one model. */
+.agent-model-field {
+  margin-bottom: 14px;
+}
+
+.agent-model-field .field-note {
+  margin: 6px 0 0;
+}
+
+/* Connected, and nothing here can honour a per-agent model. An empty select
+   would be a question with no answer. */
+.agent-model-none {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  background: var(--canvas);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+/* Only while neither tool is connected: it explains the section, and would be
+   noise once there is a picker to look at. */
+.agent-models-intro {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+
+.agent-models {
+  display: grid;
+  /* Side by side in the wide editor, stacked below ~500px, and no media query
+     or horizontal overflow either way. */
+  grid-template-columns: repeat(auto-fit, minmax(238px, 1fr));
+  gap: 12px;
+}
+
+.tool-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0; /* a long model name wraps instead of pushing the card out */
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-slab);
+  background: var(--surface);
+}
+
+/* Connected reads as a real object; unconnected stays a quiet outline. */
+.tool-card.is-connected {
+  border-color: var(--field-border);
+  box-shadow: var(--shadow-card);
+}
+
+.tool-card-top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.tool-logo {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  object-fit: contain;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--canvas);
+}
+
+/* An unconnected tool's mark is present but not yet "on". */
+.tool-card:not(.is-connected) .tool-logo {
+  opacity: 0.55;
+  filter: grayscale(1);
+}
+
+.tool-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* Status is a word first. The dot is a second channel, never the only one —
+   and two of these states are ambers that mean different things. */
+.tool-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.tool-badge i {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  display: block;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Literal on purpose: a fixed vocabulary shared with the run states elsewhere,
+   which a theme change must not quietly repaint. */
+.tool-badge.is-off { background: var(--chip); color: var(--ink-dim); }
+.tool-badge.is-checking { background: #eaf4fb; color: #2f6d99; }
+.tool-badge.is-on { background: #e6f3ec; color: var(--settled-ink); }
+.tool-badge.is-not-installed,
+.tool-badge.is-signed-out { background: #f7ecd0; color: var(--unclear-ink); }
+.tool-badge.is-failed { background: var(--accent-100); color: var(--accent-700); }
+
+.tool-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
+/* Amber is "you can finish this"; red is only ever a failure. */
+.tool-note.is-warn { color: var(--unclear-ink); }
+.tool-note.is-error { color: var(--accent-700); }
+
+/* Pushed to the baseline so two cards in different states still line up. */
+.tool-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+
+.tool-connect {
+  flex: none;
+  padding: 8px 13px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tool-connect:hover:not(:disabled) { background: var(--accent-600); }
+
+.tool-connect.is-busy {
+  background: var(--border);
+  color: var(--ink-dim);
+  cursor: progress;
+}
+
+/* Quiet, because reviewing a working connection is not the main move. */
+.tool-review {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--accent-700);
+}
+
+.agent-models-note {
+  margin: 11px 0 20px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+
+/* A pre-split model belonging to no tool — shown back, not guessed at. */
+.agent-models-review {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--unclear-border);
+  border-left: 3px solid var(--unclear);
+  border-radius: var(--radius-card);
+  background: var(--unclear-fill);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--unclear-ink);
+}
+
+.agent-models-review code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+/* ---- the contained setup sheet ---- */
+
+/*
+ * Anchored to the editor pane rather than the window, so the unsaved profile
+ * stays on screen behind it. That is the design: "your changes are kept" is
+ * something the author can see rather than something they are told, and there
+ * is no trip back to the library to doubt.
+ */
+.connect-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(32, 30, 29, 0.34);
+}
+
+.connect-sheet {
+  width: 100%;
+  max-height: 88%;
+  overflow-y: auto;
+  padding: 20px 24px 22px;
+  border-top: 1px solid var(--border);
+  border-radius: 14px 14px 0 0;
+  background: var(--surface);
+  box-shadow: 0 -14px 40px rgba(32, 30, 29, 0.22);
+}
+
+.connect-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.connect-title {
+  margin: 0 0 6px;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+
+.connect-body {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+.connect-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 15px;
+}
+
+.connect-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.connect-step i {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  display: block;
+  border-radius: 50%;
+}
+
+.connect-step.is-done i { background: #2f8f5f; }
+.connect-step.is-now i { background: #56aee0; }
+.connect-step.is-bad i { background: var(--unclear); }
+
+.connect-step.is-todo i {
+  background: var(--surface);
+  border: 1.5px solid var(--field-border);
+  box-sizing: border-box;
+}
+
+.connect-step span {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.connect-step.is-todo span { color: var(--ink-dim); }
+
+.connect-step em {
+  flex: none;
+  font-style: normal;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #2f6d99;
+}
+
+.connect-step.is-done em { color: var(--settled-ink); }
+.connect-step.is-bad em { color: var(--unclear-ink); }
+
+.connect-note {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+
+.connect-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* The one motion in the section. The word beside it already says "Checking",
+   so removing it costs nothing at all. */
+@keyframes tool-pulse {
+  0%,
+  100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.connect-step.is-now i {
+  animation: tool-pulse 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connect-step.is-now i { animation: none; }
+}
+
+.section-rule {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 11px;
+}
+
+.section-rule span {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+
+.section-rule i {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.launch-left .agent-uses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.used-tag {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+
+.agent-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.agent-editor-actions .spacer {
+  flex: 1;
+}
+
+/* Outlined rather than filled: deleting a profile costs nothing a workflow
+   depends on — the copies are theirs — so this is not the button that stops a
+   run. It turns into the app's real danger button only once it is asking
+   again. */
+.agent-delete {
+  border-color: var(--accent-300);
+  color: var(--accent-700);
+}
+
+.agent-delete:hover {
+  background: var(--accent-100);
+}
+
+.agent-id {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+  color: var(--ink-quiet);
+}
+
+.launch-filter {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--chip);
+  min-width: 190px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.launch-filter input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--ink);
+  padding: 0;
+  height: auto;
+}
+
+.launch-recents {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.launch-recent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  text-align: left;
+}
+
+.launch-recent:hover {
+  background: #f5f3f3;
+}
+
+/* Graphite, not accent: red means a plan stopping for a person, or a problem. */
+.launch-recent.active,
+.launch-recent.active:hover {
+  background: #2d2b2b;
+}
+
+.recent-tile {
+  width: 34px;
+  height: 40px;
+  flex: none;
+  border-radius: 4px;
+  background: var(--chip);
+  border: 1px solid var(--border);
+}
+
+.launch-recent.active .recent-tile {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.recent-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.recent-name {
+  font-size: 14.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.recent-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-dim);
+}
+
+.recent-meta,
+.recent-when {
+  font-size: 11.5px;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+
+.launch-recent.active .recent-name { color: #f8f4f4; }
+.launch-recent.active .recent-path,
+.launch-recent.active .recent-meta,
+.launch-recent.active .recent-when { color: #bab6b6; }
+
+.launch-recents-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.launch-recents-foot label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.launch-recents-foot input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+
+.launch-recents .empty {
+  padding: 22px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+
+/* ------------------------------------------------------------------ */
+/* The handover                                                        */
+/*                                                                     */
+/* Where the work leaves Anthill. The author copies the prompt and     */
+/* starts the session themselves, so nothing here may read as Anthill  */
+/* starting, controlling or stopping anything.                         */
+/*                                                                     */
+/* It is a sequence, not a page: a folder has to be named before files */
+/* can be written, and the files have to be written before the prompt  */
+/* is worth copying. The old single page showed both at once and the   */
+/* order — the only part that matters — was invisible.                 */
+/* ------------------------------------------------------------------ */
+
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(24, 22, 21, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+}
+
+.handover {
+  width: min(640px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--canvas);
+  border-radius: var(--radius-slab);
+  box-shadow: var(--shadow-raised);
+}
+
+.handover-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border-bottom: 1px solid #efeded;
+}
+
+.handover-logo {
+  border-radius: 7px;
+  flex: none;
+}
+
+.handover-titles h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.handover-titles p {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.handover-top .spacer {
+  flex: 1;
+}
+
+/* The sequence, shown so the author can see that it ends. */
+.handover-steps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 3px;
+}
+
+.step-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--ink-dim);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Tinted rather than filled: the pill says where you are, and a solid accent
+   block beside the title competes with the primary button for the eye. */
+.step-pill.is-active {
+  background: var(--accent-100);
+  color: var(--accent-700);
+}
+
+.step-pill.is-done {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+/* ------------------------------------------------------------------ */
+/* The state panel — steps 2 and 3 both use it                         */
+/*                                                                     */
+/* One panel, four tones, and the tone is the honesty channel rather    */
+/* than decoration. Green appears only where Anthill can actually       */
+/* report progress; amber where it cannot promise the full picture;     */
+/* red only for a failure Anthill caused; flat grey for a CLI that is   */
+/* not installed, which is neither a warning nor a fault. The panel     */
+/* always also says its state in words — nothing here is colour alone.  */
+/* ------------------------------------------------------------------ */
+
+.state-panel {
+  border-radius: var(--radius-card);
+  padding: 13px 14px;
+  border: 1px solid;
+  border-left-width: 3px;
+}
+
+.state-panel.tone-ok {
+  background: #f6faf7;
+  border-color: #cfe6d8;
+  border-left-color: #3f8f5e;
+  color: #2f6b48;
+}
+
+.state-panel.tone-unsure {
+  background: #fdf8ec;
+  border-color: #eddfbc;
+  border-left-color: #d8a21a;
+  color: #8a6a08;
+}
+
+.state-panel.tone-bad {
+  background: #fff6f4;
+  border-color: var(--accent-300);
+  border-left-color: var(--accent);
+  color: var(--accent-700);
+}
+
+.state-panel.tone-flat {
+  background: var(--canvas);
+  border-color: var(--border);
+  border-left-color: var(--ink-quiet);
+  color: var(--ink-3);
+}
+
+.state-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.state-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.state-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.state-chip {
+  padding: 2px 9px;
+  flex: none;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--surface);
+  border: 0;
+  color: inherit;
+}
+
+button.state-chip {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.state-note {
+  margin: 9px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* The receipt on the handover step states where observation was left; it has
+   no body, so the head carries the whole panel's height. */
+.state-panel.is-receipt .state-panel-head {
+  align-items: center;
+}
+
+/* ------------------------------------------------------------------ */
+/* Technical details — collapsed by default                            */
+/*                                                                     */
+/* Quiet, because opening it is not the author's main move. Paths, hook */
+/* entries and handler names live only here; the flow itself says what  */
+/* will happen, not how.                                               */
+/* ------------------------------------------------------------------ */
+
+.tech-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 13px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+
+.tech-toggle:hover {
+  color: var(--ink);
+}
+
+.tech-caret {
+  display: inline-block;
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 140ms;
+}
+
+.tech-toggle[aria-expanded="true"] .tech-caret {
+  transform: rotate(90deg);
+}
+
+.tech-rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 14px;
+  margin: 11px 0 0;
+  padding-top: 11px;
+  border-top: 1px solid #efeded;
+  font-size: 11.5px;
+}
+
+.tech-rows dt {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+
+.tech-rows dd {
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.tech-install {
+  margin-top: 13px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Waiting for the session                                             */
+/*                                                                     */
+/* The dot breathes so the panel reads as still-waiting rather than     */
+/* finished. It is the only motion in the flow, it carries no meaning   */
+/* on its own, and the panel says the same thing in words without it.   */
+/* ------------------------------------------------------------------ */
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.32;
+  }
+}
+
+.live-pulse {
+  animation: live-pulse 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-pulse {
+    animation: none;
+  }
+  .tech-caret {
+    transition: none;
+  }
+}
+
+/* The run marker: mono, selectable, and never styled as a secret. */
+.run-marker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding: 9px 11px;
+  border-radius: var(--radius-card);
+  background: var(--canvas);
+  border: 1px solid #efeded;
+}
+
+.run-marker code {
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.run-marker .key {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+
+.handover-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.handover-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-slab);
+  padding: 16px 18px;
+}
+
+.handover-panel h2 {
+  margin: 0 0 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.handover-panel > p {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+/* Amber, because Anthill does not yet know something it needs. Red is for
+   problems, and not choosing a folder yet is not one. */
+.handover-folder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+  border-radius: 9px;
+  font-size: 12.5px;
+}
+
+.handover-folder.is-unset {
+  background: #fdf8ec;
+  border: 1px solid #eddfbc;
+  border-left: 3px solid #d8a21a;
+  color: #8a6a08;
+}
+
+.handover-folder .label {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.handover-folder .spacer {
+  flex: 1;
+}
+
+.field-label {
+  display: block;
+  margin: 14px 0 7px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* What is about to happen to someone's repository, said before it happens. */
+.handover-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.handover-files li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.handover-files i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink-quiet);
+  flex: none;
+}
+
+.handover-files code {
+  font-family: var(--mono);
+  color: var(--ink-2);
+}
+
+/* The receipt changes treatment with what actually happened to the folder. */
+.handover-receipt {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px 15px;
+  border-radius: var(--radius-slab);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.handover-receipt.is-written {
+  background: #f6faf7;
+  border-color: #cfe6d8;
+}
+
+.handover-receipt.is-failed {
+  background: #fff6f4;
+  border-color: var(--accent-300);
+}
+
+.handover-receipt .dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--ink-quiet);
+  flex: none;
+}
+
+.handover-receipt.is-written .dot {
+  background: var(--ok);
+}
+
+.handover-receipt.is-failed .dot {
+  background: var(--accent);
+}
+
+.handover-receipt .spacer {
+  flex: 1;
+}
+
+.handover-receipt-head {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.handover-path {
+  display: block;
+  margin: 3px 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-3);
+  word-break: break-all;
+}
+
+.handover-receipt .hint {
+  margin: 0;
+}
+
+/* The three moves. Numbered because they are a sequence in time, and the
+   second one is the sentence the whole product rests on. */
+.handover-moves {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.handover-moves li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+.handover-moves i {
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: var(--chip);
+  color: var(--ink-3);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-style: normal;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.handover-moves .is-done i {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+/* The longest thing on the screen and the least read — but Anthill's claim is
+   that nothing is hidden from the author, so it stays one click away. */
+.handover-inspect {
+  margin-top: 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.handover-inspect:hover {
+  color: var(--ink);
+}
+
+.handover-inspect i {
+  font-style: normal;
+  color: var(--ink-dim);
+}
+
+.handover-preview {
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  max-height: 230px;
+  overflow: auto;
+  border-radius: var(--radius-card);
+  background: var(--chrome-panel);
+  color: var(--on-dark-2);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.handover-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 18px;
+  background: var(--surface);
+  border-top: 1px solid #efeded;
+}
+
+.handover-foot .hint {
+  margin: 0;
+  flex: 1;
+  text-align: right;
+}
+
+.handover-body .hint.warn {
+  margin: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Local observation setup                                             */
+/* ------------------------------------------------------------------ */
+
+.observation-setup {
+  margin: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  display: grid;
+  gap: 14px;
+}
+
+.setup-copy {
+  display: grid;
+  gap: 7px;
+}
+
+.setup-copy h2,
+.setup-harness h3 {
+  margin: 0;
+}
+
+.setup-copy p,
+.setup-harness p,
+.setup-review p,
+.setup-empty,
+.setup-message {
+  margin: 0;
+}
+
+.setup-harnesses {
+  display: grid;
+  gap: 10px;
+}
+
+.setup-harness {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  background: var(--canvas);
+}
+
+.setup-harness-head,
+.setup-harness-actions,
+.setup-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.setup-harness-head p {
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+
+.setup-harness-actions,
+.setup-actions {
+  justify-content: flex-start;
+}
+
+.setup-review {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.setup-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.setup-field > span {
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+
+.setup-field code {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px;
+}
+
+.setup-field code.plain {
+  font-family: inherit;
+}
+
+.setup-field ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.setup-message {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 9px;
+  background: var(--chip);
+}
+
+.setup-empty {
+  color: var(--ink-dim);
+}
+
+.chip.ok {
+  background: rgba(39, 134, 88, 0.14);
+  color: var(--ok);
+}
+
+/* Installed but not running: not the green of working, not the grey of
+   never enabled. */
+.chip.warn {
+  background: rgba(216, 162, 26, 0.16);
+  color: #8a6a08;
+}
+
+.chip.neutral {
+  background: var(--chip);
+  color: var(--ink-dim);
+}
+
+/* ------------------------------------------------------------------ */
+/* Live session indicator                                              */
+/*                                                                     */
+/* Red pulses only for a session Anthill has genuinely detected. Every  */
+/* other state is drawn quieter than that on purpose: the moment an     */
+/* uncertain match looks like a confident one, the indicator is lying.  */
+/* ------------------------------------------------------------------ */
+
+/* The indicator sits on the canvas now, opposite the plan metrics, in the
+   canvas chip grammar rather than the top bar's. It is about the plan in front
+   of you, not about the application. */
+/*
+ * Positioned by its cluster on the workflow canvas, and by the chip strip on
+ * the Live Session page. Absolute placement of its own would fight both.
+ */
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+}
+
+.live-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--ink-2);
+  border-radius: 999px;
+  padding: 7px 13px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: var(--shadow-card);
+}
+
+.live-chip:hover {
+  border-color: var(--field-border);
+}
+
+.live-chip.tone-live {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.live-chip.tone-bad {
+  color: var(--ink-dim);
+}
+
+/* The same chip on the dark page header. */
+.live-chip.on-dark {
+  background: var(--dark-inset);
+  border-color: var(--dark-border);
+  color: var(--on-dark-2);
+  box-shadow: none;
+  cursor: default;
+}
+
+.live-chip-cli {
+  color: var(--ink-dim);
+}
+
+.live-chip.on-dark .live-chip-cli {
+  color: var(--on-dark-dim);
+}
+
+.live-chip .count {
+  background: var(--chip);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--ink-quiet);
+}
+
+/* Only a confident match pulses. An unsure one must never look live. */
+.live-dot.tone-live {
+  background: var(--accent);
+  animation: live-ring 1.5s ease-in-out infinite;
+}
+
+.live-dot.tone-waiting {
+  background: transparent;
+  border: 1.5px solid var(--on-dark-dimmer);
+}
+
+.live-dot.tone-unsure {
+  background: #d8a21a;
+}
+
+.live-dot.tone-done {
+  background: var(--ok);
+}
+
+/*
+ * The accent dot's ring, which is a different animation from the plain fade
+ * `.live-pulse` carries — and used to share its name.
+ *
+ * Two `@keyframes live-pulse` in one sheet is not two animations: the later
+ * definition wins for every user of the name, so the fade every small dot in
+ * the app asks for was silently being drawn as this red ring. A blue dot with
+ * a red halo is the visible half of that; the invisible half is that nothing
+ * faded to 0.32 anywhere.
+ */
+@keyframes live-ring {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(236, 48, 19, 0.45);
+  }
+  70% {
+    opacity: 0.75;
+    box-shadow: 0 0 0 6px rgba(236, 48, 19, 0);
+  }
+}
+
+/* Portalled to the body: the top bar clips its overflow, so a popover drawn
+   inside it is trimmed to the height of the bar. Placed from the chip's own
+   box instead, and re-placed when the window resizes. */
+.live-popover {
+  position: fixed;
+  z-index: 50;
+  width: 330px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-raised);
+  padding: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.live-popover header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.live-pop-note {
+  margin: 0;
+  color: var(--ink-3);
+  line-height: 1.5;
+}
+
+.live-pop-note.warn {
+  color: var(--accent-700);
+}
+
+.live-popover dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.live-popover dt {
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  font-size: 10.5px;
+  letter-spacing: 0.07em;
+  padding-top: 2px;
+}
+
+.live-popover dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.live-popover code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.live-popover .quiet {
+  color: var(--ink-quiet);
+}
+
+.conf {
+  margin-left: 6px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.conf-exact,
+.conf-strong {
+  background: var(--ok-soft);
+  color: #245c39;
+}
+
+/* A guess is drawn as one, here and on the block it points at. */
+.conf-medium,
+.conf-weak {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--chip),
+    var(--chip) 3px,
+    var(--surface) 3px,
+    var(--surface) 6px
+  );
+  color: var(--ink-dim);
+}
+
+.live-pop-foot {
+  margin: 0;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+  color: var(--ink-dim);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.live-pop-actions {
+  display: flex;
+  gap: 7px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Live Session page                                                   */
+/*                                                                     */
+/* Same chrome and same work surface as the Planner, so this reads as   */
+/* part of Anthill rather than a separate tool. What is new is the      */
+/* run-state palette: red means failure and nothing else, the two kinds */
+/* of waiting are drawn apart, and every state is legible with motion   */
+/* switched off.                                                       */
+/* ------------------------------------------------------------------ */
+
+.live-page {
+  background: var(--canvas);
+}
+
+.live-page-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--on-dark);
+}
+
+.live-page-plan {
+  color: var(--on-dark-dim);
+  font-size: 13px;
+}
+
+.live-page-boundary {
+  color: var(--on-dark-dim);
+  font-size: 12px;
+}
+
+.live-page-body {
+  display: grid;
+  grid-template-columns: 252px minmax(0, 1fr) 428px;
+  flex: 1;
+  min-height: 0;
+}
+
+.live-stage {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  background: var(--canvas);
+  background-image: radial-gradient(rgba(32, 30, 29, 0.13) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/*
+ * Spans the stage rather than hugging the left edge, so the presence cluster
+ * can sit at the far end and the row can wrap instead of running under the
+ * note below it.
+ */
+/*
+ * In flow, not overlaid. It wraps once the presence cluster joins it, and an
+ * absolute row that grows downward lands on top of the note beneath it.
+ */
+.live-stage-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  padding: 14px 16px 0;
+}
+
+.canvas-chip.warn {
+  border-color: #eddfbc;
+  background: #fdf8ec;
+  color: #8a6a08;
+}
+
+.live-graph {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.live-stage-note {
+  margin: 0 auto;
+  max-width: 62ch;
+  text-align: center;
+  color: var(--ink-3);
+  line-height: 1.55;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 10px 14px;
+}
+
+.live-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding-top: 12px;
+  color: var(--ink-dim);
+  font-size: 11.5px;
+}
+
+.live-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.live-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+/* The graph itself */
+
+.live-node {
+  cursor: pointer;
+}
+
+.live-node-kicker {
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.live-node-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.live-node-state {
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+/* A live block breathes on its own border. There is no second outline: the
+   animated ring that used to sit outside the block made the active step look
+   heavier than everything around it, for no information gained. */
+.live-node.state-running .live-node-body {
+  animation: live-breathe 2s ease-in-out infinite;
+}
+
+/* Waiting moves more slowly than working, because it is not working. */
+.live-node.state-needsYou .live-node-body {
+  animation: live-breathe 2.8s ease-in-out infinite;
+}
+
+/* Slower still: the session is alive but has not said what it is doing, and a
+   brisk pulse here would read as work in progress. */
+.live-node.state-observing .live-node-body {
+  animation: live-breathe 3.4s ease-in-out infinite;
+}
+
+.live-slide {
+  animation: live-slide 1.6s ease-in-out infinite;
+}
+
+.live-edge.tone-live {
+  animation: live-flow 1s linear infinite;
+}
+
+/* Opacity on the stroke alone, so the border never leaves and the block never
+   changes size — the ports and the edges landing on them do not move. */
+@keyframes live-breathe {
+  0%,
+  100% {
+    stroke-opacity: 1;
+  }
+  50% {
+    stroke-opacity: 0.42;
+  }
+}
+
+@keyframes live-flow {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+
+@keyframes live-slide {
+  0% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(120px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+/* State is carried by colour, border weight, opacity and a word — never by
+   motion alone — so switching all of it off leaves the diagram legible. */
+@media (prefers-reduced-motion: reduce) {
+  .live-dot.tone-live,
+  .live-node-body,
+  .live-slide,
+  .live-edge.tone-live,
+  .feed-card.event-new,
+  .feed-glyph.state-working,
+  .recent-chip.is-pulsing::before {
+    animation: none;
+  }
+  /* With the motion gone the border simply stays at full strength; colour,
+     weight and the word on the card carry the state on their own. */
+  .live-node-body {
+    stroke-opacity: 1;
+  }
+}
+
+/* The right panel */
+
+.live-side {
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  overflow-y: auto;
+  padding: 14px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.live-side-top {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.live-side h2 {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  margin: 0;
+  flex: 1;
+}
+
+.live-side .quiet {
+  color: var(--ink-quiet);
+  font-size: 11.5px;
+}
+
+.live-facts dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 12px;
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.live-facts dt {
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  font-size: 10.5px;
+  letter-spacing: 0.07em;
+  padding-top: 2px;
+}
+
+.live-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.live-facts code,
+.live-feed code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.live-note {
+  margin: 6px 0 0;
+  color: var(--ink-dim);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* Activity */
+
+.live-feed {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* The rows this feed was once made of are gone; the list they sat in is not.
+   Their rules outlived them by long enough to take the one motion in the
+   feed down with them — see `.feed-card.event-new`. */
+
+.live-cannot {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.live-cannot ul {
+  margin: 8px 0 0;
+  padding-left: 1.1em;
+  color: var(--ink-3);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12.5px;
+}
+
+/* ------------------------------------------------------------------ */
+/* A process older than the screen in front of it                      */
+/*                                                                     */
+/* Drawn as a problem, not as an empty state. The failure this reports  */
+/* used to look identical to "nothing has happened yet", which is a     */
+/* claim Anthill had no right to make.                                 */
+/* ------------------------------------------------------------------ */
+
+.restart-required {
+  border: 1px solid var(--accent-300);
+  background: var(--accent-100);
+  border-radius: var(--radius-card);
+  padding: 13px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 10px 0;
+}
+
+.restart-required h2 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-700);
+  text-transform: none;
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.restart-required p {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.restart-missing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.restart-missing code {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--surface);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.restart-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.restart-note {
+  border-top: 1px solid var(--accent-300);
+  padding-top: 8px;
+  color: var(--ink-dim);
+  font-size: 11.5px;
+}
+
+/* The same distinction inside the activity list: could not read, versus
+   read and found nothing. */
+.live-feed-problem {
+  margin: 8px 0 0;
+  border-left: 2px solid var(--accent);
+  background: var(--accent-100);
+  border-radius: 0 5px 5px 0;
+  padding: 8px 10px;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.live-stage-note.warn {
+  border-color: #eddfbc;
+  background: #fdf8ec;
+  color: #8a6a08;
+}
+
+/* ------------------------------------------------------------------ */
+/* Left rail: two libraries                                            */
+/*                                                                     */
+/* Blocks and agents are the same kind of thing — reusable pieces a     */
+/* plan is composed from — so they sit together and stay on screen      */
+/* whatever is selected. Agents used to live in the right sidebar,      */
+/* where a canvas click navigated away from them.                      */
+/* ------------------------------------------------------------------ */
+
+.libraries {
+  width: 252px;
+  flex: none;
+  background: var(--chrome-panel);
+  color: var(--on-dark);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.libraries .library {
+  width: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.library-switch {
+  display: flex;
+  gap: 3px;
+  margin: 12px 12px 4px;
+  padding: 3px;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  flex: none;
+}
+
+.library-switch button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  background: none;
+  color: var(--on-dark-dim);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.library-switch button.active {
+  background: rgba(255, 255, 255, 0.13);
+  color: var(--on-dark);
+  font-weight: 600;
+}
+
+.library-switch .count {
+  font-size: 10.5px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--on-dark-2);
+}
+
+.agent-rail {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rail-lede {
+  margin: 0 4px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--on-dark-dim);
+}
+
+.rail-agents {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rail-agent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 8px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rail-agent:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.rail-agent.is-selected {
+  background: rgba(255, 255, 255, 0.13);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.rail-agent-body {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+/* The colours are stated, not inherited: this list sits on the dark panel and
+   the ink tokens around it are for paper. */
+.rail-agent-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--on-dark);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-agent-sub {
+  font-size: 11.5px;
+  color: #8a8584;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-agent-steps {
+  flex: none;
+  font-size: 10.5px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--on-dark-2);
+}
+
+.rail-agent-steps.is-unused {
+  background: none;
+  border: 1px dashed var(--dark-border);
+  color: var(--on-dark-dimmer);
+}
+
+.rail-add {
+  border: 1px dashed var(--dark-border);
+  background: none;
+  color: var(--on-dark-2);
+  border-radius: 7px;
+  padding: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rail-add:hover {
+  background: var(--dark-hover);
+}
+
+.rail-library {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 4px;
+  border-top: 1px solid var(--dark-border);
+}
+
+.rail-library-add {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
+  border: 0;
+  background: none;
+  border-radius: 7px;
+  padding: 7px 8px;
+  font: inherit;
+  color: var(--on-dark-2);
+  cursor: pointer;
+}
+
+.rail-library-add:hover {
+  background: var(--dark-hover);
+}
+
+.rail-empty,
+.rail-foot {
+  margin: 0;
+  color: var(--on-dark-dim);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------ */
+/* One inspector                                                       */
+/* ------------------------------------------------------------------ */
+
+/* Sections replace the four sub-tabs: the column is scannable without
+   being navigable, so nothing about a step is one click out of sight. */
+.inspector-section {
+  border-top: 1px solid var(--border);
+  margin-top: 16px;
+  padding-top: 14px;
+  border-radius: 4px;
+  transition: background 220ms ease;
+}
+
+.inspector-section.is-flashed {
+  background: var(--accent-100);
+}
+
+.section-label {
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  margin-bottom: 9px;
+}
+
+.inspector-idle {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 24px;
+  text-align: center;
+}
+
+.inspector-idle h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.inspector-idle p {
+  margin: 0;
+  color: var(--ink-3);
+  max-width: 34ch;
+  line-height: 1.5;
+}
+
+.inspector-idle .chip.error {
+  background: var(--accent-100);
+  color: var(--accent-700);
+}
+
+.inspector-idle .chip.ok {
+  background: var(--ok-soft);
+  color: #245c39;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 8px;
+}
+
+/* Connections, on the block and on the connection itself */
+
+.connection-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 7px 10px;
+  margin-bottom: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.connection-row:hover {
+  background: var(--row-hover);
+}
+
+.connection-from {
+  flex: 1;
+  font-weight: 500;
+}
+
+.connection-kind {
+  color: var(--ink-dim);
+  font-size: 11.5px;
+}
+
+.connection-ends {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+
+.connection-end {
+  background: var(--chip);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 5px 10px;
+  font: inherit;
+  cursor: pointer;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-end:disabled {
+  cursor: default;
+}
+
+.connection-end.is-loose {
+  color: var(--accent-700);
+  background: var(--accent-100);
+  border-color: var(--accent-300);
+}
+
+.connection-arrow {
+  color: var(--ink-dim);
+}
+
+.issue-code {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-dim);
+}
+
+/* ------------------------------------------------------------------ */
+/* Problems, as an index only                                          */
+/* ------------------------------------------------------------------ */
+
+.problems-popover {
+  position: fixed;
+  z-index: 30;
+  width: 420px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-raised);
+  padding: 12px;
+}
+
+.problems-popover header {
+  margin-bottom: 8px;
+}
+
+.problems-popover ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.problems-popover .problem {
+  width: 100%;
+  text-align: left;
+}
+
+.problems-popover .problem:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+/* The code sits after the message and needs air, or the two run together. */
+.problems-popover .problem .code {
+  display: inline-block;
+  margin-left: 6px;
+}
+
+.problems-foot {
+  margin: 10px 0 0;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+  color: var(--ink-dim);
+  font-size: 11.5px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Live Session zoom                                                   */
+/* ------------------------------------------------------------------ */
+
+.live-graph-surface {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.live-graph {
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+.live-graph.is-panning {
+  cursor: grabbing;
+}
+
+.live-zoom {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 6px;
+  box-shadow: var(--shadow-card);
+}
+
+.live-zoom button {
+  border: none;
+  background: none;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.live-zoom button:hover:not(:disabled) {
+  background: var(--chip);
+}
+
+.live-zoom button:disabled {
+  color: var(--ink-quiet);
+  cursor: default;
+}
+
+.live-zoom [data-testid="live-zoom-level"] {
+  min-width: 46px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* Who carries the step out: its own section, because it answers a question
+   about the step rather than being one more field in it. */
+.carried-by {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 9px 12px;
+  margin-bottom: 8px;
+}
+
+.carried-name {
+  flex: 1;
+  font-weight: 600;
+}
+
+.carried-name.is-missing {
+  color: var(--accent-700);
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------------ */
+/* v5 — launch rows, live rails, activity scope                        */
+/* ------------------------------------------------------------------ */
+
+/* A plan is a rule, not a tile. A tile said "document"; what matters about a
+   row here is its state, so the mark is a coloured rule down its edge. */
+.launch-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 18px;
+}
+
+.launch-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  padding: 0 4px 6px;
+}
+
+.launch-group-head.is-sessions {
+  color: #2f6d99;
+}
+
+.launch-group-head .rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.launch-group-head .count {
+  letter-spacing: 0;
+  color: var(--ink-quiet);
+}
+
+.launch-recents {
+  padding: 12px 10px 16px 8px;
+}
+
+.launch-recent {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 12px 14px 12px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.launch-recent:hover {
+  background: var(--row-hover);
+}
+
+.launch-recent.is-selected {
+  border-color: var(--field-border);
+  background: var(--row-hover);
+}
+
+.recent-mark {
+  width: 3px;
+  align-self: stretch;
+  border-radius: 999px;
+  background: var(--border);
+  flex: none;
+}
+
+.recent-mark.tone-live {
+  background: #56aee0;
+}
+.recent-mark.tone-unsure,
+.recent-mark.tone-waiting {
+  background: #d8a21a;
+}
+.recent-mark.tone-waiting {
+  background: #bab6b6;
+}
+.recent-mark.tone-bad {
+  background: var(--accent);
+}
+.recent-mark.tone-done {
+  background: #2f8f5f;
+}
+
+.recent-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.recent-name {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.recent-path {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-quiet);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-meta {
+  font-size: 11.5px;
+  color: var(--ink-dim);
+}
+
+.recent-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4px;
+  flex: none;
+}
+
+.recent-chip {
+  position: relative;
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 2px 9px;
+  background: var(--chip);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.recent-chip.tone-live {
+  background: #eaf4fb;
+  color: #2f6d99;
+}
+.recent-chip.tone-unsure {
+  background: #fdf8ec;
+  color: #8a6a08;
+}
+.recent-chip.tone-bad {
+  background: var(--accent-100);
+  color: var(--accent-700);
+}
+.recent-chip.tone-done {
+  background: var(--ok-soft);
+  color: #245c39;
+}
+
+/* Only a confident match pulses. */
+.recent-chip.is-pulsing::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #56aee0;
+  margin-right: 6px;
+  animation: live-pulse 1.5s ease-in-out infinite;
+}
+
+.recent-when {
+  font-size: 11px;
+  color: var(--ink-quiet);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The three list states keep the row's rhythm, so the list does not jump as
+   it fills. */
+.launch-note {
+  margin: 0;
+  padding: 12px 14px 12px 10px;
+  border-left: 3px solid var(--border);
+  color: var(--ink-dim);
+  line-height: 1.5;
+}
+
+/* Live Session left rail */
+
+.live-rail {
+  background: var(--chrome-panel);
+  color: var(--on-dark);
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.live-rail .kicker {
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--on-dark-dimmer);
+  padding: 0 4px;
+}
+
+.live-rail-facts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0 4px;
+}
+
+.live-rail-facts dt {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--on-dark-dimmer);
+}
+
+.live-rail-facts dd {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--on-dark-2);
+  overflow-wrap: anywhere;
+}
+
+.live-rail-facts code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.live-rail-facts .quiet {
+  color: var(--on-dark-dimmer);
+}
+
+.live-rail-cannot {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 14px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.live-rail-cannot ul {
+  margin: 8px 0 0;
+  padding-left: 1.1em;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: #bab6b6;
+}
+
+/* Describing a change in words, over the canvas. */
+/* ------------------------------------------------------------------ */
+/* The describe-a-change assistant                                      */
+/* ------------------------------------------------------------------ */
+
+/* Anchored to the canvas rather than the topbar, above the zoom cluster:
+   this edits the diagram, so it belongs to the diagram's own chrome. */
+.canvas-describe {
+  position: absolute;
+  right: 16px;
+  bottom: 60px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-300);
+  background: #ffffff;
+  color: var(--accent-700);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  box-shadow: 0 2px 8px rgba(22, 20, 19, 0.1);
+  cursor: pointer;
+}
+
+.canvas-describe:hover {
+  background: var(--accent-100);
+}
+
+/* Open reads as engaged, not merely pressed: solid fill, because while it is
+   open the canvas click means something different. */
+.canvas-describe.is-open {
+  border-color: transparent;
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 3px 12px rgba(236, 48, 19, 0.34);
+}
+
+.canvas-describe.is-open:hover {
+  background: var(--accent-600);
+}
+
+.assistant {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.assistant-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.assistant-top h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.assistant-thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.assistant-idle {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* The author's own message. One flattened corner on the reply side marks
+   whose it is, which is cheaper than an avatar system for two speakers. */
+.assistant-said {
+  align-self: flex-end;
+  max-width: 92%;
+  padding: 8px 11px;
+  border-radius: 10px 10px 2px 10px;
+  background: #f3f2f2;
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.assistant-said-mentions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 5px;
+}
+
+.assistant-declined,
+.assistant-failed {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.assistant-declined {
+  background: var(--chip);
+  color: var(--ink-dim);
+}
+
+.assistant-failed {
+  background: rgba(236, 48, 19, 0.08);
+  color: var(--accent-700);
+}
+
+.assistant-proposal {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 11px 12px;
+}
+
+.assistant-summary {
+  margin: 0 0 7px;
+  font-size: 12.5px;
+  font-weight: 550;
+  line-height: 1.5;
+}
+
+.assistant-changes {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink-dim);
+}
+
+.assistant-changes .is-destructive {
+  color: var(--accent-700);
+  font-weight: 600;
+}
+
+.assistant-proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+/* What was decided, beside the offer to decide it again. */
+.assistant-resolved {
+  margin: 0;
+  flex: 1;
+  font-size: 11.5px;
+  color: var(--ink-dim);
+}
+
+.assistant-proposal-actions.is-past {
+  align-items: center;
+  gap: 8px;
+}
+
+.assistant-proposal-actions.is-past button {
+  font-size: 11.5px;
+  padding: 4px 9px;
+}
+
+/* A refusal belongs on the proposal it refused, not in a strip above. */
+.assistant-proposal-error {
+  margin: 9px 0 0;
+  font-size: 11.5px;
+}
+
+.assistant-asking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #f8f7f7;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.think-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.think-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink-dim);
+  animation: think-bounce 1s infinite ease-in-out;
+}
+
+.think-dots i:nth-child(2) {
+  animation-delay: 160ms;
+}
+
+.think-dots i:nth-child(3) {
+  animation-delay: 320ms;
+}
+
+@keyframes think-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.55;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .think-dots i {
+    animation: none;
+  }
+}
+
+.assistant-composer {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.assistant-mentions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.mention-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-300);
+  background: var(--accent-100);
+  color: var(--accent-700);
+  font-size: 11.5px;
+}
+
+.mention-pill.is-small {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.mention-pill button {
+  border: 0;
+  background: none;
+  padding: 0 3px;
+  font: inherit;
+  font-size: 10px;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.mention-pill button:hover {
+  opacity: 1;
+}
+
+.assistant-composer textarea {
+  resize: vertical;
+  font: inherit;
+  font-size: 12.5px;
+}
+
+/* Visibly out of action, not merely inert: a field that looks writable and
+   swallows keystrokes is worse than one that says it is busy. */
+.assistant-composer textarea:disabled {
+  background: #f5f3f3;
+  color: #8a8584;
+  cursor: not-allowed;
+}
+
+.assistant-composer .hint {
+  margin: 0;
+}
+
+.assistant-send:disabled {
+  cursor: not-allowed;
+}
+
+/* An agent's own words, rendered rather than shown as source. Tight spacing:
+   this sits inside a feed card, not on a page of its own. */
+.msg-markup > *:first-child {
+  margin-top: 0;
+}
+
+.msg-markup > *:last-child {
+  margin-bottom: 0;
+}
+
+.msg-markup p {
+  margin: 0 0 6px;
+}
+
+.msg-markup h4,
+.msg-markup h5 {
+  margin: 8px 0 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.msg-markup h5 {
+  color: var(--ink-dim);
+}
+
+.msg-markup ul,
+.msg-markup ol {
+  margin: 0 0 6px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.msg-markup code {
+  font-size: 11.5px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--chip);
+  /* A path is the commonest inline code here, and it has to wrap somewhere. */
+  overflow-wrap: anywhere;
+}
+
+/* A path that is really on disk. It has to look pressable, because in a
+   message where nothing else is, an underline the reader cannot distinguish
+   from emphasis would be worse than no affordance at all. It inherits the
+   monospace of whatever it sits in, so a path inside a code span still reads
+   as one. */
+.msg-markup .msg-path {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent-700);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+  text-align: left;
+  cursor: pointer;
+}
+
+.msg-markup .msg-path:hover {
+  text-decoration-style: solid;
+}
+
+/* Shown so the reader can see where a link would go, muted so it does not
+   compete with the words around it. Not clickable — see message-markup.tsx. */
+.msg-markup .msg-url {
+  color: var(--ink-quiet);
+  overflow-wrap: anywhere;
+}
+
+/* Hooks that were installed and do not run. Loud, because the alternative is
+   a harness that quietly observes less than the page claims. */
+.setup-problem {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--accent-300);
+  background: var(--surface);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--accent-700);
+}
+
+/* Hooks that run when Anthill calls them and that the harness never calls.
+   Amber, not red: it may be permanently true of a build with no hook
+   mechanism at all, and nothing is broken — there is simply less to read. */
+.setup-quiet-problem {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #eddfbc;
+  background: #fdf8ec;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #8a6a08;
+}
+
+/* ------------------------------------------------------------------ */
+/* "How Anthill works" — the explainer screen                          */
+/*                                                                     */
+/* The launch window's own 52% split and dotted ground, because this    */
+/* screen sits at the same level of the app as the launcher rather than */
+/* inside a workflow — reusing the split says so before a word is read. */
+/* ------------------------------------------------------------------ */
+
+.how-screen {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.how-stage {
+  width: 52%;
+  flex: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 44px;
+  overflow: hidden;
+  background-color: var(--canvas);
+  background-image: radial-gradient(rgba(32, 30, 29, 0.13) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.how-back {
+  position: absolute;
+  left: 20px;
+  top: 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Fixed 400×290. The scenes are hand-placed in that box, so it must not
+   scale — every coordinate below assumes it. */
+.how-scene {
+  position: relative;
+  width: 400px;
+  height: 290px;
+}
+
+.how-scene > div {
+  position: absolute;
+  inset: 0;
+}
+
+.how-scene svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.how-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+}
+
+.how-copy-inner {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 44px 40px 48px;
+}
+
+.how-copy-inner > div {
+  max-width: 520px;
+}
+
+.how-title {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+}
+
+.how-lede {
+  margin: 12px 0 0;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+
+/* ------------------------------------------------------------------ */
+/* The step list                                                       */
+/*                                                                     */
+/* A real button per step, because the list is the navigation. The      */
+/* active row carries `aria-current="step"`; the accent rule and the    */
+/* darker title are the visual half of that same fact, never the only   */
+/* half.                                                               */
+/* ------------------------------------------------------------------ */
+
+.how-steps {
+  display: flex;
+  flex-direction: column;
+  margin-top: 30px;
+}
+
+.how-step {
+  display: flex;
+  gap: 15px;
+  width: 100%;
+  padding: 17px 14px 17px 12px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--border);
+  border-left: 2px solid transparent;
+}
+
+.how-step:hover {
+  background: var(--row-hover);
+}
+
+.how-step[aria-current="step"] {
+  border-left-color: var(--accent);
+}
+
+.how-step-no {
+  width: 22px;
+  flex: none;
+  padding-top: 3px;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-quiet);
+}
+
+.how-step[aria-current="step"] .how-step-no {
+  color: var(--accent-700);
+}
+
+.how-step-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.how-step-title {
+  font-size: 16.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink-2);
+}
+
+.how-step[aria-current="step"] .how-step-title {
+  color: var(--ink);
+}
+
+.how-step-body {
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--ink-3);
+}
+
+/* The same choice again, under the illustration, for a reader whose eye is on
+   the left pane. */
+.how-dots {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 26px;
+}
+
+.how-dot {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  background: var(--field-border);
+}
+
+.how-dot[aria-current="step"] {
+  background: var(--accent);
+}
+
+/* Neutral, not red: this is how the product works, not a warning. */
+.how-boundary {
+  margin-top: 30px;
+  padding: 19px 21px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--ink-quiet);
+  border-radius: var(--radius-slab);
+  background: var(--canvas);
+}
+
+.how-boundary h2 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.how-boundary p {
+  margin: 0 0 11px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--ink-3);
+}
+
+.how-boundary p:last-child {
+  margin: 0;
+  font-size: 13px;
+}
+
+.how-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+/* ------------------------------------------------------------------ */
+/* The illustration's card — the canvas's own shape                    */
+/*                                                                     */
+/* 124×62 is the canvas block at explainer scale, with the same         */
+/* anatomy: category dot, action kicker, name, then a chip or a state   */
+/* line. It never fades — a faded card makes its own label unreadable,  */
+/* and every state here is already said in words.                      */
+/* ------------------------------------------------------------------ */
+
+.ex-card {
+  position: absolute;
+  width: 150px;
+  /*
+    Sized by its content, with a floor.
+    
+    The handoff calls the card 124×62 — the canvas block at explainer scale —
+    and a fixed 62px is what its own demo carries. At these type sizes the
+    anatomy does not fit in 62: the kicker, the name and the agent chip come to
+    around eighty, so the chip crossed the bottom border and sat half outside
+    the card. The demo's own screenshots show a card near that height too, so
+    62 was the intent rather than the measurement. Ninety is what this anatomy
+    comes to at these sizes, so the three cards in a scene stay the same height
+    as each other; a card with less to say keeps the shape rather than
+    shrinking out of the row.
+  */
+  min-height: 90px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 11px 13px;
+  box-sizing: border-box;
+  border-radius: var(--radius-slab);
+  background: var(--surface);
+  border: 1px solid var(--field-border);
+  box-shadow: var(--shadow-card);
+}
+
+.ex-card.is-done {
+  border-color: #cfe6d8;
+}
+
+.ex-card.is-idle {
+  border-color: var(--border);
+}
+
+.ex-card.is-working {
+  border: 2px solid #56aee0;
+  box-shadow: 0 0 0 3px rgba(86, 174, 224, 0.16);
+}
+
+/* 9.5px, so it takes the darkest grey rather than a mid one: this is the
+   smallest type on the screen. */
+.ex-kicker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+
+.ex-name {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.ex-chip {
+  margin-top: auto;
+  align-self: flex-start;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--chip);
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--ink-3);
+}
+
+.ex-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 2px;
+}
+
+.ex-dot.cat-build {
+  background: #6b5bd2;
+}
+.ex-dot.cat-verify {
+  background: #d8a21a;
+}
+.ex-dot.run-done {
+  background: #2f8f5f;
+}
+.ex-dot.run-work {
+  background: #56aee0;
+}
+.ex-dot.run-idle {
+  background: var(--ink-quiet);
+}
+
+/* State is text before it is anything else, so it takes the ink of a
+   run state and never the paler rule its border may use. */
+.ex-state {
+  margin-top: auto;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.ex-state.run-done {
+  font-weight: 600;
+  color: #2f6b48;
+}
+.ex-state.run-work {
+  font-weight: 600;
+  color: #2f6d99;
+}
+.ex-state.run-idle {
+  color: var(--ink-3);
+}
+
+/* Indeterminate on purpose: Anthill reads records and cannot know how far
+   along a step is, so nothing here may imply a percentage. */
+.ex-progress {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: 1px;
+  height: 3px;
+  border-radius: 0 0 9px 9px;
+  overflow: hidden;
+  background: rgba(86, 174, 224, 0.16);
+}
+
+/* ------------------------------------------------------------------ */
+/* Scene 2 — the prompt, the pill, and the window you start yourself   */
+/* ------------------------------------------------------------------ */
+
+.ex-sheet {
+  position: absolute;
+  left: 14px;
+  top: 34px;
+  width: 186px;
+  height: 222px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 14px 15px;
+  border-radius: var(--radius-slab);
+  background: var(--surface);
+  border: 1px solid var(--field-border);
+  box-shadow: var(--shadow-card);
+}
+
+.ex-line {
+  height: 5px;
+  border-radius: 3px;
+  background: #f0eeee;
+}
+
+.ex-line.is-dim {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.ex-line.is-typed {
+  width: 70%;
+  background: var(--ink-3);
+}
+
+.ex-marker {
+  margin-top: auto;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--ink-3);
+}
+
+/* It travels to the window and fades. A pill parked on that window would read
+   as "started", which is the one thing this screen exists to deny. */
+.ex-copied {
+  position: absolute;
+  left: 150px;
+  top: 126px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--on-dark);
+}
+
+.ex-cli {
+  position: absolute;
+  left: 228px;
+  top: 74px;
+  width: 158px;
+  height: 142px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 13px 14px;
+  border-radius: var(--radius-slab);
+  background: var(--chrome-panel);
+  border: 1px solid var(--ink);
+}
+
+/* On the dark card the labels go the other way: light enough to read on it. */
+.ex-cli-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-quiet);
+}
+
+.ex-cli-logo {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 4px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.ex-cli-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--ink-quiet);
+}
+
+/* ------------------------------------------------------------------ */
+/* Motion                                                              */
+/*                                                                     */
+/* Each scene mounts fresh when the step changes, so the entrances run  */
+/* from the start every time. Nothing loops but the two ambient hints:  */
+/* a looping entrance beside body copy is a distraction.                */
+/* ------------------------------------------------------------------ */
+
+@keyframes ex-in {
+  from {
+    opacity: 0;
+    transform: translateY(7px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes ex-draw {
+  from {
+    stroke-dashoffset: 200;
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+@keyframes ex-fly {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.9);
+  }
+  22% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(96px, -34px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(96px, -34px) scale(0.94);
+  }
+}
+
+@keyframes ex-type {
+  from {
+    width: 0;
+  }
+  to {
+    width: 70%;
+  }
+}
+
+@keyframes live-flow {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+
+@keyframes live-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+.ex-node {
+  animation: ex-in 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.ex-node.d1 {
+  animation-delay: 60ms;
+}
+.ex-node.d2 {
+  animation-delay: 420ms;
+}
+.ex-node.d3 {
+  animation-delay: 780ms;
+}
+
+/* Each edge draws just after the card it points at, so the sequence reads as
+   "a step, then where it goes". */
+.ex-edge {
+  stroke-dasharray: 200;
+  animation: ex-draw 620ms ease-in-out both;
+}
+.ex-edge.d1 {
+  animation-delay: 300ms;
+}
+.ex-edge.d2 {
+  animation-delay: 660ms;
+}
+.ex-edge.d3 {
+  animation-delay: 1020ms;
+}
+
+.ex-fly {
+  animation: ex-fly 2.6s ease-in-out 700ms infinite both;
+}
+
+.ex-type {
+  animation: ex-type 1.6s ease-in-out 1.2s infinite alternate both;
+}
+
+.live-flow {
+  animation: live-flow 1s linear infinite;
+}
+
+.live-bar {
+  position: absolute;
+  inset: 0;
+  width: 34%;
+  background: #56aee0;
+  animation: live-slide 1.6s ease-in-out infinite;
+}
+
+/* Every scene then stands still, fully drawn and fully legible: nothing on
+   this screen is conveyed by motion alone. */
+@media (prefers-reduced-motion: reduce) {
+  .ex-node,
+  .ex-edge,
+  .ex-fly,
+  .ex-type,
+  .live-flow,
+  .live-bar {
+    animation: none !important;
+    opacity: 1 !important;
+    stroke-dashoffset: 0 !important;
+  }
+}
+
+/* Centred with the column it sits in. It used to be `align-self: flex-start`,
+   which put it alone against the left edge under a mark, a title, a blurb and
+   three actions that are all centred. */
+.launch-welcome-link {
+  margin-top: 10px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 12.5px;
+  color: var(--ink-dim);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.launch-welcome-link:hover {
+  color: var(--ink);
+}
+
+/* The settled session's accounting, above the graph it describes. */
+.session-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* This one rule owns every side of the card's spacing, including the gap to
+     the chip row above it. That gap used to be nobody's — the chips carry no
+     bottom padding and this carried no top margin, so the two sat flush
+     without either rule looking wrong alone. The sides are 16px to match the
+     chips above and the canvas below; they were 14px, which put the card two
+     pixels outside the row it belongs under. */
+  margin: 12px 16px 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.summary-steps {
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.summary-steps td {
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(32, 30, 29, 0.06);
+}
+
+.summary-figure {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+  padding-left: 18px !important;
+  white-space: nowrap;
+}
+
+.summary-pass {
+  color: var(--ink-quiet);
+}
+
+.summary-agents,
+.summary-tokens {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.summary-agents > div,
+.summary-tokens > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.summary-agents dt,
+.summary-tokens dt {
+  color: var(--ink-dim);
+}
+
+.summary-agents dd,
+.summary-tokens dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-boundary {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--ink-quiet);
+}
+
+/* The one control a lost session gets, and it is a control over Anthill. */
+.live-rail-look {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 4px 0;
+}
+
+.live-rail-look button {
+  align-self: flex-start;
+}
+
+.live-rail-look .hint {
+  margin: 0;
+  font-size: 11.5px;
+  opacity: 0.75;
+}
+
+.live-rail-foot {
+  margin: 0;
+  padding: 12px 4px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--on-dark-dimmer);
+}
+
+/* Activity: the scope is stated outside the scrolling area, so it cannot
+   scroll away exactly when the feed is long enough to need it. */
+.live-activity {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.live-activity-top {
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.live-activity-top h2 {
+  flex: 1;
+  margin: 0;
+}
+
+.scope-whole {
+  font-size: 11.5px;
+  color: var(--ink-quiet);
+}
+
+.scope-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #eaf4fb;
+  border: 1px solid #b9dcf0;
+  border-radius: 999px;
+  padding: 3px 5px 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2f6d99;
+}
+
+.scope-count {
+  background: #dcecf7;
+  border-radius: 999px;
+  padding: 0 6px;
+  font-weight: 500;
+}
+
+.scope-clear {
+  border: none;
+  background: none;
+  color: #2f6d99;
+  padding: 0 3px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.live-activity-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid #efeded;
+  flex: none;
+}
+
+/* The base control is a full-width form field, which is right in a form and
+   wrong in a row of two: stretched, it pushed the count against the edge and
+   read as the panel's title. Here it is a control the width of its longest
+   option. */
+.live-activity-controls select {
+  font-size: 12px;
+  padding: 4px 6px;
+  width: auto;
+}
+
+/* The count is right-aligned, so filtering reads as a change to the far end
+   of the row rather than as text that follows the order control around. */
+.live-activity-controls .spacer {
+  flex: 1;
+}
+
+.activity-count {
+  font-size: 11.5px;
+  color: var(--ink-quiet);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sr-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.live-activity-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 10px;
+}
+
+/*
+ * A new card arrives from above, once, and only in newest-first order.
+ *
+ * Seven pixels, not thirty: a nudge, not a slide — a long travel in a list
+ * that grows every few seconds becomes a twitch. Opacity and transform only,
+ * with no colour flash or border pulse: a card is not more important because
+ * it is new, and a session can produce dozens a minute.
+ *
+ * This rule used to name `.live-feed-row`, the row of the log-line design the
+ * cards replaced. Nothing has rendered that class since, so the one motion in
+ * the feed quietly never played. A selector is only as alive as the element
+ * it names.
+ */
+.feed-card.event-new {
+  animation: event-in 420ms cubic-bezier(0.2, 0.7, 0.2, 1) 1;
+}
+
+/*
+ * The working glyph turns, so a card that is still open reads as open without
+ * the reader having to compare it to its neighbours. It is a state rather than
+ * an event, which is why this one repeats and the arrival does not — and the
+ * state is still a word underneath, so the turning adds nothing a reader has
+ * to be taught.
+ */
+.feed-glyph.state-working {
+  display: inline-block;
+  animation: glyph-spin 1.1s linear infinite;
+}
+
+@keyframes glyph-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes event-in {
+  from {
+    transform: translateY(-7px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Selection reads over the run state: a selected block is at full strength
+   whatever its state, and its border stops breathing so the dark selection
+   outline stays put. */
+.live-node.is-selected {
+  opacity: 1;
+}
+
+.live-node.is-selected .live-node-body {
+  animation: none;
+  stroke-opacity: 1;
+}
+
+/* A removal is never silent: the row leaves, and the list says where the
+   file still is. */
+.launch-note.is-said {
+  border-left-color: var(--accent-300);
+  color: var(--ink-2);
+  margin: 0 10px 0 8px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Presence — the one chip that says a session is there                */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The whole motion vocabulary for "this is live" is this single breathing
+ * border. Earlier passes reached for a spinning ring and a marching dash; both
+ * made reading a log file look like holding a connection, and both are gone.
+ */
+@keyframes chip-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.28;
+  }
+}
+
+.chip-breathe {
+  animation: chip-breathe 2.2s ease-in-out infinite;
+}
+
+.presence-chip {
+  position: relative;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(32, 30, 29, 0.08);
+  font: inherit;
+  line-height: 1;
+}
+
+button.presence-chip {
+  cursor: pointer;
+}
+
+.presence-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  border: 1.5px solid currentColor;
+  pointer-events: none;
+}
+
+.presence-body {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 13px;
+}
+
+.presence-chip.size-small .presence-body {
+  gap: 6px;
+  padding: 5px 10px;
+}
+
+.presence-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex: none;
+}
+
+.presence-dot.dot-pulse,
+.presence-dot.dot-solid {
+  background: currentColor;
+}
+
+/* Hollow reads as "nothing is arriving" without needing a second colour. */
+.presence-dot.dot-hollow {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+
+.presence-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.presence-chip.size-small .presence-label {
+  font-size: 11.5px;
+}
+
+/*
+ * The plaque sits in the canvas's own coordinates, never inside the layer that
+ * pans and zooms — a statement about the session must not drift with the
+ * diagram or shrink when the author zooms out.
+ */
+.presence-plaque {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  border: 1px solid currentColor;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(32, 30, 29, 0.06);
+  font-size: 12px;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  max-width: 60ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.presence-plaque strong {
+  font-weight: 600;
+}
+
+.presence-plaque-sep {
+  opacity: 0.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chip-breathe {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* The session-started announcement                                    */
+/* ------------------------------------------------------------------ */
+
+.session-started-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: rgba(32, 30, 29, 0.32);
+  padding: 24px;
+}
+
+.session-started {
+  width: min(520px, 100%);
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(32, 30, 29, 0.22);
+  padding: 20px 24px 22px;
+}
+
+.session-started-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.session-started-close {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--ink-dim);
+  padding: 6px;
+  border-radius: 6px;
+}
+
+.session-started-close:hover {
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+.session-started h2 {
+  margin: 0 0 10px;
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  text-wrap: balance;
+}
+
+.session-started-how {
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+.session-started-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 18px;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--canvas);
+  font-size: 12.5px;
+}
+
+.session-started-facts dt {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  align-self: center;
+}
+
+.session-started-facts dd {
+  margin: 0;
+  color: var(--ink);
+}
+
+.session-started-facts code {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.session-started-boundary {
+  margin: 0 0 20px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+.session-started-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.session-started-actions button {
+  padding: 9px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.session-started-actions button:hover {
+  background: var(--canvas);
+}
+
+.session-started-actions button.primary {
+  background: var(--accent, #ec3013);
+  border-color: var(--accent, #ec3013);
+  color: #fff;
+}
+
+.session-started-actions button.primary:hover {
+  filter: brightness(0.94);
+}
+
+.session-started-esc {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--ink-dim);
+}
+
+/* ------------------------------------------------------------------ */
+/* Activity feed — one action, one card                                */
+/* ------------------------------------------------------------------ */
+
+.feed-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px;
+}
+
+.feed-filters button {
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+
+.feed-filters button:hover {
+  background: var(--canvas);
+}
+
+.feed-filters button[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+/*
+ * The card these rules arrived naming `--line`, `--muted` and `--surface-2`,
+ * three tokens this app has never had. An undefined custom property does not
+ * warn and does not fall back: the declaration around it is discarded, and a
+ * discarded `border` shorthand takes `border-style` to `none` with it. So the
+ * card had no border, no left state rule and no tint, and looked like the
+ * design it replaced. The names here are the app's own — same three colours,
+ * one name each — and `styles.test.ts` now refuses a bare `var()` that names
+ * nothing.
+ */
+.feed-card {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 10px;
+  padding: 11px 13px;
+  margin: 0 16px 8px;
+  background: #fff;
+}
+
+/* Text the CLI showed the user sits on its own tint, so it never reads as
+   Anthill's own words. */
+.feed-card.kind-message {
+  background: var(--canvas);
+}
+
+.feed-card.state-working {
+  border-left-color: #56aee0;
+}
+.feed-card.state-done {
+  border-left-color: #2f8f5f;
+}
+.feed-card.state-failed {
+  border-left-color: #ec3013;
+}
+.feed-card.state-unknown {
+  border-left-color: #bab6b6;
+}
+.feed-card.kind-session {
+  border-left-color: var(--border);
+}
+
+.feed-card-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.feed-card-top + .feed-confidence {
+  display: inline-block;
+  margin: 6px 0 0;
+}
+
+.feed-glyph {
+  font-size: 11px;
+  line-height: 1;
+  flex: none;
+}
+.feed-glyph.state-working {
+  color: #56aee0;
+}
+.feed-glyph.state-done {
+  color: #2f8f5f;
+}
+.feed-glyph.state-failed {
+  color: #ec3013;
+}
+.feed-glyph.state-unknown {
+  color: #8a8584;
+}
+
+.feed-card-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feed-confidence {
+  align-self: flex-start;
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.feed-confidence.conf-exact {
+  background: #e6f3ec;
+  color: #2f6b48;
+}
+.feed-confidence.conf-likely {
+  background: #f7ecd0;
+  color: #8a6a08;
+}
+.feed-confidence.conf-unmapped {
+  background: #fdf8ec;
+  color: #8a6a08;
+}
+
+.feed-card-time {
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.feed-runtime,
+.feed-card-body,
+.feed-state {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+.feed-runtime code,
+.feed-evidence code {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11.5px;
+}
+
+.feed-state.state-working {
+  color: #2f6d99;
+}
+.feed-state.state-done {
+  color: #2f6b48;
+}
+.feed-state.state-failed {
+  color: #ae1800;
+}
+.feed-state.state-unknown {
+  color: #8a8584;
+}
+
+.feed-more,
+.feed-evidence-toggle {
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--accent, #ec3013);
+  cursor: pointer;
+}
+
+.feed-evidence-toggle {
+  display: block;
+  color: var(--ink-dim);
+}
+
+.feed-evidence-toggle:hover {
+  color: var(--ink);
+}
+
+.feed-evidence {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  margin: 8px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+}
+
+.feed-evidence dt {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+.feed-evidence dd {
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* How many runs are open, beside the chip that speaks for one of them. */
+.live-count {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--canvas);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+/*
+ * Every screen with a workflow open reads the same way: the mark, the screen's
+ * own name in bold, then the workflow's name beside it. Before this the
+ * Workflow screen jumped straight to an unlabelled input, so the one field on
+ * the bar had nothing saying what it named.
+ */
+.screen-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--on-dark);
+  white-space: nowrap;
+}
+
+/* The workflow's own name, beside whatever screen is showing it. */
+.screen-subject {
+  color: var(--on-dark-dim);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 34ch;
+}
+
+/*
+ * Anchored in the canvas's own coordinates, deliberately outside the layer
+ * that pans and zooms: a statement about the session must not drift with the
+ * diagram or shrink when the author zooms out.
+ */
+.canvas-presence {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  left: 16px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  pointer-events: none;
+}
+
+/* Only the chip is clickable; the cluster spans the canvas so the plaque has
+   room to shrink, and must not swallow clicks meant for the diagram. */
+.canvas-presence > * {
+  pointer-events: auto;
+}

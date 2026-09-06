@@ -1,0 +1,20 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "agent-monitor",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "source ~/.nvm/nvm.sh && nvm use 22 >/dev/null && cd ~/dev/apps/Claude-Code-Agent-Monitor && npm run dev"
+      ],
+      "port": 5173
+    },
+    {
+      "name": "anthill-builder",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--workspace=@anthill/builder"],
+      "port": 5273
+    }
+  ]
+}

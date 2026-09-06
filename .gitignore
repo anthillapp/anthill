@@ -1,0 +1,18 @@
+docs/
+
+node_modules/
+dist/
+out/
+*.tsbuildinfo
+coverage/
+.DS_Store
+
+# Electron-ABI build of better-sqlite3, fetched by
+# apps/desktop/scripts/fetch-electron-sqlite.mjs — a binary, not source.
+apps/desktop/native/
+
+# Packaged builds. `npm run package` writes an .app here; it is output.
+apps/desktop/release/
+
+# Local copy of the design prototype, for reference while implementing it.
+.design-preview/

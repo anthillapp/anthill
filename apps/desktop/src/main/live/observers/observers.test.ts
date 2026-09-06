@@ -1,0 +1,1337 @@
+/**
+ * The observers, run against fixtures shaped like the real thing.
+ *
+ * The record shapes here were copied from actual files on this machine — a
+ * Claude Code transcript under `~/.claude/projects` and a Codex rollout under
+ * `~/.codex/sessions` — so a change in what either tool writes shows up as a
+ * failing test rather than as an indicator that quietly stops working.
+ */
+
+import { appendFile, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { applyEvidence, createPendingRun, type PendingRun } from "@anthill/live";
+
+import { ClaudeCodeObserver } from "./claude-code.js";
+import { CodexObserver } from "./codex.js";
+
+const RUN_ID = "ANT-1A2B3C4D";
+const NONCE = "9f8e7d";
+
+function pending(cli: "claude-code" | "codex"): PendingRun {
+  return createPendingRun({
+    anthillRunId: RUN_ID,
+    correlationNonce: NONCE,
+    selectedCli: cli,
+    promptVersion: "1",
+    bootstrapPromptHash: "abcd1234",
+    now: new Date(Date.now() - 5_000).toISOString(),
+  });
+}
+
+const roots: string[] = [];
+async function root(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "anthill-observer-"));
+  roots.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  roots.length = 0;
+});
+
+/* ------------------------------------------------------------------ */
+/* Claude Code                                                         */
+/* ------------------------------------------------------------------ */
+
+const MARKED_PROMPT = `<!-- Anthill run marker.\nanthill-run-id: ${RUN_ID}\nanthill-nonce: ${NONCE}\n-->\n\nRead the note.`;
+
+function claudeTranscript(
+  sessionId: string,
+  options: {
+    marked: boolean;
+    stopReason?: string;
+    step?: string;
+    tool?: boolean;
+    delegate?: "Task" | "Agent";
+  },
+) {
+  const at = new Date().toISOString();
+  const rows: unknown[] = [
+    {
+      type: "user",
+      sessionId,
+      timestamp: at,
+      cwd: "/tmp/scratch",
+      message: { role: "user", content: options.marked ? MARKED_PROMPT : "Read the note." },
+    },
+  ];
+  if (options.step || options.tool || options.delegate || options.stopReason) {
+    rows.push({
+      type: "assistant",
+      sessionId,
+      timestamp: at,
+      message: {
+        role: "assistant",
+        ...(options.stopReason ? { stop_reason: options.stopReason } : {}),
+        content: [
+          { type: "thinking", thinking: "PRIVATE-REASONING-SHOULD-NEVER-BE-READ" },
+          {
+            type: "text",
+            text: options.step
+              ? `ANTHILL-STEP ${RUN_ID} ${NONCE} ${options.step}`
+              : "It says pumpernickel.",
+          },
+          ...(options.tool
+            ? [
+                {
+                  type: "tool_use",
+                  id: "toolu_1",
+                  name: "Bash",
+                  input: { command: "ls -la", description: "List files" },
+                },
+              ]
+            : []),
+          ...(options.delegate
+            ? [
+                {
+                  type: "tool_use",
+                  id: "toolu_2",
+                  name: options.delegate,
+                  input: { subagent_type: "reader", description: "Read note.txt" },
+                },
+              ]
+            : []),
+        ],
+      },
+    });
+  }
+  return rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+}
+
+async function writeClaude(dir: string, project: string, sessionId: string, body: string) {
+  await mkdir(join(dir, project), { recursive: true });
+  await writeFile(join(dir, project, `${sessionId}.jsonl`), body, "utf8");
+}
+
+describe("the Claude Code observer", () => {
+  it("says so when there is nothing on this machine to read", async () => {
+    const observer = new ClaudeCodeObserver(join(await root(), "missing"));
+    const capabilities = await observer.detectCapabilities();
+    expect(capabilities.available).toBe(false);
+
+    const { evidence } = await observer.poll(pending("claude-code"), new Date().toISOString());
+    expect(evidence).toEqual([
+      expect.objectContaining({ kind: "unobservable", channel: "claude-code:transcript" }),
+    ]);
+  });
+
+  it("recognises the session whose recorded user message carries the marker", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-scratch", "sess-1", claudeTranscript("sess-1", { marked: true }));
+
+    const { evidence } = await new ClaudeCodeObserver(dir).poll(
+      pending("claude-code"),
+      new Date().toISOString(),
+    );
+    expect(evidence).toEqual([
+      expect.objectContaining({
+        kind: "match",
+        sessionId: "sess-1",
+        confidence: "strong",
+        channel: "claude-code:transcript",
+      }),
+    ]);
+  });
+
+  it("ignores a session that does not carry the marker", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-other", "sess-2", claudeTranscript("sess-2", { marked: false }));
+
+    const { evidence } = await new ClaudeCodeObserver(dir).poll(
+      pending("claude-code"),
+      new Date().toISOString(),
+    );
+    expect(evidence).toEqual([]);
+  });
+
+  it("calls two marked sessions ambiguous rather than choosing", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-a", "sess-1", claudeTranscript("sess-1", { marked: true }));
+    await writeClaude(dir, "-b", "sess-2", claudeTranscript("sess-2", { marked: true }));
+
+    const { evidence } = await new ClaudeCodeObserver(dir).poll(
+      pending("claude-code"),
+      new Date().toISOString(),
+    );
+    expect(evidence[0].kind).toBe("ambiguous");
+  });
+
+  it("reports a finished turn only once it has also been quiet", async () => {
+    const dir = await root();
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      claudeTranscript("sess-1", { marked: true, stopReason: "end_turn" }),
+    );
+    const observer = new ClaudeCodeObserver(dir);
+    const run = pending("claude-code");
+
+    const first = await observer.poll(run, new Date().toISOString());
+    expect(first.evidence.some((item) => item.kind === "completed")).toBe(false);
+
+    const live = { ...run, detectedSessionId: "sess-1", state: "detected_live" as const };
+    // The settle window is the same silence that would otherwise be called
+    // "observation lost" — a turn boundary alone is not the end of a session.
+    const later = new Date(Date.now() + 6 * 60_000).toISOString();
+    const second = await observer.poll(live, later);
+    expect(second.evidence).toEqual([
+      expect.objectContaining({
+        kind: "completed",
+        sessionId: "sess-1",
+        detail: "The session finished its turn and has been quiet since.",
+      }),
+    ]);
+  });
+
+  it("does not keep reporting activity for a transcript that stopped growing", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-scratch", "sess-1", claudeTranscript("sess-1", { marked: true }));
+    const observer = new ClaudeCodeObserver(dir);
+    const live = {
+      ...pending("claude-code"),
+      detectedSessionId: "sess-1",
+      state: "detected_live" as const,
+    };
+
+    await observer.poll(live, new Date().toISOString());
+    // Nothing was appended between the two polls, so there is nothing to say.
+    expect((await observer.poll(live, new Date().toISOString())).evidence).toEqual([]);
+  });
+
+  /**
+   * ANT-47. The stop reason was read and only ever used to time a settle five
+   * minutes later, so a session watched through the transcript alone had no
+   * record that the agent had handed control back — the diagram said
+   * "Working", and then "Done", at a step where somebody was needed.
+   */
+  it("writes down the moment the agent stopped, not only the fact for later", async () => {
+    const dir = await root();
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      claudeTranscript("sess-1", { marked: true, stopReason: "end_turn" }),
+    );
+    const { events } = await new ClaudeCodeObserver(dir).poll(
+      pending("claude-code"),
+      new Date().toISOString(),
+    );
+    expect(events.filter((item) => item.kind === "turn.end")).toHaveLength(1);
+  });
+
+  it("says nothing about a turn that is only pausing to call a tool", async () => {
+    // `tool_use` is the agent stopping to act, not stopping to wait.
+    const dir = await root();
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      claudeTranscript("sess-1", { marked: true, tool: true, stopReason: "tool_use" }),
+    );
+    const { events } = await new ClaudeCodeObserver(dir).poll(
+      pending("claude-code"),
+      new Date().toISOString(),
+    );
+    expect(events.some((item) => item.kind === "turn.end")).toBe(false);
+  });
+
+  it("never carries a thinking block out of a transcript", async () => {
+    const dir = await root();
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      claudeTranscript("sess-1", { marked: true, stopReason: "end_turn" }),
+    );
+    const { evidence } = await new ClaudeCodeObserver(dir).poll(
+      pending("claude-code"),
+      new Date().toISOString(),
+    );
+    expect(JSON.stringify(evidence)).not.toContain("PRIVATE-REASONING");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Codex                                                               */
+/* ------------------------------------------------------------------ */
+
+function codexRollout(
+  sessionId: string,
+  options: { marked: boolean; complete?: boolean; error?: string; step?: string },
+) {
+  const at = new Date().toISOString();
+  const rows: unknown[] = [
+    { timestamp: at, type: "session_meta", payload: { session_id: sessionId, cwd: "/tmp/scratch" } },
+    {
+      timestamp: at,
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: options.marked ? MARKED_PROMPT : "Read the note." }],
+      },
+    },
+    {
+      timestamp: at,
+      type: "response_item",
+      payload: { type: "reasoning", content: [{ text: "PRIVATE-REASONING-SHOULD-NEVER-BE-READ" }] },
+    },
+  ];
+  if (options.step) {
+    rows.push({
+      timestamp: at,
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: `ANTHILL-STEP ${RUN_ID} ${NONCE} ${options.step}` }],
+      },
+    });
+  }
+  if (options.complete) {
+    rows.push({ timestamp: at, type: "event_msg", payload: { type: "task_complete" } });
+  }
+  if (options.error) {
+    rows.push({
+      timestamp: at,
+      type: "event_msg",
+      payload: { type: "error", message: options.error },
+    });
+  }
+  return rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+}
+
+async function writeCodex(dir: string, sessionId: string, body: string) {
+  const day = join(dir, "2026", "08", "29");
+  await mkdir(day, { recursive: true });
+  await writeFile(join(day, `rollout-2026-08-29T10-00-00-${sessionId}.jsonl`), body, "utf8");
+}
+
+describe("the Codex observer", () => {
+  it("recognises the session whose recorded user message carries the marker", async () => {
+    const dir = await root();
+    await writeCodex(dir, "sess-cx", codexRollout("sess-cx", { marked: true }));
+
+    const { evidence } = await new CodexObserver(dir).poll(
+      pending("codex"),
+      new Date().toISOString(),
+    );
+    expect(evidence).toEqual([
+      expect.objectContaining({
+        kind: "match",
+        sessionId: "sess-cx",
+        confidence: "strong",
+        channel: "codex:rollout",
+      }),
+    ]);
+  });
+
+  it("reads Codex's own completion record rather than inferring one", async () => {
+    const dir = await root();
+    await writeCodex(dir, "sess-cx", codexRollout("sess-cx", { marked: true, complete: true }));
+
+    const run = { ...pending("codex"), detectedSessionId: "sess-cx", state: "detected_live" as const };
+    const { evidence } = await new CodexObserver(dir).poll(run, new Date().toISOString());
+    expect(evidence).toContainEqual(
+      expect.objectContaining({ kind: "completed", sessionId: "sess-cx" }),
+    );
+  });
+
+  it("reports a recorded error as a failure", async () => {
+    const dir = await root();
+    await writeCodex(
+      dir,
+      "sess-cx",
+      codexRollout("sess-cx", { marked: true, error: "the model stream stopped" }),
+    );
+
+    const run = { ...pending("codex"), detectedSessionId: "sess-cx", state: "detected_live" as const };
+    const { evidence } = await new CodexObserver(dir).poll(run, new Date().toISOString());
+    expect(evidence).toContainEqual(
+      expect.objectContaining({ kind: "failed", detail: "the model stream stopped" }),
+    );
+  });
+
+  it("never carries a reasoning record out of a rollout", async () => {
+    const dir = await root();
+    await writeCodex(dir, "sess-cx", codexRollout("sess-cx", { marked: true, complete: true }));
+    const { evidence } = await new CodexObserver(dir).poll(
+      pending("codex"),
+      new Date().toISOString(),
+    );
+    expect(JSON.stringify(evidence)).not.toContain("PRIVATE-REASONING");
+  });
+
+  it("advertises that it can report both completion and failure", async () => {
+    const dir = await root();
+    await writeCodex(dir, "sess-cx", codexRollout("sess-cx", { marked: false }));
+    const capabilities = await new CodexObserver(dir).detectCapabilities();
+    expect(capabilities).toMatchObject({ reportsCompletion: true, reportsFailure: true });
+  });
+});
+
+describe("a session that was alive long before this run", () => {
+  /** A transcript row from days ago, of the kind a long-lived session is full of. */
+  function oldTranscript(sessionId: string) {
+    const old = new Date(Date.now() - 6 * 86_400_000).toISOString();
+    const now = new Date().toISOString();
+    return (
+      [
+        {
+          type: "assistant",
+          sessionId,
+          timestamp: old,
+          message: {
+            role: "assistant",
+            content: [{ type: "tool_use", id: "old_1", name: "Bash", input: { command: "ls" } }],
+          },
+        },
+        {
+          type: "user",
+          sessionId,
+          timestamp: now,
+          message: { role: "user", content: MARKED_PROMPT },
+        },
+        {
+          type: "assistant",
+          sessionId,
+          timestamp: now,
+          message: {
+            role: "assistant",
+            content: [{ type: "tool_use", id: "new_1", name: "Read", input: { file_path: "a.ts" } }],
+          },
+        },
+      ]
+        .map((row) => JSON.stringify(row))
+        .join("\n") + "\n"
+    );
+  }
+
+  it("records only what happened after the prompt was pasted", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-scratch", "sess-1", oldTranscript("sess-1"));
+
+    const { events } = await new ClaudeCodeObserver(dir).poll(
+      pending("claude-code"),
+      new Date().toISOString(),
+    );
+
+    // The whole file has to be read to find the marker, but six days of someone
+    // else's work is not this run's activity.
+    expect(events.map((event) => event.toolUseId)).not.toContain("old_1");
+    expect(events.map((event) => event.toolUseId)).toContain("new_1");
+  });
+
+  it("does not call the session finished just because a turn ended", async () => {
+    const dir = await root();
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      claudeTranscript("sess-1", { marked: true, stopReason: "end_turn" }),
+    );
+    const observer = new ClaudeCodeObserver(dir);
+    const run = { ...pending("claude-code"), detectedSessionId: "sess-1", state: "detected_live" as const };
+
+    await observer.poll(run, new Date().toISOString());
+    // Half a minute of thinking between turns is an agent working, not an agent
+    // that has stopped. The old fifteen-second window ended observation here.
+    const soon = new Date(Date.now() + 45_000).toISOString();
+    const { evidence } = await observer.poll(run, soon);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+  });
+
+  it("calls it finished once the silence is as long as losing it would take", async () => {
+    const dir = await root();
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      claudeTranscript("sess-1", { marked: true, stopReason: "end_turn" }),
+    );
+    const observer = new ClaudeCodeObserver(dir);
+    const run = { ...pending("claude-code"), detectedSessionId: "sess-1", state: "detected_live" as const };
+
+    await observer.poll(run, new Date().toISOString());
+    const muchLater = new Date(Date.now() + 6 * 60_000).toISOString();
+    const { evidence } = await observer.poll(run, muchLater);
+    expect(evidence).toContainEqual(expect.objectContaining({ kind: "completed" }));
+  });
+});
+
+describe("what each CLI's records yield as activity", () => {
+  it("reads an announced step out of a Claude Code transcript", async () => {
+    const dir = await root();
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      claudeTranscript("sess-1", { marked: true, step: "implement" }),
+    );
+    const { events } = await new ClaudeCodeObserver(dir).poll(
+      pending("claude-code"),
+      new Date().toISOString(),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ kind: "step.marker", blockId: "implement" }),
+    );
+    // The step id is the only thing taken out of what the agent wrote.
+    expect(JSON.stringify(events)).not.toContain("PRIVATE-REASONING");
+    expect(JSON.stringify(events)).not.toContain("pumpernickel");
+  });
+
+  it("reads a Claude Code tool call as activity, naming what it acted on", async () => {
+    const dir = await root();
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      claudeTranscript("sess-1", { marked: true, tool: true }),
+    );
+    const { events } = await new ClaudeCodeObserver(dir).poll(
+      pending("claude-code"),
+      new Date().toISOString(),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: "tool.start",
+        toolName: "Bash",
+        toolUseId: "toolu_1",
+        detail: "List files",
+      }),
+    );
+  });
+
+  it.each(["Task", "Agent"] as const)(
+    "reads a %s delegation as a subagent, keeping the name it was given",
+    async (toolName) => {
+      const dir = await root();
+      await writeClaude(
+        dir,
+        "-tmp-scratch",
+        "sess-1",
+        claudeTranscript("sess-1", { marked: true, delegate: toolName }),
+      );
+      const { events } = await new ClaudeCodeObserver(dir).poll(
+        pending("claude-code"),
+        new Date().toISOString(),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({ kind: "subagent.start", agentName: "reader" }),
+      );
+    },
+  );
+
+  it("reads Codex's own turn-completion record as activity, which Claude Code has none of", async () => {
+    const dir = await root();
+    await writeCodex(dir, "sess-cx", codexRollout("sess-cx", { marked: true, complete: true }));
+    const { events } = await new CodexObserver(dir).poll(pending("codex"), new Date().toISOString());
+    expect(events).toContainEqual(expect.objectContaining({ kind: "session.start" }));
+    expect(events).toContainEqual(expect.objectContaining({ kind: "turn.end" }));
+    expect(JSON.stringify(events)).not.toContain("PRIVATE-REASONING");
+  });
+
+  it("reads an announced step out of a Codex rollout", async () => {
+    const dir = await root();
+    await writeCodex(dir, "sess-cx", codexRollout("sess-cx", { marked: true, step: "test" }));
+    const { events } = await new CodexObserver(dir).poll(pending("codex"), new Date().toISOString());
+    expect(events).toContainEqual(
+      expect.objectContaining({ kind: "step.marker", blockId: "test", source: "rollout" }),
+    );
+  });
+
+  it("keeps activity from a session this run does not own", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-other", "sess-other", claudeTranscript("sess-other", { marked: false, tool: true }));
+    const { events } = await new ClaudeCodeObserver(dir).poll(
+      pending("claude-code"),
+      new Date().toISOString(),
+    );
+    expect(events).toEqual([]);
+  });
+});
+
+describe("the two CLIs are not claimed to be equal", () => {
+  it("says Claude Code cannot report a failure, and Codex can", async () => {
+    const dir = await root();
+    await mkdir(join(dir, "-x"), { recursive: true });
+    const claude = await new ClaudeCodeObserver(dir).detectCapabilities();
+    const codex = await new CodexObserver(dir).detectCapabilities();
+    expect(claude.reportsFailure).toBe(false);
+    expect(codex.reportsFailure).toBe(true);
+  });
+});
+
+describe("a finished session stays finished", () => {
+  /**
+   * Two runs were lost to this. Codex recorded `task_complete`, the observer
+   * reported it, and two seconds later the next poll reported the same
+   * unchanged file as fresh activity — which took the run back to
+   * `detected_live`, froze its last-seen time at the moment it finished, and
+   * left it to drift into `observation_lost` five minutes later.
+   */
+  it("reports no further activity once a rollout containing curly quotes stops growing", async () => {
+    const dir = await root();
+    const body = codexRollout("sess-cx", { marked: true, complete: true }).replace(
+      "Read the note.",
+      "Read the note — I’ll wait.",
+    );
+    await writeCodex(dir, "sess-cx", body);
+
+    const observer = new CodexObserver(dir);
+    const run = pending("codex");
+    const first = await observer.poll(run, new Date().toISOString());
+    expect(first.evidence.map((item) => item.kind)).toEqual(["match", "completed"]);
+
+    // The state machine has moved the run on; the file has not changed.
+    const detected: PendingRun = { ...run, state: "completed", detectedSessionId: "sess-cx" };
+    for (let poll = 0; poll < 3; poll += 1) {
+      const again = await observer.poll(detected, new Date().toISOString());
+      expect(again.evidence).toEqual([]);
+      expect(again.events).toEqual([]);
+    }
+  });
+
+  it("does not call a chunk of skipped reasoning activity", async () => {
+    const dir = await root();
+    await writeCodex(dir, "sess-cx", codexRollout("sess-cx", { marked: true, complete: true }));
+
+    const observer = new CodexObserver(dir);
+    const run = pending("codex");
+    await observer.poll(run, new Date().toISOString());
+
+    // Codex writes its own working out to the same file. Anthill skips those
+    // records by name, so the file grows without anything to report.
+    const day = join(dir, "2026", "08", "29");
+    await appendFile(
+      join(day, "rollout-2026-08-29T10-00-00-sess-cx.jsonl"),
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        type: "response_item",
+        payload: { type: "reasoning", content: [{ text: "PRIVATE-REASONING" }] },
+      }) + "\n",
+      "utf8",
+    );
+
+    const detected: PendingRun = { ...run, state: "completed", detectedSessionId: "sess-cx" };
+    const after = await observer.poll(detected, new Date().toISOString());
+    expect(after.evidence).toEqual([]);
+  });
+
+  it("still notices the session writing real work again", async () => {
+    const dir = await root();
+    await writeCodex(dir, "sess-cx", codexRollout("sess-cx", { marked: true, complete: true }));
+
+    const observer = new CodexObserver(dir);
+    const run = pending("codex");
+    await observer.poll(run, new Date().toISOString());
+
+    const day = join(dir, "2026", "08", "29");
+    await appendFile(
+      join(day, "rollout-2026-08-29T10-00-00-sess-cx.jsonl"),
+      JSON.stringify({
+        // Explicitly later than the fixture's rows: on a fast machine the whole
+        // test fits in one millisecond, and activity at the already-reported
+        // timestamp is — correctly — not reported twice.
+        timestamp: new Date(Date.now() + 50).toISOString(),
+        type: "response_item",
+        payload: { type: "function_call", name: "exec_command", call_id: "call-9" },
+      }) + "\n",
+      "utf8",
+    );
+
+    const detected: PendingRun = { ...run, state: "completed", detectedSessionId: "sess-cx" };
+    const after = await observer.poll(detected, new Date().toISOString());
+    expect(after.evidence.map((item) => item.kind)).toEqual(["activity"]);
+  });
+});
+
+/**
+ * What the agent said.
+ *
+ * ANT-16. Both observers took the step markers out of a message and threw the
+ * message itself away, so the page's Messages filter was a tab that could only
+ * ever be empty — and a reader watching a long session had tool names and
+ * nothing else to go on. One line survives now, built by removing: no
+ * reasoning, no fenced code, no correlation plumbing.
+ */
+describe("one line of what the agent said", () => {
+  const PROSE = [
+    "I have read the note and will start on the first step now.",
+    "",
+    "```bash",
+    "export SECRET_TOKEN=hunter2",
+    "```",
+    `ANTHILL-STEP ${RUN_ID} ${NONCE} implement`,
+  ].join("\n");
+
+  function claudeSaying(sessionId: string, text: string) {
+    const at = new Date().toISOString();
+    return (
+      [
+        {
+          type: "user",
+          sessionId,
+          timestamp: at,
+          cwd: "/tmp/scratch",
+          message: { role: "user", content: MARKED_PROMPT },
+        },
+        {
+          type: "assistant",
+          sessionId,
+          timestamp: at,
+          message: {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "PRIVATE-REASONING-SHOULD-NEVER-BE-READ" },
+              { type: "text", text },
+            ],
+          },
+        },
+      ]
+        .map((row) => JSON.stringify(row))
+        .join("\n") + "\n"
+    );
+  }
+
+  function codexSaying(sessionId: string, text: string) {
+    const at = new Date().toISOString();
+    return (
+      [
+        { timestamp: at, type: "session_meta", payload: { session_id: sessionId, cwd: "/tmp/x" } },
+        {
+          timestamp: at,
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: MARKED_PROMPT }],
+          },
+        },
+        {
+          timestamp: at,
+          type: "response_item",
+          payload: { type: "reasoning", content: [{ text: "PRIVATE-REASONING-SHOULD-NEVER-BE-READ" }] },
+        },
+        {
+          timestamp: at,
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text }],
+          },
+        },
+      ]
+        .map((row) => JSON.stringify(row))
+        .join("\n") + "\n"
+    );
+  }
+
+  it("reaches the feed from a Claude Code transcript", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-scratch", "sess-1", claudeSaying("sess-1", PROSE));
+    const { events } = await new ClaudeCodeObserver(dir).poll(
+      pending("claude-code"),
+      new Date().toISOString(),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: "message",
+        detail: "I have read the note and will start on the first step now.",
+      }),
+    );
+  });
+
+  it("reaches the feed from a Codex rollout", async () => {
+    const dir = await root();
+    await writeCodex(dir, "sess-cx", codexSaying("sess-cx", PROSE));
+    const { events } = await new CodexObserver(dir).poll(
+      pending("codex"),
+      new Date().toISOString(),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: "message",
+        detail: "I have read the note and will start on the first step now.",
+      }),
+    );
+  });
+
+  it("still leaves the reasoning, the fenced code and the plumbing behind", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-scratch", "sess-1", claudeSaying("sess-1", PROSE));
+    const { events } = await new ClaudeCodeObserver(dir).poll(
+      pending("claude-code"),
+      new Date().toISOString(),
+    );
+    const dump = JSON.stringify(events);
+    expect(dump).not.toContain("PRIVATE-REASONING");
+    expect(dump).not.toContain("SECRET_TOKEN");
+    expect(dump).not.toContain("hunter2");
+    expect(dump).not.toContain("ANTHILL-STEP");
+  });
+
+  it("announces the step as a step, and does not repeat it as a message", async () => {
+    const dir = await root();
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      claudeSaying("sess-1", `ANTHILL-STEP ${RUN_ID} ${NONCE} implement`),
+    );
+    const { events } = await new ClaudeCodeObserver(dir).poll(
+      pending("claude-code"),
+      new Date().toISOString(),
+    );
+    expect(events.filter((event) => event.kind === "step.marker")).toHaveLength(1);
+    expect(events.filter((event) => event.kind === "message")).toHaveLength(0);
+  });
+});
+
+/**
+ * A session that handed a stage to somebody else.
+ *
+ * ANT-18, built from the transcript that filed it. The orchestrator dispatched
+ * stage 4 to a background agent, said so, ended its turn, and then wrote
+ * nothing for twelve minutes while the work happened somewhere this file never
+ * describes. A terminal stop reason plus five minutes of silence was read as an
+ * ending, so Anthill announced "Session finished" for seven minutes in the
+ * middle of the largest stage of the workflow. The same transcript had two
+ * earlier pauses that came within a minute of doing the same.
+ */
+describe("a session that delegates and then waits", () => {
+  const at = (ms: number) => new Date(Date.parse("2026-08-29T10:00:00.000Z") + ms).toISOString();
+
+  function transcript(sessionId: string, rows: unknown[]) {
+    return (
+      [
+        {
+          type: "user",
+          sessionId,
+          timestamp: at(0),
+          cwd: "/tmp/scratch",
+          message: { role: "user", content: MARKED_PROMPT },
+        },
+        ...rows,
+      ]
+        .map((row) => JSON.stringify(row))
+        .join("\n") + "\n"
+    );
+  }
+
+  function assistant(sessionId: string, when: number, content: unknown[], stop?: string) {
+    return {
+      type: "assistant",
+      sessionId,
+      timestamp: at(when),
+      message: { role: "assistant", ...(stop ? { stop_reason: stop } : {}), content },
+    };
+  }
+
+  /** The exact shape from the report: dispatch, wrap-up, then a long silence. */
+  function dispatched(sessionId: string, tool: string) {
+    return transcript(sessionId, [
+      assistant(
+        sessionId,
+        4_000,
+        [{ type: "tool_use", id: "toolu_9", name: tool, input: { description: "Stage 4" } }],
+        "tool_use",
+      ),
+      {
+        type: "user",
+        sessionId,
+        timestamp: at(5_000),
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_9", is_error: false }],
+        },
+      },
+      assistant(sessionId, 6_000, [{ type: "text", text: "Stage 4 dispatched." }], "end_turn"),
+    ]);
+  }
+
+  async function look(body: string, quietMs: number) {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-scratch", "sess-1", body);
+    return new ClaudeCodeObserver(dir).poll(pending("claude-code"), at(quietMs));
+  }
+
+  it("is not called finished while the delegate is working", async () => {
+    // Twelve minutes of silence, which is what the report measured.
+    const { evidence } = await look(dispatched("sess-1", "SendMessage"), 12 * 60_000);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+  });
+
+  it("stays that way however long the stage takes", async () => {
+    const { evidence } = await look(dispatched("sess-1", "SendMessage"), 3 * 60 * 60_000);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+  });
+
+  it("says nothing rather than the wrong thing — the quiet path handles it", async () => {
+    // Anthill has no record of the delegate's work, so the honest report is
+    // that it cannot see anything, which is recoverable and says so.
+    const { evidence } = await look(dispatched("sess-1", "SendMessage"), 12 * 60_000);
+    expect(evidence.some((item) => item.kind === "failed")).toBe(false);
+  });
+
+  it("also waits on a delegation that has not come back", async () => {
+    const body = transcript("sess-2", [
+      assistant(
+        "sess-2",
+        4_000,
+        [{ type: "tool_use", id: "toolu_1", name: "Task", input: { subagent_type: "reader" } }],
+        "tool_use",
+      ),
+      assistant("sess-2", 6_000, [{ type: "text", text: "Handed it over." }], "end_turn"),
+    ]);
+    const { evidence } = await look(body, 12 * 60_000);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+  });
+
+  it("settles once a delegation that comes back has come back", async () => {
+    const body = transcript("sess-3", [
+      assistant(
+        "sess-3",
+        4_000,
+        [{ type: "tool_use", id: "toolu_1", name: "Task", input: { subagent_type: "reader" } }],
+        "tool_use",
+      ),
+      {
+        type: "user",
+        sessionId: "sess-3",
+        timestamp: at(5_000),
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_1", is_error: false }],
+        },
+      },
+      assistant("sess-3", 6_000, [{ type: "text", text: "All done." }], "end_turn"),
+    ]);
+    const { evidence } = await look(body, 12 * 60_000);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(true);
+  });
+
+  it("still settles an ordinary session that simply finished", async () => {
+    const body = transcript("sess-4", [
+      assistant("sess-4", 4_000, [{ type: "text", text: "It says pumpernickel." }], "end_turn"),
+    ]);
+    const { evidence } = await look(body, 12 * 60_000);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(true);
+  });
+
+  it("does not settle before the silence is long enough", async () => {
+    const body = transcript("sess-5", [
+      assistant("sess-5", 4_000, [{ type: "text", text: "Nearly there." }], "end_turn"),
+    ]);
+    const { evidence } = await look(body, 60_000);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+  });
+});
+
+/**
+ * The same marker in two transcripts, after one of them was already chosen.
+ *
+ * ANT-6, from the observer's side. The guard only ran before a session had
+ * been picked, so a second session appearing later was reported as an ordinary
+ * strong match and quietly took over.
+ */
+describe("a second session that turns up after the first", () => {
+  const detected = { ...pending("claude-code"), detectedSessionId: "sess-a" } as const;
+
+  async function twoSessions() {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-a", "sess-a", claudeTranscript("sess-a", { marked: true }));
+    await writeClaude(dir, "-tmp-b", "sess-b", claudeTranscript("sess-b", { marked: true }));
+    return dir;
+  }
+
+  it("is reported as ambiguous even though one was already being followed", async () => {
+    const dir = await twoSessions();
+    const { evidence } = await new ClaudeCodeObserver(dir).poll(detected, new Date().toISOString());
+    expect(evidence).toEqual([
+      expect.objectContaining({
+        kind: "ambiguous",
+        sessionIds: expect.arrayContaining(["sess-a", "sess-b"]),
+      }),
+    ]);
+  });
+
+  it("reports nothing from either while it cannot tell them apart", async () => {
+    const dir = await twoSessions();
+    const { events } = await new ClaudeCodeObserver(dir).poll(detected, new Date().toISOString());
+    expect(events).toEqual([]);
+  });
+
+  it("says so again for Codex, which had the same guard", async () => {
+    const dir = await root();
+    await writeCodex(dir, "sess-x", codexRollout("sess-x", { marked: true }));
+    await writeCodex(dir, "sess-y", codexRollout("sess-y", { marked: true }));
+    const { evidence } = await new CodexObserver(dir).poll(
+      { ...pending("codex"), detectedSessionId: "sess-x" },
+      new Date().toISOString(),
+    );
+    expect(evidence).toEqual([
+      expect.objectContaining({ kind: "ambiguous", sessionIds: expect.arrayContaining(["sess-x", "sess-y"]) }),
+    ]);
+  });
+
+  it("offers a way back when only the followed session is left", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-a", "sess-a", claudeTranscript("sess-a", { marked: true }));
+    const { evidence } = await new ClaudeCodeObserver(dir).poll(
+      { ...detected, state: "ambiguous_match" },
+      new Date().toISOString(),
+    );
+    expect(evidence).toContainEqual(
+      expect.objectContaining({ kind: "match", sessionId: "sess-a", confidence: "strong" }),
+    );
+  });
+});
+
+/**
+ * How a contest of two sessions ends.
+ *
+ * From the In Review audit's finding on ANT-6: ambiguity could only resolve
+ * when `distinct` shrank to one, but transcripts outlive their sessions and
+ * files never leave the disk — so two matching files kept a run ambiguous for
+ * the rest of its life. The contest is now between candidates still speaking,
+ * and a session that recorded an ending or fell fully quiet has left it.
+ */
+describe("a contest of two sessions, and how it ends", () => {
+  const T0 = Date.parse("2026-08-29T10:00:00.000Z");
+  const at = (ms: number) => new Date(T0 + ms).toISOString();
+
+  function claudeAt(sessionId: string, when: string, extra: string) {
+    const rows: unknown[] = [
+      {
+        type: "user",
+        sessionId,
+        timestamp: when,
+        cwd: "/tmp/scratch",
+        message: { role: "user", content: MARKED_PROMPT },
+      },
+      {
+        type: "assistant",
+        sessionId,
+        timestamp: when,
+        message: { role: "assistant", content: [{ type: "text", text: extra }] },
+      },
+    ];
+    return rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+  }
+
+  it("recovers to the candidate still speaking once the other has gone quiet", async () => {
+    const dir = await root();
+    // sess-a stopped writing forty minutes ago; sess-b wrote a minute ago.
+    await writeClaude(dir, "-tmp-a", "sess-a", claudeAt("sess-a", at(0), "Working."));
+    await writeClaude(dir, "-tmp-b", "sess-b", claudeAt("sess-b", at(39 * 60_000), "Working."));
+
+    const observer = new ClaudeCodeObserver(dir);
+    const ambiguousRun = {
+      ...pending("claude-code"),
+      state: "ambiguous_match" as const,
+      detectedSessionId: "sess-b",
+    };
+    const { evidence } = await observer.poll(ambiguousRun, at(40 * 60_000));
+
+    expect(evidence.some((item) => item.kind === "ambiguous")).toBe(false);
+    expect(evidence).toContainEqual(
+      expect.objectContaining({ kind: "match", sessionId: "sess-b", confidence: "strong" }),
+    );
+  });
+
+  it("recovers to the *other* candidate when the tracked one is the one that died", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-a", "sess-a", claudeAt("sess-a", at(0), "Working."));
+    await writeClaude(dir, "-tmp-b", "sess-b", claudeAt("sess-b", at(39 * 60_000), "Working."));
+
+    const observer = new ClaudeCodeObserver(dir);
+    const { evidence } = await observer.poll(
+      { ...pending("claude-code"), state: "ambiguous_match", detectedSessionId: "sess-a" },
+      at(40 * 60_000),
+    );
+    expect(evidence).toContainEqual(
+      expect.objectContaining({ kind: "match", sessionId: "sess-b" }),
+    );
+  });
+
+  it("stays ambiguous while both are still speaking", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-a", "sess-a", claudeAt("sess-a", at(39 * 60_000), "Working."));
+    await writeClaude(dir, "-tmp-b", "sess-b", claudeAt("sess-b", at(39 * 60_000), "Working."));
+
+    const { evidence } = await new ClaudeCodeObserver(dir).poll(
+      { ...pending("claude-code"), state: "ambiguous_match", detectedSessionId: "sess-a" },
+      at(40 * 60_000),
+    );
+    expect(evidence).toEqual([
+      expect.objectContaining({
+        kind: "ambiguous",
+        sessionIds: expect.arrayContaining(["sess-a", "sess-b"]),
+      }),
+    ]);
+  });
+
+  it("says nothing new when every candidate has gone quiet", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-a", "sess-a", claudeAt("sess-a", at(0), "Done."));
+    await writeClaude(dir, "-tmp-b", "sess-b", claudeAt("sess-b", at(60_000), "Done."));
+
+    const { evidence, events } = await new ClaudeCodeObserver(dir).poll(
+      { ...pending("claude-code"), state: "ambiguous_match", detectedSessionId: "sess-a" },
+      at(40 * 60_000),
+    );
+    expect(evidence).toEqual([]);
+    expect(events).toEqual([]);
+  });
+
+  it("retires a Codex candidate on its own recorded ending, not only on silence", async () => {
+    const dir = await root();
+    // Both wrote moments ago, but sess-x recorded task_complete.
+    await writeCodex(dir, "sess-x", codexRollout("sess-x", { marked: true, complete: true }));
+    await writeCodex(dir, "sess-y", codexRollout("sess-y", { marked: true }));
+
+    const { evidence } = await new CodexObserver(dir).poll(
+      { ...pending("codex"), state: "ambiguous_match", detectedSessionId: "sess-y" },
+      new Date().toISOString(),
+    );
+    expect(evidence.some((item) => item.kind === "ambiguous")).toBe(false);
+    expect(evidence).toContainEqual(
+      expect.objectContaining({ kind: "match", sessionId: "sess-y" }),
+    );
+  });
+
+  it("lets the state machine accept the survivor from an ambiguous run", () => {
+    // The takeover end to end: ambiguous with A tracked, strong match for B.
+    const run = applyEvidence(
+      {
+        ...pending("claude-code"),
+        state: "ambiguous_match" as const,
+        detectedSessionId: "sess-a",
+      },
+      {
+        kind: "match",
+        sessionId: "sess-b",
+        confidence: "strong",
+        channel: "claude-code:transcript",
+        at: new Date().toISOString(),
+      },
+    );
+    expect(run.state).toBe("detected_live");
+    expect(run.detectedSessionId).toBe("sess-b");
+  });
+});
+
+/**
+ * What each harness records about its own spending.
+ *
+ * ANT-9 / ANT-21. Always the vendor's numbers, never an estimate — and for
+ * Claude Code, taken once per message: a message streams as several records
+ * that each repeat the same usage, so summing per record would double-count.
+ */
+describe("token usage, as the harness recorded it", () => {
+  it("reads Claude Code usage once per message, however many records stream it", async () => {
+    const dir = await root();
+    const when = new Date().toISOString();
+    const record = (content: unknown[]) => ({
+      type: "assistant",
+      sessionId: "sess-1",
+      timestamp: when,
+      message: {
+        id: "msg_1",
+        role: "assistant",
+        usage: { input_tokens: 5, cache_read_input_tokens: 95, output_tokens: 40 },
+        content,
+      },
+    });
+    const body =
+      [
+        {
+          type: "user",
+          sessionId: "sess-1",
+          timestamp: when,
+          message: { role: "user", content: MARKED_PROMPT },
+        },
+        // The same message, streamed as two records with the usage repeated.
+        record([{ type: "text", text: "First half." }]),
+        record([{ type: "text", text: "Second half." }]),
+      ]
+        .map((row) => JSON.stringify(row))
+        .join("\n") + "\n";
+    await writeClaude(dir, "-tmp-scratch", "sess-1", body);
+
+    const { events } = await new ClaudeCodeObserver(dir).poll(
+      pending("claude-code"),
+      new Date().toISOString(),
+    );
+    const usage = events.filter((event) => event.kind === "usage");
+    expect(usage).toHaveLength(1);
+    // Fresh input and cache traffic both count as read.
+    expect(usage[0].tokens).toEqual({ in: 100, out: 40 });
+  });
+
+  it("reads Codex's token_count slices", async () => {
+    const dir = await root();
+    const when = new Date().toISOString();
+    const rows = [
+      { timestamp: when, type: "session_meta", payload: { session_id: "sess-cx", cwd: "/tmp/x" } },
+      {
+        timestamp: when,
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: MARKED_PROMPT }],
+        },
+      },
+      {
+        timestamp: when,
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            total_token_usage: { input_tokens: 999, cached_input_tokens: 0, output_tokens: 999 },
+            last_token_usage: { input_tokens: 300, cached_input_tokens: 700, output_tokens: 55 },
+          },
+        },
+      },
+    ];
+    await writeCodex(dir, "sess-cx", rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+
+    const { events } = await new CodexObserver(dir).poll(pending("codex"), new Date().toISOString());
+    const usage = events.filter((event) => event.kind === "usage");
+    // The slice, not the running total — slices sum; totals repeated would not.
+    expect(usage).toHaveLength(1);
+    expect(usage[0].tokens).toEqual({ in: 1000, out: 55 });
+  });
+
+  it("emits nothing where a record carries no usage — unavailable, not zero", async () => {
+    const dir = await root();
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      claudeTranscript("sess-1", { marked: true, step: "implement" }),
+    );
+    const { events } = await new ClaudeCodeObserver(dir).poll(
+      pending("claude-code"),
+      new Date().toISOString(),
+    );
+    expect(events.filter((event) => event.kind === "usage")).toHaveLength(0);
+  });
+});
+
+/**
+ * Who each harness says wrote a message.
+ *
+ * ANT-24. The rule is that the answer comes from the record. Claude Code has
+ * an `isSidechain` field for a turn taken by a delegate; every transcript this
+ * was written against carries it false throughout, which agrees with what
+ * ANT-18 found — the delegate's work is not written here at all.
+ */
+describe("the author of a message", () => {
+  const when = () => new Date().toISOString();
+
+  function claudeSaying(text: string, extra: Record<string, unknown> = {}) {
+    const at = when();
+    return (
+      [
+        {
+          type: "user",
+          sessionId: "sess-1",
+          timestamp: at,
+          cwd: "/tmp/scratch",
+          message: { role: "user", content: MARKED_PROMPT },
+        },
+        {
+          type: "assistant",
+          sessionId: "sess-1",
+          timestamp: at,
+          ...extra,
+          message: { role: "assistant", content: [{ type: "text", text }] },
+        },
+      ]
+        .map((row) => JSON.stringify(row))
+        .join("\n") + "\n"
+    );
+  }
+
+  it("is the main agent for an ordinary Claude Code turn", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-scratch", "sess-1", claudeSaying("Starting now."));
+    const { events } = await new ClaudeCodeObserver(dir).poll(pending("claude-code"), when());
+    const message = events.find((event) => event.kind === "message");
+    expect(message?.author).toEqual({ kind: "main" });
+  });
+
+  it("is a subagent when the record marks the turn as one", async () => {
+    const dir = await root();
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      claudeSaying("Handled it.", { isSidechain: true, agentName: "Reviewer" }),
+    );
+    const { events } = await new ClaudeCodeObserver(dir).poll(pending("claude-code"), when());
+    const message = events.find((event) => event.kind === "message");
+    expect(message?.author).toEqual({ kind: "subagent", name: "Reviewer" });
+  });
+
+  it("is a nameless subagent rather than a guessed one", async () => {
+    const dir = await root();
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      claudeSaying("Handled it.", { isSidechain: true }),
+    );
+    const { events } = await new ClaudeCodeObserver(dir).poll(pending("claude-code"), when());
+    const message = events.find((event) => event.kind === "message");
+    expect(message?.author).toEqual({ kind: "subagent" });
+  });
+
+  it("is the main agent for a Codex rollout message", async () => {
+    const dir = await root();
+    const at = when();
+    const rows = [
+      { timestamp: at, type: "session_meta", payload: { session_id: "sess-cx", cwd: "/tmp/x" } },
+      {
+        timestamp: at,
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: MARKED_PROMPT }],
+        },
+      },
+      {
+        timestamp: at,
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "Starting the survey." }],
+        },
+      },
+    ];
+    await writeCodex(dir, "sess-cx", rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const { events } = await new CodexObserver(dir).poll(pending("codex"), when());
+    const message = events.find((event) => event.kind === "message");
+    expect(message?.author).toEqual({ kind: "main" });
+  });
+});

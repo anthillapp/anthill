@@ -1,0 +1,22 @@
+<!--
+  The macOS application icon.
+
+  The in-app mark is a bare silhouette on whatever it sits on, which is right
+  inside a window and wrong in a dock: a floating shape with no ground reads as
+  a broken icon next to every other app on the machine. So the dock gets the
+  same drawing on the chrome it is reversed onto elsewhere, in Apple's own icon
+  grid — an 824×824 rounded square centred in 1024, which is what makes it the
+  same optical size as its neighbours.
+
+  This file is the source. `scripts/make-icon.mjs` renders it to the PNG sizes
+  macOS asks for and packs them into `icon.icns`.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#1f1e1d"/>
+  <!-- The mark sits at ~52% of the tile: Apple's grid leaves a wide margin, and
+       a glyph that fills its tile reads as louder than every icon beside it. -->
+  <g transform="translate(512 512) scale(9.6) translate(-24 -24)">
+    <path d="M24 4 L46 44 H35.5 L24 22 L12.5 44 H2 Z" fill="#f8f4f4"/>
+    <path d="M24 27 L33 44 H15 Z" fill="#ec3013"/>
+  </g>
+</svg>

@@ -1,0 +1,76 @@
+{
+  "name": "@anthill/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Anthill desktop shell (Electron): visual workflow authoring plus local execution.",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev --watch",
+    "build": "electron-vite build",
+    "icon": "electron scripts/make-icon.cjs",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "package": "npm run build && electron-builder --mac --dir",
+    "dist": "npm run build && electron-builder --mac"
+  },
+  "dependencies": {
+    "@anthill/builder": "*",
+    "@anthill/engine": "*",
+    "@anthill/live": "*",
+    "@anthill/run-store": "*",
+    "@anthill/runtimes": "*",
+    "@anthill/ui": "*",
+    "@anthill/workflow": "*",
+    "@anthill/workflow-schema": "*",
+    "@anthill/workspace": "*",
+    "better-sqlite3": "^11.5.0"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.0.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "@xyflow/react": "^12.3.5",
+    "electron": "^33.2.0",
+    "electron-builder": "~26.15.3",
+    "electron-vite": "^2.3.0",
+    "jsdom": "^25.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.0"
+  },
+  "build": {
+    "appId": "com.anthill.desktop",
+    "productName": "Anthill",
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json",
+      "native/**/*"
+    ],
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns",
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "identity": null
+    },
+    "npmRebuild": false,
+    "electronVersion": "33.4.11"
+  }
+}

@@ -62,6 +62,31 @@ rather than as a supported setup.
 
 ## Install
 
+### From a release
+
+Download the `.dmg` from
+[Releases](https://github.com/nstr/anthill/releases), open it, and drag Anthill
+to Applications. macOS on Apple Silicon only.
+
+**The first launch will be refused, and that is expected.** The build is not
+signed with an Apple Developer ID and not notarised, so Gatekeeper blocks it
+with *"Apple could not verify Anthill is free of malware"*. Double-clicking
+again will not help. Do this once:
+
+1. Open **Applications** in Finder.
+2. **Right-click** Anthill and choose **Open**.
+3. Confirm **Open** in the dialog.
+
+macOS remembers the decision, and every launch after that is ordinary. If the
+dialog offers only *Move to Trash*, you double-clicked — go back and use
+right-click → Open.
+
+There is no way around this short of paying for an Apple Developer Program
+membership and signing the build. Nothing about the app changes either way; the
+only difference is whether macOS has been told who built it.
+
+### From source
+
 From a clean checkout:
 
 ```bash
@@ -226,6 +251,36 @@ when the window regains focus. It never handles your credentials.
 If the log is empty, the hooks are not installed or the CLI is not calling them.
 If the log has lines, the run marker was probably lost — that happens when the
 prompt is edited before pasting.
+
+## Building a release
+
+```bash
+npm run dist --workspace=@anthill/desktop
+```
+
+Writes `apps/desktop/release/Anthill-<version>-arm64.dmg`. Unsigned, per the
+note above.
+
+CI does the same on a tag:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+`.github/workflows/release.yml` typechecks, runs the tests, builds the image on
+a macOS runner and attaches it to the release. The tag is the trigger, because
+publishing is a decision somebody makes rather than something every push should
+do. `workflow_dispatch` builds the same image without publishing, for checking
+that the build still works.
+
+**Signing it properly**, if that becomes worth $99/year: add an Apple Developer
+ID Application certificate and a notarisation credential as repository secrets,
+drop `"identity": null` from `apps/desktop/package.json`, and set
+`mac.notarize`. Then the three steps above collapse into a double-click.
+
+**Intel Macs are not covered.** The target is `arm64` only. A `universal` build
+is possible but the native dependency is fetched per-architecture, so it needs
+both copies — untried here rather than known to work.
 
 ## Repository layout
 

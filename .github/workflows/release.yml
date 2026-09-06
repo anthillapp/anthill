@@ -1,0 +1,67 @@
+# Build the macOS disk image and attach it to a GitHub release.
+#
+# Triggered by a tag rather than by a push to master: a release is a thing
+# somebody decides to make, and tagging is how they say so. Running on every
+# push would produce a stream of artefacts nobody asked for and no way to tell
+# which one is meant to be downloaded.
+#
+# The runner is `macos-14`, pinned rather than `macos-latest`, because the
+# runner image decides the architecture of the build and `latest` moves without
+# telling anyone. It is Apple Silicon, which matches the only arch this app
+# packages for.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # So the build can be exercised without cutting a release.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The Electron-ABI copy of better-sqlite3. Not in the repository — it is a
+      # binary — so it is fetched here, and the packaged app fails at startup
+      # without it.
+      - run: node apps/desktop/scripts/fetch-electron-sqlite.mjs
+
+      # A broken build is worth catching before it is published, not after
+      # somebody downloads it.
+      - run: npm run typecheck
+      - run: npm test
+
+      - run: npm run dist --workspace=@anthill/desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anthill-macos-arm64
+          path: apps/desktop/release/*.dmg
+
+      # Only for a tag. A manual run leaves the artefact above and publishes
+      # nothing.
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: apps/desktop/release/*.dmg
+          # Said on the release itself, because it is the first thing a
+          # downloader meets and the last thing they will read afterwards.
+          body: |
+            macOS, Apple Silicon.
+
+            This build is **not signed or notarised**, so macOS will refuse to
+            open it on the first try. Right-click the app in Applications and
+            choose *Open*, then confirm — once. After that it launches normally.

@@ -139,13 +139,30 @@ let allowCloseWithUnsavedWorkflow = false;
  *
  * The npm-installed copy is compiled for the system Node and fails to load
  * under Electron, so `scripts/fetch-electron-sqlite.mjs` keeps a separate
- * Electron build next to the app. Returns `undefined` when it is missing, so
- * better-sqlite3 falls back to its default lookup and the resulting error
- * names the real problem.
+ * Electron build next to the app.
+ *
+ * In a packaged build it lands under `app.asar.unpacked/`, because the
+ * `asarUnpack` glob for native addons takes them out of the archive but leaves
+ * each file where it sat inside it. This used to look in `Resources/native/`
+ * instead — where a file would be only if it were an `extraResource` — found
+ * nothing, and returned `undefined`; better-sqlite3 then fell back to its own
+ * resolution and picked up the *Node*-ABI copy that ships alongside as an
+ * ordinary dependency. The app died at startup on a NODE_MODULE_VERSION
+ * mismatch: the exact failure this function exists to prevent, in the one
+ * build nobody runs while developing.
+ *
+ * Both paths are tried, so an `extraResources` layout would work too, and
+ * `packaging.test.ts` holds the two in agreement.
+ *
+ * Returns `undefined` when there is genuinely nothing, so the fallback error
+ * names the real problem rather than this function hiding it.
  */
 function electronSqliteBinding(): string | undefined {
   const candidates = app.isPackaged
-    ? [join(process.resourcesPath, "native/better_sqlite3.node")]
+    ? [
+        join(process.resourcesPath, "app.asar.unpacked/native/better_sqlite3.node"),
+        join(process.resourcesPath, "native/better_sqlite3.node"),
+      ]
     : [
         join(__dirname, "../../native/better_sqlite3.node"),
         join(app.getAppPath(), "apps/desktop/native/better_sqlite3.node"),

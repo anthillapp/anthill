@@ -62,7 +62,7 @@
       "icon": "build/icon.icns",
       "target": [
         {
-          "target": "dir",
+          "target": "dmg",
           "arch": [
             "arm64"
           ]
@@ -71,6 +71,9 @@
       "identity": null
     },
     "npmRebuild": false,
-    "electronVersion": "33.4.11"
+    "electronVersion": "33.4.11",
+    "dmg": {
+      "title": "${productName}"
+    }
   }
 }

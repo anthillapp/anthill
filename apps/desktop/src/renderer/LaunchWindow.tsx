@@ -510,6 +510,24 @@ function LaunchIntro({
   onOpen: (path?: string) => void;
   onExplain: () => void;
 }) {
+  /*
+    Ask for the file here, and leave this screen only once there is one.
+
+    Handing the workflow screen an "open" with no path made it mount with
+    nothing to show, so it fell back to the template picker — and the file
+    dialog opened on top of a page about starting a workflow from scratch,
+    which is not what was asked for. Cancelling then left the author on that
+    page rather than where they pressed the button.
+
+    The dialog is the whole of this action, so it belongs to the button. The
+    file is read again by the screen that opens it; that keeps one path for
+    actually loading a workflow, which is the part worth not duplicating.
+  */
+  const onChooseFile = useCallback(async () => {
+    const result = await window.anthill.openWorkflow();
+    if (result.ok) onOpen(result.opened.path);
+  }, [onOpen]);
+
   return (
     <>
       <AnthillMark className="launch-mark" size={104} />
@@ -526,21 +544,21 @@ function LaunchIntro({
       <div className="launch-actions">
         <LaunchAction
           glyph="+"
-          title="Create New Workflow…"
+          title="Create New Workflow"
           subtitle="Start from a template, or blank"
           onClick={onNewWorkflow}
         />
         <LaunchAction
           glyph="✎"
-          title="Workflow from a Prompt…"
+          title="Workflow from a Prompt"
           subtitle="Describe the work; a local CLI proposes a workflow"
           onClick={onFromPrompt}
         />
         <LaunchAction
           glyph="⌸"
-          title="Open Existing Workflow…"
+          title="Open Existing Workflow"
           subtitle="A .workflow.json file on this machine"
-          onClick={() => onOpen()}
+          onClick={() => void onChooseFile()}
         />
       </div>
 

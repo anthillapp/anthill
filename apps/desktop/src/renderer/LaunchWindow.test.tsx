@@ -50,6 +50,8 @@ function stub(recents: RecentWorkflow[], runs: PendingRun[] = [], events: unknow
     agentsList: vi.fn(async () => []),
     detectInterpreters: vi.fn(async () => []),
     codexModels: vi.fn(async () => undefined),
+    // Opening asks for a file from this screen, so the stub has to answer.
+    openWorkflow: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
   };
   (window as unknown as { anthill: unknown }).anthill = api;
   return api;
@@ -466,5 +468,45 @@ describe("agents beside the workflows", () => {
 
     fireEvent.click(tab("Workflows"));
     expect(screen.getByText("Nightly review")).toBeTruthy();
+  });
+});
+
+/**
+ * Opening a file is opening a file, and nothing else.
+ *
+ * The button handed the workflow screen an "open" carrying no path, so that
+ * screen mounted with nothing to show and fell back to its template picker —
+ * and the file dialog opened on top of a page about starting from scratch.
+ * Cancelling left the author on that page rather than where they had pressed.
+ */
+describe("Open Existing Workflow", () => {
+  const button = () => screen.getByRole("button", { name: /Open Existing Workflow/ });
+
+  it("asks for a file rather than navigating first", async () => {
+    const { api, onOpen } = await show([]);
+    fireEvent.click(button());
+    await waitFor(() => expect(api.openWorkflow).toHaveBeenCalled());
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("stays put when the dialog is cancelled", async () => {
+    const { onOpen } = await show([]);
+    fireEvent.click(button());
+    await waitFor(() => expect(screen.getByRole("button", { name: /Open Existing Workflow/ })).toBeTruthy());
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("opens what was chosen, once there is something", async () => {
+    const { api, onOpen } = await show([]);
+    api.openWorkflow = vi.fn(async () => ({
+      ok: true as const,
+      opened: { path: "/tmp/chosen.workflow.json", workflow: { name: "Chosen" } },
+    })) as never;
+    fireEvent.click(button());
+    await waitFor(() => expect(onOpen).toHaveBeenCalledWith("/tmp/chosen.workflow.json"));
+  });
+
+  it("carries no ellipsis in its label", () => {
+    expect(screen.queryByRole("button", { name: /Open Existing Workflow…/ })).toBeNull();
   });
 });

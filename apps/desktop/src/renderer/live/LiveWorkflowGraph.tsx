@@ -113,6 +113,61 @@ function enteredAt(block: BlockView | undefined): number | undefined {
   return Number.isNaN(at) ? undefined : at;
 }
 
+function carriedControl(
+  view: LiveSessionView,
+  source: string,
+  target: string,
+  boundaryKind: (id: string) => "start" | "end" | undefined,
+): boolean {
+  if (boundaryKind(target) === "end") return runFinished(view);
+
+  const to = view.blocks[target];
+  if (!to || to.passes < 1) return false;
+
+  if (boundaryKind(source) === "start") return true;
+
+  const from = view.blocks[source];
+  if (from?.state !== "done") return false;
+  const left = enteredAt(from);
+  const arrived = enteredAt(to);
+  return !(left !== undefined && arrived !== undefined && arrived < left);
+}
+
+/**
+ * Which connection most recently brought control to each step.
+ *
+ * Several connections arrive at the same step, and once a loop has come round
+ * more than one of them will have carried work at some point. Exactly one did
+ * so *last*, and only that one may pulse: "live" says control is arriving here
+ * now, and that cannot be true of two lines at once — which is what the
+ * diagram was claiming, with two dashed blue lines converging on one step
+ * (ANT-53).
+ *
+ * The most recently entered source is the answer rather than a guess at it.
+ * The fold tracks a single active step, so control was in exactly one place
+ * before it reached this one, and the latest entry among the candidates is
+ * where it was.
+ *
+ * A step whose candidates carry no usable time is left out entirely. Then
+ * nothing is singled out and every arriving connection pulses, as before —
+ * an unclear record should lose the distinction, not have one invented for it.
+ */
+function deliveringSources(
+  workflow: Workflow,
+  view: LiveSessionView,
+  boundaryKind: (id: string) => "start" | "end" | undefined,
+): Map<string, string> {
+  const best = new Map<string, { source: string; at: number }>();
+  for (const edge of workflow.edges) {
+    if (!carriedControl(view, edge.source, edge.target, boundaryKind)) continue;
+    const at = enteredAt(view.blocks[edge.source]);
+    if (at === undefined) continue;
+    const held = best.get(edge.target);
+    if (!held || at > held.at) best.set(edge.target, { source: edge.source, at });
+  }
+  return new Map([...best].map(([target, held]) => [target, held.source]));
+}
+
 /**
  * How an edge is drawn, from what was observed at its two ends.
  *
@@ -120,45 +175,32 @@ function enteredAt(block: BlockView | undefined): number | undefined {
  * target. Leaving the source is not enough, and reading it as enough is what
  * ANT-55 was: a finished step that branches has several outgoing edges, control
  * went down exactly one of them, and colouring them all from the source alone
- * drew a green arrow into a checkpoint the run had not reached. A target
- * nothing has arrived at keeps its edge grey, which is the honest reading —
- * there is no record of anything coming this way.
+ * drew a green arrow into a checkpoint the run had not reached.
  *
  * Arrival on its own is not enough either, because a rework edge points back at
  * a step that has already run and would otherwise light up on the strength of
  * that first pass. So the two ends are ordered: only a target entered *after*
- * its source can have been reached along this edge. A loop that has come round
- * shows the later entry and draws; a loop that never fired points at an older
- * one and stays grey, however finished both of its ends look.
+ * its source can have been reached along this edge.
  *
- * Where the record cannot settle the order — an entry carrying no usable
- * timestamp — arrival stands alone rather than a sequence being invented.
- *
- * Start has no announcement of its own, and the session beginning is what
- * leaving it means, so its edge rests on arrival. End has none either and is
- * reached exactly when every step is finished — the same fact its block is
- * drawn from, so block and edge cannot contradict each other.
+ * And of the connections that did carry control, only the one that carried it
+ * last may pulse. The rest are drawn as travelled, which they were — earlier.
  */
 function edgeTone(
   view: LiveSessionView,
   source: string,
   target: string,
   boundaryKind: (id: string) => "start" | "end" | undefined,
+  delivering: Map<string, string>,
 ): EdgeTone {
-  if (boundaryKind(target) === "end") return runFinished(view) ? "seen" : "idle";
+  if (!carriedControl(view, source, target, boundaryKind)) return "idle";
+  if (boundaryKind(target) === "end") return "seen";
 
   const to = view.blocks[target];
-  if (!to || to.passes < 1) return "idle";
+  const arriving = to?.state === "running" || to?.state === "needsYou";
+  if (!arriving) return "seen";
 
-  if (boundaryKind(source) !== "start") {
-    const from = view.blocks[source];
-    if (from?.state !== "done") return "idle";
-    const left = enteredAt(from);
-    const arrived = enteredAt(to);
-    if (left !== undefined && arrived !== undefined && arrived < left) return "idle";
-  }
-
-  return to.state === "running" || to.state === "needsYou" ? "live" : "seen";
+  const last = delivering.get(target);
+  return last === undefined || last === source ? "live" : "seen";
 }
 
 export function LiveWorkflowGraph({
@@ -194,6 +236,12 @@ export function LiveWorkflowGraph({
     }
     return (id: string) => kinds.get(id);
   }, [workflow]);
+
+  /** Recomputed with the view, since it is entirely a fact about the events. */
+  const delivering = useMemo(
+    () => deliveringSources(workflow, view, boundaryKind),
+    [workflow, view, boundaryKind],
+  );
 
   const bounds = useMemo(() => {
     const rects = workflow.nodes.map((node) => blockRect(node));
@@ -332,7 +380,7 @@ export function LiveWorkflowGraph({
       {model.connected.map((path) => {
         const edge = workflow.edges.find((item) => item.id === path.output.id);
         const target = edge?.target ?? "";
-        const tone = edgeTone(view, path.nodeId, target, boundaryKind);
+        const tone = edgeTone(view, path.nodeId, target, boundaryKind, delivering);
         const style = EDGE_TONE[tone];
         return (
           <path

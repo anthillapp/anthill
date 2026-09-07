@@ -570,3 +570,122 @@ describe("edges only carry control where control demonstrably went", () => {
     unmount();
   });
 });
+
+/**
+ * Two lines cannot both be bringing control here.
+ *
+ * Several connections arrive at one step, and once a loop has come round more
+ * than one of them will have carried work at some point. The diagram drew every
+ * one of them pulsing, so a checkpoint sat with two dashed blue lines
+ * converging on it, each claiming to be delivering the work that moment
+ * (ANT-53). Exactly one of them did it last.
+ */
+describe("only the connection that carried control last pulses", () => {
+  const converging: Workflow = {
+    id: "workflow-3",
+    name: "Two ways in",
+    version: "1",
+    target: "claude-code",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {}, position: { x: 0, y: 0 } },
+      {
+        id: "first",
+        type: "agent",
+        name: "Read-only readiness",
+        config: { actionKind: "agent-step", task: "check" },
+        position: { x: 300, y: 0 },
+      },
+      {
+        id: "second",
+        type: "agent",
+        name: "Startup and isolation",
+        config: { actionKind: "agent-step", task: "check" },
+        position: { x: 600, y: 0 },
+      },
+      {
+        id: "checkpoint",
+        type: "agent",
+        name: "Checkpoint, close and report",
+        config: { actionKind: "agent-step", task: "hand off" },
+        position: { x: 900, y: 300 },
+      },
+      { id: "end", type: "end", name: "Done", config: {}, position: { x: 1200, y: 300 } },
+    ],
+    edges: [
+      { id: "in-first", source: "start", target: "first" },
+      { id: "first-second", source: "first", target: "second" },
+      { id: "first-checkpoint", source: "first", target: "checkpoint" },
+      { id: "second-checkpoint", source: "second", target: "checkpoint" },
+      { id: "checkpoint-end", source: "checkpoint", target: "end" },
+    ],
+    metadata: { workflow: { formatVersion: 4 } },
+  };
+
+  let seq = 0;
+  function announce(blockId: string, at: string): ObservationEvent {
+    seq += 1;
+    return {
+      runId: "ANT-1",
+      seq,
+      at,
+      recordedAt: at,
+      cli: "claude-code",
+      source: "transcript",
+      channel: "claude-code:transcript",
+      kind: "step.marker",
+      title: blockId,
+      blockId,
+    };
+  }
+
+  function draw(events: ObservationEvent[]) {
+    const view = foldLiveSession(converging, run, events);
+    const { unmount } = render(
+      <LiveWorkflowGraph
+        workflow={converging}
+        view={view}
+        sessionState={run.state}
+        onSelect={vi.fn()}
+      />,
+    );
+    const tone = (id: string) =>
+      (document.querySelector(`[data-edge="${id}"]`)?.getAttribute("class") ?? "")
+        .replace("live-edge ", "");
+    const live = () =>
+      [...document.querySelectorAll(".live-edge.tone-live")].length;
+    return { tone, live, unmount };
+  }
+
+  /** first, then second, then back through first, then the checkpoint. */
+  const both = () => [
+    announce("first", "2026-08-29T10:00:05.000Z"),
+    announce("second", "2026-08-29T10:00:10.000Z"),
+    announce("first", "2026-08-29T10:00:20.000Z"),
+    announce("checkpoint", "2026-08-29T10:00:30.000Z"),
+  ];
+
+  it("draws exactly one pulsing line into the step", () => {
+    const { live, unmount } = draw(both());
+    expect(live()).toBe(1);
+    unmount();
+  });
+
+  it("picks the connection whose source was there most recently", () => {
+    const { tone, unmount } = draw(both());
+    expect(tone("first-checkpoint")).toBe("tone-live");
+    unmount();
+  });
+
+  it("still shows the other as travelled, because it was — earlier", () => {
+    const { tone, unmount } = draw(both());
+    expect(tone("second-checkpoint")).toBe("tone-seen");
+    unmount();
+  });
+
+  it("leaves a step nothing has reached with no line into it at all", () => {
+    const { tone, unmount } = draw([announce("first", "2026-08-29T10:00:05.000Z")]);
+    expect(tone("first-checkpoint")).toBe("tone-idle");
+    expect(tone("second-checkpoint")).toBe("tone-idle");
+    unmount();
+  });
+});

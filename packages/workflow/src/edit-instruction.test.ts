@@ -132,3 +132,59 @@ describe("blocks the author pointed at", () => {
     expect(text.indexOf("The author pointed at")).toBeLessThan(text.indexOf("The author's request"));
   });
 });
+
+/**
+ * Ambiguity is a question to ask, not a reason to refuse or to choose.
+ *
+ * The instruction used to send "too ambiguous to honour" into the refusal
+ * shape, which told the author it could not be done rather than what was
+ * missing (ANT-36).
+ */
+describe("what to do with a request that does not say enough", () => {
+  const instruction = () => buildEditInstruction(workflow, { kind: "workflow" }, "Split it.");
+
+  it("tells the interpreter to ask rather than choose", () => {
+    expect(instruction()).toContain("ASK rather than choose");
+  });
+
+  it("gives it a shape to ask in", () => {
+    expect(instruction()).toContain('"question": "the one thing you need the author to decide"');
+  });
+
+  it("asks for one question, not a list", () => {
+    expect(instruction()).toContain("One question, about the single decision");
+  });
+
+  it("forbids asking and changing in the same reply", () => {
+    expect(instruction()).toContain("Do not ask and");
+  });
+
+  it("keeps reasoning out of it", () => {
+    expect(instruction()).toContain("Do not explain your reasoning");
+  });
+
+  it("still keeps a refusal for what genuinely cannot be done", () => {
+    expect(instruction()).toContain("why this cannot be done as asked");
+  });
+});
+
+describe("answering a question the interpreter asked", () => {
+  const answered = () =>
+    buildEditInstruction(workflow, { kind: "workflow" }, "Implement.", [], {
+      request: "Split this task into subagents.",
+      question: "Which step should be split?",
+    });
+
+  it("sends both halves so the answer is not read as a fresh request", () => {
+    const text = answered();
+    expect(text).toContain("Split this task into subagents.");
+    expect(text).toContain("Which step should be split?");
+    expect(text).toContain("Read the two together as one request");
+  });
+
+  it("says nothing of the sort when there is no question to answer", () => {
+    expect(buildEditInstruction(workflow, { kind: "workflow" }, "Split it.")).not.toContain(
+      "Earlier in this exchange",
+    );
+  });
+});

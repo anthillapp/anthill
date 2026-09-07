@@ -5734,6 +5734,7 @@ button.state-chip {
 }
 
 .assistant-declined,
+.assistant-question,
 .assistant-failed {
   margin: 0;
   padding: 9px 11px;
@@ -5750,6 +5751,17 @@ button.state-chip {
 .assistant-failed {
   background: rgba(236, 48, 19, 0.08);
   color: var(--accent-700);
+}
+
+/* A question is waiting on the author, which is a different thing from a
+   refusal and from a fault — so it is drawn like the thing it is: full-strength
+   ink on paper, with the amber edge this app already uses for "waiting on you".
+   Not red: nothing has gone wrong. */
+.assistant-question {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid #d8a21a;
+  color: var(--ink);
 }
 
 .assistant-proposal {

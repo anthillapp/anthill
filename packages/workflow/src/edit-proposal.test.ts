@@ -316,3 +316,68 @@ describe("applying a proposal", () => {
     ]);
   });
 });
+
+/**
+ * Ambiguity has its own answer, and it is not a guess.
+ *
+ * "Split this task into subagents" names no block and no division of work.
+ * Folded into the refusal shape it came back as a decline, leaving the author
+ * to work out what would have satisfied it; answered helpfully it came back as
+ * a proposal against a block somebody picked for them (ANT-36). A question is
+ * a third outcome, and the parser holds it to carrying no change.
+ */
+describe("a reply that asks instead of proposing", () => {
+  const ask = (extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      version: EDIT_PROPOSAL_VERSION,
+      summary: "The request does not say which step to split.",
+      question: "Which step should be split — Implement, or Run tests?",
+      ops: [],
+      ...extra,
+    });
+
+  it("is read as a question, not as a refusal", () => {
+    const parsed = parseEditProposal(ask());
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.proposal.question).toBe("Which step should be split — Implement, or Run tests?");
+    expect(parsed.proposal.ops).toEqual([]);
+  });
+
+  it("refuses a reply that asks and changes something at once", () => {
+    const parsed = parseEditProposal(
+      ask({ ops: [{ op: "remove-block", id: "implement" }] }),
+    );
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.error).toContain("one or the other");
+  });
+
+  it("leaves an ordinary refusal exactly as it was", () => {
+    const parsed = parseEditProposal(
+      JSON.stringify({
+        version: EDIT_PROPOSAL_VERSION,
+        summary: "That is not a change to this diagram.",
+        ops: [],
+      }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.proposal.question).toBeUndefined();
+    expect(parsed.proposal.ops).toEqual([]);
+  });
+
+  it("leaves a proposal without a question exactly as it was", () => {
+    const parsed = parseEditProposal(
+      JSON.stringify({
+        version: EDIT_PROPOSAL_VERSION,
+        summary: "Removes the old step.",
+        ops: [{ op: "remove-block", id: "implement" }],
+      }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.proposal.question).toBeUndefined();
+    expect(parsed.proposal.ops).toHaveLength(1);
+  });
+});

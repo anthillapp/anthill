@@ -72,6 +72,20 @@ export type EditProposal = {
   /** One plain sentence the preview leads with. The assistant's words. */
   summary: string;
   ops: EditOp[];
+  /**
+   * The one thing that has to be settled before anything can be proposed.
+   *
+   * Ambiguity used to be folded into the refusal shape, so "split this task
+   * into subagents" — which block? divided how? — came back as a decline, and
+   * the author was left to guess what would have satisfied it. Worse, an
+   * interpreter inclined to be helpful would pick a block and propose against
+   * it, which is a guess wearing a proposal's clothes (ANT-36).
+   *
+   * A question is therefore its own outcome, and carries no operations: a
+   * reply that asks *and* changes something has already decided the thing it
+   * claims not to know, and the parser refuses it.
+   */
+  question?: string;
 };
 
 export type EditParseResult =
@@ -251,13 +265,27 @@ export function parseEditProposal(text: string): EditParseResult {
   // cannot be done as asked" in the summary, and nothing proposed. The caller
   // shows it as a decline, not an error.
 
+  const question = str(value.question);
+  // Asking and changing at once is the one combination that cannot be honest:
+  // whatever it says it needs to know, it went ahead without the answer.
+  if (question && Array.isArray(value.ops) && value.ops.length > 0) {
+    return {
+      ok: false,
+      error: "The reply asks a question and proposes a change at once; it can do one or the other.",
+      raw: text,
+    };
+  }
+
   const ops: EditOp[] = [];
   for (const [index, raw] of value.ops.entries()) {
     const checked = validateOp(raw, index);
     if (!checked.ok) return { ok: false, error: checked.error, raw: text };
     ops.push(checked.op);
   }
-  return { ok: true, proposal: { version: EDIT_PROPOSAL_VERSION, summary, ops } };
+  return {
+    ok: true,
+    proposal: { version: EDIT_PROPOSAL_VERSION, summary, ops, ...(question ? { question } : {}) },
+  };
 }
 
 /* ------------------------------------------------------------------ */

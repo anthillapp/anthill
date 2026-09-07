@@ -67,6 +67,14 @@ export type DescribeChangeAssistantProps = {
 export type ChatTurn =
   | { kind: "user"; text: string; mentions: string[] }
   | { kind: "declined"; summary: string }
+  /**
+   * The interpreter needs one thing decided before it can propose anything.
+   *
+   * `asked` travels with it so the answer can be sent back as the second half
+   * of one exchange. Without it, "the login one" is read as a fresh request
+   * and means nothing (ANT-36).
+   */
+  | { kind: "question"; question: string; asked: string }
   | { kind: "failed"; error: string }
   | {
       kind: "proposal";
@@ -121,6 +129,22 @@ export function describeChange(change: EditChange): string {
 /** Whether a change takes something away — the list makes those loud. */
 function destructive(change: EditChange): boolean {
   return change.kind === "block-removed" || change.kind === "disconnected";
+}
+
+/**
+ * The question this next request would be answering, if any.
+ *
+ * Only the last turn counts. Once anything else has happened — a proposal, a
+ * refusal, a failure — the exchange has moved on and a new request stands on
+ * its own.
+ */
+export function pendingQuestion(
+  chat: readonly ChatTurn[],
+): { request: string; question: string } | undefined {
+  const last = chat[chat.length - 1];
+  return last?.kind === "question"
+    ? { request: last.asked, question: last.question }
+    : undefined;
 }
 
 /** The index of the one proposal that may still be acted on, if there is one. */
@@ -247,6 +271,8 @@ export function DescribeChangeAssistant({
     // At most one proposal can be acted on, so an older one steps aside rather
     // than sitting there with live buttons under a newer request.
     resolveLast("discarded");
+    // Read before the turn is added, so it sees the question rather than this.
+    const answering = pendingQuestion(chat);
     const asked = [...mentions];
     setChat((current) => [...current, { kind: "user", text, mentions: asked }]);
     setRequest("");
@@ -255,7 +281,7 @@ export function DescribeChangeAssistant({
 
     const response = await window.anthill.draftFromPrompt({
       interpreterId: chosen.id,
-      instruction: buildEditInstruction(workflow, { kind: "workflow" }, text, asked),
+      instruction: buildEditInstruction(workflow, { kind: "workflow" }, text, asked, answering),
     });
     setAsking(false);
 
@@ -271,6 +297,22 @@ export function DescribeChangeAssistant({
     const parsed = parseEditProposal(response.reply);
     if (!parsed.ok) {
       setChat((current) => [...current, { kind: "failed", error: parsed.error }]);
+      return;
+    }
+    if (parsed.proposal.question) {
+      // Not a refusal and not a change: one decision it will not make on the
+      // author's behalf. The workflow is untouched — nothing is applied on any
+      // path until a proposal exists and the author accepts it.
+      setChat((current) => [
+        ...current,
+        {
+          kind: "question",
+          question: parsed.proposal.question as string,
+          // The request being clarified, which is this one unless this one was
+          // itself an answer — then the original still stands.
+          asked: answering?.request ?? text,
+        },
+      ]);
       return;
     }
     if (parsed.proposal.ops.length === 0) {
@@ -294,7 +336,7 @@ export function DescribeChangeAssistant({
         proposal: parsed.proposal,
       },
     ]);
-  }, [chosen, request, workflow, mentions, asking, onMentionsChange, resolveLast]);
+  }, [chosen, request, workflow, mentions, asking, onMentionsChange, resolveLast, chat]);
 
   const live = actionableTurn(chat);
 
@@ -343,6 +385,13 @@ export function DescribeChangeAssistant({
                 ) : null}
                 {turn.text}
               </div>
+            );
+          }
+          if (turn.kind === "question") {
+            return (
+              <p key={key} className="assistant-question" role="status">
+                {turn.question}
+              </p>
             );
           }
           if (turn.kind === "declined") {

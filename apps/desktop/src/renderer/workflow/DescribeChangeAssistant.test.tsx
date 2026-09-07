@@ -468,3 +468,113 @@ describe("applying an earlier proposal", () => {
     expect(screen.getByText("Applied to the canvas.")).toBeTruthy();
   });
 });
+
+/**
+ * A request that does not say enough gets a question, not a guess.
+ *
+ * "Split this task into subagents" names no block and no division of work.
+ * Before this, ambiguity shared the refusal shape — so the author was told it
+ * could not be done and left to work out what would have satisfied it — and an
+ * interpreter inclined to help would instead pick a block and propose against
+ * it, which is a guess wearing a proposal's clothes (ANT-36).
+ */
+describe("a request that does not say enough", () => {
+  const asking = {
+    version: 1,
+    summary: "The request does not say which step to split.",
+    question: "Which step should be split — Implement, or Run tests?",
+    ops: [],
+  };
+
+  const change = {
+    version: 1,
+    summary: "Splits Implement into two steps.",
+    ops: [
+      {
+        op: "add-block",
+        ref: "second",
+        blockType: "agent",
+        name: "Second half",
+        config: { actionKind: "agent-step", task: "the rest" },
+        near: "implement",
+      },
+    ],
+  };
+
+  it("puts the question to the author instead of proposing", async () => {
+    stub(reply(asking));
+    mount();
+    await ask("Split this task into subagents.");
+    expect(
+      await screen.findByText("Which step should be split — Implement, or Run tests?"),
+    ).toBeTruthy();
+  });
+
+  it("changes nothing while the question is unanswered", async () => {
+    stub(reply(asking));
+    const { onApply } = mount();
+    await ask("Split this task into subagents.");
+    await screen.findByText(/Which step should be split/);
+    expect(onApply).not.toHaveBeenCalled();
+    expect(document.querySelector(".assistant-proposal")).toBeNull();
+  });
+
+  it("does not dress the question up as a refusal", async () => {
+    stub(reply(asking));
+    mount();
+    await ask("Split this task into subagents.");
+    await screen.findByText(/Which step should be split/);
+    expect(screen.queryByText(/declined/)).toBeNull();
+  });
+
+  it("keeps the original request in view to answer against", async () => {
+    stub(reply(asking));
+    mount();
+    await ask("Split this task into subagents.");
+    await screen.findByText(/Which step should be split/);
+    expect(screen.getByText("Split this task into subagents.")).toBeTruthy();
+  });
+
+  it("sends the answer as the second half of one exchange", async () => {
+    const { draftFromPrompt } = stub(reply(asking), reply(change));
+    mount();
+    await ask("Split this task into subagents.");
+    await screen.findByText(/Which step should be split/);
+
+    await ask("Implement.");
+    await waitFor(() => expect(draftFromPrompt).toHaveBeenCalledTimes(2));
+    const second = (draftFromPrompt.mock.calls[1] as unknown[])[0] as { instruction: string };
+    expect(second.instruction).toContain("Split this task into subagents.");
+    expect(second.instruction).toContain("Which step should be split");
+    expect(second.instruction).toContain("Implement.");
+  });
+
+  it("reaches a normal proposal once the answer arrives", async () => {
+    stub(reply(asking), reply(change));
+    mount();
+    await ask("Split this task into subagents.");
+    await screen.findByText(/Which step should be split/);
+    await ask("Implement.");
+    expect(await screen.findByText(/Splits Implement into two steps/)).toBeTruthy();
+  });
+
+  it("asks nothing extra of a request that was clear to begin with", async () => {
+    const { draftFromPrompt } = stub(reply(change));
+    mount();
+    await ask("Split Implement into two steps.");
+    expect(await screen.findByText(/Splits Implement into two steps/)).toBeTruthy();
+    const sent = (draftFromPrompt.mock.calls[0] as unknown[])[0] as { instruction: string };
+    expect(sent.instruction).not.toContain("Earlier in this exchange");
+  });
+
+  it("treats the next request as its own once the exchange has moved on", async () => {
+    const { draftFromPrompt } = stub(reply(change), reply(change));
+    mount();
+    await ask("Split Implement into two steps.");
+    await screen.findByText(/Splits Implement into two steps/);
+    await ask("Rename it.");
+    await waitFor(() => expect(draftFromPrompt).toHaveBeenCalledTimes(2));
+    const second = (draftFromPrompt.mock.calls[1] as unknown[])[0] as { instruction: string };
+    expect(second.instruction).not.toContain("Earlier in this exchange");
+  });
+});

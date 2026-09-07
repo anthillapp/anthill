@@ -49,6 +49,14 @@ const SHAPE = `{
   ]
 }`;
 
+/** What to send back instead when the request does not say enough to act on. */
+const QUESTION_SHAPE = `{
+  "version": ${EDIT_PROPOSAL_VERSION},
+  "summary": "what is unclear, in one sentence",
+  "question": "the one thing you need the author to decide",
+  "ops": []
+}`;
+
 /** The graph as the interpreter is allowed to see it: structure, not secrets. */
 function describeWorkflow(workflow: Workflow, scope: EditScope): string {
   const agents = agentProfiles(workflow);
@@ -118,6 +126,14 @@ export function buildEditInstruction(
   request: string,
   /** Ids of blocks the author referenced by clicking them on the canvas. */
   mentions: readonly string[] = [],
+  /**
+   * The question this request is an answer to, and what was originally asked.
+   *
+   * Sent so a follow-up is read as the second half of one exchange rather than
+   * a fresh request: "the login one" means nothing on its own and everything
+   * after "which block did you mean?" (ANT-36).
+   */
+  answering?: { request: string; question: string },
 ): string {
   return [
     "You are helping edit a workflow diagram. Your only job is to propose changes",
@@ -138,13 +154,38 @@ export function buildEditInstruction(
     "- blockType is one of: agent, approval, condition. Start and end blocks",
     "  cannot be added or removed.",
     '- An agent block\'s config should carry "actionKind" and "task".',
-    "- If the request is not a graph edit, or is too ambiguous to honour, reply",
-    '  with {"version": ' + String(EDIT_PROPOSAL_VERSION) + ', "summary": "why this cannot be done as asked", "ops": []}',
+    "- If the request is not a graph edit, or cannot be done to this diagram,",
+    '  reply with {"version": ' + String(EDIT_PROPOSAL_VERSION) + ', "summary": "why this cannot be done as asked", "ops": []}',
     "  and nothing else — an empty proposal is a refusal with a reason.",
+    "- If the request does not say enough to act on — which block or connection",
+    "  it means, how far the change reaches, or what the result should be —",
+    "  ASK rather than choose. Reply with this shape instead:",
+    "",
+    QUESTION_SHAPE,
+    "",
+    "  One question, about the single decision you are missing, in the author's",
+    "  own vocabulary. Name the candidates when there are a few. Do not ask and",
+    "  propose in the same reply: a change made alongside the question has",
+    "  already decided the thing being asked about, and will be refused.",
+    "  Do not explain your reasoning — ask the question and stop.",
     "",
     describeWorkflow(workflow, scope),
     ...describeMentions(workflow, mentions),
     "",
+    ...(answering
+      ? [
+          "Earlier in this exchange the author asked for:",
+          "",
+          answering.request,
+          "",
+          "You asked:",
+          "",
+          answering.question,
+          "",
+          "Their answer follows. Read the two together as one request.",
+          "",
+        ]
+      : []),
     "The author's request:",
     "",
     EDIT_REQUEST_OPEN,

@@ -67,9 +67,15 @@ jobs:
           security create-keychain -p "$PASSWORD" "$KEYCHAIN"
           security set-keychain-settings -lut 900 "$KEYCHAIN"
           security unlock-keychain -p "$PASSWORD" "$KEYCHAIN"
-          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          # Whitespace is stripped from both because a secret carries whatever
+          # was pasted into it, and a trailing newline is invisible in the box.
+          # One rode in on the password and the import failed with "MAC
+          # verification failed (wrong password?)" — which is what a correct
+          # password plus a newline looks like from the outside.
+          printf '%s' "$MACOS_CERTIFICATE" | tr -d '[:space:]' | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          CERT_PASSWORD=$(printf '%s' "$MACOS_CERTIFICATE_PASSWORD" | tr -d '[:space:]')
           security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
-            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign
           rm -f "$RUNNER_TEMP/cert.p12"
           # Without this, codesign stops to ask for permission nobody can give.
           security set-key-partition-list -S apple-tool:,apple: -s -k "$PASSWORD" "$KEYCHAIN" > /dev/null
@@ -89,7 +95,7 @@ jobs:
             exit 0
           fi
           KEY=$RUNNER_TEMP/notary.p8
-          echo "$APPLE_API_KEY_P8" | base64 --decode > "$KEY"
+          printf '%s' "$APPLE_API_KEY_P8" | tr -d '[:space:]' | base64 --decode > "$KEY"
           chmod 600 "$KEY"
           echo "path=$KEY" >> "$GITHUB_OUTPUT"
 

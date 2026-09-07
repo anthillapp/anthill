@@ -56,6 +56,7 @@ import { detectInterpreters, runDraft, signInToInterpreter } from "./interpreter
 import { readCodexModels } from "./codex-models.js";
 import { readCodexAgentSupport } from "./codex-capability.js";
 import { adoptUserPath } from "./user-path.js";
+import { isRealLoadFailure, loadFailureUrl } from "./load-failure.js";
 import {
   nameInSavedFile,
   saveDestination,
@@ -306,8 +307,43 @@ function createWindow(): void {
     },
   });
 
-  if (process.env.ELECTRON_RENDERER_URL) {
-    void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
+  /*
+    A window that cannot load says so.
+
+    Both calls used to be discarded with `void`, so a failed load produced an
+    empty window and nothing else — no page, no message, nothing in the app to
+    read. It reads as "Anthill is broken" when the usual cause in development
+    is that `electron-vite`'s dev server has stopped answering and the window
+    was restarted against it.
+
+    `did-fail-load` rather than the promise alone, because it also catches a
+    reload that fails later — pressing ⌘R against a server that is still down
+    has to say the same thing rather than blanking the window again. The guard
+    stops the error page's own load from being treated as another failure.
+  */
+  const rendererUrl = process.env.ELECTRON_RENDERER_URL;
+  let showingFailure = false;
+  mainWindow.webContents.on(
+    "did-fail-load",
+    (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (showingFailure || !isRealLoadFailure(errorCode, isMainFrame)) return;
+      showingFailure = true;
+      void mainWindow
+        ?.loadURL(
+          loadFailureUrl({
+            url: validatedURL || rendererUrl || "the app's own files",
+            error: errorDescription || `error ${errorCode}`,
+            dev: Boolean(rendererUrl),
+          }),
+        )
+        .finally(() => {
+          showingFailure = false;
+        });
+    },
+  );
+
+  if (rendererUrl) {
+    void mainWindow.loadURL(rendererUrl);
   } else {
     void mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
   }

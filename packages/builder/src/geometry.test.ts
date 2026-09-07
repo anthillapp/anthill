@@ -610,3 +610,123 @@ describe("the side an output leaves from", () => {
     expect(portPoint(at(0), 0, 1).side).toBe("right");
   });
 });
+
+/**
+ * An arch no bigger than getting past things requires.
+ *
+ * A bend is stored as a fraction of the chord, so the same stored value means
+ * a larger and larger arch as its two ends move apart. `layout.ts` chooses a
+ * loop's apex in absolute terms — clear the corridor by a fixed margin — and
+ * that intent is lost the moment the fraction meets a longer chord: the arch
+ * inflates although the obstacles have not moved. On the workflow this was
+ * reported from, one long skip bowed 179px off its own chord and dived below
+ * the block it was arriving at, while the two connections beside it bowed 20
+ * and 17 (ANT-53).
+ */
+describe("an arch fitted to the corridor rather than to the chord", () => {
+  const row = Array.from({ length: 6 }, (_, index) => ({
+    left: index * 300,
+    top: 200,
+    w: 200,
+    h: 100,
+  }));
+
+  const from = { x: row[0].left + row[0].w + 8, y: 250, side: "right" as const };
+  const to = { x: row[5].left, y: 250, side: "left" as const };
+
+  /** How far a drawn line strays from the straight run between its ends. */
+  function bow(geometry: ReturnType<typeof route>): number {
+    const numbers = (geometry.path.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+    const [x0, y0, c1x, c1y, c2x, c2y, x1, y1] = numbers;
+    const dx = geometry.to.x - geometry.from.x;
+    const dy = geometry.to.y - geometry.from.y;
+    const length = Math.hypot(dx, dy) || 1;
+    let worst = 0;
+    for (let step = 0; step <= 60; step += 1) {
+      const t = step / 60;
+      const m = 1 - t;
+      const x = m * m * m * x0 + 3 * m * m * t * c1x + 3 * m * t * t * c2x + t * t * t * x1;
+      const y = m * m * m * y0 + 3 * m * m * t * c1y + 3 * m * t * t * c2y + t * t * t * y1;
+      const off = Math.abs((x - geometry.from.x) * dy - (y - geometry.from.y) * dx) / length;
+      if (off > worst) worst = off;
+    }
+    return worst;
+  }
+
+  function crossesAny(geometry: ReturnType<typeof route>): boolean {
+    const numbers = (geometry.path.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+    const [x0, y0, c1x, c1y, c2x, c2y, x1, y1] = numbers;
+    for (let step = 0; step <= 90; step += 1) {
+      const t = step / 90;
+      const m = 1 - t;
+      const x = m * m * m * x0 + 3 * m * m * t * c1x + 3 * m * t * t * c2x + t * t * t * x1;
+      const y = m * m * m * y0 + 3 * m * m * t * c1y + 3 * m * t * t * c2y + t * t * t * y1;
+      for (const r of row.slice(1, 5)) {
+        if (x > r.left + 2 && x < r.left + r.w - 2 && y > r.top + 2 && y < r.top + r.h - 2) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** Far more arch than clearing one row of blocks could ever need. */
+  const inflated = { along: 0, across: 0.34 };
+
+  it("tightens an arch the blocks do not justify", () => {
+    const loose = route(from, to, { bend: inflated });
+    const fitted = route(from, to, { bend: inflated, blocks: row });
+    expect(bow(loose)).toBeGreaterThan(300);
+    expect(bow(fitted)).toBeLessThan(bow(loose) / 2);
+  });
+
+  it("still gets the line past everything in the way", () => {
+    expect(crossesAny(route(from, to, { bend: inflated, blocks: row }))).toBe(false);
+  });
+
+  it("leaves a modest bend alone rather than flattening every curve", () => {
+    const small = { along: 0, across: 0.02 };
+    expect(route(from, to, { bend: small, blocks: row }).path).toBe(
+      route(from, to, { bend: small }).path,
+    );
+  });
+
+  it("changes nothing when it was given no blocks to reason about", () => {
+    expect(route(from, to, { bend: inflated }).path).toBe(
+      curve(from, to, inflated).path,
+    );
+  });
+
+  it("leaves a stepped line alone, which has no arch to trim", () => {
+    expect(route(from, to, { routing: "orthogonal", bend: inflated, blocks: row }).path).toBe(
+      elbow(from, to, inflated).path,
+    );
+  });
+
+  /**
+   * The safety net. Trimming may only ever tighten a line that was already
+   * clear; it must never buy a smaller arch with a new crossing.
+   */
+  it("keeps the wider arch when a tighter one would cut through a block", () => {
+    const tall = row.map((r, index) => (index > 0 && index < 5 ? { ...r, top: 120, h: 260 } : r));
+    const fitted = route(from, to, { bend: inflated, blocks: tall });
+    const points = (geometry: ReturnType<typeof route>) => {
+      const n = (geometry.path.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+      return n;
+    };
+    // Whatever it settles on, it is not drawn through the taller blocks.
+    const n = points(fitted);
+    const [x0, y0, c1x, c1y, c2x, c2y, x1, y1] = n;
+    let hit = false;
+    for (let step = 0; step <= 90; step += 1) {
+      const t = step / 90;
+      const m = 1 - t;
+      const x = m * m * m * x0 + 3 * m * m * t * c1x + 3 * m * t * t * c2x + t * t * t * x1;
+      const y = m * m * m * y0 + 3 * m * m * t * c1y + 3 * m * t * t * c2y + t * t * t * y1;
+      for (const r of tall.slice(1, 5)) {
+        if (x > r.left + 2 && x < r.left + r.w - 2 && y > r.top + 2 && y < r.top + r.h - 2) hit = true;
+      }
+    }
+    expect(hit).toBe(false);
+  });
+});

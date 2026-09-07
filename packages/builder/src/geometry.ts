@@ -606,6 +606,70 @@ function clearOf(
   return best;
 }
 
+/** How far a drawn line strays from the straight run between its two ends. */
+function maxBow(geometry: CurveGeometry, from: Point, to: Point): number {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.hypot(dx, dy) || 1;
+  let worst = 0;
+  for (const point of samplesAlong(geometry)) {
+    const off = Math.abs((point.x - from.x) * dy - (point.y - from.y) * dx) / length;
+    if (off > worst) worst = off;
+  }
+  return worst;
+}
+
+/**
+ * Fractions of the stored bend to try, tightest first.
+ *
+ * Tightest first because the smallest arch that still clears everything is the
+ * one that reads as a connection rather than as a line adrift.
+ */
+const ARCH_STEPS = [0.3, 0.45, 0.6, 0.8];
+
+/** Below this a bow is already modest, and worth nothing to trim. */
+const ARCH_FLOOR = 60;
+
+/**
+ * Keep an arch no larger than the blocks between the ends actually require.
+ *
+ * A bend is stored as a fraction of the chord — `bendFromPoint` divides by the
+ * chord's length and `curve` multiplies it back — which keeps a hand-dragged
+ * shape stable while its blocks stay put, and makes it grow without limit when
+ * they do not. `layout.ts` picks a loop's apex in absolute terms, to clear the
+ * corridor by a fixed margin, and that intent is lost the moment the fraction
+ * is reinterpreted against a longer chord: the arch inflates although the
+ * obstacles it was avoiding have not moved.
+ *
+ * On the workflow this was measured against, one long skip bowed 179px off its
+ * own chord — diving well below the block it was arriving at — while the two
+ * connections beside it bowed 20 and 17 (ANT-53).
+ *
+ * So the fraction is re-fitted rather than trusted: the tightest arch that
+ * crosses no more than the stored one does is the one drawn. That keeps every
+ * line clear of the blocks it must get past — the fault ANT-44 fixed — while
+ * refusing to arch further than getting past them requires. A line that cannot
+ * be improved is returned exactly as it was, so this can only tighten, never
+ * loosen, and never introduce a crossing that was not already there.
+ */
+function trimArch(
+  a: LooseFrom,
+  b: EntryPoint,
+  bend: Bend,
+  base: CurveGeometry,
+  blocks: readonly Rect[],
+): CurveGeometry {
+  const from = departure(a);
+  if (maxBow(base, from, b) <= ARCH_FLOOR) return base;
+
+  const allowed = crossed(samplesAlong(base), blocks, from, b).length;
+  for (const fraction of ARCH_STEPS) {
+    const tried = curve(a, b, { along: bend.along, across: bend.across * fraction });
+    if (crossed(samplesAlong(tried), blocks, from, b).length <= allowed) return tried;
+  }
+  return base;
+}
+
 /**
  * Draw a connection in whichever style it asks for.
  *
@@ -621,8 +685,16 @@ export function route(
     options.routing === "orthogonal"
       ? elbow(a, b, options.bend)
       : curve(a, b, options.bend);
-  if (hasBend(options.bend) || !options.blocks || options.blocks.length === 0) return base;
-  return clearOf(a, b, options.routing ?? "curved", base, options.blocks);
+  const blocks = options.blocks;
+  if (hasBend(options.bend)) {
+    // A stepped line has one degree of freedom and no arch to speak of, so
+    // there is nothing here to trim.
+    return options.routing === "orthogonal" || !blocks || blocks.length === 0
+      ? base
+      : trimArch(a, b, options.bend, base, blocks);
+  }
+  if (!blocks || blocks.length === 0) return base;
+  return clearOf(a, b, options.routing ?? "curved", base, blocks);
 }
 
 export const BEND_LIMIT = 1.5;

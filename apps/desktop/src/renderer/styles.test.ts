@@ -165,3 +165,39 @@ describe("the Used by links", () => {
     expect(css).toMatch(/\.agent-uses \.link:hover,\s*\.agent-uses \.link:focus-visible \{/);
   });
 });
+
+/**
+ * A recent row is a fixed width; the things in it are not.
+ *
+ * Each row carries a name, a path and — for a watched session — a chip holding
+ * a state and a step, which is easily as wide as "Observation lost ·
+ * Checkpoint, close and report". The chip's column does not shrink, so anything
+ * to its left that refuses to wrap and refuses to clip paints straight through
+ * it. The path was always clipped. The name was not, and overran into the chip.
+ */
+describe("the recent rows", () => {
+  const rule = (name: string) => {
+    // Two blocks define these classes, ~2000 lines apart; the later one wins on
+    // the properties it sets. Reading the last is reading what actually applies.
+    const all = [...css.matchAll(new RegExp(`\\.${name} \\{([^}]*)\\}`, "g"))];
+    return all[all.length - 1]?.[1] ?? "";
+  };
+
+  it("clip the name so it cannot run under the session chip", () => {
+    const name = rule("recent-name");
+    expect(name).toContain("overflow: hidden");
+    expect(name).toContain("text-overflow: ellipsis");
+    expect(name).toContain("white-space: nowrap");
+  });
+
+  it("clip the path the same way, as they always did", () => {
+    const path = rule("recent-path");
+    expect(path).toContain("overflow: hidden");
+    expect(path).toContain("text-overflow: ellipsis");
+  });
+
+  /** If this column could shrink, a long chip would squeeze itself instead. */
+  it("keep the chip's column from being squeezed", () => {
+    expect(rule("recent-right")).toContain("flex: none");
+  });
+});

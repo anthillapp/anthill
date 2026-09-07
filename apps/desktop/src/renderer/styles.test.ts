@@ -138,3 +138,30 @@ describe("the agent library's classes", () => {
     expect(missing).toEqual([]);
   });
 });
+
+/**
+ * Red is spent, not spread.
+ *
+ * The token block states the rule in as many words: red means the plan
+ * stopping for a person, and a problem. `button.link` is nonetheless accent-700
+ * app-wide, so any list of ordinary links inherits the colour of a fault. Under
+ * "Used by" — a list of the steps an agent is correctly assigned to — that read
+ * as a validation error against a perfectly valid assignment (ANT-56).
+ */
+describe("the Used by links", () => {
+  const rule = css.match(/\.agent-uses \.link \{([^}]*)\}/)?.[1] ?? "";
+
+  it("are drawn in ink rather than the accent red", () => {
+    expect(rule).toContain("color: var(--ink-2)");
+    expect(rule).not.toContain("--accent");
+  });
+
+  it("keep an underline to stay recognisable as links", () => {
+    expect(rule).toContain("text-decoration-color");
+    expect(rule).not.toContain("text-decoration: none");
+  });
+
+  it("answer to the keyboard as well as the pointer", () => {
+    expect(css).toMatch(/\.agent-uses \.link:hover,\s*\.agent-uses \.link:focus-visible \{/);
+  });
+});

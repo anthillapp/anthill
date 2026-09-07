@@ -1427,6 +1427,22 @@ details summary {
   white-space: normal;
   overflow-wrap: anywhere;
   min-width: 0;
+  /* Ink, not accent. This sheet's own palette reserves red for two things —
+     the plan stopping for a person, and a problem — and a step that uses this
+     agent is neither: it is a place to go, and a correct assignment. Drawn in
+     the app's link red it read as a validation error sitting under a heading
+     that was only listing where the agent is used (ANT-56). The underline and
+     the pointer carry the affordance instead, which is what they are for. */
+  color: var(--ink-2);
+  text-decoration-color: var(--ink-quiet);
+}
+
+/* Darker on both, so the target is as clear to the keyboard as to the mouse.
+   No outline is touched: the focus ring stays whatever the platform draws. */
+.agent-uses .link:hover,
+.agent-uses .link:focus-visible {
+  color: var(--ink);
+  text-decoration-color: var(--ink-3);
 }
 
 /* ---------------- prompt to plan ---------------- */

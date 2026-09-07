@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  What the hardened runtime has to be asked to allow.
+
+  Notarisation requires the hardened runtime, and the hardened runtime forbids
+  several things Electron cannot run without. Each of these is a hole in a
+  default-deny policy, so each is here because Electron needs it and for no
+  other reason:
+
+  - allow-jit and allow-unsigned-executable-memory: V8 compiles JavaScript to
+    machine code at runtime and executes it. Without both, the renderer dies on
+    startup.
+  - allow-dyld-environment-variables: Electron's own launcher sets DYLD_* to
+    find the framework beside it.
+  - disable-library-validation: the app loads better-sqlite3, a native module
+    signed with this app's certificate rather than shipped inside the framework.
+    Library validation refuses code signed by a different team, and refuses
+    ad-hoc signed code outright.
+
+  Deliberately absent: no network server entitlement, no camera, no microphone,
+  no address book, no automation. Anthill reads files this machine already has
+  and talks to nothing.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>

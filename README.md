@@ -71,19 +71,28 @@ to Applications. macOS on Apple Silicon only.
 **The first launch will be refused, and that is expected.** The build is not
 signed with an Apple Developer ID and not notarised, so Gatekeeper blocks it
 with *"Apple could not verify Anthill is free of malware"*. Double-clicking
-again will not help. Do this once:
+again will not help.
 
-1. Open **Applications** in Finder.
-2. **Right-click** Anthill and choose **Open**.
-3. Confirm **Open** in the dialog.
+What to do depends on the version of macOS, because Apple changed it:
 
-macOS remembers the decision, and every launch after that is ordinary. If the
-dialog offers only *Move to Trash*, you double-clicked — go back and use
-right-click → Open.
+- **macOS 15 Sequoia and later** — try to open it once and let it be refused.
+  Then go to  **System Settings ▸ Privacy & Security**, scroll to the bottom,
+  and press **Open Anyway** beside the message about Anthill. Confirm.
+- **macOS 14 Sonoma and earlier** — **right-click** Anthill in Applications,
+  choose **Open**, and confirm **Open** in the dialog. (This shortcut was
+  removed in macOS 15; on newer systems it now offers only *Move to Trash*.)
 
-There is no way around this short of paying for an Apple Developer Program
-membership and signing the build. Nothing about the app changes either way; the
-only difference is whether macOS has been told who built it.
+Either way macOS remembers the decision and every launch after that is
+ordinary.
+
+This applies to a build *downloaded* from Releases. One you built yourself
+never came from the internet, carries no quarantine flag, and opens without
+any of the above.
+
+There is no way around it short of an Apple Developer Program membership
+($99/year) and signing the build — the repository is already set up for that,
+and needs only the secrets. Nothing about the app changes either way; the only
+difference is whether macOS has been told who built it.
 
 ### From source
 
@@ -280,8 +289,9 @@ prompt is edited before pasting.
 npm run dist --workspace=@anthill/desktop
 ```
 
-Writes `apps/desktop/release/Anthill-<version>-arm64.dmg`. Unsigned, per the
-note above.
+Writes `apps/desktop/release/Anthill-<version>-arm64.dmg`. Signed with whatever
+Developer ID certificate the machine has, and ad-hoc signed when it has none —
+which is the same build, minus Apple having been told who made it.
 
 CI does the same on a tag:
 
@@ -295,10 +305,30 @@ publishing is a decision somebody makes rather than something every push should
 do. `workflow_dispatch` builds the same image without publishing, for checking
 that the build still works.
 
-**Signing it properly**, if that becomes worth $99/year: add an Apple Developer
-ID Application certificate and a notarisation credential as repository secrets,
-drop `"identity": null` from `apps/desktop/package.json`, and set
-`mac.notarize`. Then the three steps above collapse into a double-click.
+**Signing it properly.** The packaging is already configured for it — hardened
+runtime, the entitlements Electron needs under it, and notarisation are all in
+`apps/desktop/package.json`, and the release workflow signs and notarises when,
+and only when, the secrets exist. Without them it builds exactly as before and
+says in the log that it did. So all that is missing is an Apple Developer
+Program membership ($99/year) and five repository secrets:
+
+| Secret | What it is |
+|---|---|
+| `MACOS_CERTIFICATE` | the **Developer ID Application** certificate exported from Keychain Access as `.p12`, then base64-encoded |
+| `MACOS_CERTIFICATE_PASSWORD` | the password set on that export |
+| `APPLE_API_KEY_P8` | an App Store Connect API key (`.p8`), base64-encoded |
+| `APPLE_API_KEY_ID` | that key's ID |
+| `APPLE_API_ISSUER` | the issuer ID from App Store Connect |
+| `APPLE_TEAM_ID` | the team the certificate belongs to |
+
+Note that **Apple Development** and **Apple Distribution** certificates will not
+do: the first is for running on your own machines, the second for the App
+Store. Distributing a Mac app outside the App Store needs a *Developer ID
+Application* certificate specifically, which is created by the account holder.
+
+With those in place a tag produces a build that opens on a double-click, and
+the workflow's last step says which of the two kinds it made rather than
+leaving it to be discovered by whoever downloads it.
 
 **Intel Macs are not covered.** The target is `arm64` only. A `universal` build
 is possible but the native dependency is fetched per-architecture, so it needs

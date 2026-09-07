@@ -68,7 +68,11 @@
           ]
         }
       ],
-      "identity": null
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "gatekeeperAssess": false,
+      "notarize": true
     },
     "npmRebuild": false,
     "electronVersion": "33.4.11",

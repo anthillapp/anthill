@@ -86,3 +86,51 @@ describe("what a release produces", () => {
     expect(manifest.build.mac.target.map((entry) => entry.target)).toContain("dmg");
   });
 });
+
+/**
+ * What notarisation requires, checked against the manifest rather than trusted.
+ *
+ * Apple will not notarise a build without the hardened runtime, and the
+ * hardened runtime stops Electron running unless it is told otherwise: V8
+ * compiles and executes machine code at runtime, the launcher sets DYLD_*, and
+ * better-sqlite3 is a native module signed separately from the framework.
+ * Getting any of that wrong produces a build that passes every test here and
+ * dies on the first launch of the one copy nobody ran before publishing it.
+ */
+describe("signing and notarisation", () => {
+  const mac = manifest.build.mac as Record<string, unknown>;
+
+  it("asks for the hardened runtime notarisation requires", () => {
+    expect(mac.hardenedRuntime).toBe(true);
+  });
+
+  it("does not force an ad-hoc signature over a real certificate", () => {
+    // `identity: null` meant "never sign", which no amount of certificate
+    // could override.
+    expect("identity" in mac).toBe(false);
+  });
+
+  it("points at entitlements for the app and for its helpers", () => {
+    expect(mac.entitlements).toBe("build/entitlements.mac.plist");
+    expect(mac.entitlementsInherit).toBe("build/entitlements.mac.plist");
+  });
+
+  it("grants exactly what Electron needs under the hardened runtime", () => {
+    const plist = readFileSync(resolve("build/entitlements.mac.plist"), "utf8");
+    for (const needed of [
+      "com.apple.security.cs.allow-jit",
+      "com.apple.security.cs.allow-unsigned-executable-memory",
+      "com.apple.security.cs.allow-dyld-environment-variables",
+      "com.apple.security.cs.disable-library-validation",
+    ]) {
+      expect(plist).toContain(needed);
+    }
+  });
+
+  /** A hole in a default-deny policy is worth noticing when it appears. */
+  it("grants nothing beyond those four", () => {
+    const plist = readFileSync(resolve("build/entitlements.mac.plist"), "utf8");
+    const granted = [...plist.matchAll(/<key>([^<]+)<\/key>/g)].map((m) => m[1]);
+    expect(granted).toHaveLength(4);
+  });
+});

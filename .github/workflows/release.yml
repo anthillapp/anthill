@@ -102,12 +102,21 @@ jobs:
       # Credentials reach electron-builder through the environment and appear
       # nowhere in the repository. Absent, it skips notarising and says so; the
       # build still succeeds.
-      - run: npm run dist --workspace=@anthill/desktop
+      # Trimmed in the shell rather than passed straight through: a secret
+      # holds exactly what was pasted, and pasting into the box leaves the
+      # cursor on a fresh line. The certificate password arrived that way and
+      # the import failed on it; these three happened not to, which is luck
+      # rather than a property worth relying on.
+      - run: |
+          export APPLE_API_KEY_ID=$(printf '%s' "$RAW_KEY_ID" | tr -d '[:space:]')
+          export APPLE_API_ISSUER=$(printf '%s' "$RAW_ISSUER" | tr -d '[:space:]')
+          export APPLE_TEAM_ID=$(printf '%s' "$RAW_TEAM_ID" | tr -d '[:space:]')
+          npm run dist --workspace=@anthill/desktop
         env:
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          RAW_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          RAW_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          RAW_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_API_KEY: ${{ steps.notary.outputs.path }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       # Says plainly which of the two kinds of build this is, so a failure to
       # sign cannot be discovered later by somebody downloading it.

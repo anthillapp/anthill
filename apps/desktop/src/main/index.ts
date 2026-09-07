@@ -54,6 +54,11 @@ import { detectInterpreters, runDraft, signInToInterpreter } from "./interpreter
 import { readCodexModels } from "./codex-models.js";
 import { readCodexAgentSupport } from "./codex-capability.js";
 import { adoptUserPath } from "./user-path.js";
+import {
+  nameInSavedFile,
+  saveDestination,
+  type SavedRecord,
+} from "./save-destination.js";
 import { desktopUserDataPath } from "./user-data.js";
 import { LiveSessionService, type LiveSessionSnapshot } from "./live/service.js";
 import { ObservationSetupService } from "./live/setup.js";
@@ -494,18 +499,41 @@ function registerIpcHandlers(): void {
   handle(
     IpcChannel.workflowSave,
     async (_event, request: SaveWorkflowRequest): Promise<{ path: string } | null> => {
+      // What the last successful save left behind, read from the file itself
+      // rather than tracked alongside it — see ./save-destination.ts.
+      const saved: SavedRecord = request.path
+        ? await readFile(request.path, "utf8").then(
+            (contents) => {
+              const name = nameInSavedFile(contents);
+              return name === undefined
+                ? ({ kind: "unreadable" } as const)
+                : ({ kind: "named", name } as const);
+            },
+            // Gone is a fact worth acting on; unreadable for any other reason
+            // — permissions, a volume playing up — is not evidence that they
+            // deleted anything, so it must not provoke a dialog.
+            (error: NodeJS.ErrnoException) =>
+              error?.code === "ENOENT"
+                ? ({ kind: "missing" } as const)
+                : ({ kind: "unreadable" } as const),
+          )
+        : ({ kind: "missing" } as const);
+
+      const destination = saveDestination(request.workflow.name ?? "", request.path, saved);
       let path = request.path;
-      if (!path) {
+      if (destination.kind === "ask") {
         const result = await dialog.showSaveDialog({
           title: "Save workflow",
           // New saves get the ".workflow.json" suffix. The open side matches
           // any ".json", so anything saved under an earlier convention keeps
           // opening normally.
-          defaultPath: `${request.workflow.name || "workflow"}.workflow.json`,
+          defaultPath: destination.suggested,
           filters: [{ name: "Workflow JSON", extensions: ["json"] }],
         });
         if (result.canceled || !result.filePath) return null;
         path = result.filePath;
+      } else {
+        path = destination.path;
       }
       await writeFile(path, `${JSON.stringify(request.workflow, null, 2)}\n`, "utf8");
       // Saving is how a workflow gets into the launch window's list in the first

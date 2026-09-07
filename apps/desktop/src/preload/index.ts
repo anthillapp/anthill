@@ -15,6 +15,7 @@ import {
   LIVE_EVENTS_CHANNEL,
   LIVE_SNAPSHOT_CHANNEL,
   OPEN_SETTINGS_CHANNEL,
+  SAVE_WORKFLOW_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
   RUN_EVENT_CHANNEL,
   type AnthillApi,
@@ -100,6 +101,11 @@ const api: AnthillApi = {
     const handler = () => listener();
     ipcRenderer.on(OPEN_SETTINGS_CHANNEL, handler);
     return () => ipcRenderer.removeListener(OPEN_SETTINGS_CHANNEL, handler);
+  },
+  onSaveWorkflow: (listener: () => void) => {
+    const handler = () => listener();
+    ipcRenderer.on(SAVE_WORKFLOW_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(SAVE_WORKFLOW_CHANNEL, handler);
   },
   onLiveSnapshot: (listener: (snapshot: LiveSnapshot) => void) => {
     const handler = (_event: unknown, snapshot: LiveSnapshot) => listener(snapshot);

@@ -80,7 +80,7 @@ export const IpcChannel = {
  * quietly showed nothing. Bump this whenever a channel is added, and the
  * renderer can find out before it subscribes to something that will never fire.
  */
-export const IPC_CONTRACT = 11;
+export const IPC_CONTRACT = 12;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -122,6 +122,15 @@ export const LIVE_EVENTS_CHANNEL = "live:events-changed";
  * through ⌘, instead.
  */
 export const OPEN_SETTINGS_CHANNEL = "app:open-settings";
+
+/**
+ * The File menu asking the focused window to save what it has open.
+ *
+ * Save lives in the menu rather than in a renderer key handler so that one
+ * press is one save: an accelerator is consumed before the page sees the key,
+ * which also settles ⌘S never reaching the browser's own Save Page (ANT-59).
+ */
+export const SAVE_WORKFLOW_CHANNEL = "app:save-workflow";
 
 /* ------------------------------------------------------------------ */
 /* Payload shapes                                                      */
@@ -570,6 +579,8 @@ export interface AnthillApi {
   /** With a path, opens that workflow; without one, asks the author to pick. */
   openWorkflow(path?: string): Promise<OpenWorkflowResult>;
   saveWorkflow(request: SaveWorkflowRequest): Promise<SaveWorkflowResult>;
+  /** File ▸ Save, or ⌘S. Returns the unsubscribe. */
+  onSaveWorkflow(listener: () => void): () => void;
   detectRuntimes(): Promise<RuntimeInfo[]>;
   startRun(request: StartRunRequest): Promise<StartRunResponse>;
   listRuns(): Promise<WorkflowRun[]>;

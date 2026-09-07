@@ -21,8 +21,12 @@ type SnapshotListener = (snapshot: Snapshot) => void;
 /** The id of the workflow the Prompt modal last registered observation for. */
 let observedWorkflowId: string | undefined;
 
+/** The File ▸ Save listener the screen registered, if it is mounted. */
+let menuSave: (() => void) | undefined;
+
 function stubApi() {
   observedWorkflowId = undefined;
+  menuSave = undefined;
   const api = {
     contract: 2,
     capabilities: vi.fn(
@@ -50,6 +54,14 @@ function stubApi() {
     chooseRunFolder: vi.fn(async (): Promise<string | null> => "/tmp"),
     saveWorkflow: vi.fn(async (): Promise<SaveWorkflowResult> => ({ kind: "saved", path: "/tmp/w.workflow.json" })),
     openWorkflow: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
+    // File ▸ Save / ⌘S arrives from the menu, so tests hold the listener and
+    // fire it themselves rather than pressing a key the page never sees.
+    onSaveWorkflow: vi.fn((listener: () => void): (() => void) => {
+      menuSave = listener;
+      return () => {
+        menuSave = undefined;
+      };
+    }),
   };
   (window as unknown as { anthill: unknown }).anthill = api;
   return api;
@@ -616,5 +628,83 @@ describe("what Save says for itself", () => {
     expect(live.getAttribute("aria-live")).toBe("polite");
     expect(live.getAttribute("tabindex")).toBeNull();
     expect(document.activeElement).not.toBe(live);
+  });
+});
+
+/**
+ * ⌘S, which is the File menu's Save and not a second one.
+ *
+ * Binding it in the page as well would give one press two saves racing the
+ * same file, and would have to carve out an exception for every text field
+ * (ANT-59). The menu owns the key; this screen only answers it.
+ */
+describe("saving from the keyboard", () => {
+  const status = () => document.querySelector(".save-status")?.textContent ?? "";
+
+  it("saves the open workflow when the menu asks", async () => {
+    await workflow();
+    const api = (window as unknown as { anthill: { saveWorkflow: ReturnType<typeof vi.fn> } })
+      .anthill;
+    expect(menuSave).toBeTypeOf("function");
+
+    await act(async () => {
+      menuSave?.();
+    });
+    expect(api.saveWorkflow).toHaveBeenCalledTimes(1);
+    await screen.findByText("Saved");
+  });
+
+  it("reports through the same indicator the toolbar uses", async () => {
+    const api = stubApi();
+    api.saveWorkflow = vi.fn(
+      async (): Promise<SaveWorkflowResult> => ({ kind: "failed", error: "read-only volume" }),
+    );
+    render(<WorkflowScreen onExit={() => undefined} />);
+    const template = await screen.findByText(/Implement, test, fix/);
+    fireEvent.click(template.closest("button") as HTMLElement);
+    await screen.findByRole("button", { name: "Prompt" });
+
+    await act(async () => {
+      menuSave?.();
+    });
+    await waitFor(() => expect(status()).toContain("read-only volume"));
+  });
+
+  it("saves what is on screen now, not what was there when it opened", async () => {
+    await workflow();
+    const api = (window as unknown as {
+      anthill: { saveWorkflow: ReturnType<typeof vi.fn> };
+    }).anthill;
+
+    // Rename through the toolbar's own field, exactly as a person would.
+    const name = document.querySelector(".topbar input") as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Renamed while open" } });
+
+    await act(async () => {
+      menuSave?.();
+    });
+    const [request] = api.saveWorkflow.mock.calls.at(-1) as [{ workflow: { name: string } }];
+    expect(request.workflow.name).toBe("Renamed while open");
+  });
+
+  it("does not start a second save over one already running", async () => {
+    const api = stubApi();
+    let land: (result: SaveWorkflowResult) => void = () => undefined;
+    api.saveWorkflow = vi.fn(
+      () => new Promise<SaveWorkflowResult>((resolve) => { land = resolve; }),
+    );
+    render(<WorkflowScreen onExit={() => undefined} />);
+    const template = await screen.findByText(/Implement, test, fix/);
+    fireEvent.click(template.closest("button") as HTMLElement);
+    await screen.findByRole("button", { name: "Prompt" });
+
+    await act(async () => {
+      menuSave?.();
+      menuSave?.();
+    });
+    expect(api.saveWorkflow).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      land({ kind: "saved", path: "/tmp/w.workflow.json" });
+    });
   });
 });

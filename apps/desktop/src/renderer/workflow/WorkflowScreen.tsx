@@ -452,6 +452,28 @@ export function WorkflowScreen({ onExit, start }: WorkflowScreenProps) {
     }
   }, [workflow, path, markDirty]);
 
+  /**
+   * File ▸ Save and ⌘S, which are the same one thing.
+   *
+   * The key is bound in the application menu, not here: an accelerator is
+   * consumed before the page sees it, so one press cannot become two saves and
+   * ⌘S can never fall through to the browser's own Save Page (ANT-59). It also
+   * works with a text field focused, which a page-level key handler would have
+   * had to make an exception for.
+   *
+   * Nothing is flushed before saving because nothing is held back — every
+   * field in this editor commits as it is typed, so the workflow in hand is
+   * already what is on screen. Blurring "just in case" would take the caret
+   * away from the author and buy nothing.
+   *
+   * The latest `save` is reached through a ref so this subscribes once. Read
+   * directly it would close over the first one and go on saving the workflow
+   * as it stood when the screen opened.
+   */
+  const saveNow = useRef(save);
+  saveNow.current = save;
+  useEffect(() => window.anthill.onSaveWorkflow(() => void saveNow.current()), []);
+
   // "Saved" is about the click, so it goes when the click stops being recent.
   // A failure stays until something else happens: it is the author's to read.
   useEffect(() => {

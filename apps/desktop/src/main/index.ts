@@ -28,6 +28,7 @@ import {
   LIVE_EVENTS_CHANNEL,
   LIVE_SNAPSHOT_CHANNEL,
   OPEN_SETTINGS_CHANNEL,
+  SAVE_WORKFLOW_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
   RUN_EVENT_CHANNEL,
   type ApprovalResponse,
@@ -870,7 +871,28 @@ function applyMenu(): void {
           { role: "quit" },
         ],
       },
-      { role: "fileMenu" },
+      {
+        // Spelled out rather than taken from the role, because the role's File
+        // menu has no Save in it. Save is a menu item and not a key handler in
+        // the page so that one press is exactly one save, and so the shortcut
+        // is written down where people look for it (ANT-59).
+        label: "File",
+        submenu: [
+          {
+            label: "Save",
+            accelerator: "CmdOrCtrl+S",
+            // The window the menu fired for, so a second window saves its own
+            // document and not whatever happens to be first in the list.
+            click: (_item, window) => {
+              const target =
+                window instanceof BrowserWindow ? window : BrowserWindow.getFocusedWindow();
+              target?.webContents.send(SAVE_WORKFLOW_CHANNEL);
+            },
+          },
+          { type: "separator" },
+          { role: "close" },
+        ],
+      },
       { role: "editMenu" },
       { role: "viewMenu" },
       { role: "windowMenu" },

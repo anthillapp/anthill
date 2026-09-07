@@ -201,3 +201,35 @@ describe("the recent rows", () => {
     expect(rule("recent-right")).toContain("flex: none");
   });
 });
+
+/**
+ * One name per animation.
+ *
+ * Two `@keyframes` with the same name do not merge and do not warn: the later
+ * one silently replaces the earlier for every element that names it. That is
+ * how the Live Session graph's progress bar — an SVG rect, animated by a few
+ * pixels — came to run the explainer's keyframes instead, which slide an HTML
+ * bar by percentages. On an SVG element a percentage in `transform` resolves
+ * against the whole viewport, so the bar left its block and crossed the
+ * diagram (ANT-53).
+ */
+describe("the animations", () => {
+  it("declare every keyframes name exactly once", () => {
+    // Comments first: the sheet talks about this very hazard by name, and a
+    // `@keyframes live-pulse` quoted in prose is not a declaration.
+    const code = css.replace(/\/\*[^]*?\*\//g, "");
+    const names = [...code.matchAll(/@keyframes\s+([\w-]+)/g)].map((m) => m[1]);
+    const seen = new Map<string, number>();
+    for (const name of names) seen.set(name, (seen.get(name) ?? 0) + 1);
+    const duplicated = [...seen].filter(([, count]) => count > 1).map(([name]) => name);
+    expect(duplicated).toEqual([]);
+  });
+
+  /** The graph's bar is an SVG rect, so its slide must be in user units. */
+  it("move the graph's progress bar by pixels, never by a percentage", () => {
+    const block = css.match(/@keyframes live-slide \{([^]*?)\n\}/)?.[1] ?? "";
+    const moves = [...block.matchAll(/translateX\(([^)]*)\)/g)].map((m) => m[1]);
+    expect(moves.length).toBeGreaterThan(0);
+    for (const move of moves) expect(move).toMatch(/^(0|-?\d+(\.\d+)?px)$/);
+  });
+});

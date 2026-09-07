@@ -6586,13 +6586,20 @@ button.state-chip {
   }
 }
 
-@keyframes live-flow {
+@keyframes ex-flow {
   to {
     stroke-dashoffset: -28;
   }
 }
 
-@keyframes live-slide {
+/* Percentages, and its own name for exactly that reason. The Live Session
+   graph draws its progress bar as an SVG rect, and on an SVG element a
+   percentage in `transform` resolves against the whole viewport rather than
+   the element — 300% of the canvas is thousands of pixels. This block once
+   shared the name `live-slide` with that bar's keyframes and, declared later,
+   silently replaced them: the bar left its block and flew across the diagram
+   (ANT-53). One name per animation, so neither can override the other. */
+@keyframes ex-slide {
   0% {
     transform: translateX(-100%);
   }
@@ -6639,7 +6646,7 @@ button.state-chip {
 }
 
 .live-flow {
-  animation: live-flow 1s linear infinite;
+  animation: ex-flow 1s linear infinite;
 }
 
 .live-bar {
@@ -6647,7 +6654,7 @@ button.state-chip {
   inset: 0;
   width: 34%;
   background: #56aee0;
-  animation: live-slide 1.6s ease-in-out infinite;
+  animation: ex-slide 1.6s ease-in-out infinite;
 }
 
 /* Every scene then stands still, fully drawn and fully legible: nothing on

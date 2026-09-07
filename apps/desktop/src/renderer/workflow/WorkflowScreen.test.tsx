@@ -7,11 +7,12 @@
  */
 
 import { StrictMode } from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PendingRun } from "@anthill/live";
 
+import type { SaveWorkflowResult } from "../../shared/ipc.js";
 import { WorkflowScreen } from "./WorkflowScreen.js";
 
 type Snapshot = { runs: PendingRun[]; capabilities: unknown[] };
@@ -47,7 +48,7 @@ function stubApi() {
     detectInterpreters: vi.fn(async () => []),
     exportWorkflow: vi.fn(async () => ({ ok: true as const, directory: "/tmp", written: [] })),
     chooseRunFolder: vi.fn(async (): Promise<string | null> => "/tmp"),
-    saveWorkflow: vi.fn(async () => null),
+    saveWorkflow: vi.fn(async (): Promise<SaveWorkflowResult> => ({ kind: "saved", path: "/tmp/w.workflow.json" })),
     openWorkflow: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
   };
   (window as unknown as { anthill: unknown }).anthill = api;
@@ -507,5 +508,113 @@ describe("the gate on the handover", () => {
     breakTheWorkflow();
     fireEvent.click(prompt());
     expect(document.querySelector(".problems-popover")).toBeTruthy();
+  });
+});
+
+/**
+ * Pressing Save used to produce nothing anybody could see.
+ *
+ * The write happened and the dirty pill went out; on a workflow that was
+ * already saved even that did not move, so the click had no visible effect at
+ * all and "did that work?" had no answer on the screen (ANT-58).
+ */
+describe("what Save says for itself", () => {
+  /** The toolbar's own Save, not the handover's. */
+  const saveButton = () => screen.getByRole("button", { name: "Save" });
+  const status = () => document.querySelector(".save-status")?.textContent ?? "";
+
+  it("says nothing before anything has been saved", async () => {
+    await workflow();
+    expect(status()).toBe("");
+  });
+
+  it("confirms a write once it has actually landed", async () => {
+    await workflow();
+    fireEvent.click(saveButton());
+    await screen.findByText("Saved");
+  });
+
+  it("holds off saying so until the write comes back", async () => {
+    const api = stubApi();
+    let land: (result: SaveWorkflowResult) => void = () => undefined;
+    api.saveWorkflow = vi.fn(
+      () => new Promise<SaveWorkflowResult>((resolve) => { land = resolve; }),
+    );
+    render(<WorkflowScreen onExit={() => undefined} />);
+    const template = await screen.findByText(/Implement, test, fix/);
+    fireEvent.click(template.closest("button") as HTMLElement);
+    await screen.findByRole("button", { name: "Prompt" });
+
+    fireEvent.click(saveButton());
+    await screen.findByText("Saving…");
+    expect(screen.queryByText("Saved")).toBeNull();
+
+    await act(async () => {
+      land({ kind: "saved", path: "/tmp/w.workflow.json" });
+    });
+    await screen.findByText("Saved");
+  });
+
+  it("claims nothing when the author cancels the dialog", async () => {
+    const api = stubApi();
+    api.saveWorkflow = vi.fn(async (): Promise<SaveWorkflowResult> => ({ kind: "cancelled" }));
+    render(<WorkflowScreen onExit={() => undefined} />);
+    const template = await screen.findByText(/Implement, test, fix/);
+    fireEvent.click(template.closest("button") as HTMLElement);
+    await screen.findByRole("button", { name: "Prompt" });
+
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(status()).toBe(""));
+    expect(screen.queryByText("Saved")).toBeNull();
+  });
+
+  it("gives the reason when the write is refused, and keeps the work", async () => {
+    const api = stubApi();
+    api.saveWorkflow = vi.fn(
+      async (): Promise<SaveWorkflowResult> => ({ kind: "failed", error: "no space left on device" }),
+    );
+    render(<WorkflowScreen onExit={() => undefined} />);
+    const template = await screen.findByText(/Implement, test, fix/);
+    fireEvent.click(template.closest("button") as HTMLElement);
+    await screen.findByRole("button", { name: "Prompt" });
+
+    fireEvent.click(saveButton());
+    await screen.findByText(/no space left on device/);
+    // Still theirs to save: nothing was written, so nothing may claim it was.
+    expect(screen.queryByText("Saved")).toBeNull();
+  });
+
+  it("does not race a second click against the write already running", async () => {
+    const api = stubApi();
+    let land: (result: SaveWorkflowResult) => void = () => undefined;
+    const calls = vi.fn(
+      () => new Promise<SaveWorkflowResult>((resolve) => { land = resolve; }),
+    );
+    api.saveWorkflow = calls;
+    render(<WorkflowScreen onExit={() => undefined} />);
+    const template = await screen.findByText(/Implement, test, fix/);
+    fireEvent.click(template.closest("button") as HTMLElement);
+    await screen.findByRole("button", { name: "Prompt" });
+
+    fireEvent.click(saveButton());
+    fireEvent.click(saveButton());
+    fireEvent.click(saveButton());
+    expect(calls).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      land({ kind: "saved", path: "/tmp/w.workflow.json" });
+    });
+    await screen.findByText("Saved");
+  });
+
+  it("announces politely instead of taking the focus", async () => {
+    await workflow();
+    fireEvent.click(saveButton());
+    await screen.findByText("Saved");
+    const live = document.querySelector(".save-status") as HTMLElement;
+    expect(live.getAttribute("role")).toBe("status");
+    expect(live.getAttribute("aria-live")).toBe("polite");
+    expect(live.getAttribute("tabindex")).toBeNull();
+    expect(document.activeElement).not.toBe(live);
   });
 });

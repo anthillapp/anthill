@@ -34,6 +34,7 @@ import {
 import { HARNESS_TARGETS, type HarnessTarget, type Workflow } from "@anthill/workflow-schema";
 import type { PendingRun } from "@anthill/live";
 
+import { SAVED_LINGER_MS, isFailure, saveMessage, type SaveStatus } from "./save-status.js";
 import { AgentEditor } from "./AgentLibrary.js";
 import { type CustomBlock, type LibraryBlock } from "./BlockLibrary.js";
 import { BlockInspector } from "./BlockInspector.js";
@@ -93,6 +94,9 @@ export function WorkflowScreen({ onExit, start }: WorkflowScreenProps) {
   const [linking, setLinking] = useState<LinkingState>(null);
   const [path, setPath] = useState<string | undefined>();
   const [dirty, setDirty] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: "idle" });
+  /** Held in a ref, not state: it gates the next call, it does not draw. */
+  const saving = useRef(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [library, setLibrary] = useState<LibraryTab>("blocks");
   const [showProblems, setShowProblems] = useState(false);
@@ -416,15 +420,45 @@ export function WorkflowScreen({ onExit, start }: WorkflowScreenProps) {
 
   const save = useCallback(async () => {
     if (!workflow) return;
-    const saved = await window.anthill.saveWorkflow({
-      workflow: stampWorkflowFormat(workflow),
-      path,
-    });
-    if (!saved) return;
-    setPath(saved.path);
-    markDirty(false);
-    setNotice(null);
+    // One press, one write. A second click while the first is in flight would
+    // race it to the same file and could report the older answer last, so it
+    // is dropped rather than queued — the save already running is the one the
+    // author asked for (ANT-58).
+    if (saving.current) return;
+    saving.current = true;
+    setSaveStatus({ kind: "saving" });
+    try {
+      const result = await window.anthill.saveWorkflow({
+        workflow: stampWorkflowFormat(workflow),
+        path,
+      });
+      if (result.kind === "saved") {
+        setPath(result.path);
+        markDirty(false);
+        setNotice(null);
+        setSaveStatus({ kind: "saved" });
+        return;
+      }
+      // Cancelling is a decision, not a fault: nothing was written and nothing
+      // is claimed. The dirty pill goes on saying what is true.
+      setSaveStatus(result.kind === "failed" ? { kind: "failed", error: result.error } : { kind: "idle" });
+    } catch (error) {
+      setSaveStatus({
+        kind: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      saving.current = false;
+    }
   }, [workflow, path, markDirty]);
+
+  // "Saved" is about the click, so it goes when the click stops being recent.
+  // A failure stays until something else happens: it is the author's to read.
+  useEffect(() => {
+    if (saveStatus.kind !== "saved") return;
+    const timer = window.setTimeout(() => setSaveStatus({ kind: "idle" }), SAVED_LINGER_MS);
+    return () => window.clearTimeout(timer);
+  }, [saveStatus]);
 
   const exit = useCallback(() => {
     if (!confirmDiscard("Leaving the workflow screen")) return;
@@ -646,6 +680,16 @@ export function WorkflowScreen({ onExit, start }: WorkflowScreenProps) {
             <span className="dot" /> Unsaved
           </span>
         ) : null}
+
+        {/* Announced politely and never focused: the author is told without
+            being interrupted, and the caret stays where they left it. */}
+        <span
+          className={`save-status${isFailure(saveStatus) ? " is-failed" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          {saveMessage(saveStatus)}
+        </span>
 
         {validation.errors.length > 0 ? (
           <button

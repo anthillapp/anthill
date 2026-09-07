@@ -7468,3 +7468,18 @@ button.presence-chip {
 .canvas-presence > * {
   pointer-events: auto;
 }
+
+/* The save indicator, beside the pill that says whether there is anything to
+   save. Quiet by default and red only for a failure — this sheet spends red on
+   faults and on the plan stopping for a person, and a successful save is
+   neither. It reserves no width when empty, so the toolbar does not shift as
+   the message comes and goes. */
+.save-status {
+  font-size: 12px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.save-status.is-failed {
+  color: var(--accent-700);
+}

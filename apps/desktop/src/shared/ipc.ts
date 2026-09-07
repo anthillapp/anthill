@@ -80,7 +80,7 @@ export const IpcChannel = {
  * quietly showed nothing. Bump this whenever a channel is added, and the
  * renderer can find out before it subscribes to something that will never fire.
  */
-export const IPC_CONTRACT = 10;
+export const IPC_CONTRACT = 11;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -227,9 +227,28 @@ export type OpenWorkflowResult =
 
 export type SaveWorkflowRequest = {
   workflow: Workflow;
-  /** Existing path to overwrite; omit to prompt with a Save dialog. */
+  /**
+   * Where the last successful save went, if it went anywhere.
+   *
+   * Not a promise to write there: the main process asks for a destination
+   * when that answer no longer holds — the file has gone, or the workflow has
+   * been renamed since (ANT-57).
+   */
   path?: string;
 };
+
+/**
+ * How a save ended, in the three ways an author can be told apart.
+ *
+ * A bare path-or-null could not distinguish "you cancelled the dialog" from
+ * "the disk refused it", so the editor had nothing true to show for either and
+ * showed nothing at all (ANT-58). Failure carries its reason because a message
+ * the author can act on is the whole point of reporting one.
+ */
+export type SaveWorkflowResult =
+  | { kind: "saved"; path: string }
+  | { kind: "cancelled" }
+  | { kind: "failed"; error: string };
 
 export type StartRunRequest = {
   workflow: Workflow;
@@ -550,7 +569,7 @@ export interface AnthillApi {
   workspaceStatus(rootPath: string): Promise<WorkspaceStatus>;
   /** With a path, opens that workflow; without one, asks the author to pick. */
   openWorkflow(path?: string): Promise<OpenWorkflowResult>;
-  saveWorkflow(request: SaveWorkflowRequest): Promise<{ path: string } | null>;
+  saveWorkflow(request: SaveWorkflowRequest): Promise<SaveWorkflowResult>;
   detectRuntimes(): Promise<RuntimeInfo[]>;
   startRun(request: StartRunRequest): Promise<StartRunResponse>;
   listRuns(): Promise<WorkflowRun[]>;

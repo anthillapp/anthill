@@ -44,6 +44,7 @@ import {
   type OpenWorkflowResult,
   type RunEvent,
   type SaveWorkflowRequest,
+  type SaveWorkflowResult,
   type StartRunRequest,
   type StartRunResponse,
   type WorkspaceInfo,
@@ -498,7 +499,7 @@ function registerIpcHandlers(): void {
 
   handle(
     IpcChannel.workflowSave,
-    async (_event, request: SaveWorkflowRequest): Promise<{ path: string } | null> => {
+    async (_event, request: SaveWorkflowRequest): Promise<SaveWorkflowResult> => {
       // What the last successful save left behind, read from the file itself
       // rather than tracked alongside it — see ./save-destination.ts.
       const saved: SavedRecord = request.path
@@ -530,16 +531,26 @@ function registerIpcHandlers(): void {
           defaultPath: destination.suggested,
           filters: [{ name: "Workflow JSON", extensions: ["json"] }],
         });
-        if (result.canceled || !result.filePath) return null;
+        if (result.canceled || !result.filePath) return { kind: "cancelled" };
         path = result.filePath;
       } else {
         path = destination.path;
       }
-      await writeFile(path, `${JSON.stringify(request.workflow, null, 2)}\n`, "utf8");
+      try {
+        await writeFile(path, `${JSON.stringify(request.workflow, null, 2)}\n`, "utf8");
+      } catch (error) {
+        // Reported rather than thrown, so the editor can say what went wrong
+        // and keep the unsaved work rather than losing the answer in a
+        // rejected IPC call (ANT-58).
+        return {
+          kind: "failed",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
       // Saving is how a workflow gets into the launch window's list in the first
       // place: a workflow drafted from a prompt has never been opened from a file.
       await rememberRecent(path);
-      return { path };
+      return { kind: "saved", path };
     },
   );
 

@@ -92,7 +92,7 @@ export function App() {
 
   const saveWorkflow = useCallback(async () => {
     const saved = await window.anthill.saveWorkflow({ workflow, path: workflowPath });
-    if (saved) setWorkflowPath(saved.path);
+    if (saved.kind === "saved") setWorkflowPath(saved.path);
   }, [workflow, workflowPath]);
 
   const runWorkflow = useCallback(async () => {

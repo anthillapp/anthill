@@ -68,12 +68,17 @@ Download the `.dmg` from
 [Releases](https://github.com/nstr/anthill/releases), open it, and drag Anthill
 to Applications. macOS on Apple Silicon only.
 
-**The first launch will be refused, and that is expected.** The build is not
-signed with an Apple Developer ID and not notarised, so Gatekeeper blocks it
-with *"Apple could not verify Anthill is free of malware"*. Double-clicking
-again will not help.
+A release built with the signing secrets in place is **signed with an Apple
+Developer ID and notarised**, and opens on a double-click with none of the
+ceremony below. The notarisation ticket is stapled to the app itself, so it
+survives being dragged out of the disk image and keeps working offline.
 
-What to do depends on the version of macOS, because Apple changed it:
+**If the release was built without them, the first launch is refused.**
+Gatekeeper blocks it with *"Apple could not verify Anthill is free of
+malware"*, and double-clicking again will not help. The build's own release
+notes say which kind it is.
+
+What to do then depends on the version of macOS, because Apple changed it:
 
 - **macOS 15 Sequoia and later** — try to open it once and let it be refused.
   Then go to  **System Settings ▸ Privacy & Security**, scroll to the bottom,
@@ -89,10 +94,8 @@ This applies to a build *downloaded* from Releases. One you built yourself
 never came from the internet, carries no quarantine flag, and opens without
 any of the above.
 
-There is no way around it short of an Apple Developer Program membership
-($99/year) and signing the build — the repository is already set up for that,
-and needs only the secrets. Nothing about the app changes either way; the only
-difference is whether macOS has been told who built it.
+Nothing about the app changes either way; the only difference is whether macOS
+has been told who built it.
 
 ### From source
 

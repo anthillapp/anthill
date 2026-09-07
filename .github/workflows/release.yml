@@ -131,8 +131,9 @@ jobs:
           body: |
             macOS, Apple Silicon.
 
-            If this build is **not signed or notarised**, macOS refuses to open
-            it on the first try. Let it be refused, then allow it once:
+            A signed, notarised build opens on a double-click. If this one was
+            built without the signing secrets, macOS refuses it on the first
+            try — let it be refused, then allow it once:
 
             - **macOS 15 and later** — System Settings ▸ Privacy & Security ▸
               *Open Anyway*, at the bottom.

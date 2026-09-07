@@ -25,7 +25,12 @@ import {
   type Workflow,
 } from "@anthill/builder";
 import { agentConfig } from "@anthill/workflow";
-import { hasStepEvidence, type LiveSessionState, type LiveSessionView } from "@anthill/live";
+import {
+  hasStepEvidence,
+  type BlockView,
+  type LiveSessionState,
+  type LiveSessionView,
+} from "@anthill/live";
 import { actionDefinition } from "@anthill/workflow";
 
 import { EDGE_TONE, RUN_STATE, type DrawnRunState, type EdgeTone } from "./run-state.js";
@@ -72,6 +77,16 @@ function kicker(node: Workflow["nodes"][number]): string {
  * announcing a step, Anthill never learned whether the workflow got past Start,
  * and `unknown` says so instead of guessing either way.
  */
+/**
+ * Whether every step the workflow has has finished.
+ *
+ * `every` over no blocks is vacuously true, so a session nothing has been
+ * observed for would otherwise read as a completed one — hence the guard.
+ */
+function runFinished(view: LiveSessionView): boolean {
+  return !view.empty && Object.values(view.blocks).every((block) => block.state === "done");
+}
+
 function boundaryState(
   view: LiveSessionView,
   node: Workflow["nodes"][number],
@@ -82,33 +97,68 @@ function boundaryState(
     if (hasStepEvidence(view)) return "done";
     return sessionState === "detected_live" ? "observing" : "unknown";
   }
-  return Object.values(view.blocks).every((block) => block.state === "done") && !view.empty
-    ? "done"
-    : "queued";
+  return runFinished(view) ? "done" : "queued";
 }
 
 /**
- * How an edge is drawn, from the states at its two ends.
+ * When a block was last announced, as something two ends can be ordered by.
  *
- * Only the edge that actually delivered control flows. A workflow with a rework
- * loop has two edges arriving at the same step, and drawing both as live would
- * claim the work came back round when it never did — so an edge is live only
- * when its own source has been left behind.
+ * `undefined` means the record cannot answer — the block was never entered, or
+ * was entered without a usable timestamp. Callers must not read that as
+ * "earlier": an absent time is a missing fact, not an early one.
+ */
+function enteredAt(block: BlockView | undefined): number | undefined {
+  if (!block || block.passes < 1 || !block.enteredAt) return undefined;
+  const at = Date.parse(block.enteredAt);
+  return Number.isNaN(at) ? undefined : at;
+}
+
+/**
+ * How an edge is drawn, from what was observed at its two ends.
  *
- * A start block has no observed state of its own; it counts as passed as soon
- * as anything at all has been observed, which is what "the session began" means.
+ * An edge may only be drawn as taken once control demonstrably *arrived* at its
+ * target. Leaving the source is not enough, and reading it as enough is what
+ * ANT-55 was: a finished step that branches has several outgoing edges, control
+ * went down exactly one of them, and colouring them all from the source alone
+ * drew a green arrow into a checkpoint the run had not reached. A target
+ * nothing has arrived at keeps its edge grey, which is the honest reading —
+ * there is no record of anything coming this way.
+ *
+ * Arrival on its own is not enough either, because a rework edge points back at
+ * a step that has already run and would otherwise light up on the strength of
+ * that first pass. So the two ends are ordered: only a target entered *after*
+ * its source can have been reached along this edge. A loop that has come round
+ * shows the later entry and draws; a loop that never fired points at an older
+ * one and stays grey, however finished both of its ends look.
+ *
+ * Where the record cannot settle the order — an entry carrying no usable
+ * timestamp — arrival stands alone rather than a sequence being invented.
+ *
+ * Start has no announcement of its own, and the session beginning is what
+ * leaving it means, so its edge rests on arrival. End has none either and is
+ * reached exactly when every step is finished — the same fact its block is
+ * drawn from, so block and edge cannot contradict each other.
  */
 function edgeTone(
   view: LiveSessionView,
   source: string,
   target: string,
-  isBoundary: (id: string) => boolean,
+  boundaryKind: (id: string) => "start" | "end" | undefined,
 ): EdgeTone {
-  const from = view.blocks[source];
+  if (boundaryKind(target) === "end") return runFinished(view) ? "seen" : "idle";
+
   const to = view.blocks[target];
-  const left = isBoundary(source) ? !view.empty : from?.state === "done";
-  if (!left) return "idle";
-  return to && (to.state === "running" || to.state === "needsYou") ? "live" : "seen";
+  if (!to || to.passes < 1) return "idle";
+
+  if (boundaryKind(source) !== "start") {
+    const from = view.blocks[source];
+    if (from?.state !== "done") return "idle";
+    const left = enteredAt(from);
+    const arrived = enteredAt(to);
+    if (left !== undefined && arrived !== undefined && arrived < left) return "idle";
+  }
+
+  return to.state === "running" || to.state === "needsYou" ? "live" : "seen";
 }
 
 export function LiveWorkflowGraph({
@@ -136,11 +186,13 @@ export function LiveWorkflowGraph({
   const [panning, setPanning] = useState(false);
   const panFrom = useRef<{ x: number; y: number; origin: Viewport } | null>(null);
 
-  const isBoundary = useMemo(() => {
-    const ids = new Set(
-      workflow.nodes.filter((node) => node.type === "start" || node.type === "end").map((n) => n.id),
-    );
-    return (id: string) => ids.has(id);
+  /** Which end of the run a block is, for the two that carry no work. */
+  const boundaryKind = useMemo(() => {
+    const kinds = new Map<string, "start" | "end">();
+    for (const node of workflow.nodes) {
+      if (node.type === "start" || node.type === "end") kinds.set(node.id, node.type);
+    }
+    return (id: string) => kinds.get(id);
   }, [workflow]);
 
   const bounds = useMemo(() => {
@@ -280,11 +332,12 @@ export function LiveWorkflowGraph({
       {model.connected.map((path) => {
         const edge = workflow.edges.find((item) => item.id === path.output.id);
         const target = edge?.target ?? "";
-        const tone = edgeTone(view, path.nodeId, target, isBoundary);
+        const tone = edgeTone(view, path.nodeId, target, boundaryKind);
         const style = EDGE_TONE[tone];
         return (
           <path
             key={`${path.nodeId}-${path.output.id}`}
+            {...(edge ? { "data-edge": edge.id } : {})}
             className={`live-edge tone-${tone}`}
             d={path.geometry.path}
             fill="none"

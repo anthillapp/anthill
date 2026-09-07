@@ -418,3 +418,155 @@ describe("an active block's outline", () => {
     }
   });
 });
+
+/**
+ * A branch that was not taken, drawn as though it had been (ANT-55).
+ *
+ * The edge tone used to be decided by the source alone: once a step finished,
+ * every edge leaving it turned green. On a workflow that branches that is a
+ * claim about a path control never went down — in the session this was reported
+ * from, a green arrow ran into "Checkpoint, close and report" while the run was
+ * still working two steps upstream, so the diagram announced a checkpoint that
+ * had not been reached.
+ *
+ * The rework loop is here for the opposite reason: the fix must not be "colour
+ * an edge whenever both ends have run", because a loop's back edge points at a
+ * step that has already finished and would light up on the strength of that
+ * first pass.
+ */
+describe("edges only carry control where control demonstrably went", () => {
+  const branching: Workflow = {
+    id: "workflow-2",
+    name: "Select, run, checkpoint",
+    version: "1",
+    target: "claude-code",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {}, position: { x: 0, y: 0 } },
+      {
+        id: "select",
+        type: "agent",
+        name: "Select one untested scenario",
+        config: { actionKind: "agent-step", task: "Pick one" },
+        position: { x: 300, y: 0 },
+      },
+      {
+        id: "scenario",
+        type: "agent",
+        name: "Run the scenario",
+        config: { actionKind: "agent-step", task: "Run it" },
+        position: { x: 600, y: 0 },
+      },
+      {
+        id: "record",
+        type: "agent",
+        name: "Record observations",
+        config: { actionKind: "agent-step", task: "Write it down" },
+        position: { x: 900, y: 0 },
+      },
+      {
+        id: "checkpoint",
+        type: "agent",
+        name: "Checkpoint, close and report",
+        config: { actionKind: "agent-step", task: "Hand off" },
+        position: { x: 600, y: 300 },
+      },
+      { id: "end", type: "end", name: "Done", config: {}, position: { x: 1200, y: 0 } },
+    ],
+    edges: [
+      { id: "to-select", source: "start", target: "select" },
+      { id: "to-scenario", source: "select", target: "scenario" },
+      { id: "to-checkpoint", source: "select", target: "checkpoint" },
+      { id: "to-record", source: "scenario", target: "record" },
+      { id: "back-to-select", source: "record", target: "select" },
+      { id: "to-end", source: "checkpoint", target: "end" },
+    ],
+    metadata: { workflow: { formatVersion: 4 } },
+  };
+
+  let seq = 0;
+  function announce(blockId: string, at: string): ObservationEvent {
+    seq += 1;
+    return {
+      runId: "ANT-1",
+      seq,
+      at,
+      recordedAt: at,
+      cli: "claude-code",
+      source: "transcript",
+      channel: "claude-code:transcript",
+      kind: "step.marker",
+      title: blockId,
+      blockId,
+    };
+  }
+
+  function draw(events: ObservationEvent[]) {
+    const view = foldLiveSession(branching, run, events);
+    const { unmount } = render(
+      <LiveWorkflowGraph
+        workflow={branching}
+        view={view}
+        sessionState={run.state}
+        onSelect={vi.fn()}
+      />,
+    );
+    const tone = (id: string) =>
+      (document.querySelector(`[data-edge="${id}"]`)?.getAttribute("class") ?? "")
+        .replace("live-edge ", "");
+    return { tone, unmount };
+  }
+
+  /** Announced select, then scenario: the run is working on the upper branch. */
+  const workingUpstream = () => [
+    announce("select", "2026-08-29T10:00:05.000Z"),
+    announce("scenario", "2026-08-29T10:00:10.000Z"),
+  ];
+
+  it("leaves the branch control did not take grey", () => {
+    const { tone, unmount } = draw(workingUpstream());
+    expect(tone("to-checkpoint")).toBe("tone-idle");
+    unmount();
+  });
+
+  it("still flows the branch control did take", () => {
+    const { tone, unmount } = draw(workingUpstream());
+    expect(tone("to-scenario")).toBe("tone-live");
+    expect(tone("to-select")).toBe("tone-seen");
+    unmount();
+  });
+
+  it("does not reach the end while a step is still working", () => {
+    const { tone, unmount } = draw(workingUpstream());
+    expect(tone("to-end")).toBe("tone-idle");
+    unmount();
+  });
+
+  it("leaves a rework edge grey until the loop has actually come round", () => {
+    const { tone, unmount } = draw([
+      ...workingUpstream(),
+      announce("record", "2026-08-29T10:00:20.000Z"),
+    ]);
+    expect(tone("to-record")).toBe("tone-live");
+    expect(tone("back-to-select")).toBe("tone-idle");
+    unmount();
+  });
+
+  /** Live, not merely seen: the loop has come round and that step is working. */
+  it("flows the rework edge once the step is announced a second time", () => {
+    const { tone, unmount } = draw([
+      ...workingUpstream(),
+      announce("record", "2026-08-29T10:00:20.000Z"),
+      announce("select", "2026-08-29T10:00:30.000Z"),
+    ]);
+    expect(tone("back-to-select")).toBe("tone-live");
+    unmount();
+  });
+
+  it("draws nothing at all before the first step is announced", () => {
+    const { tone, unmount } = draw([]);
+    for (const id of ["to-select", "to-scenario", "to-checkpoint", "to-record", "to-end"]) {
+      expect(tone(id)).toBe("tone-idle");
+    }
+    unmount();
+  });
+});

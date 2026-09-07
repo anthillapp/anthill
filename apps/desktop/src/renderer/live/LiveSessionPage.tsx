@@ -185,10 +185,28 @@ export function LiveSessionPage({
    * It is also why Anthill will not call such a session finished — see ANT-18.
    */
   const handedOff = useMemo(
-    () =>
-      events.some(
-        (event) => event.kind === "subagent.start" || event.toolName === "SendMessage",
-      ),
+    () => events.some((event) => event.toolName === "SendMessage"),
+    [events],
+  );
+
+  /**
+   * Whether this session delegated to a subagent.
+   *
+   * Kept apart from a handover because the two are missing different things
+   * and the reader is owed the difference. A delegation's *steps* are counted
+   * — the delegate announces them and they move the diagram — while its turns
+   * are not written into this session's transcript at all, so its messages
+   * are the one part that cannot appear in the feed (ANT-54).
+   *
+   * That is a fact about the record, not about Anthill's reading of it: across
+   * every transcript on the machine this was measured on, `isSidechain` is
+   * present and false throughout, and Codex's rollouts have no subagent
+   * concept to record in the first place. So the feed is not hiding a message
+   * it received; there was never one to receive, and saying so beats leaving a
+   * gap the reader has to explain to themselves.
+   */
+  const delegated = useMemo(
+    () => events.some((event) => event.kind === "subagent.start"),
     [events],
   );
 
@@ -395,6 +413,14 @@ export function LiveSessionPage({
               <li>Whether the agent is actually following the workflow.</li>
               <li>Why it took one path rather than another.</li>
               <li>Anything the CLI does not write down on this machine.</li>
+              {delegated ? (
+                <li>
+                  What a subagent said. This session delegated work, and the record keeps the
+                  delegation and the moment it ended — never the delegate&rsquo;s own turns.
+                  The steps it announced still count; its messages were not written down to
+                  show.
+                </li>
+              ) : null}
               {handedOff ? (
                 <li>
                   What another agent did with the work this session handed over — the record

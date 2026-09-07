@@ -676,16 +676,49 @@ describe("a session that handed work to another agent", () => {
     expect(screen.getByText(/the record\s+has the handover, not the work/)).toBeTruthy();
   });
 
-  it("says it about a subagent too", async () => {
-    await show([
-      event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "Developer" }),
-    ]);
-    expect(screen.getByText(/has the handover, not the work/)).toBeTruthy();
-  });
-
   it("stays quiet about it when nothing was handed over", async () => {
     await show([event({ kind: "tool.start", title: "Bash", toolName: "Bash" })]);
     expect(screen.queryByText(/has the handover, not the work/)).toBeNull();
+  });
+});
+
+/**
+ * Delegating is not the same hole as handing over, and used to be told as one.
+ *
+ * Both once produced the sentence about "the handover, not the work", which is
+ * true of a handover and misleading of a delegation: a subagent's *steps* do
+ * arrive and do move the diagram — it is only its turns that are never written
+ * into this session's transcript, which is why its messages cannot appear in
+ * the feed (ANT-54). A reader looking for that message is owed the actual
+ * reason rather than a sentence about a different gap.
+ */
+describe("a session that delegated to a subagent", () => {
+  it("names the one part that cannot be shown", async () => {
+    await show([
+      event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "Developer" }),
+    ]);
+    expect(screen.getByText(/What a subagent said/)).toBeTruthy();
+  });
+
+  it("does not describe it as a handover to another session", async () => {
+    await show([
+      event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "Developer" }),
+    ]);
+    expect(screen.queryByText(/has the handover, not the work/)).toBeNull();
+  });
+
+  it("says nothing of the sort when no subagent ran", async () => {
+    await show([event({ kind: "tool.start", title: "Bash", toolName: "Bash" })]);
+    expect(screen.queryByText(/What a subagent said/)).toBeNull();
+  });
+
+  it("tells both apart when a session did both", async () => {
+    await show([
+      event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "Developer" }),
+      event({ kind: "tool.start", title: "SendMessage", toolName: "SendMessage" }),
+    ]);
+    expect(screen.getByText(/What a subagent said/)).toBeTruthy();
+    expect(screen.getByText(/has the handover, not the work/)).toBeTruthy();
   });
 });
 

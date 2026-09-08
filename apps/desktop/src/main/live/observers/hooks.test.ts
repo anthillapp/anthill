@@ -52,26 +52,29 @@ const line = (data: Record<string, unknown>) => ({
 describe("the hook log observer", () => {
   it("reports nothing until the run has a session to match against", async () => {
     const path = await log([line({ hook_event_name: "Notification", message: "needs permission" })]);
-    const events = await new HookLogObserver(path).poll(
+    const result = await new HookLogObserver(path).poll(
       pending({ detectedSessionId: undefined, state: "pending_after_copy" }),
       new Date().toISOString(),
     );
     // Before a match, another session's hooks are somebody else's business.
-    expect(events).toEqual([]);
+    expect(result).toEqual({ evidence: [], events: [] });
   });
 
   it("ignores lines belonging to a different session", async () => {
     const path = await log([
       { ...line({ hook_event_name: "PreToolUse", tool_name: "Bash" }), data: { session_id: "other", hook_event_name: "PreToolUse" } },
     ]);
-    expect(await new HookLogObserver(path).poll(pending(), new Date().toISOString())).toEqual([]);
+    expect(await new HookLogObserver(path).poll(pending(), new Date().toISOString())).toEqual({
+      evidence: [],
+      events: [],
+    });
   });
 
   it("reads a permission prompt as the session waiting for a person", async () => {
     const path = await log([
       line({ hook_event_name: "Notification", message: "Claude needs your permission to use Bash" }),
     ]);
-    const events = await new HookLogObserver(path).poll(pending(), new Date().toISOString());
+    const { events } = await new HookLogObserver(path).poll(pending(), new Date().toISOString());
     expect(events).toEqual([
       expect.objectContaining({
         kind: "notification",
@@ -94,7 +97,7 @@ describe("the hook log observer", () => {
         tool_response: {},
       }),
     ]);
-    const events = await new HookLogObserver(path).poll(pending(), new Date().toISOString());
+    const { events } = await new HookLogObserver(path).poll(pending(), new Date().toISOString());
     expect(events[0]).toMatchObject({
       kind: "tool.end",
       toolName: "Bash",
@@ -112,7 +115,7 @@ describe("the hook log observer", () => {
         last_assistant_message: `Working on it.\nANTHILL-STEP ${RUN_ID} ${NONCE} implement\nSECRET-PROSE`,
       }),
     ]);
-    const events = await new HookLogObserver(path).poll(pending(), new Date().toISOString());
+    const { events } = await new HookLogObserver(path).poll(pending(), new Date().toISOString());
     expect(events).toContainEqual(
       expect.objectContaining({ kind: "step.marker", blockId: "implement" }),
     );
@@ -122,13 +125,63 @@ describe("the hook log observer", () => {
   it("reads each line once, however often it is polled", async () => {
     const path = await log([line({ hook_event_name: "SessionStart" })]);
     const observer = new HookLogObserver(path);
-    expect(await observer.poll(pending(), new Date().toISOString())).toHaveLength(1);
-    expect(await observer.poll(pending(), new Date().toISOString())).toEqual([]);
+    expect((await observer.poll(pending(), new Date().toISOString())).events).toHaveLength(1);
+    expect(await observer.poll(pending(), new Date().toISOString())).toEqual({
+      evidence: [],
+      events: [],
+    });
   });
 
   it("says nothing at all when hooks were never installed", async () => {
     const observer = new HookLogObserver(join(tmpdir(), "anthill-no-such-hook-log.jsonl"));
     expect(await observer.available()).toBe(false);
-    expect(await observer.poll(pending(), new Date().toISOString())).toEqual([]);
+    expect(await observer.poll(pending(), new Date().toISOString())).toEqual({
+      evidence: [],
+      events: [],
+    });
+  });
+});
+
+/**
+ * ANT-64. A session working through subagents writes its transcript rarely and
+ * this log constantly, and the clock that decides "gone quiet" heard only the
+ * transcript. What the page shows as work has to count as a sign of life.
+ */
+describe("hook lines as evidence the session is alive", () => {
+  const at = (iso: string, data: Record<string, unknown>) => ({ ...line(data), recordedAt: iso });
+
+  it("reports the newest kept line as activity from the run's session", async () => {
+    const path = await log([
+      at("2026-08-29T10:00:01.000Z", { hook_event_name: "PreToolUse", tool_name: "Bash" }),
+      at("2026-08-29T10:00:04.000Z", { hook_event_name: "PostToolUse", tool_name: "Bash" }),
+    ]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), new Date().toISOString());
+    // One piece of evidence for the poll, at the moment of the latest line.
+    expect(evidence).toEqual([{ kind: "activity", sessionId: "sess-1", at: "2026-08-29T10:00:04.000Z" }]);
+  });
+
+  it("says nothing about a line that belongs to another session", async () => {
+    const path = await log([
+      { ...line({ hook_event_name: "PreToolUse" }), data: { session_id: "other", hook_event_name: "PreToolUse" } },
+    ]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), new Date().toISOString());
+    expect(evidence).toEqual([]);
+  });
+
+  it("does not report a late line about an earlier moment as new activity", async () => {
+    const path = await log([at("2026-08-29T10:00:09.000Z", { hook_event_name: "PreToolUse", tool_name: "Bash" })]);
+    const observer = new HookLogObserver(path);
+    await observer.poll(pending(), new Date().toISOString());
+
+    const { appendFile } = await import("node:fs/promises");
+    await appendFile(
+      path,
+      JSON.stringify(at("2026-08-29T10:00:03.000Z", { hook_event_name: "PostToolUse", tool_name: "Bash" })) + "\n",
+      "utf8",
+    );
+    const { evidence, events } = await observer.poll(pending(), new Date().toISOString());
+    // The line is still shown; it just is not news about now.
+    expect(events).toHaveLength(1);
+    expect(evidence).toEqual([]);
   });
 });

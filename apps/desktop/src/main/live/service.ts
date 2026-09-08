@@ -247,7 +247,9 @@ export class LiveSessionService {
     // Hooks are read separately because the log is machine-wide and only
     // becomes relevant once another channel has matched the run to a session.
     try {
-      drafts = [...drafts, ...(await this.hooks.poll(run, now))];
+      const hooked = await this.hooks.poll(run, now);
+      evidence = [...evidence, ...hooked.evidence];
+      drafts = [...drafts, ...hooked.events];
     } catch {
       // No hooks installed, or the log is unreadable. Neither is an error.
     }

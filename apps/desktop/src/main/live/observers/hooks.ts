@@ -22,15 +22,24 @@
  * The log is machine-wide, so lines are kept only once the run has a session id
  * to match them against. Before that, another session's hooks are somebody
  * else's business.
+ *
+ * Every line kept is also evidence that the session is alive, and is reported
+ * as such. It was not, once: this reader produced page events and nothing
+ * else, so the clock that decides whether a session has gone quiet heard only
+ * the transcript. A session doing its work through subagents writes the
+ * transcript rarely and the hook log constantly — 638 of one run's 659 records
+ * came through here — and the run was declared lost, twice, in the middle of
+ * that work (ANT-64). What is worth showing on the page is worth counting as
+ * a sign of life.
  */
 
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { parseStepMarkers, type MarkerCli, type PendingRun } from "@anthill/live";
+import { parseStepMarkers, type Evidence, type MarkerCli, type PendingRun } from "@anthill/live";
 
-import type { ObservationEventDraft } from "./types.js";
+import type { ObservationEventDraft, PollResult } from "./types.js";
 import { newCursor, readNewLines, type TailCursor } from "./tail.js";
 
 export const HOOK_LOG = join(homedir(), ".anthill", "live-hooks", "events.jsonl");
@@ -77,6 +86,14 @@ export class HookLogObserver {
   private readonly path: string;
   /** Bytes already read, per run, so a growing log is never re-parsed whole. */
   private readonly cursors = new Map<string, TailCursor>();
+  /**
+   * The latest moment already reported as activity, per run.
+   *
+   * Lines can land in the log out of order — a subagent's hooks and the main
+   * session's interleave — and a late line about an earlier moment is not
+   * news about now.
+   */
+  private readonly reportedAt = new Map<string, string>();
 
   constructor(path: string = HOOK_LOG) {
     this.path = path;
@@ -84,6 +101,7 @@ export class HookLogObserver {
 
   forget(runId: string): void {
     this.cursors.delete(runId);
+    this.reportedAt.delete(runId);
   }
 
   /** Whether hooks are installed and have ever recorded anything. */
@@ -99,9 +117,11 @@ export class HookLogObserver {
    *
    * Only lines whose session id matches this run are kept, which is why nothing
    * is returned until the run has been matched to a session by another channel.
+   * Whatever is kept is reported as activity too, at the moment of the newest
+   * line — one piece of evidence per poll, however many lines arrived.
    */
-  async poll(run: PendingRun, now: string): Promise<ObservationEventDraft[]> {
-    if (!run.detectedSessionId) return [];
+  async poll(run: PendingRun, now: string): Promise<PollResult> {
+    if (!run.detectedSessionId) return { evidence: [], events: [] };
 
     let cursor = this.cursors.get(run.anthillRunId);
     if (!cursor) {
@@ -110,9 +130,10 @@ export class HookLogObserver {
     }
 
     const chunk = await readNewLines(this.path, cursor);
-    if (!chunk.grew) return [];
+    if (!chunk.grew) return { evidence: [], events: [] };
 
     const events: ObservationEventDraft[] = [];
+    const sessionId = run.detectedSessionId;
     for (const line of chunk.lines) {
       if (!line.startsWith("{")) continue;
       let row: Record<string, unknown>;
@@ -181,6 +202,17 @@ export class HookLogObserver {
 
       events.push(base);
     }
-    return events;
+
+    const newest = events.reduce<string | undefined>(
+      (latest, event) => (latest && latest >= event.at ? latest : event.at),
+      undefined,
+    );
+    const already = this.reportedAt.get(run.anthillRunId);
+    const evidence: Evidence[] = [];
+    if (newest && (!already || newest > already)) {
+      this.reportedAt.set(run.anthillRunId, newest);
+      evidence.push({ kind: "activity", sessionId, at: newest });
+    }
+    return { evidence, events };
   }
 }

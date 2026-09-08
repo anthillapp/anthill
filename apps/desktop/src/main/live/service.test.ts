@@ -25,6 +25,7 @@ type Harness = {
   service: LiveSessionService;
   store: PendingRunStore;
   claudeRoot: string;
+  hookLogPath: string;
   storePath: string;
   published: LiveSessionSnapshot[];
   setNow: (iso: string) => void;
@@ -40,14 +41,31 @@ async function harness(startAt = "2026-08-29T10:00:00.000Z"): Promise<Harness> {
   const published: LiveSessionSnapshot[] = [];
   let now = startAt;
 
+  const hookLogPath = join(dir, "hooks", "events.jsonl");
   const service = new LiveSessionService(
     store,
     (snapshot) => published.push(snapshot),
     () => now,
-    { claudeRoot, codexRoot: join(dir, "codex"), journalDir: join(dir, "observations") },
+    { claudeRoot, codexRoot: join(dir, "codex"), journalDir: join(dir, "observations"), hookLogPath },
   );
 
-  return { service, store, claudeRoot, storePath, published, setNow: (iso) => (now = iso) };
+  return { service, store, claudeRoot, hookLogPath, storePath, published, setNow: (iso) => (now = iso) };
+}
+
+/** One line in the log the user's installed hooks write. */
+async function hookLine(path: string, sessionId: string, name: string, when: string) {
+  await mkdir(join(path, ".."), { recursive: true });
+  await appendFile(
+    path,
+    JSON.stringify({
+      source: "anthill-observation-hook",
+      harness: "claude-code",
+      eventType: name,
+      recordedAt: when,
+      data: { session_id: sessionId, hook_event_name: name, tool_name: "Bash" },
+    }) + "\n",
+    "utf8",
+  );
 }
 
 async function writeTranscript(
@@ -169,6 +187,35 @@ describe("detection", () => {
     const run = only(h.service.snapshot());
     expect(run.state).toBe("observation_lost");
     expect(run.statusMessage).toContain("may still be running");
+  });
+
+  /**
+   * ANT-64. A session that delegates writes its own transcript rarely and the
+   * hook log constantly: in the run this was reported from, 638 of 659
+   * records came through hooks, and the transcript was silent for thirteen
+   * minutes while subagents worked. The quiet clock heard only the
+   * transcript, so the run was declared lost in the middle of the work.
+   */
+  it("hears the hooks as a sign of life while the transcript is silent", async () => {
+    const h = await harness();
+    await h.service.start();
+    await h.service.startObservation(observeRequest);
+    await writeTranscript(h.claudeRoot, "sess-1");
+    h.setNow("2026-08-29T10:00:10.000Z");
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("detected_live");
+
+    // Thirteen minutes of subagent work: nothing in the transcript, a hook
+    // line every two minutes.
+    const base = Date.parse("2026-08-29T10:00:10.000Z");
+    for (let minute = 2; minute <= 13; minute += 2) {
+      const when = new Date(base + minute * 60_000).toISOString();
+      await hookLine(h.hookLogPath, "sess-1", "PostToolUse", when);
+      h.setNow(when);
+      await h.service.poll();
+      expect(only(h.service.snapshot()).state).toBe("detected_live");
+    }
+    expect(only(h.service.snapshot()).lastObservedAt).toBe(new Date(base + 12 * 60_000).toISOString());
   });
 
   it("fails a run that waited out its window without a match", async () => {

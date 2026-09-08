@@ -4,6 +4,8 @@ import {
   TIMING,
   applyEvidence,
   reopenForAnotherLook,
+  resumeFromEvidence,
+  isRecoverable,
   createPendingRun,
   expireIfStale,
   hasGoneQuiet,
@@ -501,5 +503,107 @@ describe("reopening a run for another look", () => {
   it("refuses a dismissed run — the author put it away", () => {
     const dismissed = { ...lostAndClosed(), dismissedAt: later(41 * 60_000) };
     expect(reopenForAnotherLook(dismissed, later(60 * 60_000))).toBeUndefined();
+  });
+});
+
+/**
+ * Picking a lost session back up without being asked.
+ *
+ * ANT-65. The reopening is the one "Look again" does; what is new is that
+ * evidence can do it. The rules are mostly about which evidence cannot,
+ * because a run that reopens on a re-reading of its own old records would
+ * come back on every launch and never actually be lost.
+ */
+describe("resuming a lost run from evidence", () => {
+  const lostAndClosed = (): PendingRun => ({
+    ...applyEvidence(run(), strongMatch),
+    state: "observation_lost",
+    closedAt: later(40 * 60_000),
+  });
+  const activity = (at: string, sessionId = "sess-1"): Evidence => ({ kind: "activity", sessionId, at });
+
+  it("is worth another look for as long as the record is kept", () => {
+    expect(isRecoverable(lostAndClosed(), later(60 * 60_000))).toBe(true);
+    expect(isRecoverable(lostAndClosed(), later(TIMING.retentionMs + 5_000 + 60_000))).toBe(false);
+  });
+
+  it("is not worth a look when Look again would refuse it either", () => {
+    const lost = { ...applyEvidence(run(), strongMatch), state: "observation_lost" as const };
+    expect(isRecoverable(lost, later(1_000))).toBe(false);
+    expect(isRecoverable({ ...lostAndClosed(), dismissedAt: later(41 * 60_000) }, later(60 * 60_000))).toBe(false);
+    expect(isRecoverable({ ...run(), state: "failed", closedAt: later(1_000) }, later(2_000))).toBe(false);
+  });
+
+  it("picks the session back up when it writes again", () => {
+    const at = later(60 * 60_000);
+    const resumed = resumeFromEvidence(lostAndClosed(), [activity(at)], at);
+    expect(resumed?.state).toBe("detected_live");
+    expect(resumed?.closedAt).toBeUndefined();
+    expect(resumed?.lastObservedAt).toBe(at);
+    expect(isOpen(resumed as PendingRun)).toBe(true);
+    expect(resumed?.statusMessage).toBe(
+      "The session started writing again after 60 minutes unseen, so Anthill picked it back up. Nothing was sent to the session.",
+    );
+  });
+
+  it("does not close again on its next look", () => {
+    const at = later(60 * 60_000);
+    const resumed = resumeFromEvidence(lostAndClosed(), [activity(at)], at) as PendingRun;
+    expect(hasGoneQuiet(resumed, later(60 * 60_000 + 2_000))).toBe(false);
+    expect(expireIfStale(resumed, later(60 * 60_000 + 2_000))).toBe(resumed);
+  });
+
+  it("is not fooled by a re-reading of the records it already saw", () => {
+    // An observer starting from scratch reports the old activity again, at
+    // the old time. That is not the session coming back.
+    const lost = lostAndClosed();
+    expect(resumeFromEvidence(lost, [activity(lost.lastObservedAt as string)], later(60 * 60_000))).toBeUndefined();
+    expect(resumeFromEvidence(lost, [activity(later(1_000))], later(60 * 60_000))).toBeUndefined();
+  });
+
+  it("ignores silence, unreadability, and another session's work", () => {
+    const at = later(60 * 60_000);
+    expect(resumeFromEvidence(lostAndClosed(), [{ kind: "quiet", at }], at)).toBeUndefined();
+    expect(
+      resumeFromEvidence(
+        lostAndClosed(),
+        [{ kind: "unobservable", channel: "c", at, detail: "nothing to read" }],
+        at,
+      ),
+    ).toBeUndefined();
+    expect(resumeFromEvidence(lostAndClosed(), [activity(at, "sess-2")], at)).toBeUndefined();
+  });
+
+  it("comes back ambiguous, not reconnected, when a second session now carries the marker", () => {
+    const at = later(60 * 60_000);
+    const resumed = resumeFromEvidence(
+      lostAndClosed(),
+      [{ ...strongMatch, sessionId: "sess-2", at }],
+      at,
+    );
+    expect(resumed?.state).toBe("ambiguous_match");
+    expect(resumed?.closedAt).toBeUndefined();
+    expect(resumed?.detectedSessionId).toBe("sess-1");
+  });
+
+  it("takes the session's own ending as a return too", () => {
+    const at = later(60 * 60_000);
+    const resumed = resumeFromEvidence(
+      lostAndClosed(),
+      [{ kind: "completed", sessionId: "sess-1", channel: "c", at, detail: "Finished." }],
+      at,
+    );
+    expect(resumed?.state).toBe("completed");
+    expect(resumed?.statusMessage).toBe("Finished.");
+  });
+
+  it("never resumes a run Look again would refuse", () => {
+    const at = later(60 * 60_000);
+    const dismissed = { ...lostAndClosed(), dismissedAt: later(41 * 60_000) };
+    expect(resumeFromEvidence(dismissed, [activity(at)], at)).toBeUndefined();
+    const failed = { ...applyEvidence(run(), strongMatch), state: "failed" as const, closedAt: later(1_000) };
+    expect(resumeFromEvidence(failed, [activity(at)], at)).toBeUndefined();
+    const expired = later(TIMING.retentionMs + 60 * 60_000);
+    expect(resumeFromEvidence(lostAndClosed(), [activity(expired)], expired)).toBeUndefined();
   });
 });

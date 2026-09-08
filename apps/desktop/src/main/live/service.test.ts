@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 
 import { TIMING, type PendingRun } from "@anthill/live";
 
-import { LiveSessionService, type LiveSessionSnapshot } from "./service.js";
+import { LiveSessionService, RECOVERY_POLL_MS, type LiveSessionSnapshot } from "./service.js";
 import { PendingRunStore } from "./store.js";
 
 const RUN_ID = "ANT-1A2B3C4D";
@@ -548,5 +548,162 @@ describe("looking again", () => {
     const snapshot = await h.service.lookAgain(RUN_ID);
     expect(only(snapshot).state).toBe("failed");
     expect(only(snapshot).closedAt).toBeDefined();
+  });
+});
+
+/**
+ * Picking a lost session back up without being asked.
+ *
+ * ANT-65. The run this came from was declared lost twice while its session
+ * was working; the first time the author noticed, the only way back was a
+ * button. A lost run's records are now looked at again, slowly, for as long
+ * as the record is kept — and the run comes back by itself when they grow.
+ * Reading, as ever: nothing here sends anything to the session.
+ */
+describe("a lost session that writes again", () => {
+  const START = "2026-08-29T10:00:00.000Z";
+  const at = (ms: number) => new Date(Date.parse(START) + ms).toISOString();
+  const minutes = (n: number) => at(n * 60_000);
+
+  async function say(root: string, sessionId: string, text: string, when: string) {
+    await appendFile(
+      join(root, "-tmp-scratch", `${sessionId}.jsonl`),
+      JSON.stringify({
+        type: "assistant",
+        sessionId,
+        timestamp: when,
+        message: { role: "assistant", content: [{ type: "text", text }] },
+      }) + "\n",
+      "utf8",
+    );
+  }
+
+  /** A run Anthill found, lost, and closed — the state "Look again" is offered in. */
+  async function lostAndClosed(): Promise<Harness> {
+    const h = await harness(START);
+    await h.service.start();
+    await h.service.startObservation(observeRequest);
+    await writeTranscript(h.claudeRoot, "sess-1");
+    h.setNow(at(10_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("detected_live");
+
+    // The transcript's last word was at 10:00:05; half an hour of silence
+    // after it closes the run.
+    h.setNow(minutes(31));
+    await h.service.poll();
+    const run = only(h.service.snapshot());
+    expect(run.state).toBe("observation_lost");
+    expect(run.closedAt).toBeDefined();
+    return h;
+  }
+
+  it("is picked back up when its transcript grows", async () => {
+    const h = await lostAndClosed();
+
+    await say(h.claudeRoot, "sess-1", "Back to it.", minutes(60));
+    h.setNow(minutes(60));
+    await h.service.poll();
+
+    const run = only(h.service.snapshot());
+    expect(run.state).toBe("detected_live");
+    expect(run.closedAt).toBeUndefined();
+    expect(run.lastObservedAt).toBe(minutes(60));
+    expect(run.statusMessage).toContain("picked it back up");
+    expect(run.statusMessage).toContain("Nothing was sent to the session");
+    // And the header was told, not just the store.
+    expect(h.published.at(-1)?.runs[0].state).toBe("detected_live");
+  });
+
+  it("stays picked up on the very next look", async () => {
+    const h = await lostAndClosed();
+    await say(h.claudeRoot, "sess-1", "Back to it.", minutes(60));
+    h.setNow(minutes(60));
+    await h.service.poll();
+
+    h.setNow(at(60 * 60_000 + 2_000));
+    await h.service.poll();
+    const run = only(h.service.snapshot());
+    expect(run.state).toBe("detected_live");
+    expect(run.closedAt).toBeUndefined();
+  });
+
+  it("is picked back up by its hooks too, when the transcript is the quiet channel", async () => {
+    const h = await lostAndClosed();
+
+    await hookLine(h.hookLogPath, "sess-1", "PreToolUse", minutes(60));
+    h.setNow(minutes(60));
+    await h.service.poll();
+
+    expect(only(h.service.snapshot()).state).toBe("detected_live");
+  });
+
+  it("keeps what the session wrote while Anthill was not claiming to watch", async () => {
+    const h = await lostAndClosed();
+    await say(h.claudeRoot, "sess-1", `ANTHILL-STEP ${RUN_ID} ${NONCE} implement`, minutes(60));
+    h.setNow(minutes(60));
+    await h.service.poll();
+
+    expect(await h.service.events(RUN_ID)).toContainEqual(
+      expect.objectContaining({ kind: "step.marker", blockId: "implement" }),
+    );
+  });
+
+  it("is not reopened by re-reading records it already saw, even after a restart", async () => {
+    const h = await lostAndClosed();
+
+    // A second service over the same files is exactly what a restart is. Its
+    // observers start from scratch and read the whole transcript again.
+    const store = new PendingRunStore(h.storePath);
+    const restarted = new LiveSessionService(store, () => undefined, () => minutes(60), {
+      claudeRoot: h.claudeRoot,
+      codexRoot: join(h.claudeRoot, "..", "codex"),
+      journalDir: join(h.claudeRoot, "..", "observations"),
+      hookLogPath: h.hookLogPath,
+    });
+    await restarted.start();
+    await restarted.poll();
+
+    const run = only(restarted.snapshot());
+    expect(run.state).toBe("observation_lost");
+    expect(run.closedAt).toBeDefined();
+  });
+
+  it("looks slowly — not on every tick", async () => {
+    const h = await lostAndClosed();
+    // The recovery look last ran at the moment of closing; a transcript that
+    // grows ten seconds later waits for the next look.
+    h.setNow(minutes(60));
+    await h.service.poll();
+    await say(h.claudeRoot, "sess-1", "Back to it.", at(60 * 60_000 + 10_000));
+    h.setNow(at(60 * 60_000 + 10_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("observation_lost");
+
+    h.setNow(at(60 * 60_000 + 10_000 + RECOVERY_POLL_MS));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("detected_live");
+  });
+
+  it("stops looking once the record is past keeping", async () => {
+    const h = await lostAndClosed();
+    const late = at(TIMING.retentionMs + 60 * 60_000);
+    await say(h.claudeRoot, "sess-1", "Back to it.", late);
+    h.setNow(late);
+    await h.service.poll();
+
+    const run = only(h.service.snapshot());
+    expect(run.state).toBe("observation_lost");
+    expect(run.closedAt).toBeDefined();
+  });
+
+  it("keeps the poll loop alive for a lost run, and lets it go once there is nothing to look for", async () => {
+    const h = await lostAndClosed();
+    const timer = () => (h.service as unknown as { timer?: unknown }).timer;
+    expect(timer()).toBeDefined();
+
+    await h.service.dismiss(RUN_ID);
+    await h.service.poll();
+    expect(timer()).toBeUndefined();
   });
 });

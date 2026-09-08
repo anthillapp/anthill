@@ -444,6 +444,93 @@ export function reopenForAnotherLook(run: PendingRun, now: string): PendingRun |
   };
 }
 
+/**
+ * Whether a closed run is still worth a slower look for signs of life.
+ *
+ * Exactly the runs "Look again" would accept — a session Anthill was reading
+ * and then lost, not put away by the author — for as long as the record is
+ * kept at all. A lost session is not a finished one: the person may have
+ * stopped it and picked it up an hour later, or Anthill may simply have missed
+ * what it was doing (ANT-64 was the second), and either way the record on
+ * disk starts growing again. Waiting for a button press to notice that made
+ * the button the only way back (ANT-65).
+ */
+export function isRecoverable(run: PendingRun, now: string): boolean {
+  if (!run.closedAt || run.dismissedAt) return false;
+  if (run.state !== "observation_lost" || !run.detectedSessionId) return false;
+  return !isExpired(run, now);
+}
+
+/**
+ * Whether one piece of evidence is the session doing something *after* the
+ * moment the run last saw it.
+ *
+ * Anything else is a re-reading of old records. An observer that starts from
+ * scratch — after the app restarts, say — reports the whole record again, and
+ * reporting activity from before the loss as a return would reopen every lost
+ * run on every launch. Silence and "nothing to read" are never news.
+ */
+function isNewsSince(evidence: Evidence, run: PendingRun, since: number): boolean {
+  switch (evidence.kind) {
+    case "quiet":
+    case "unobservable":
+      return false;
+    case "ambiguous":
+      // Only sessions still speaking are counted as contenders, so this is
+      // about now by construction.
+      return true;
+    case "activity":
+    case "completed":
+    case "failed":
+      if (evidence.sessionId !== run.detectedSessionId) return false;
+      return Date.parse(evidence.at) > since;
+    case "match":
+      return Date.parse(evidence.at) > since;
+  }
+}
+
+/** "a minute", "12 minutes", "3 hours" — for the note that says how long. */
+function forHowLong(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 2) return "a minute";
+  if (minutes < 120) return `${minutes} minutes`;
+  return `${Math.round(minutes / 60)} hours`;
+}
+
+/**
+ * Pick a lost run back up if its session has written again.
+ *
+ * The same reopening "Look again" does, made by the evidence rather than by
+ * the author, and only by evidence that is news. Everything after the
+ * reopening is the ordinary fold: matching re-runs at its usual tiers, so a
+ * second session now carrying the marker makes the run ambiguous rather than
+ * quietly reconnecting to one of them.
+ *
+ * Returns nothing when there is nothing to do, so a caller can tell a resumed
+ * run from an untouched one by identity alone.
+ */
+export function resumeFromEvidence(
+  run: PendingRun,
+  evidence: readonly Evidence[],
+  now: string,
+): PendingRun | undefined {
+  if (!isRecoverable(run, now)) return undefined;
+  const since = Date.parse(run.lastObservedAt ?? run.createdAt);
+  const news = evidence.filter((item) => isNewsSince(item, run, since));
+  if (news.length === 0) return undefined;
+
+  const reopened = reopenForAnotherLook(run, now);
+  if (!reopened) return undefined;
+
+  let next = reopened;
+  for (const item of news) next = applyEvidence(next, item);
+  if (next.state !== "detected_live") return next;
+  return {
+    ...next,
+    statusMessage: `The session started writing again after ${forHowLong(Date.parse(now) - since)} unseen, so Anthill picked it back up. Nothing was sent to the session.`,
+  };
+}
+
 /** Whether a detected run has been quiet long enough to stop claiming it. */
 export function hasGoneQuiet(run: PendingRun, now: string): boolean {
   if (run.state !== "detected_live" || !run.lastObservedAt) return false;

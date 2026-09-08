@@ -336,6 +336,9 @@ export function LiveSessionPage({
    * run is still open it revives by itself the moment the session writes, so a
    * button would promise nothing the app is not already doing; and a cancelled
    * run cannot appear here at all, because cancelling removes the record.
+   *
+   * A closed one is also looked at again by itself, just more slowly (ANT-65),
+   * so the button's remaining promise is "now" rather than "at all".
    */
   const canLookAgain = run.state === "observation_lost" && Boolean(run.closedAt);
   const [looking, setLooking] = useState(false);
@@ -437,8 +440,10 @@ export function LiveSessionPage({
                 {looking ? "Reading the records…" : "Look again"}
               </button>
               <p className="hint">
-                Anthill re-reads the records this session writes on this machine. Nothing is
-                sent to the session — it never knew Anthill was reading.
+                Anthill keeps checking this session&rsquo;s records every half-minute for a day
+                and picks the session back up by itself if they grow. Look again reads them
+                right now instead of waiting. Nothing is sent to the session — it never knew
+                Anthill was reading.
               </p>
             </div>
           ) : null}

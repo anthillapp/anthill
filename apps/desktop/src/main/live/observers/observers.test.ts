@@ -941,6 +941,133 @@ describe("a session that delegates and then waits", () => {
     const { evidence } = await look(body, 60_000);
     expect(evidence.some((item) => item.kind === "completed")).toBe(false);
   });
+
+  /**
+   * The same delegation, sent to the background.
+   *
+   * ANT-70, measured from the session it was reported in. `Agent` was treated
+   * as a delegation that comes back, because normally it does: in that
+   * transcript two foreground `Agent` calls returned after 428 and 773
+   * seconds. The three background ones returned in *two* — the tool reports
+   * that the agent was started, and the work then runs for half an hour
+   * writing nothing here. So the wait was recorded and cleared two seconds
+   * later, the turn ended, and five minutes on Anthill said "Session
+   * finished" while the agent was still going.
+   *
+   * `run_in_background` is what separates the two, not the tool's name.
+   */
+  function backgrounded(sessionId: string, tool: string) {
+    return transcript(sessionId, [
+      assistant(
+        sessionId,
+        4_000,
+        [
+          {
+            type: "tool_use",
+            id: "toolu_9",
+            name: tool,
+            input: { subagent_type: "developer", description: "Stage 2", run_in_background: true },
+          },
+        ],
+        "tool_use",
+      ),
+      {
+        type: "user",
+        sessionId,
+        // Two seconds, because all it says is that the agent was started.
+        timestamp: at(6_000),
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_9", is_error: false }],
+        },
+      },
+      assistant(sessionId, 7_000, [{ type: "text", text: "Stage 2 is running." }], "end_turn"),
+    ]);
+  }
+
+  it.each(["Agent", "Task"] as const)(
+    "is not called finished while a backgrounded %s is working",
+    async (tool) => {
+      // Thirty-seven minutes, which is what the reported session measured.
+      const { evidence } = await look(backgrounded("sess-6", tool), 37 * 60_000);
+      expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+    },
+  );
+
+  it("stays that way for as long as the background agent takes", async () => {
+    const { evidence } = await look(backgrounded("sess-7", "Agent"), 3 * 60 * 60_000);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+  });
+
+  it("is not fooled by the instant result the dispatch returns", async () => {
+    // The result came back, so the old rule had nothing left to wait on. It is
+    // a receipt for the dispatch, not the delegate's work.
+    const { evidence } = await look(backgrounded("sess-8", "Agent"), 12 * 60_000);
+    expect(evidence.some((item) => item.kind === "failed")).toBe(false);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+  });
+
+  it("does not settle while another channel is still hearing the session", async () => {
+    // ANT-70's second half. Even with nothing in this file, the hook log was
+    // reporting the session's tool calls throughout; the run's own clock had
+    // moved, and this observer was the only thing that had not noticed.
+    const dir = await root();
+    const body = transcript("sess-10", [
+      assistant("sess-10", 4_000, [{ type: "text", text: "Kicked it off." }], "end_turn"),
+    ]);
+    await writeClaude(dir, "-tmp-scratch", "sess-10", body);
+
+    const heardElsewhere: PendingRun = {
+      ...pending("claude-code"),
+      detectedSessionId: "sess-10",
+      state: "detected_live",
+      lastObservedAt: at(11 * 60_000),
+    };
+    const { evidence } = await new ClaudeCodeObserver(dir).poll(heardElsewhere, at(12 * 60_000));
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+  });
+
+  it("settles once every channel has gone quiet", async () => {
+    const dir = await root();
+    const body = transcript("sess-11", [
+      assistant("sess-11", 4_000, [{ type: "text", text: "That is everything." }], "end_turn"),
+    ]);
+    await writeClaude(dir, "-tmp-scratch", "sess-11", body);
+
+    const heardLongAgo: PendingRun = {
+      ...pending("claude-code"),
+      detectedSessionId: "sess-11",
+      state: "detected_live",
+      lastObservedAt: at(4_000),
+    };
+    const { evidence } = await new ClaudeCodeObserver(dir).poll(heardLongAgo, at(12 * 60_000));
+    expect(evidence.some((item) => item.kind === "completed")).toBe(true);
+  });
+
+  it("still settles a foreground delegation that came back", async () => {
+    // The guard must not swallow the ordinary case: a foreground Agent's
+    // result is the work itself, and the session really has finished.
+    const body = transcript("sess-9", [
+      assistant(
+        "sess-9",
+        4_000,
+        [{ type: "tool_use", id: "toolu_1", name: "Agent", input: { subagent_type: "reader" } }],
+        "tool_use",
+      ),
+      {
+        type: "user",
+        sessionId: "sess-9",
+        timestamp: at(400_000),
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_1", is_error: false }],
+        },
+      },
+      assistant("sess-9", 401_000, [{ type: "text", text: "All done." }], "end_turn"),
+    ]);
+    const { evidence } = await look(body, 401_000 + 12 * 60_000);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(true);
+  });
 });
 
 /**

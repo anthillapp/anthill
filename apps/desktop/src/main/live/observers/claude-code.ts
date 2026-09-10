@@ -74,9 +74,23 @@ const TERMINAL_STOP = new Set(["end_turn", "stop_sequence"]);
  * here at all — there is no second transcript and no `isSidechain` record to
  * read. After one of those, silence in this file stops being evidence about
  * the session, and inferring an ending from it is a guess dressed as a fact.
+ *
+ * Which of the two a call is cannot be read off the name alone. `Task` and
+ * `Agent` also take `run_in_background`, and with it they behave exactly like
+ * `SendMessage`: in the session ANT-70 was reported from, two foreground
+ * `Agent` calls returned after 428 and 773 seconds while all three background
+ * ones returned in two — a receipt saying the agent had started, not the work.
+ * So the property is `run_in_background`, and the name only says whether a
+ * result is the work or a receipt for it.
  */
 const AWAITED_DELEGATION = new Set(["Task", "Agent"]);
 const BACKGROUND_DELEGATION = new Set(["SendMessage"]);
+
+/** Whether this call hands work off somewhere this transcript will not follow. */
+function goesToBackground(name: string, input: Record<string, unknown>): boolean {
+  if (BACKGROUND_DELEGATION.has(name)) return true;
+  return AWAITED_DELEGATION.has(name) && input.run_in_background === true;
+}
 
 const CHANNEL = "claude-code:transcript";
 
@@ -275,9 +289,27 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
         evidence.push({ kind: "activity", sessionId, at: state.lastActivityAt });
       }
 
-      const quietFor = state.lastActivityAt
-        ? Date.parse(now) - Date.parse(state.lastActivityAt)
-        : 0;
+      /*
+        Silence measured across every channel, not just this file.
+
+        A session's last word is the latest thing *anything* recorded about it,
+        and since ANT-64 the hook log is usually the busier of the two: in the
+        session ANT-70 was reported from, 212 hook events for this session
+        landed during the thirty-seven minutes this transcript said nothing.
+        Reading only this file, the observer concluded the session had finished
+        while another channel was watching it work.
+
+        `run.lastObservedAt` is one poll behind, which against a five-minute
+        threshold does not matter, and it never runs ahead of the truth: it
+        moves only when a channel actually reported something.
+      */
+      const lastWord = [state.lastActivityAt, run.lastObservedAt]
+        .filter((value): value is string => Boolean(value))
+        .reduce<string | undefined>(
+          (latest, value) => (latest && latest >= value ? latest : value),
+          undefined,
+        );
+      const quietFor = lastWord ? Date.parse(now) - Date.parse(lastWord) : 0;
       // ANT-18. A terminal stop reason plus a long silence used to be read as
       // an ending. Delegating a stage produces exactly that shape — the agent
       // dispatches, says so, ends its turn, and then waits for as long as the
@@ -534,10 +566,14 @@ function scan(
           // `Agent` across versions; both carry `subagent_type`, which is the
           // one field that can tie work to a workflow's agent.
           const isDelegation = AWAITED_DELEGATION.has(name);
+          const background = goesToBackground(name, input);
           // A delegation that comes back is a wait with a visible end; one that
-          // does not is a hole in what this transcript can ever say.
-          if (isDelegation && id) state.awaiting.add(id);
-          if (BACKGROUND_DELEGATION.has(name)) state.dispatched = true;
+          // does not is a hole in what this transcript can ever say. Waiting on
+          // a backgrounded one would be worse than not waiting at all: its
+          // receipt arrives within seconds and would clear the wait while the
+          // work is still ahead.
+          if (isDelegation && id && !background) state.awaiting.add(id);
+          if (background) state.dispatched = true;
           events.push({
             ...base,
             kind: isDelegation ? "subagent.start" : "tool.start",

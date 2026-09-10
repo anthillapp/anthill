@@ -607,3 +607,59 @@ describe("resuming a lost run from evidence", () => {
     expect(resumeFromEvidence(lostAndClosed(), [activity(expired)], expired)).toBeUndefined();
   });
 });
+
+/**
+ * A tool that started and has not come back.
+ *
+ * ANT-71. The quiet clock asks "when did anything last arrive?". While a tool
+ * is running the honest answer is "nothing can arrive yet", and treating that
+ * as absence declared a session lost eight minutes into a build it was in the
+ * middle of.
+ */
+describe("work still in flight", () => {
+  const live = (): PendingRun => applyEvidence(run(), strongMatch);
+  const working = (ms: number): Evidence => ({
+    kind: "working",
+    sessionId: "sess-1",
+    at: later(ms),
+    since: later(5_000),
+    detail: "Bash has been running since 10:00:05.",
+  });
+
+  it("keeps a live session live, however long the tool takes", () => {
+    const busy = applyEvidence(live(), working(20 * 60_000));
+    expect(busy.state).toBe("detected_live");
+    expect(hasGoneQuiet(busy, later(20 * 60_000 + 1_000))).toBe(false);
+  });
+
+  it("says what is running rather than claiming the session wrote something", () => {
+    const busy = applyEvidence(live(), working(10 * 60_000));
+    expect(busy.statusMessage).toBe(
+      "Bash has been running since 10:00:05. It has not reported back yet, so the session is still working.",
+    );
+    // The moment is the observation, not an invented write by the session.
+    expect(busy.lastObservedAt).toBe(later(10 * 60_000));
+  });
+
+  it("brings back a session already given up on", () => {
+    const lost = { ...live(), state: "observation_lost" as const };
+    expect(applyEvidence(lost, working(10 * 60_000)).state).toBe("detected_live");
+  });
+
+  it("does not speak for another session", () => {
+    const busy = applyEvidence(live(), { ...working(10 * 60_000), sessionId: "sess-2" } as Evidence);
+    expect(busy).toBe(live() === busy ? busy : busy);
+    expect(busy.lastObservedAt).toBe(live().lastObservedAt);
+  });
+
+  it("does not make a run live that was never matched", () => {
+    // A tool call is not a match. Only the channels that read the marker say
+    // which session this run is.
+    expect(applyEvidence(run(), working(10_000)).state).toBe("pending_after_copy");
+  });
+
+  it("does not reopen a session the tool recorded as failed", () => {
+    const failed = { ...live(), state: "failed" as const };
+    expect(applyEvidence(failed, working(10 * 60_000)).state).toBe("failed");
+  });
+});

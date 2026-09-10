@@ -101,6 +101,16 @@ export type Evidence =
   | { kind: "ambiguous"; sessionIds: string[]; channel: string; at: string }
   /** The matched session wrote something new. */
   | { kind: "activity"; sessionId: string; at: string }
+  /**
+   * A tool this session started has not reported back yet.
+   *
+   * Not the same claim as `activity`, and it must not be folded into it: the
+   * session has written nothing since `since`, and saying otherwise would put
+   * a moment on the record that nothing happened at. What it says is narrower
+   * and stronger — work is in flight *right now*, because something opened and
+   * has not closed.
+   */
+  | { kind: "working"; sessionId: string; at: string; since: string; detail?: string }
   /** The tool recorded that the work finished. */
   | { kind: "completed"; sessionId: string; channel: string; at: string; detail?: string }
   /** The tool recorded a failure. */
@@ -295,6 +305,22 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
         statusMessage: `${evidence.sessionIds.length} local sessions carry this marker, so Anthill cannot say which one to observe.`,
       };
 
+    case "working": {
+      if (run.detectedSessionId && run.detectedSessionId !== evidence.sessionId) return run;
+      // Only for a session already being followed. A run still waiting for its
+      // first match is not made live by a tool call it has not tied to itself.
+      if (run.state !== "detected_live" && run.state !== "observation_lost") return run;
+      return {
+        ...run,
+        state: "detected_live",
+        expiresAt: windowFrom(run, evidence.at),
+        lastObservedAt: evidence.at,
+        statusMessage: evidence.detail
+          ? `${evidence.detail} It has not reported back yet, so the session is still working.`
+          : "A tool this session started has not reported back yet, so it is still working.",
+      };
+    }
+
     case "activity": {
       if (run.detectedSessionId && run.detectedSessionId !== evidence.sessionId) return run;
       // Only work done *after* the finish disproves it. An observer that
@@ -479,6 +505,10 @@ function isNewsSince(evidence: Evidence, run: PendingRun, since: number): boolea
       // Only sessions still speaking are counted as contenders, so this is
       // about now by construction.
       return true;
+    case "working":
+      // Reported at the moment of the look, and only while something is
+      // genuinely outstanding — so it is always about now, never a re-reading.
+      return evidence.sessionId === run.detectedSessionId;
     case "activity":
     case "completed":
     case "failed":

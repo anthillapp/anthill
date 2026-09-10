@@ -37,7 +37,7 @@ import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { parseStepMarkers, type Evidence, type MarkerCli, type PendingRun } from "@anthill/live";
+import { TIMING, parseStepMarkers, type Evidence, type MarkerCli, type PendingRun } from "@anthill/live";
 
 import type { ObservationEventDraft, PollResult } from "./types.js";
 import { newCursor, readNewLines, type TailCursor } from "./tail.js";
@@ -82,6 +82,22 @@ function toolTarget(name: string | undefined, input: unknown): string | undefine
   return str(input.pattern) ?? str(input.query) ?? str(input.description);
 }
 
+/** A tool call seen starting, still waiting to be seen finishing. */
+type OpenCall = { at: string; toolName?: string };
+
+/**
+ * How long an unfinished tool call is still taken as a sign of life.
+ *
+ * Nothing ever retracts a `PreToolUse`. A session killed mid-tool, or a hook
+ * that failed to write its `PostToolUse`, leaves one open forever — this log
+ * has one from a permission prompt that was never answered, open for over an
+ * hour. So the claim has to expire, and it expires on the same clock that
+ * decides a matched session has stopped being worth reading: long enough for
+ * any build or test suite somebody would sit through, short enough that a
+ * stale record cannot keep a dead session looking alive all day.
+ */
+const IN_FLIGHT_TTL_MS = TIMING.silenceTtlMs;
+
 export class HookLogObserver {
   private readonly path: string;
   /** Bytes already read, per run, so a growing log is never re-parsed whole. */
@@ -94,6 +110,16 @@ export class HookLogObserver {
    * news about now.
    */
   private readonly reportedAt = new Map<string, string>();
+  /**
+   * Tool calls this session started that have not reported back, per run.
+   *
+   * A `PreToolUse` with no `PostToolUse` is the strongest thing either channel
+   * ever says: work is happening *now*. Nothing more can arrive until the tool
+   * returns, so the silence after it is the tool running, not the session
+   * stopping — and the longer the tool takes, the more certain the old clock
+   * became that the session was gone (ANT-71).
+   */
+  private readonly open = new Map<string, Map<string, OpenCall>>();
 
   constructor(path: string = HOOK_LOG) {
     this.path = path;
@@ -102,6 +128,7 @@ export class HookLogObserver {
   forget(runId: string): void {
     this.cursors.delete(runId);
     this.reportedAt.delete(runId);
+    this.open.delete(runId);
   }
 
   /** Whether hooks are installed and have ever recorded anything. */
@@ -129,11 +156,19 @@ export class HookLogObserver {
       this.cursors.set(run.anthillRunId, cursor);
     }
 
+    const sessionId = run.detectedSessionId;
+    let inFlight = this.open.get(run.anthillRunId);
+    if (!inFlight) {
+      inFlight = new Map<string, OpenCall>();
+      this.open.set(run.anthillRunId, inFlight);
+    }
+
     const chunk = await readNewLines(this.path, cursor);
-    if (!chunk.grew) return { evidence: [], events: [] };
+    // A log that has not grown can still be saying something: a tool that
+    // opened before this poll and has not closed is work in flight now.
+    if (!chunk.grew) return { evidence: this.stillWorking(inFlight, sessionId, now), events: [] };
 
     const events: ObservationEventDraft[] = [];
-    const sessionId = run.detectedSessionId;
     for (const line of chunk.lines) {
       if (!line.startsWith("{")) continue;
       let row: Record<string, unknown>;
@@ -154,6 +189,14 @@ export class HookLogObserver {
       const cli = (str(row.harness) as MarkerCli | undefined) ?? run.selectedCli;
       const at = str(row.recordedAt) ?? now;
       const toolName = str(data.tool_name);
+
+      // Opened and closed, tracked by the id the tool call carries. A call
+      // with no id cannot be paired, so it is not counted either way.
+      const useId = str(data.tool_use_id);
+      if (useId) {
+        if (name === "PreToolUse") inFlight.set(useId, { at, ...(toolName ? { toolName } : {}) });
+        else if (name === "PostToolUse") inFlight.delete(useId);
+      }
 
       const base: ObservationEventDraft = {
         at,
@@ -213,6 +256,39 @@ export class HookLogObserver {
       this.reportedAt.set(run.anthillRunId, newest);
       evidence.push({ kind: "activity", sessionId, at: newest });
     }
-    return { evidence, events };
+    return { evidence: [...evidence, ...this.stillWorking(inFlight, sessionId, now)], events };
+  }
+
+  /**
+   * "Something is running" — said only while something demonstrably is.
+   *
+   * Reported at `now` rather than at the call's own moment, because that is
+   * the claim: not that the session wrote at this instant, but that as of this
+   * instant it has work outstanding. Calls too old to believe are dropped as
+   * they are found, so a stale record cannot keep saying it forever.
+   */
+  private stillWorking(
+    inFlight: Map<string, OpenCall>,
+    sessionId: string,
+    now: string,
+  ): Evidence[] {
+    let newest: OpenCall | undefined;
+    for (const [id, call] of inFlight) {
+      if (Date.parse(now) - Date.parse(call.at) > IN_FLIGHT_TTL_MS) {
+        inFlight.delete(id);
+        continue;
+      }
+      if (!newest || call.at > newest.at) newest = call;
+    }
+    if (!newest) return [];
+    return [
+      {
+        kind: "working",
+        sessionId,
+        at: now,
+        since: newest.at,
+        ...(newest.toolName ? { detail: `${newest.toolName} has been running since ${newest.at}.` } : {}),
+      },
+    ];
   }
 }

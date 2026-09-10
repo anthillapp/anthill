@@ -53,7 +53,13 @@ async function harness(startAt = "2026-08-29T10:00:00.000Z"): Promise<Harness> {
 }
 
 /** One line in the log the user's installed hooks write. */
-async function hookLine(path: string, sessionId: string, name: string, when: string) {
+async function hookLine(
+  path: string,
+  sessionId: string,
+  name: string,
+  when: string,
+  toolUseId?: string,
+) {
   await mkdir(join(path, ".."), { recursive: true });
   await appendFile(
     path,
@@ -62,7 +68,12 @@ async function hookLine(path: string, sessionId: string, name: string, when: str
       harness: "claude-code",
       eventType: name,
       recordedAt: when,
-      data: { session_id: sessionId, hook_event_name: name, tool_name: "Bash" },
+      data: {
+        session_id: sessionId,
+        hook_event_name: name,
+        tool_name: "Bash",
+        ...(toolUseId ? { tool_use_id: toolUseId } : {}),
+      },
     }) + "\n",
     "utf8",
   );
@@ -705,5 +716,76 @@ describe("a lost session that writes again", () => {
     await h.service.dismiss(RUN_ID);
     await h.service.poll();
     expect(timer()).toBeUndefined();
+  });
+});
+
+/**
+ * A session in the middle of a long tool call.
+ *
+ * ANT-71, driven end to end because that is the only place the bug was
+ * visible: the observers were each behaving as written, and the run still went
+ * to "Observation lost" eight minutes into a `swift build` the session was
+ * demonstrably running. The last thing either channel had recorded was the
+ * call *starting* — which is the strongest sign of life there is, and the one
+ * the clock counted as silence.
+ */
+describe("a session waiting on a tool it started", () => {
+  const START = "2026-08-29T10:00:00.000Z";
+  const at = (ms: number) => new Date(Date.parse(START) + ms).toISOString();
+
+  async function live(): Promise<Harness> {
+    const h = await harness(START);
+    await h.service.start();
+    await h.service.startObservation(observeRequest);
+    await writeTranscript(h.claudeRoot, "sess-1");
+    h.setNow(at(10_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("detected_live");
+    return h;
+  }
+
+  it("stays live while the call is outstanding, past the quiet threshold", async () => {
+    const h = await live();
+    await hookLine(h.hookLogPath, "sess-1", "PreToolUse", at(60_000), "toolu_1");
+
+    // Well past activityTtlMs with nothing further written anywhere — which is
+    // exactly what a build looks like from outside.
+    for (const minute of [2, 6, 12, 20]) {
+      h.setNow(at(minute * 60_000));
+      await h.service.poll();
+      const run = only(h.service.snapshot());
+      expect(run.state).toBe("detected_live");
+      expect(run.statusMessage).toContain("still working");
+    }
+  });
+
+  it("goes quiet once the call reports back and nothing follows", async () => {
+    const h = await live();
+    await hookLine(h.hookLogPath, "sess-1", "PreToolUse", at(60_000), "toolu_1");
+    h.setNow(at(2 * 60_000));
+    await h.service.poll();
+
+    await hookLine(h.hookLogPath, "sess-1", "PostToolUse", at(3 * 60_000), "toolu_1");
+    h.setNow(at(3 * 60_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("detected_live");
+
+    // Now there really is nothing outstanding, so silence means what it says.
+    h.setNow(at(3 * 60_000 + TIMING.activityTtlMs + 1_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("observation_lost");
+  });
+
+  it("does not let one forgotten call keep a dead session alive all day", async () => {
+    const h = await live();
+    await hookLine(h.hookLogPath, "sess-1", "PreToolUse", at(60_000), "toolu_1");
+    h.setNow(at(2 * 60_000));
+    await h.service.poll();
+
+    // A call nothing ever closes stops counting on the same clock that decides
+    // a matched session has stopped being worth reading.
+    h.setNow(at(60_000 + TIMING.silenceTtlMs + 60_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("observation_lost");
   });
 });

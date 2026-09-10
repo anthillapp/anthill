@@ -185,3 +185,93 @@ describe("hook lines as evidence the session is alive", () => {
     expect(evidence).toEqual([]);
   });
 });
+
+/**
+ * A tool that started and has not come back.
+ *
+ * ANT-71, measured from the session it was reported in. The last thing either
+ * channel recorded was `PreToolUse Bash` — a `swift build` — and eight minutes
+ * later Anthill said "Observation lost" while that build was still running.
+ * Nothing more *can* arrive until a tool returns, so the silence after it is
+ * the tool working; reading it as absence gets more wrong the longer the tool
+ * takes.
+ */
+describe("work still in flight", () => {
+  const NOW = "2026-08-29T10:10:00.000Z";
+  const at = (iso: string, data: Record<string, unknown>) => ({ ...line(data), recordedAt: iso });
+  const started = (iso: string, id = "toolu_1", tool = "Bash") =>
+    at(iso, { hook_event_name: "PreToolUse", tool_name: tool, tool_use_id: id });
+  const finished = (iso: string, id = "toolu_1", tool = "Bash") =>
+    at(iso, { hook_event_name: "PostToolUse", tool_name: tool, tool_use_id: id });
+
+  it("reports the session as working while the call is open", async () => {
+    const path = await log([started("2026-08-29T10:02:00.000Z")]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    expect(evidence).toContainEqual(
+      expect.objectContaining({
+        kind: "working",
+        sessionId: "sess-1",
+        at: NOW,
+        since: "2026-08-29T10:02:00.000Z",
+      }),
+    );
+  });
+
+  it("keeps saying so on a later poll that reads nothing new", async () => {
+    // The whole point: the log stops growing precisely because the tool is
+    // busy, and that is when the old clock started counting towards silence.
+    const path = await log([started("2026-08-29T10:02:00.000Z")]);
+    const observer = new HookLogObserver(path);
+    await observer.poll(pending(), "2026-08-29T10:02:01.000Z");
+    const { evidence, events } = await observer.poll(pending(), NOW);
+    expect(events).toEqual([]);
+    expect(evidence.some((item) => item.kind === "working")).toBe(true);
+  });
+
+  it("names the tool, so the page can say what is running", async () => {
+    const path = await log([started("2026-08-29T10:02:00.000Z")]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    const working = evidence.find((item) => item.kind === "working");
+    expect(working && "detail" in working && working.detail).toContain("Bash has been running");
+  });
+
+  it("stops once the call reports back", async () => {
+    const path = await log([
+      started("2026-08-29T10:02:00.000Z"),
+      finished("2026-08-29T10:02:30.000Z"),
+    ]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    expect(evidence.some((item) => item.kind === "working")).toBe(false);
+  });
+
+  it("follows the newest open call when several are running", async () => {
+    const path = await log([
+      started("2026-08-29T10:01:00.000Z", "toolu_1"),
+      started("2026-08-29T10:05:00.000Z", "toolu_2"),
+    ]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    expect(evidence).toContainEqual(
+      expect.objectContaining({ kind: "working", since: "2026-08-29T10:05:00.000Z" }),
+    );
+  });
+
+  it("gives up on a call too old to believe", async () => {
+    // Nothing ever retracts a PreToolUse. The reported log still held one from
+    // a permission prompt nobody answered, open for over an hour — a record
+    // like that must not keep a dead session looking alive all day.
+    const path = await log([started("2026-08-29T09:00:00.000Z")]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    expect(evidence.some((item) => item.kind === "working")).toBe(false);
+  });
+
+  it("says nothing about a call belonging to another session", async () => {
+    const path = await log([
+      {
+        ...started("2026-08-29T10:02:00.000Z"),
+        data: { session_id: "other", hook_event_name: "PreToolUse", tool_use_id: "toolu_9" },
+      },
+    ]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    expect(evidence).toEqual([]);
+  });
+});

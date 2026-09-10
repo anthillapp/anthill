@@ -16,7 +16,7 @@ import {
   type PendingRun,
 } from "@anthill/live";
 
-import { LiveWorkflowGraph, ZOOM_MAX, ZOOM_MIN } from "./LiveWorkflowGraph.js";
+import { LiveWorkflowGraph, ZOOM_MAX, ZOOM_MIN, wasDrag } from "./LiveWorkflowGraph.js";
 
 const workflow: Workflow = {
   id: "workflow-1",
@@ -53,7 +53,7 @@ const run: PendingRun = {
   state: "detected_live",
 };
 
-function show() {
+function show(selectedBlockId?: string) {
   const onSelect = vi.fn();
   const view = foldLiveSession(workflow, run, []);
   render(
@@ -61,11 +61,37 @@ function show() {
       workflow={workflow}
       view={view}
       sessionState={run.state}
+      selectedBlockId={selectedBlockId}
       onSelect={onSelect}
     />,
   );
   return { onSelect };
 }
+
+/**
+ * The pan guard, which the component cannot be asked about.
+ *
+ * A pan ends with a click on the background, and a click on the background
+ * puts the selected step down — so dragging the diagram sideways while reading
+ * a step must not close what you are reading. jsdom's pointer events carry no
+ * clientX or clientY (both arrive as null), so the drag itself cannot be
+ * simulated here; the rule is tested where it lives instead.
+ */
+describe("telling a pan from a click", () => {
+  it("counts real travel as a drag", () => {
+    expect(wasDrag({ x: 100, y: 100 }, { x: 260, y: 140 })).toBe(true);
+  });
+
+  it("lets a hand resting on the trackpad still be a click", () => {
+    expect(wasDrag({ x: 100, y: 100 }, { x: 101, y: 102 })).toBe(false);
+    expect(wasDrag({ x: 100, y: 100 }, { x: 100, y: 100 })).toBe(false);
+  });
+
+  it("measures both directions, so a diagonal nudge is not a drag twice over", () => {
+    expect(wasDrag({ x: 100, y: 100 }, { x: 97, y: 98 })).toBe(true);
+    expect(wasDrag({ x: 100, y: 100 }, { x: 98, y: 99 })).toBe(false);
+  });
+});
 
 const level = () => screen.getByTestId("live-zoom-level").textContent ?? "";
 const zoomIn = () => screen.getByRole("button", { name: "Zoom in" });
@@ -240,6 +266,144 @@ describe("the Live Session zoom controls", () => {
     expect(onSelect).toHaveBeenCalledWith("implement");
     // Read-only: there is nothing here that could change the workflow.
     expect(graph.querySelector("input, textarea, select")).toBeNull();
+  });
+
+  it("puts the step down when the click lands on the empty diagram", () => {
+    // The ✕ on the activity filter was the only way back, across the window
+    // from where the reader was looking.
+    const { onSelect } = show("implement");
+    const graph = document.querySelector(".live-graph") as unknown as HTMLElement;
+    fireEvent.click(graph);
+    expect(onSelect).toHaveBeenCalledWith(undefined);
+  });
+
+  it("puts it down for a click on a connection too — nothing there is selectable", () => {
+    const { onSelect } = show("implement");
+    const graph = document.querySelector(".live-graph") as unknown as HTMLElement;
+    fireEvent.click(graph.querySelector(".live-edge") as Element);
+    expect(onSelect).toHaveBeenCalledWith(undefined);
+  });
+
+  it("says nothing when there was no selection to put down", () => {
+    const { onSelect } = show();
+    fireEvent.click(document.querySelector(".live-graph") as unknown as HTMLElement);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("keeps the step while a click lands on a block", () => {
+    const { onSelect } = show("implement");
+    const graph = document.querySelector(".live-graph") as unknown as HTMLElement;
+    fireEvent.click(within(graph).getByText("Make the change"));
+    // The block's own handler toggled it; the background must not fire as well.
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith(undefined);
+  });
+
+  it("selects when the click lands on the step's own words", () => {
+    // The lines inside a block are laid out by the browser now, so a click
+    // usually lands on the text rather than on the card behind it.
+    const { onSelect } = show();
+    const graph = document.querySelector(".live-graph") as unknown as HTMLElement;
+    fireEvent.click(within(graph).getByText("Make the change"));
+    expect(onSelect).toHaveBeenCalledWith("implement");
+  });
+});
+
+/**
+ * What a finished step says it cost.
+ *
+ * The running block already ticks; a done one had nothing to show for the time
+ * it took, so the diagram forgot it the moment the next step started.
+ */
+describe("a finished step's elapsed time", () => {
+  function draw(spentMs?: number) {
+    const view = foldLiveSession(workflow, run, []);
+    const shown = {
+      ...view,
+      blocks: {
+        ...view.blocks,
+        implement: {
+          ...view.blocks.implement,
+          state: "done" as const,
+          passes: 1,
+          ...(spentMs !== undefined ? { spentMs } : {}),
+        },
+      },
+    };
+    render(
+      <LiveWorkflowGraph
+        workflow={workflow}
+        view={shown}
+        sessionState={run.state}
+        onSelect={vi.fn()}
+      />,
+    );
+    return document.querySelector(".live-graph") as unknown as HTMLElement;
+  }
+
+  /** The state line of the step, which the End block also calls "Done". */
+  const stateLine = (graph: HTMLElement) =>
+    [...graph.querySelectorAll(".live-node-state")].map((line) => line.textContent);
+
+  it("says how long it took, in the past tense", () => {
+    // "so far" belongs to a step still going; this one has stopped.
+    expect(stateLine(draw(4 * 60_000 + 30_000))).toContain("Done · took 4m 30s");
+  });
+
+  it("says only Done when the record could not measure it", () => {
+    expect(stateLine(draw(undefined))).toContain("Done");
+  });
+
+  it("does not round a real measurement away to nothing", () => {
+    expect(stateLine(draw(400))).toContain("Done · took 400ms");
+  });
+});
+
+/**
+ * A step's name cannot leave the card it is in.
+ *
+ * The name used to be cut at 24 characters, which is a guess at a width rather
+ * than a measurement of one: "Этап 2 — локальное пони…" is 24 characters and
+ * about 197 pixels in a box with room for 168, so it ran out through the
+ * right-hand border — and took the group's bounding box with it, which is what
+ * the platform's focus ring was drawn around.
+ */
+describe("a step whose name does not fit", () => {
+  const long = "Этап 2 — локальное понимание экрана";
+
+  function draw() {
+    const renamed = {
+      ...workflow,
+      nodes: workflow.nodes.map((node) =>
+        node.id === "implement" ? { ...node, name: long } : node,
+      ),
+    };
+    render(
+      <LiveWorkflowGraph
+        workflow={renamed}
+        view={foldLiveSession(renamed, run, [])}
+        sessionState={run.state}
+        onSelect={vi.fn()}
+      />,
+    );
+    return document.querySelector(".live-graph") as unknown as HTMLElement;
+  }
+
+  it("keeps the whole name, and lets the browser decide where it stops", () => {
+    // Truncating in JavaScript is what got this wrong; the ellipsis belongs to
+    // CSS, which knows the width the glyphs actually take.
+    const graph = draw();
+    expect(within(graph).getByText(long)).toBeTruthy();
+  });
+
+  it("holds every line inside the card", () => {
+    const graph = draw();
+    const name = within(graph).getByText(long);
+    expect(name.closest("foreignObject")).toBeTruthy();
+    // The rule that does the clipping, applied to each line rather than to the
+    // box around them, so one long line cannot push the others out.
+    expect(name.className).toContain("live-node-name");
+    expect(name.parentElement?.className).toContain("live-node-lines");
   });
 });
 

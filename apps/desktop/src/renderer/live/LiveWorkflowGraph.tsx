@@ -53,6 +53,24 @@ export type LiveWorkflowGraphProps = {
 
 export { ZOOM_MAX, ZOOM_MIN };
 
+/** How far the pointer may travel and still count as a click, in pixels. */
+const DRAG_SLOP = 4;
+
+/**
+ * Whether a pointer that went down at one place and moved to another was
+ * dragging the diagram rather than clicking it.
+ *
+ * A slop rather than an exact comparison, because a hand resting on a trackpad
+ * moves a pixel or two and that is still somebody clicking. Kept out of the
+ * component because it is the one part of the pan guard worth testing on its
+ * own: jsdom's pointer events carry no coordinates at all, so a pan cannot be
+ * simulated at the component level and a test that appeared to do so would be
+ * asserting the environment's silence rather than this rule.
+ */
+export function wasDrag(from: { x: number; y: number }, to: { x: number; y: number }): boolean {
+  return Math.abs(to.x - from.x) + Math.abs(to.y - from.y) > DRAG_SLOP;
+}
+
 /** Pan and zoom, the same shape the Workflow canvas uses. */
 type Viewport = { x: number; y: number; scale: number };
 
@@ -227,6 +245,14 @@ export function LiveWorkflowGraph({
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, scale: 1 });
   const [panning, setPanning] = useState(false);
   const panFrom = useRef<{ x: number; y: number; origin: Viewport } | null>(null);
+  /**
+   * Whether the pointer travelled between going down and coming up.
+   *
+   * A pan ends with a click on the background, and a click on the background
+   * clears the selection — so without this, dragging the diagram sideways
+   * while reading a step would put that step away.
+   */
+  const dragged = useRef(false);
 
   /** Which end of the run a block is, for the two that carry no work. */
   const boundaryKind = useMemo(() => {
@@ -343,6 +369,7 @@ export function LiveWorkflowGraph({
       role="img"
       aria-label={`${workflow.name}, observed progress`}
       onPointerDown={(event) => {
+        dragged.current = false;
         // Dragging the background pans. Nothing else here moves — the diagram
         // is a report, not an editor.
         if (event.target !== event.currentTarget) return;
@@ -353,6 +380,7 @@ export function LiveWorkflowGraph({
       onPointerMove={(event) => {
         const from = panFrom.current;
         if (!from) return;
+        if (wasDrag(from, { x: event.clientX, y: event.clientY })) dragged.current = true;
         setViewport({
           scale: from.origin.scale,
           x: from.origin.x + (event.clientX - from.x),
@@ -362,6 +390,25 @@ export function LiveWorkflowGraph({
       onPointerUp={() => {
         panFrom.current = null;
         setPanning(false);
+      }}
+      /*
+        Clicking away puts the step down.
+
+        Selecting a step narrows the activity list beside the diagram, and the
+        only way back out was the ✕ on that filter — a control you have to
+        find, across the window from where you were looking. Clicking the
+        diagram where there is nothing is the other thing people try, so it
+        does what they mean.
+
+        "Where there is nothing" is anything outside a block: the background,
+        and a connection, which is not selectable here either. A click that
+        landed on a block is that block's own business, and it has already
+        toggled itself by the time this runs.
+      */
+      onClick={(event) => {
+        if (!selectedBlockId || dragged.current) return;
+        if ((event.target as Element).closest(".live-node")) return;
+        onSelect(undefined);
       }}
     >
       <defs>
@@ -445,24 +492,52 @@ export function LiveWorkflowGraph({
             />
 
             {!structural ? (
-              <>
-                <text x={rect.left + 14} y={rect.top + 23} className="live-node-kicker" fill={style.ink}>
-                  {kicker(node)}
-                </text>
-                <text x={rect.left + 14} y={rect.top + 45} className="live-node-name" fill={style.ink}>
-                  {node.name.length > 24 ? `${node.name.slice(0, 23)}…` : node.name}
-                </text>
-                <text x={rect.left + 14} y={rect.top + 70} className="live-node-state" fill={style.ink}>
-                  {style.label}
-                  {passes > 1 ? ` · pass ${passes}` : ""}
-                  {/* How long the agent has been on this step — elapsed since
-                      its own announcement, ticking, and plainly not a promise
-                      about when it will finish. */}
-                  {state === "running" && block?.enteredAt
-                    ? ` · ${readDuration(now - Date.parse(block.enteredAt)) || "0s"} so far`
-                    : ""}
-                </text>
-              </>
+              /*
+                Laid out by the browser, inside the card, rather than at three
+                baselines this file works out itself.
+
+                The name was cut at 24 characters, which is a guess at a width
+                and was wrong for any alphabet whose letters are wider than the
+                one it was tuned on: "Этап 2 — локальное пони…" is 24 characters
+                and about 197 pixels in a box with room for 168, so it ran out
+                through the right-hand border. It also dragged the group's
+                bounding box with it, and the platform drew its focus ring
+                around *that* — which is why the ring looked wider than the
+                block it belonged to.
+
+                CSS knows the width the glyphs actually take, so the ellipsis
+                lands where the text truly stops fitting, and nothing can leave
+                the card whatever anybody names a step.
+              */
+              <foreignObject
+                x={rect.left + 1}
+                y={rect.top + 1}
+                width={rect.w - 2}
+                height={rect.h - 2}
+                className="live-node-text"
+              >
+                <div className="live-node-lines" style={{ color: style.ink }}>
+                  <span className="live-node-kicker">{kicker(node)}</span>
+                  <span className="live-node-name">{node.name}</span>
+                  <span className="live-node-state">
+                    {style.label}
+                    {passes > 1 ? ` · pass ${passes}` : ""}
+                    {/* How long the agent has been on this step — elapsed since
+                        its own announcement, ticking, and plainly not a promise
+                        about when it will finish. */}
+                    {state === "running" && block?.enteredAt
+                      ? ` · ${readDuration(now - Date.parse(block.enteredAt)) || "0s"} so far`
+                      : ""}
+                    {/* And what a finished step took, on the same footing: the
+                        span from the agent announcing it to announcing the
+                        next, summed over its passes. No "so far" — this one
+                        has stopped. */}
+                    {state === "done" && block?.spentMs !== undefined
+                      ? ` · took ${readDuration(block.spentMs) || "0s"}`
+                      : ""}
+                  </span>
+                </div>
+              </foreignObject>
             ) : (
               <>
                 <text

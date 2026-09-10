@@ -4627,8 +4627,34 @@ button.state-chip {
   cursor: pointer;
 }
 
+.live-node-text {
+  overflow: visible;
+}
+
+/* The three lines inside a step, laid out by the browser rather than at
+   baselines the diagram works out for itself. Each one is clipped to the card
+   with an ellipsis, so no name and no duration can reach the border. */
+.live-node-lines {
+  height: 100%;
+  padding: 12px 13px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.live-node-lines > span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .live-node-kicker {
   font-size: 10px;
+  line-height: 11px;
   letter-spacing: 0.09em;
   font-weight: 600;
   opacity: 0.75;
@@ -4636,12 +4662,15 @@ button.state-chip {
 
 .live-node-name {
   font-size: 14px;
+  line-height: 18px;
   font-weight: 600;
 }
 
 .live-node-state {
   font-size: 11px;
+  line-height: 13px;
   opacity: 0.85;
+  margin-top: 2px;
 }
 
 /* A live block breathes on its own border. There is no second outline: the
@@ -6949,6 +6978,26 @@ button.state-chip {
 }
 
 .live-node.is-selected .live-node-body {
+  animation: none;
+  stroke-opacity: 1;
+}
+
+/* One border, and it is the block's own — the same rule the diagram already
+   keeps for run states, extended to focus.
+
+   A `<g>` with a tabindex gets the platform's focus ring, and the platform
+   draws that around the group's bounding box: a square, unrounded outline
+   tracing whatever the text happens to reach, sitting outside the card and
+   following the OS accent colour rather than anything in this palette. It is
+   exactly the second outline this diagram refuses. Keyboard focus is shown on
+   the card's own border instead, where selection is already shown. */
+.live-node:focus {
+  outline: none;
+}
+
+.live-node:focus-visible .live-node-body {
+  stroke: #201e1d;
+  stroke-width: 2.5;
   animation: none;
   stroke-opacity: 1;
 }

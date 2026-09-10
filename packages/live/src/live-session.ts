@@ -43,6 +43,17 @@ export type BlockView = {
   /** How the block came to be in this state. Always `exact` for a moved block. */
   confidence: "exact" | "unmapped";
   enteredAt?: string;
+  /**
+   * Wall-clock the block has been the announced step, summed over the passes
+   * it has finished.
+   *
+   * From the agent announcing this step to it announcing another, which is the
+   * only span the record actually supports. It is not a measure of effort: a
+   * step that spent half its time waiting for a person is not distinguished
+   * here, and a pass still in flight is not counted at all — `enteredAt` is
+   * what a reader watching one now is shown against.
+   */
+  spentMs?: number;
   /** How many times the agent announced it. A rework loop shows more than one. */
   passes: number;
   /** A short reason, for `failed` and `needsYou`. */
@@ -106,6 +117,23 @@ function resumesWork(event: ObservationEvent): boolean {
   );
 }
 
+/**
+ * What a block has cost by the time it is left, added to what it already had.
+ *
+ * A loop re-enters a block, and the question a reader is asking of a finished
+ * step is how long went into it — not how long its last pass took. Anything
+ * the clocks cannot support (no entry recorded, an unparseable stamp, a
+ * departure that reads as earlier than the arrival) leaves the total exactly
+ * as it was rather than guessing at it.
+ */
+function spentBy(block: BlockView, leftAt: string): number | undefined {
+  if (!block.enteredAt) return block.spentMs;
+  const from = Date.parse(block.enteredAt);
+  const to = Date.parse(leftAt);
+  if (Number.isNaN(from) || Number.isNaN(to) || to < from) return block.spentMs;
+  return (block.spentMs ?? 0) + (to - from);
+}
+
 export function foldLiveSession(
   workflow: Workflow,
   run: PendingRun,
@@ -143,7 +171,12 @@ export function foldLiveSession(
         const leaving = blocks[announced];
         // A step the agent left without failing is as done as Anthill can say.
         if (leaving && (leaving.state === "running" || leaving.state === "needsYou")) {
-          blocks[announced] = { ...leaving, state: "done" };
+          const spent = spentBy(leaving, event.at);
+          blocks[announced] = {
+            ...leaving,
+            state: "done",
+            ...(spent !== undefined ? { spentMs: spent } : {}),
+          };
         }
       }
       const entering = blocks[mapping.blockId];
@@ -151,6 +184,9 @@ export function foldLiveSession(
         state: "running",
         confidence: "exact",
         enteredAt: event.at,
+        // Carried, not reset: what earlier passes cost is still part of what
+        // this step has cost.
+        ...(entering?.spentMs !== undefined ? { spentMs: entering.spentMs } : {}),
         passes: (entering?.passes ?? 0) + 1,
       };
       announced = mapping.blockId;
@@ -199,7 +235,14 @@ export function foldLiveSession(
     // stays amber rather than being declared finished at the point where
     // somebody is still needed.
     if (open && run.state === "completed" && blocks[announced].state !== "needsYou") {
-      blocks[announced] = { ...blocks[announced], state: "done" };
+      // Nothing announced a departure, so the last thing anything was recorded
+      // at is as close as the record gets to when this step stopped.
+      const spent = lastSeenAt ? spentBy(blocks[announced], lastSeenAt) : blocks[announced].spentMs;
+      blocks[announced] = {
+        ...blocks[announced],
+        state: "done",
+        ...(spent !== undefined ? { spentMs: spent } : {}),
+      };
     } else if (open && run.state === "failed") {
       blocks[announced] = { ...blocks[announced], state: "failed", note: run.statusMessage };
     } else if (open && (run.state === "observation_lost" || run.state === "ambiguous_match")) {

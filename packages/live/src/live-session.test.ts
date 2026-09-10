@@ -365,3 +365,83 @@ describe("folding a session", () => {
     expect(foldLiveSession(workflow, run(), log)).toEqual(foldLiveSession(workflow, run(), log));
   });
 });
+
+/**
+ * How long a finished step took.
+ *
+ * The span the record actually supports: from the agent announcing this step
+ * to it announcing the next one. Not a measure of effort — a step that spent
+ * half of it waiting for a person is not told apart here — and never a
+ * prediction, because it only exists once the step has been left.
+ */
+describe("what a finished step cost", () => {
+  const T0 = Date.parse("2026-08-29T10:00:00.000Z");
+  const at = (ms: number) => new Date(T0 + ms).toISOString();
+  const marker = (blockId: string, when: number) => ({ ...step(blockId), at: at(when) });
+
+  it("measures from this step's announcement to the next", () => {
+    const view = foldLiveSession(workflow, run(), [
+      marker("implement", 60_000),
+      marker("test", 5 * 60_000),
+    ]);
+    expect(view.blocks.implement.spentMs).toBe(4 * 60_000);
+  });
+
+  it("says nothing about the step still running", () => {
+    const view = foldLiveSession(workflow, run(), [marker("implement", 60_000)]);
+    expect(view.blocks.implement.spentMs).toBeUndefined();
+    expect(view.blocks.implement.state).toBe("running");
+  });
+
+  it("adds the passes up, because a loop is still one step's cost", () => {
+    const view = foldLiveSession(workflow, run(), [
+      marker("implement", 0),
+      marker("test", 60_000),
+      marker("implement", 120_000),
+      marker("test", 300_000),
+    ]);
+    // A minute the first time round, three minutes the second.
+    expect(view.blocks.implement.spentMs).toBe(4 * 60_000);
+    expect(view.blocks.implement.passes).toBe(2);
+  });
+
+  it("counts a step's own waiting, which is time it took even so", () => {
+    const view = foldLiveSession(workflow, run(), [
+      marker("implement", 0),
+      { ...event({ kind: "turn.end", title: "The agent finished its turn" }), at: at(30_000) },
+      marker("test", 120_000),
+    ]);
+    expect(view.blocks.implement.spentMs).toBe(120_000);
+  });
+
+  it("closes the last step on the last thing anything was recorded at", () => {
+    // Nothing announced a departure, so there is no other moment to use.
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      marker("implement", 60_000),
+      { ...event({ kind: "tool.end", title: "Bash" }), at: at(200_000) },
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+    expect(view.blocks.implement.spentMs).toBe(140_000);
+  });
+
+  it("leaves the total alone when the clocks cannot support it", () => {
+    // Stamps can arrive out of order across channels; a departure that reads
+    // as earlier than the arrival is not a negative duration, it is no
+    // measurement at all.
+    const view = foldLiveSession(workflow, run(), [
+      marker("implement", 300_000),
+      marker("test", 60_000),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+    expect(view.blocks.implement.spentMs).toBeUndefined();
+  });
+
+  it("does not put a cost on a step that failed, which did not finish", () => {
+    const view = foldLiveSession(workflow, run(), [
+      marker("implement", 60_000),
+      { ...event({ kind: "error", title: "It broke" }), at: at(120_000) },
+    ]);
+    expect(view.blocks.implement.state).toBe("failed");
+    expect(view.blocks.implement.spentMs).toBeUndefined();
+  });
+});

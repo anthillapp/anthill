@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { agentProfiles, assignedAgents, stepsUsingAgent } from "./agents.js";
+import type { Workflow } from "@anthill/workflow-schema";
+
+import {
+  agentProfiles,
+  assignedAgents,
+  stepsUsingAgent,
+  updateAgentProfile,
+} from "./agents.js";
 import { WORKFLOWNER_DRAFT_VERSION, type WorkflowDraft } from "./draft.js";
 import { mapDraftToWorkflow, workflowSource, reviewDraft } from "./draft-mapping.js";
 import { agentConfig, validateWorkflow } from "./workflow.js";
 import { outputsOf } from "./outputs.js";
 import { compile } from "./compile.js";
-import { WORKFLOW_FORMAT_VERSION } from "./format.js";
+import { WORKFLOW_FORMAT_VERSION, migrateWorkflow } from "./format.js";
 
 const OPTIONS = {
   prompt: "Build the thing and check it works.",
@@ -165,14 +172,203 @@ describe("mapping agents", () => {
     expect(warnings[0].message).toContain("no model called \"gpt-9\"");
   });
 
-  it("leaves a step unassigned when it names an agent the draft did not list", () => {
+  it("leaves a step unassigned only when the draft names nobody for it", () => {
     const source = draft();
-    source.steps[0].agent = "ghost";
+    delete source.steps[0].agent;
     const { workflow, warnings } = mapDraftToWorkflow(source, OPTIONS);
     expect(agentConfig(workflow.nodes[1]).agentId).toBeUndefined();
-    expect(warnings.some((item) => item.message.includes("was not in the draft's agent list"))).toBe(true);
+    expect(warnings.some((item) => item.message.includes("No agent was suggested"))).toBe(true);
     // The gap is then an ordinary Workflow problem the author can act on.
     expect(validateWorkflow(workflow).errors.some((error) => error.code === "STEP_MISSING_AGENT")).toBe(true);
+  });
+});
+
+/**
+ * Agents a draft refers to but never describes.
+ *
+ * ANT-66. A prompt naming a developer, a reviewer and a researcher produced a
+ * workflow with no profiles and not one step assigned: the interpreter had put
+ * the roles on the steps and left `agents` empty, and mapping dropped every
+ * reference it could not match. The author was left to read the diagram, work
+ * out who was meant to do what, add three agents by hand and assign every step.
+ *
+ * A reference is the interpreter saying this step is carried out by someone,
+ * and that the someone is the same wherever the name appears. That is a profile
+ * and its assignments, so mapping mints one instead of throwing the intent away.
+ */
+describe("agents named on a step but not described", () => {
+  /** Three roles on three steps, and an `agents` list that forgot all of them. */
+  function undescribed(): WorkflowDraft {
+    return {
+      draftVersion: WORKFLOWNER_DRAFT_VERSION,
+      title: "Ship a feature",
+      brief: {},
+      agents: [],
+      steps: [
+        {
+          id: "implement",
+          name: "Implement",
+          kind: "step",
+          agent: "developer",
+          action: "agent-step",
+          task: "Write the feature.",
+          outputs: [{ to: "review", kind: "next" }],
+        },
+        {
+          id: "review",
+          name: "Review",
+          kind: "step",
+          agent: "reviewer",
+          action: "code-review",
+          task: "Read the change and say what is wrong with it.",
+          outputs: [{ to: "research", kind: "next" }],
+        },
+        {
+          id: "research",
+          name: "Research the alternatives",
+          kind: "step",
+          agent: "researcher",
+          action: "agent-step",
+          task: "Compare the two approaches.",
+          outputs: [{ to: "fix", kind: "next" }],
+        },
+        {
+          id: "fix",
+          name: "Fix what review found",
+          kind: "step",
+          agent: "developer",
+          action: "agent-step",
+          task: "Fix what review found.",
+          outputs: [{ to: "end", kind: "stop" }],
+        },
+      ],
+      questions: [],
+    };
+  }
+
+  it("creates a profile for each role the steps name", () => {
+    const { workflow } = mapDraftToWorkflow(undescribed(), OPTIONS);
+    expect(agentProfiles(workflow).map((profile) => profile.name)).toEqual([
+      "Developer",
+      "Reviewer",
+      "Researcher",
+    ]);
+  });
+
+  it("assigns every step to its own role, by profile id", () => {
+    const { workflow } = mapDraftToWorkflow(undescribed(), OPTIONS);
+    const assigned = workflow.nodes
+      .filter((node) => node.type === "agent")
+      .map((node) => [node.name, agentConfig(node).agentId]);
+    expect(assigned).toEqual([
+      ["Implement", "agent-1"],
+      ["Review", "agent-2"],
+      ["Research the alternatives", "agent-3"],
+      ["Fix what review found", "agent-1"],
+    ]);
+    expect(validateWorkflow(workflow).errors.some((error) => error.code === "STEP_MISSING_AGENT")).toBe(
+      false,
+    );
+  });
+
+  it("gives the two steps naming one role the same profile, not two", () => {
+    const { workflow } = mapDraftToWorkflow(undescribed(), OPTIONS);
+    expect(stepsUsingAgent(workflow, "agent-1").map((node) => node.name)).toEqual([
+      "Implement",
+      "Fix what review found",
+    ]);
+    // One agent file for the developer, not one per step they carry out.
+    expect(compile(workflow).files.map((file) => file.path)).toEqual([
+      ".claude/agents/developer.md",
+      ".claude/agents/reviewer.md",
+      ".claude/agents/researcher.md",
+    ]);
+  });
+
+  it("says which agents it inferred, so the author can check them", () => {
+    const { warnings } = mapDraftToWorkflow(undescribed(), OPTIONS);
+    const inferred = warnings.filter((item) => item.message.includes("never described"));
+    // Once per agent, not once per step: the second developer step found the
+    // profile the first one created.
+    expect(inferred).toHaveLength(3);
+    expect(inferred[0].message).toContain('an agent called "Developer" was created');
+  });
+
+  it("invents a name and nothing else — no role, description or model", () => {
+    const { workflow } = mapDraftToWorkflow(undescribed(), OPTIONS);
+    expect(agentProfiles(workflow)[0]).toEqual({ id: "agent-1", name: "Developer" });
+  });
+
+  it("reads a multi-word reference as a name", () => {
+    const source = undescribed();
+    source.steps[1].agent = "security-reviewer";
+    const { workflow } = mapDraftToWorkflow(source, OPTIONS);
+    expect(agentProfiles(workflow)[1].name).toBe("Security Reviewer");
+  });
+
+  it("keeps a described agent's own details when other steps name it loosely", () => {
+    const source = undescribed();
+    source.agents = [{ id: "developer", name: "Developer", role: "Builds it", model: "opus" }];
+    // The same agent, written three ways across one draft.
+    source.steps[0].agent = "Developer";
+    source.steps[3].agent = "DEVELOPER";
+    const { workflow, warnings } = mapDraftToWorkflow(source, OPTIONS);
+
+    expect(agentProfiles(workflow)[0]).toEqual({
+      id: "agent-1",
+      name: "Developer",
+      models: { "claude-code": { id: "opus" } },
+      role: "Builds it",
+    });
+    expect(stepsUsingAgent(workflow, "agent-1")).toHaveLength(2);
+    expect(warnings.some((item) => item.message.includes('"Developer" was created'))).toBe(false);
+  });
+
+  it("lets a declared id win over another agent's display name", () => {
+    const source = undescribed();
+    source.agents = [
+      { id: "dev", name: "Reviewer" },
+      { id: "reviewer", name: "Code reviewer" },
+    ];
+    const { workflow } = mapDraftToWorkflow(source, OPTIONS);
+    // Step "review" says agent "reviewer" — the second agent's id, not the
+    // first agent's name.
+    expect(agentConfig(workflow.nodes[2]).agentId).toBe("agent-2");
+  });
+
+  it("keeps the profiles and their step references through save, reload and export", () => {
+    const { workflow } = mapDraftToWorkflow(undescribed(), OPTIONS);
+    // A save is JSON on disk; a reload is that JSON read back through migration.
+    const reloaded = migrateWorkflow(JSON.parse(JSON.stringify(workflow))).workflow as Workflow;
+
+    expect(agentProfiles(reloaded)).toEqual(agentProfiles(workflow));
+    expect(
+      reloaded.nodes.filter((node) => node.type === "agent").map((node) => agentConfig(node).agentId),
+    ).toEqual(["agent-1", "agent-2", "agent-3", "agent-1"]);
+    expect(compile(reloaded).files.map((file) => file.path)).toEqual(
+      compile(workflow).files.map((file) => file.path),
+    );
+  });
+
+  it("keeps a renamed profile's step references, because they are ids", () => {
+    const { workflow } = mapDraftToWorkflow(undescribed(), OPTIONS);
+    const renamed = updateAgentProfile(workflow, "agent-1", { name: "Implementer" });
+
+    expect(stepsUsingAgent(renamed, "agent-1").map((node) => node.name)).toEqual([
+      "Implement",
+      "Fix what review found",
+    ]);
+    expect(validateWorkflow(renamed).errors.some((error) => error.code === "STEP_MISSING_AGENT")).toBe(
+      false,
+    );
+  });
+
+  it("still maps a draft that describes no agents anywhere", () => {
+    const source = undescribed();
+    for (const step of source.steps) delete step.agent;
+    const { workflow } = mapDraftToWorkflow(source, OPTIONS);
+    expect(agentProfiles(workflow)).toEqual([]);
+    expect(workflow.nodes.filter((node) => node.type === "agent")).toHaveLength(4);
   });
 });
 

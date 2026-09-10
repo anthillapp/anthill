@@ -280,6 +280,15 @@ describe("the drafting instruction", () => {
     expect(instruction).toContain('Every step with "kind": "step" must have an "agent"');
   });
 
+  it("requires the agents it names on steps to be described (ANT-66)", () => {
+    // A role on a step with nothing in "agents" is how a draft arrives
+    // describing work with nobody assigned to any of it.
+    expect(instruction).toContain('"agents" must describe every agent any step names');
+    expect(instruction).toContain("a developer, a reviewer, a researcher — list all");
+    // And the shape shows more than one, so a multi-agent answer looks ordinary.
+    expect(instruction).toContain('"id": "reviewer", "name": "Reviewer"');
+  });
+
   it("says a condition must name an agent id, not a word chosen for the occasion", () => {
     expect(instruction).toContain("<agent-id>.<field>");
     expect(instruction).toContain("not a word\nyou have chosen for the occasion");

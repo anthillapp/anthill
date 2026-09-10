@@ -104,6 +104,38 @@ function usableModel(
 }
 
 /**
+ * How an agent reference is looked up, whatever form it arrives in.
+ *
+ * A draft names the same agent three ways in one document — declared as
+ * `"id": "qa-agent"`, referenced from a step as `"agent": "QA Agent"`, and
+ * written into a condition as `qa_agent.decision` — because it is prose from a
+ * language model, not a database. Matching those exactly meant the second and
+ * third found nothing, and the step or the condition silently lost its agent.
+ * Case and the separators are therefore not part of the identity here.
+ */
+function lookupKey(reference: string): string {
+  return reference.trim().toLowerCase().replace(/[\s_-]+/g, "-");
+}
+
+/**
+ * A display name for an agent the draft referred to but never described.
+ *
+ * The reference is all there is to go on, so it is all that is used: no role,
+ * no description and no model are invented to go with it. `qa-agent` becomes
+ * "Qa Agent" rather than "QA Agent" — expanding an acronym would be a guess
+ * about the author's own vocabulary, and the name is theirs to correct in one
+ * click, while a wrong expansion is something they first have to notice.
+ */
+function agentNameFrom(reference: string): string {
+  const words = reference
+    .trim()
+    .split(/[\s_-]+/)
+    .filter((word) => word.length > 0)
+    .map((word) => word[0].toUpperCase() + word.slice(1));
+  return words.length > 0 ? words.join(" ") : reference.trim();
+}
+
+/**
  * Rewrite a condition to name the agent the way the Workflow does.
  *
  * A condition's first segment is the agent whose result the branch reads, and
@@ -126,7 +158,7 @@ function rewriteCondition(
   if (!match) return { condition, changed: false };
 
   const [, head, rest] = match;
-  const slug = slugOfDraftId.get(head) ?? slugOfDraftId.get(head.toLowerCase());
+  const slug = slugOfDraftId.get(lookupKey(head));
   if (!slug || slug === head) return { condition, changed: false };
   return { condition: `${slug}${rest}`, changed: true };
 }
@@ -176,9 +208,26 @@ export function mapDraftToWorkflow(
   };
 
   const profileIdOf = new Map<string, string>();
-  // Draft agent id -> the slug a condition has to use to name that agent.
+  // Draft agent reference -> the slug a condition has to use to name that agent.
   const slugOfDraftId = new Map<string, string>();
-  for (const agent of draft.agents) {
+
+  /**
+   * File a profile under every reference that should reach it.
+   *
+   * First writer wins per key, and the caller registers ids before names, so a
+   * declared id can never be shadowed by another agent's display name.
+   */
+  const remember = (agentId: string, name: string, references: readonly (string | undefined)[]) => {
+    const slug = agentSlug({ id: agentId, name });
+    for (const reference of references) {
+      const key = reference ? lookupKey(reference) : "";
+      if (!key || profileIdOf.has(key)) continue;
+      profileIdOf.set(key, agentId);
+      slugOfDraftId.set(key, slug);
+    }
+  };
+
+  const declared = draft.agents.map((agent) => {
     const where = `agent "${agent.id}"`;
     // A draft is proposed for one harness, so the model it names is that
     // harness's — recorded under it rather than as a choice for both.
@@ -190,9 +239,45 @@ export function mapDraftToWorkflow(
       ...(agent.description ? { description: agent.description } : {}),
     });
     shell = created.workflow;
-    profileIdOf.set(agent.id, created.agentId);
-    slugOfDraftId.set(agent.id, agentSlug({ id: created.agentId, name: agent.name }));
-  }
+    return { agent, agentId: created.agentId };
+  });
+
+  // Two passes: every declared id, then every display name. An agent's own id
+  // is what the draft says it is, and must outrank a name that happens to
+  // collide with it.
+  for (const { agent, agentId } of declared) remember(agentId, agent.name, [agent.id]);
+  for (const { agent, agentId } of declared) remember(agentId, agent.name, [agent.name]);
+
+  /**
+   * The profile a step's `agent` refers to, creating one if nothing does.
+   *
+   * A draft that names "developer", "reviewer" and "researcher" on its steps
+   * and forgets to describe them in `agents` used to produce a workflow with no
+   * profiles at all and not one step assigned (ANT-66) — the author had to
+   * read the diagram, work out who was meant to do what, add each agent by
+   * hand and then assign every step. The reference is the interpreter saying
+   * plainly that this step is carried out by someone, and that someone is the
+   * same across every step naming them, which is a profile and its assignments.
+   *
+   * Minting one here rather than refusing keeps that intent. What it must not
+   * do is pretend to know more than the reference: the profile gets a name and
+   * nothing else, and the warning says it was inferred so the author can check
+   * it against the prompt they wrote.
+   */
+  const resolveAgent = (reference: string, where: string): string => {
+    const existing = profileIdOf.get(lookupKey(reference));
+    if (existing) return existing;
+
+    const name = agentNameFrom(reference);
+    const created = addAgentProfile(shell, { name });
+    shell = created.workflow;
+    remember(created.agentId, name, [reference, name]);
+    warn({
+      where,
+      message: `It is carried out by "${reference}", which the draft never described, so an agent called "${name}" was created for it. Check its name and model in the Agents rail.`,
+    });
+    return created.agentId;
+  };
 
   /* --- blocks: one per draft step, in the order given --- */
 
@@ -212,13 +297,10 @@ export function mapDraftToWorkflow(
       return;
     }
 
-    const agentId = step.agent ? profileIdOf.get(step.agent) : undefined;
-    if (step.agent && !agentId) {
-      warn({
-        where: `step "${step.id}"`,
-        message: `It names an agent "${step.agent}" that was not in the draft's agent list, so the step has none. Assign one on the canvas.`,
-      });
-    } else if (!step.agent) {
+    const agentId = step.agent
+      ? resolveAgent(step.agent, `step "${step.id}"`)
+      : undefined;
+    if (!step.agent) {
       warn({
         where: `step "${step.id}"`,
         message: "No agent was suggested for this step. Assign one on the canvas.",

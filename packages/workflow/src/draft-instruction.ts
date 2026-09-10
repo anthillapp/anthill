@@ -40,6 +40,9 @@ const SHAPE = `{
   "agents": [
     { "id": "developer", "name": "Developer", "model": "sonnet",
       "role": "short line on what this agent is for",
+      "description": "longer description of how it should work" },
+    { "id": "reviewer", "name": "Reviewer",
+      "role": "short line on what this agent is for",
       "description": "longer description of how it should work" }
   ],
   "steps": [
@@ -159,6 +162,12 @@ Every step with "kind": "step" must have an "agent", and it must be the "id" of
 one of the agents you listed. A step with no agent is a step nobody carries out.
 Several steps may share one agent — that is how one agent working through
 several stages is expressed, and it is usually right for a small workflow.
+
+"agents" must describe every agent any step names. Naming a role on a step and
+leaving it out of "agents" is the commonest way a draft arrives with nobody
+described: the reader gets a diagram of work with no one assigned to it. If the
+text describes several roles — a developer, a reviewer, a researcher — list all
+of them, each with its own "id", "name" and "role".
 
 A step must not point an output at its own id. To say a step repeats, point a
 later step's output back at it and give it "maxIterations".

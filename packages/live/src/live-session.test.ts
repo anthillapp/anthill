@@ -445,3 +445,40 @@ describe("what a finished step cost", () => {
     expect(view.blocks.implement.spentMs).toBeUndefined();
   });
 });
+
+/**
+ * A long session's early steps.
+ *
+ * ANT-73, at the level the bug actually bit. The fold is only as good as the
+ * record it is handed, and the page was handing it the last thousand events —
+ * a bound meant for how many cards to draw. This is what that did to the
+ * diagram, and it is why the record must arrive whole.
+ */
+describe("a diagram folded from a record that lost its beginning", () => {
+  const T0 = Date.parse("2026-08-29T10:00:00.000Z");
+  const at = (ms: number) => new Date(T0 + ms).toISOString();
+  const marker = (blockId: string, when: number) => ({ ...step(blockId), at: at(when) });
+
+  /** Two steps announced early, then a great deal of ordinary tool activity. */
+  function wholeRun(): ObservationEvent[] {
+    const noise = Array.from({ length: 1200 }, (_, index) =>
+      event({ kind: "tool.start", title: "Bash", toolUseId: `t${index}`, at: at(600_000 + index * 1000) }),
+    );
+    return [marker("implement", 0), marker("test", 300_000), ...noise];
+  }
+
+  it("shows the announced steps when the whole record is folded", () => {
+    const view = foldLiveSession(workflow, run(), wholeRun());
+    expect(view.blocks.implement.state).toBe("done");
+    expect(view.blocks.test.state).toBe("running");
+  });
+
+  it("forgets them entirely when the record arrives truncated", () => {
+    // The failure, kept as a test so the cause stays legible: nothing is wrong
+    // with the fold, and this is exactly what the page was doing to it.
+    const view = foldLiveSession(workflow, run(), wholeRun().slice(-1000));
+    expect(view.blocks.implement.state).toBe("queued");
+    expect(view.blocks.test.state).toBe("queued");
+    expect(hasStepEvidence(view)).toBe(false);
+  });
+});

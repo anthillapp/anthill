@@ -135,3 +135,54 @@ describe("reading a journal two writers interleaved", () => {
     expect(events.filter((item) => item.kind === "tool.start")).toHaveLength(1);
   });
 });
+
+/**
+ * The record the diagram is folded from.
+ *
+ * ANT-73. `tail` defaulted to the last thousand events, which is a sensible
+ * bound on how many cards to draw and a ruinous one on how much the page may
+ * know: the graph is a fold over this same list, so once a session passed a
+ * thousand events the steps it had announced early scrolled out from under it
+ * and blocks that had run for an hour went back to saying "Waiting its turn".
+ * Measured on the session it was reported from — 1531 events, 8 step markers,
+ * only 2 of them inside the last thousand.
+ */
+describe("how much of a run the page is given", () => {
+  async function longRun(count: number) {
+    const { journal: log } = await journal();
+    await log.append(
+      "ANT-1",
+      Array.from({ length: count }, (_, index) =>
+        draft({
+          kind: index === 0 ? "step.marker" : "tool.start",
+          title: index === 0 ? "Step announced" : "Bash",
+          ...(index === 0 ? { blockId: "n1" } : {}),
+          toolUseId: `toolu_${index}`,
+          at: new Date(Date.parse("2026-08-29T10:00:00.000Z") + index * 1000).toISOString(),
+        }),
+      ),
+    );
+    return log;
+  }
+
+  it("hands back everything, however long the session ran", async () => {
+    const log = await longRun(1500);
+    expect(await log.tail("ANT-1")).toHaveLength(1500);
+  });
+
+  it("keeps the step announced at the very start, which the graph needs", async () => {
+    const log = await longRun(1500);
+    const events = await log.tail("ANT-1");
+    // The one event in 1500 that moves a block. Losing it is losing the block.
+    expect(events.filter((event) => event.kind === "step.marker")).toHaveLength(1);
+    expect(events[0].blockId).toBe("n1");
+  });
+
+  it("still trims when a caller asks it to", async () => {
+    const log = await longRun(1500);
+    const events = await log.tail("ANT-1", 10);
+    expect(events).toHaveLength(10);
+    // The newest ten, not the oldest.
+    expect(events.at(-1)?.seq).toBe(1500);
+  });
+});

@@ -27,9 +27,6 @@ import { eventFingerprint, type ObservationEvent } from "@anthill/live";
 
 import type { ObservationEventDraft } from "./observers/types.js";
 
-/** How many events one run's page keeps in memory. The file keeps everything. */
-export const FEED_LIMIT = 1000;
-
 export class ObservationJournal {
   /** Events already on disk, per run, so a reopened run continues its numbering. */
   private readonly loaded = new Map<string, ObservationEvent[]>();
@@ -114,10 +111,19 @@ export class ObservationJournal {
     return added;
   }
 
-  /** The tail the page renders. The rest stays on disk. */
-  async tail(runId: string, limit = FEED_LIMIT): Promise<ObservationEvent[]> {
+  /**
+   * What the page is given: everything, unless a caller asks for less.
+   *
+   * It used to default to the last thousand, which was a cap on how much the
+   * *feed* draws applied to how much the page is allowed to *know*. The
+   * diagram is a fold over this record, so once a session passed a thousand
+   * events the steps announced early scrolled out from under it and blocks
+   * that had run for an hour went back to saying "Waiting its turn"
+   * (ANT-73). Drawing is bounded where the drawing happens.
+   */
+  async tail(runId: string, limit?: number): Promise<ObservationEvent[]> {
     const events = await this.read(runId);
-    return events.slice(-limit);
+    return limit === undefined ? events : events.slice(-limit);
   }
 
   /** Drop a run's log entirely — used when the user stops observing it. */

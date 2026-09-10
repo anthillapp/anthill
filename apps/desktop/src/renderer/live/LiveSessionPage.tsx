@@ -39,6 +39,7 @@ import { relative, useNow } from "./elapsed.js";
 import {
   buildFeed,
   FEED_FILTERS,
+  FEED_LIMIT,
   matchesFilter,
   type FeedFilter,
 } from "./feed.js";
@@ -247,7 +248,20 @@ export function LiveSessionPage({
   const settled =
     run.state === "completed" || run.state === "failed" || run.state === "observation_lost";
 
-  const cards = useMemo(() => buildFeed(scoped, settled), [scoped, settled]);
+  /*
+    The feed draws a window; the diagram above it does not.
+
+    Both used to come from one truncated list, so a session past a thousand
+    events lost the steps it announced early — the graph was folded from a
+    record whose beginning had scrolled away, and blocks that had run for an
+    hour went back to "Waiting its turn" (ANT-73). The fold now gets
+    everything and the cap sits here, on what is rendered, which is the cost
+    it was always meant to bound.
+  */
+  const cards = useMemo(
+    () => buildFeed(scoped, settled).slice(-FEED_LIMIT),
+    [scoped, settled],
+  );
 
   /**
    * The newest arrival, held as one id rather than a flag on a card.

@@ -19,6 +19,17 @@
 
 import type { AttributedEvent, MappingConfidence, ObservationEvent } from "@anthill/live";
 
+/**
+ * How many cards the feed draws.
+ *
+ * A bound on rendering, and on nothing else. It lived in the journal and
+ * bounded what the page was given at all — which also bounded what the
+ * diagram above the feed could be folded from, so a long session lost its
+ * early steps (ANT-73). The graph now folds over the whole record and this
+ * decides only how far back the list itself goes.
+ */
+export const FEED_LIMIT = 1000;
+
 /** What the card is about, which decides how it is drawn. */
 export type CardKind = "session" | "agent" | "tool" | "message";
 

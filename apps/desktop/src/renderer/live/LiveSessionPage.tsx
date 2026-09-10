@@ -35,7 +35,7 @@ import { agentProfiles } from "@anthill/workflow";
 
 import { LIVE_SESSION_CHANNELS } from "../../shared/ipc.js";
 import { useIpcHealth } from "../ipc-health.js";
-import { relative, useNow } from "./elapsed.js";
+import { relative, spanned, useNow } from "./elapsed.js";
 import {
   buildFeed,
   FEED_FILTERS,
@@ -420,6 +420,17 @@ export function LiveSessionPage({
             </dd>
             <dt>Started</dt>
             <dd>{view.startedAt ? clock(view.startedAt) : "—"}</dd>
+            {/*
+              How long the run has been going, and no longer than that.
+
+              A session Anthill is still reading is measured to now and ticks
+              with the clock above. One that has finished, failed, or gone
+              where Anthill cannot see it is measured to the last thing
+              actually observed — counting past that would be claiming time
+              nobody watched.
+            */}
+            <dt>Elapsed</dt>
+            <dd>{spanned(view.startedAt, settled ? (view.lastSeenAt ?? run.lastObservedAt) : now)}</dd>
             <dt>Last seen</dt>
             <dd>{relative(view.lastSeenAt ?? run.lastObservedAt, now)}</dd>
           </dl>

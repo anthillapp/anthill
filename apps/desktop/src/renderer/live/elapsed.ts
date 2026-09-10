@@ -24,6 +24,30 @@ export function relative(at: string | undefined, now: number = Date.now()): stri
 }
 
 /**
+ * How long a span lasted, to the minute.
+ *
+ * The session's own total, where the per-step figures on the diagram are
+ * exact. Seconds belong on a step, which is short enough for them to mean
+ * something; on a run that has been going for two hours they are noise
+ * dressed as precision, and they change every second in a place nobody is
+ * watching for that.
+ *
+ * "under a minute" rather than "0m", because a run that has just started has
+ * lasted a real amount of time and rounding it to zero says otherwise.
+ */
+export function spanned(from: string | undefined, to: string | number | undefined): string {
+  if (!from || to === undefined) return "—";
+  const start = Date.parse(from);
+  const end = typeof to === "number" ? to : Date.parse(to);
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return "—";
+
+  const minutes = Math.floor((end - start) / 60_000);
+  if (minutes < 1) return "under a minute";
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+/**
  * A clock that re-renders the component holding it.
  *
  * Returns the current time, so a label derived from it goes stale by at most

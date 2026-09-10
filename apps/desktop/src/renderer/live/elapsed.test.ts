@@ -10,7 +10,7 @@
 import { renderHook, act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { relative, useNow } from "./elapsed.js";
+import { relative, spanned, useNow } from "./elapsed.js";
 
 describe("saying how long ago something happened", () => {
   const at = "2026-08-29T10:00:00.000Z";
@@ -54,5 +54,46 @@ describe("the clock behind the label", () => {
     unmount();
     // A leaked interval would keep setting state on an unmounted component.
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+/**
+ * The run's own total, to the minute.
+ *
+ * Seconds are right on a step and wrong here: on a run measured in hours they
+ * are noise dressed as precision, and they would tick in a corner nobody is
+ * watching for that.
+ */
+describe("how long a run has lasted", () => {
+  const start = "2026-08-29T10:00:00.000Z";
+  const after = (ms: number) => new Date(Date.parse(start) + ms).toISOString();
+
+  it("counts whole minutes", () => {
+    expect(spanned(start, after(12 * 60_000))).toBe("12m");
+    // 59m 59s is not an hour, and saying "1h" would round time into existence.
+    expect(spanned(start, after(59 * 60_000 + 59_000))).toBe("59m");
+  });
+
+  it("rolls over into hours, which minutes alone would not", () => {
+    expect(spanned(start, after(60 * 60_000))).toBe("1h 0m");
+    expect(spanned(start, after(84 * 60_000 + 30_000))).toBe("1h 24m");
+    expect(spanned(start, after(5 * 3600_000 + 7 * 60_000))).toBe("5h 7m");
+  });
+
+  it("says a run that just began lasted something, not nothing", () => {
+    expect(spanned(start, after(40_000))).toBe("under a minute");
+    expect(spanned(start, after(0))).toBe("under a minute");
+  });
+
+  it("takes the end as a clock reading too, for a session still going", () => {
+    expect(spanned(start, Date.parse(start) + 30 * 60_000)).toBe("30m");
+  });
+
+  it("says nothing when the record cannot support an answer", () => {
+    expect(spanned(undefined, after(60_000))).toBe("—");
+    expect(spanned(start, undefined)).toBe("—");
+    expect(spanned("not a date", after(60_000))).toBe("—");
+    // An end before the start is two clocks disagreeing, not a negative run.
+    expect(spanned(after(60_000), start)).toBe("—");
   });
 });

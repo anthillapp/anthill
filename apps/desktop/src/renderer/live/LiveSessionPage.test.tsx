@@ -940,3 +940,66 @@ describe("the arrival", () => {
     expect(marked(cards())).toBe(0);
   });
 });
+
+/**
+ * How long the run has been going.
+ *
+ * The rail already says when it started and when it was last seen, which
+ * leaves the reader doing arithmetic across two lines to answer the question
+ * they actually have.
+ *
+ * Measured from the events rather than by pushing the clock about: fake timers
+ * stop the polling `waitFor` in `show` from ever resolving, and a test that
+ * has to disable the harness to run is testing the harness.
+ */
+describe("the session's own elapsed time", () => {
+  /** The <dd> that follows the Elapsed label in the session rail. */
+  function elapsed(): string {
+    const term = [...document.querySelectorAll("dt")].find((dt) => dt.textContent === "Elapsed");
+    return term?.nextElementSibling?.textContent ?? "";
+  }
+
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+
+  it("measures a live session up to now, not to its last record", async () => {
+    // Started 95 and a half minutes ago; its last record is much older than
+    // that would suggest, and the answer follows the clock rather than it.
+    await show(
+      [
+        event({ kind: "tool.start", title: "Bash", at: ago(95 * 60_000 + 30_000) }),
+        event({ kind: "tool.end", title: "Bash", at: ago(90 * 60_000) }),
+      ],
+      run(),
+    );
+    expect(elapsed()).toBe("1h 35m");
+  });
+
+  it("stops at the last thing observed once the session is over", async () => {
+    // Hours ago on the clock, but the session itself ran for 42 minutes.
+    await show(
+      [
+        event({ kind: "tool.start", title: "Bash", at: ago(5 * 3600_000) }),
+        event({ kind: "tool.end", title: "Bash", at: ago(5 * 3600_000 - 42 * 60_000) }),
+      ],
+      run({ state: "completed" }),
+    );
+    expect(elapsed()).toBe("42m");
+  });
+
+  it("counts no further than the last sighting of a session it lost", async () => {
+    // Anthill cannot see it any more, so it does not claim the hours since.
+    await show(
+      [
+        event({ kind: "tool.start", title: "Bash", at: ago(3 * 3600_000) }),
+        event({ kind: "tool.end", title: "Bash", at: ago(3 * 3600_000 - 20 * 60_000) }),
+      ],
+      run({ state: "observation_lost" }),
+    );
+    expect(elapsed()).toBe("20m");
+  });
+
+  it("says nothing at all before there is anything to measure", async () => {
+    await show([], run());
+    expect(elapsed()).toBe("—");
+  });
+});

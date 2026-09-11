@@ -318,13 +318,11 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
       const total = offset + length;
       if (buf.length < total) return; // wait for the rest of the frame
       let payload = buf.subarray(offset, total);
-      if (masked) {
-        // RFC6455 §5.1: a server MUST fail the connection if MASK is 0.
-        if (!masked) {
-          failProtocol(client, 1002);
-          return;
-        }
-        payload = unmask(payload, buf.subarray(offset - 4, offset));
+      if (!masked) {
+        failProtocol(client, 1002);
+        return;
+      }
+      payload = unmask(payload, buf.subarray(offset - 4, offset));
       }
       client.pending = buf.subarray(total);
       dispatchFrame(client, fin, opcode, payload);

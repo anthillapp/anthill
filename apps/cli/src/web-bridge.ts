@@ -113,8 +113,12 @@ export function installWebBridge(): Promise<AnthillApi> {
         const send = (): void => {
           socket.send(JSON.stringify({ id, channel, args }));
         };
-        if (socket.readyState === WebSocket.OPEN) send();
-        else socket.addEventListener("open", send, { once: true });
+        if (socket.readyState === WebSocket.OPEN) {
+          send();
+        } else {
+          pending.delete(id);
+          reject(new Error("The connection to the CLI is not open."));
+        }
       });
     };
 

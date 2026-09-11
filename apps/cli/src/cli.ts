@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
 import { open, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { ensureDataDir, resolvePaths } from "./paths.js";
 import type { Paths } from "./paths.js";
 import { startServer } from "./server.js";
+import { createBridge } from "./bridge.js";
 
 /**
  * `anthill` — run Anthill on Linux as a CLI that opens a web interface.
@@ -71,10 +71,20 @@ export function parseArgs(argv: string[]): CliOptions {
   let dataDir: string | undefined;
 
   for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    // The value of `--flag value`, or the remainder of `--flag=value`.
+    let arg = argv[i]!;
+    // `--flag=value` is the same as `--flag value`: split it up front so the
+    // checks below only ever see the bare flag name.
+    let inline: string | undefined;
+    if (arg.startsWith("--")) {
+      const eq = arg.indexOf("=");
+      if (eq !== -1) {
+        inline = arg.slice(eq + 1);
+        arg = arg.slice(0, eq);
+      }
+    }
+    // The value of `--flag value` (the next arg) or `--flag=value` (inline).
     const take = (): [string, number] => {
-      if (arg.includes("=")) return [arg.slice(arg.indexOf("=") + 1), 1];
+      if (inline !== undefined) return [inline, 1];
       const next = argv[i + 1];
       if (next === undefined) fail(`${arg} needs a value`);
       return [next, 2];
@@ -273,8 +283,11 @@ function tryOpen(opener: string, url: string): Promise<boolean> {
   });
 }
 
-/** Where the built renderer lives, relative to this file (`out/renderer`). */
-const rendererDir = join(fileURLToPath(new URL(".", import.meta.url)), "renderer");
+/**
+ * Where the built renderer lives. `cli.js` compiles to `out/cli/src/`, the
+ * renderer to `out/renderer/`, so two levels up from here.
+ */
+const rendererDir = join(__dirname, "../../renderer");
 
 function waitForSignal(): Promise<void> {
   return new Promise((resolve) => {
@@ -297,16 +310,23 @@ export async function main(): Promise<void> {
   await ensureDataDir(paths);
   const releaseLock = await acquireInstanceLock(paths, options.port, options.host);
 
-  // TODO(task 1, server): `startServer` is a stub until the next activation.
-  // This is its call site: once it lands, it serves the renderer from
-  // `rendererDir` and answers /health and /api on the loopback interface.
-  // (If it ever binds a different port than requested, the lock's recorded
-  // port should be updated to the actual one.)
+  // The web server: serves the renderer from `rendererDir` and answers
+  // /health and the /api WebSocket on the loopback interface.
   const server = await startServer({
     host: options.host,
     port: options.port,
     paths,
     rendererDir,
+  });
+
+  // The bridge: maps every `IpcChannel` onto the reused service modules and
+  // broadcasts the push channels over the WebSocket. It installs its request
+  // dispatcher on the server's `onMessage` and pushes through `broadcast`.
+  const bridge = await createBridge({
+    paths,
+    workspace: options.workspace,
+    broadcast: server.broadcast,
+    onMessage: server.onMessage,
   });
 
   const url = `http://${options.host}:${server.port}/`;
@@ -317,6 +337,18 @@ export async function main(): Promise<void> {
   }
 
   await waitForSignal();
+  await bridge.close();
   await server.close();
   await releaseLock();
+}
+
+// The entry point: run `main` only when this file is executed directly (the
+// CJS `require.main === module` idiom), not when it is imported. A failure is
+// reported and exits non-zero.
+declare const module: { id: string };
+if (typeof require !== "undefined" && require.main === module) {
+  void main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
 }

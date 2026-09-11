@@ -3,10 +3,9 @@
   "version": "0.6.3",
   "private": true,
   "description": "Anthill on Linux: a CLI that opens the app as a web interface on 127.0.0.1.",
-  "type": "module",
-  "main": "out/cli.js",
+  "main": "out/cli/src/cli.js",
   "bin": {
-    "anthill": "out/cli.js"
+    "anthill": "out/cli/src/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && vite build",

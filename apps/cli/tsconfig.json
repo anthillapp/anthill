@@ -15,7 +15,6 @@
     "src/cli.ts",
     "src/server.ts",
     "src/bridge.ts",
-    "src/paths.ts",
-    "vite.config.ts"
+    "src/paths.ts"
   ]
 }

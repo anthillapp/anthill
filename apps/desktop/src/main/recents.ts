@@ -15,7 +15,6 @@
  * deleted simply drops out.
  */
 
-import { app } from "electron";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -28,8 +27,22 @@ type Stored = { paths: string[] };
 
 const EMPTY: Stored = { paths: [] };
 
+/**
+ * Where this store lives and what `~` means. Injected rather than read from a
+ * host API, so the same module runs in Electron (the app sets the Electron
+ * paths at startup) and in the CLI (which sets its own data dir and home).
+ */
+let recentsPaths: { userData: string; home: string } = {
+  userData: "",
+  home: "",
+};
+
+export function setRecentsPaths(paths: { userData: string; home: string }): void {
+  recentsPaths = paths;
+}
+
 function storePath(): string {
-  return join(app.getPath("userData"), "recent-workflows.json");
+  return join(recentsPaths.userData, "recent-workflows.json");
 }
 
 /**
@@ -40,7 +53,7 @@ function storePath(): string {
  * reads as "you have never opened anything" to someone who has.
  */
 function legacyStorePath(): string {
-  return join(app.getPath("userData"), "recent-plans.json");
+  return join(recentsPaths.userData, "recent-plans.json");
 }
 
 async function read(): Promise<Stored> {
@@ -145,8 +158,8 @@ export function describeWorkflow(
 
 /** Home-relative, because `~/workflows/x.json` is readable and the full path is not. */
 function shorten(path: string): string {
-  const home = app.getPath("home");
-  return path.startsWith(home) ? `~${path.slice(home.length)}` : path;
+  const home = recentsPaths.home;
+  return home && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
 }
 
 /**

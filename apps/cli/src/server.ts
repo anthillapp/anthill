@@ -125,7 +125,7 @@ async function serveStatic(
 // ---------------------------------------------------------------------------
 
 /** The magic value from RFC6455 §4.1, mixed into the handshake hash. */
-const WS_MAGIC = "258EAFA5-E914-47DA-95CA-5AB5DC259C66";
+const WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 /** Refuse payloads bigger than this (a page of JSON is kilobytes at most). */
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 
@@ -194,32 +194,50 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
     void handleRequest(req, res);
   });
 
+  // WebSocket upgrade: Node fires the `upgrade` event (instead of the request
+  // handler) for an upgrade request, handing over a detached socket. We write
+  // the 101 response directly to the socket (a `res.end()` in the request
+  // handler would close it) and then attach it for frame handling.
+  server.on("upgrade", (req: IncomingMessage, socket: Socket, head: Buffer) => {
+    const url = new URL(req.url ?? "/", `http://${host || "localhost"}`);
+    const isUpgrade =
+      (req.headers.upgrade ?? "").toLowerCase() === "websocket" &&
+      req.headers["sec-websocket-version"] === "13";
+    if (url.pathname !== "/api" || !isUpgrade) {
+      socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    const key = req.headers["sec-websocket-key"];
+    if (typeof key !== "string" || key.length === 0) {
+      socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    // RFC6455 §4.1: base64(sha1(key + magic)).
+    const accept = createHash("sha1").update(key + WS_MAGIC).digest("base64");
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\n" +
+        "Upgrade: websocket\r\n" +
+        "Connection: Upgrade\r\n" +
+        `Sec-WebSocket-Accept: ${accept}\r\n` +
+        "\r\n",
+    );
+    // If the client sent data with the upgrade request, feed it to the
+    // frame handler.
+    if (head && head.length > 0) {
+      socket.unshift(head);
+    }
+    attachWebSocket(socket);
+  });
+
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", `http://${host || "localhost"}`);
 
     if (url.pathname === "/api") {
-      const isUpgrade =
-        (req.headers.upgrade ?? "").toLowerCase() === "websocket" &&
-        req.headers["sec-websocket-version"] === "13";
-      if (isUpgrade) {
-        const key = req.headers["sec-websocket-key"];
-        if (typeof key !== "string" || key.length === 0) {
-          sendError(res, 400, "bad WebSocket handshake: missing Sec-WebSocket-Key");
-          return;
-        }
-        // RFC6455 §4.1: base64(sha1(key + magic)).
-        const accept = createHash("sha1").update(key + WS_MAGIC).digest("base64");
-        res.writeHead(101, {
-          upgrade: "websocket",
-          connection: "upgrade",
-          "sec-websocket-accept": accept,
-        });
-        res.end();
-        // The 101 detaches the socket from the http server; from here on
-        // it is ours (RFC6455 §4.1, the "Switching Protocols" step).
-        attachWebSocket(req.socket);
-        return;
-      }
+      // A WebSocket upgrade request is handled by the `upgrade` event (below),
+      // which Node fires instead of the request handler. A plain (non-upgrade)
+      // request to /api is rejected here.
       sendError(res, 400, "/api is a WebSocket endpoint (RFC 6455); use an upgrade request");
       return;
     }

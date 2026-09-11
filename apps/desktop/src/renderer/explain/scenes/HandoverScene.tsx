@@ -13,7 +13,7 @@
 import { useState } from "react";
 import type { MarkerCli } from "@anthill/live";
 
-import { INTERPRETER_LOGOS } from "../../workflow/interpreter-logos.js";
+import { interpreterLogo } from "../../workflow/interpreter-logos.js";
 
 /**
  * The short name, not the harness's full one.
@@ -27,6 +27,7 @@ import { INTERPRETER_LOGOS } from "../../workflow/interpreter-logos.js";
 const CLI_NAME: Record<MarkerCli, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
+  pi: "Pi",
 };
 
 /**
@@ -41,13 +42,11 @@ export function HandoverScene() {
   /**
    * How many times the pill has flown, which is what picks the window's CLI.
    *
-   * Anthill hands over to two tools and the copy beside the picture says both;
-   * drawing one of them for ever made the illustration narrower than the
-   * sentence next to it. The swap rides the loop rather than the step, because
-   * the loop is what a reader sitting on this step actually sees happen — and
-   * it lands at the end of a flight, when the pill has faded and nothing is
-   * travelling, so the window changes identity between deliveries rather than
-   * under one.
+   * The illustration cycles between two of the tools Anthill hands over to;
+   * the swap rides the loop rather than the step, because the loop is what a
+   * reader sitting on this step actually sees happen — and it lands at the end
+   * of a flight, when the pill has faded and nothing is travelling, so the
+   * window changes identity between deliveries rather than under one.
    */
   const [flights, setFlights] = useState(0);
   const cli: MarkerCli = flights % 2 === 0 ? "claude-code" : "codex";
@@ -70,7 +69,7 @@ export function HandoverScene() {
         <span className="ex-cli-head">
           <i
             className="ex-cli-logo"
-            style={{ backgroundImage: `url(${INTERPRETER_LOGOS[cli]})` }}
+            style={{ backgroundImage: `url(${interpreterLogo(cli)})` }}
             aria-hidden="true"
           />
           {CLI_NAME[cli]}

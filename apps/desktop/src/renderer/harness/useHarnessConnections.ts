@@ -62,7 +62,7 @@ function statusOf(info: InterpreterInfo): ToolStatus {
 
 export type HarnessConnections = ReturnType<typeof useHarnessConnections>;
 
-const IDS: InterpreterId[] = ["claude-code", "codex"];
+const IDS: InterpreterId[] = ["claude-code", "codex", "pi"];
 
 export function useHarnessConnections() {
   const [tools, setTools] = useState<Record<InterpreterId, HarnessConnection>>(() =>

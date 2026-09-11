@@ -52,7 +52,18 @@ const HARNESS = {
   },
 } as const;
 
-type HarnessDefinition = (typeof HARNESS)[MarkerCli];
+/**
+ * The harnesses with a config file Anthill can install observation hooks
+ * into.
+ *
+ * pi has no config-file hook mechanism — its extension hooks are TypeScript
+ * that pi itself loads — so it is not in this table. Its observation is the
+ * session files it writes for itself, which need no install and no status
+ * row here.
+ */
+type HookHarness = "claude-code" | "codex";
+
+type HarnessDefinition = (typeof HARNESS)[HookHarness];
 
 type SetupPrefs = {
   dismissed?: boolean;
@@ -90,7 +101,7 @@ export class ObservationSetupService {
       dismissed: prefs.dismissed === true,
       trigger: "Shown after the first meaningful Workflow edit: a workflow is open and the edit makes it unsaved.",
       harnesses: await Promise.all(
-        (Object.keys(HARNESS) as MarkerCli[]).map((id) => this.describeHarness(id, prefs)),
+        (Object.keys(HARNESS) as HookHarness[]).map((id) => this.describeHarness(id, prefs)),
       ),
     };
   }
@@ -113,7 +124,7 @@ export class ObservationSetupService {
     action: "install" | "disable",
   ): Promise<ObservationSetupActionResult> {
     try {
-      if (!isHarnessId(harness)) {
+      if (!isHookHarnessId(harness)) {
         return {
           ok: false,
           status: await this.status(),
@@ -169,7 +180,7 @@ export class ObservationSetupService {
     }
   }
 
-  private async describeHarness(id: MarkerCli, prefs?: SetupPrefs): Promise<ObservationHarnessSetup> {
+  private async describeHarness(id: HookHarness, prefs?: SetupPrefs): Promise<ObservationHarnessSetup> {
     const def = HARNESS[id];
     const installedAt = prefs?.harnesses?.[id]?.installedAt;
     const detection = await detectBinary({
@@ -220,7 +231,7 @@ export class ObservationSetupService {
     };
   }
 
-  private configPath(harness: MarkerCli): string {
+  private configPath(harness: HookHarness): string {
     if (harness === "claude-code") return this.paths.claudeConfigPath ?? HARNESS[harness].configFile();
     return this.paths.codexConfigPath ?? HARNESS[harness].configFile();
   }
@@ -309,7 +320,7 @@ export class ObservationSetupService {
    * answer lives, and a harness that has never fired is exactly the case where
    * no shortcut from the end of the file can stop early.
    */
-  private async lastHookEvent(harness: MarkerCli): Promise<string | undefined> {
+  private async lastHookEvent(harness: HookHarness): Promise<string | undefined> {
     const text = await readFile(this.hookLogPath(), "utf8").catch(() => "");
     if (!text) return undefined;
     const marker = `"harness":"${harness}"`;
@@ -354,7 +365,7 @@ export class ObservationSetupService {
     await this.writePrefs(update(await this.readPrefs()));
   }
 
-  private async recordHarnessAction(harness: MarkerCli, action: "install" | "disable"): Promise<void> {
+  private async recordHarnessAction(harness: HookHarness, action: "install" | "disable"): Promise<void> {
     const now = new Date().toISOString();
     await this.updatePrefs((prefs) => ({
       ...prefs,
@@ -526,6 +537,6 @@ function labelEvent(event: string): string {
     .replace("User Prompt Submit", "User prompt submit");
 }
 
-function isHarnessId(value: unknown): value is MarkerCli {
+function isHookHarnessId(value: unknown): value is HookHarness {
   return value === "claude-code" || value === "codex";
 }

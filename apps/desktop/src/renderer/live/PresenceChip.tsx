@@ -17,7 +17,7 @@
 
 import type { PendingRun } from "@anthill/live";
 
-import { INTERPRETER_LOGOS } from "../workflow/interpreter-logos.js";
+import { interpreterLogo } from "../workflow/interpreter-logos.js";
 import {
   needsPlaque,
   presenceLabel,
@@ -64,7 +64,7 @@ export function PresenceChip({
           aria-hidden="true"
         />
         {named ? (
-          <img src={INTERPRETER_LOGOS[run.selectedCli]} alt="" width={14} height={14} />
+          <img src={interpreterLogo(run.selectedCli)} alt="" width={14} height={14} />
         ) : null}
         {showLabel ? (
           <span className="presence-label">{presenceLabel(run, presence)}</span>

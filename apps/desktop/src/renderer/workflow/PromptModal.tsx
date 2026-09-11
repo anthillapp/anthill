@@ -46,7 +46,7 @@ import {
   type ObservationState,
 } from "../live/ObservationStep.js";
 
-import { INTERPRETER_LOGOS } from "./interpreter-logos.js";
+import { interpreterLogo } from "./interpreter-logos.js";
 
 export type PromptModalProps = {
   workflow: Workflow;
@@ -109,7 +109,8 @@ export function PromptModal({
   onObserving,
   onRunRoot,
 }: PromptModalProps) {
-  const cli: MarkerCli = workflow.target === "codex" ? "codex" : "claude-code";
+  const cli: MarkerCli =
+    workflow.target === "codex" ? "codex" : workflow.target === "pi" ? "pi" : "claude-code";
   const harnessProfile = HARNESS_PROFILES[workflow.target ?? "claude-code"];
 
   /**
@@ -369,7 +370,7 @@ export function PromptModal({
         <header className="handover-top">
           <img
             className="handover-logo"
-            src={INTERPRETER_LOGOS[cli]}
+            src={interpreterLogo(cli)}
             alt=""
             width={28}
             height={28}

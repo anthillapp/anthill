@@ -23,7 +23,7 @@ import { useEffect, useRef } from "react";
 import { harnessProfile, interpreterDefinition } from "@anthill/workflow";
 import type { HarnessTarget } from "@anthill/workflow-schema";
 
-import { INTERPRETER_LOGOS } from "../workflow/interpreter-logos.js";
+import { interpreterLogo } from "../workflow/interpreter-logos.js";
 import type { HarnessConnection } from "./useHarnessConnections.js";
 
 /** One line of the sheet's account of where it got to. */
@@ -196,7 +196,7 @@ export function ConnectHarness({ target, connection, onRecheck, onClose }: Conne
         aria-label={`Connect ${harness.displayName}`}
       >
         <div className="connect-top">
-          <img className="tool-logo is-mark" src={INTERPRETER_LOGOS[target]} alt="" />
+          <img className="tool-logo is-mark" src={interpreterLogo(target)} alt="" />
           <span className="kicker">Connect · {harness.displayName}</span>
         </div>
 

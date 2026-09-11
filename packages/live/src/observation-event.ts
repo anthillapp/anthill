@@ -30,6 +30,8 @@ export type ObservationSource =
   | "transcript"
   /** Codex's own rollout file. */
   | "rollout"
+  /** pi's own session file. */
+  | "session"
   /** Anthill's own bookkeeping, not the CLI's. */
   | "anthill";
 

@@ -1,11 +1,11 @@
 /**
  * The agent's model, per coding tool.
  *
- * Two cards, and each answers for itself, because the two tools are genuinely
- * different: Claude Code's models are declared in Anthill's own table, Codex's
- * are discovered from the catalogue Codex keeps on this machine, and Codex has
- * a reasoning effort where Claude Code has none. One picker could only have
- * served both by pretending they share a vocabulary.
+ * A card per coding tool, and each answers for itself, because the tools are
+ * genuinely different: Claude Code's models are declared in Anthill's own
+ * table, Codex's are discovered from the catalogue Codex keeps on this
+ * machine, and Codex has a reasoning effort where Claude Code has none. One
+ * picker could only have served them by pretending they share a vocabulary.
  *
  * A tool's connection and an agent's model stay separate facts. Whether Codex
  * is on this machine is a fact about the machine; which model this agent uses
@@ -29,7 +29,7 @@ import { HARNESS_DEFAULT, harnessProfile, type AgentModels } from "@anthill/work
 import { HARNESS_TARGETS, type HarnessTarget } from "@anthill/workflow-schema";
 
 import type { CodexModelCatalog, CodexModelOption } from "../../shared/ipc.js";
-import { INTERPRETER_LOGOS } from "../workflow/interpreter-logos.js";
+import { interpreterLogo } from "../workflow/interpreter-logos.js";
 import { isConnected, type HarnessConnections, type ToolStatus } from "../harness/useHarnessConnections.js";
 
 /** What a picker carries when nobody has answered. Never stored. */
@@ -133,7 +133,7 @@ export function AgentModelFields({
       {!anyConnected ? (
         <p className="agent-models-intro">
           Connect a coding tool to choose models for this agent. One is enough to start —
-          you can add the other later. This agent keeps a separate model for each, because
+          you can add the others later. This agent keeps a separate model for each, because
           you start the session yourself and the tool you start is what decides.
         </p>
       ) : null}
@@ -150,7 +150,10 @@ export function AgentModelFields({
 
           /* Declared for Claude Code, discovered for Codex. A discovered list
              Anthill has not been given is not an empty one, and the card says
-             the difference rather than showing a picker with nothing in it. */
+             the difference rather than showing a picker with nothing in it.
+             pi's catalogue is discovered on the machine (`pi --list-models`)
+             and Anthill does not read it yet, so its list is the empty one
+             that means "not handed over" — never Codex's. */
           const options: CodexModelOption[] = harness.modelsAreDeclared
             ? harness.models.map((option) => ({
                 id: option.id,
@@ -158,7 +161,9 @@ export function AgentModelFields({
                 ...(option.hint ? { hint: option.hint } : {}),
                 efforts: [],
               }))
-            : (codex?.models ?? []);
+            : target === "codex"
+              ? (codex?.models ?? [])
+              : [];
 
           const picked = options.find((option) => option.id === chosen?.id);
           const efforts = picked?.efforts ?? [];
@@ -177,7 +182,7 @@ export function AgentModelFields({
           return (
             <div className={`tool-card${live ? " is-connected" : ""}`} key={target}>
               <div className="tool-card-top">
-                <img className="tool-logo" src={INTERPRETER_LOGOS[target]} alt="" />
+                <img className="tool-logo" src={interpreterLogo(target)} alt="" />
                 {/* A `label` only where there is a field to label. Pointing one
                     at the connect button would make its accessible name the
                     tool's name, when what it does is open the connection
@@ -274,7 +279,7 @@ export function AgentModelFields({
                       what it last listed for this machine — better than "what
                       this version supports" — but it is a cache with a date,
                       not a live check of the account. */}
-                  {!harness.modelsAreDeclared && codex?.fetchedAt ? (
+                  {!harness.modelsAreDeclared && target === "codex" && codex?.fetchedAt ? (
                     <p className="tool-note">
                       The models {harness.displayName} last listed for you, on{" "}
                       {new Date(codex.fetchedAt).toLocaleDateString()}.

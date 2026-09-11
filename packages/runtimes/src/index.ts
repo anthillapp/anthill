@@ -59,6 +59,12 @@ export {
   buildClaudeArgs,
   type ClaudeCodeRuntimeConfig,
 } from "./claude-code-runtime.js";
+export {
+  PI_DEFAULT_COMMAND,
+  PiCliRuntime,
+  buildPiArgs,
+  type PiCliRuntimeConfig,
+} from "./pi-cli-runtime.js";
 
 // Honest, intentionally unimplemented ACP/MCP bridge placeholders.
 export {

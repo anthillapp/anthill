@@ -124,7 +124,7 @@ describe("detecting what is installed", () => {
     const { spawnFn } = fakeSpawn([{ error: missing() }]);
     const found = await detectInterpreters(spawnFn);
     // Omitting it would leave the author wondering whether Anthill supports it.
-    expect(found).toHaveLength(2);
+    expect(found).toHaveLength(3);
     expect(found[0]).toMatchObject({ available: false });
     expect(found[0].reason).toContain("not found on your PATH");
   });
@@ -376,6 +376,14 @@ describe("sign-in state", () => {
     expect(claude.readStatus("not json at all", 0)).toBeUndefined();
     expect(claude.readStatus('{"other": 1}', 0)).toBeUndefined();
     expect(codex.readStatus("something new", 0)).toBeUndefined();
+  });
+
+  it("does not ask pi, which has no non-interactive sign-in check", () => {
+    const pi = INTERPRETERS.find((item) => item.id === "pi")!;
+    // The question is not asked at all; the answer stays `undefined` rather
+    // than being read as a sign-out.
+    expect(pi.statusArgs).toBeUndefined();
+    expect(pi.readStatus("whatever", 0)).toBeUndefined();
   });
 });
 

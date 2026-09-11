@@ -102,7 +102,7 @@ const SETTING_KEY = "anthill.promptInterpreter";
 function readSetting(): InterpreterId | undefined {
   try {
     const value = window.localStorage.getItem(SETTING_KEY);
-    return value === "claude-code" || value === "codex" ? value : undefined;
+    return value === "claude-code" || value === "codex" || value === "pi" ? value : undefined;
   } catch {
     return undefined;
   }

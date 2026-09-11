@@ -132,7 +132,7 @@ export function describeWorkflow(
     ),
   ];
   const harness =
-    workflow.target === "codex" ? "Codex CLI" : workflow.target === "claude-code" ? "Claude Code" : undefined;
+    workflow.target === "codex" ? "Codex CLI" : workflow.target === "claude-code" ? "Claude Code" : workflow.target === "pi" ? "Pi" : undefined;
 
   return {
     ...(typeof workflow.name === "string" && workflow.name.trim() ? { name: workflow.name } : {}),

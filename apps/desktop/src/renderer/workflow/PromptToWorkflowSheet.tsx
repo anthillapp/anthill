@@ -40,7 +40,7 @@ import {
 import { withLayout } from "@anthill/builder";
 
 import type { InterpreterInfo, PromptDraftStage } from "../../shared/ipc.js";
-import { INTERPRETER_LOGOS } from "./interpreter-logos.js";
+import { interpreterLogo } from "./interpreter-logos.js";
 import { DraftClarify } from "./DraftClarify.js";
 import {
   PREVIEW_EDGES,
@@ -66,7 +66,7 @@ const SETTING_KEY = "anthill.promptInterpreter";
 function readSetting(): InterpreterId | undefined {
   try {
     const value = window.localStorage.getItem(SETTING_KEY);
-    return value === "claude-code" || value === "codex" ? value : undefined;
+    return value === "claude-code" || value === "codex" || value === "pi" ? value : undefined;
   } catch {
     return undefined;
   }
@@ -622,7 +622,7 @@ function ChooseInterpreter({
                 onClick={only ? undefined : () => onChoose(item.id)}
               >
                 <span className="interpreter-head">
-                  <img className="interpreter-logo" src={INTERPRETER_LOGOS[item.id]} alt="" />
+                  <img className="interpreter-logo" src={interpreterLogo(item.id)} alt="" />
                   <span className="interpreter-name">
                     {item.label}
                     <span className="interpreter-version">

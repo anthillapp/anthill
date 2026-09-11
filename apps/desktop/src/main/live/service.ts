@@ -38,6 +38,7 @@ import {
 
 import { ClaudeCodeObserver } from "./observers/claude-code.js";
 import { CodexObserver } from "./observers/codex.js";
+import { PiObserver } from "./observers/pi.js";
 import { HookLogObserver } from "./observers/hooks.js";
 import type {
   LiveSessionObserver,
@@ -79,6 +80,7 @@ export type StartObservationInput = {
 export type ObservationRoots = {
   claudeRoot?: string;
   codexRoot?: string;
+  piRoot?: string;
   hookLogPath?: string;
   journalDir?: string;
 };
@@ -106,6 +108,7 @@ export class LiveSessionService {
         ? new ClaudeCodeObserver(roots.claudeRoot)
         : new ClaudeCodeObserver(),
       codex: roots.codexRoot ? new CodexObserver(roots.codexRoot) : new CodexObserver(),
+      pi: roots.piRoot ? new PiObserver(roots.piRoot) : new PiObserver(),
     };
     this.hooks = roots.hookLogPath ? new HookLogObserver(roots.hookLogPath) : new HookLogObserver();
     this.journal = new ObservationJournal(roots.journalDir ?? "");
@@ -206,8 +209,7 @@ export class LiveSessionService {
 
   /** Drop every observer's place in this run's records. */
   private forget(runId: string): void {
-    this.observers["claude-code"].forget(runId);
-    this.observers.codex.forget(runId);
+    for (const observer of Object.values(this.observers)) observer.forget(runId);
     this.hooks.forget(runId);
   }
 

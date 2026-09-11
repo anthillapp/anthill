@@ -90,7 +90,7 @@ export function installWebBridge(): Promise<AnthillApi> {
         const request = pending.get(message.id as number);
         if (!request) return;
         pending.delete(message.id as number);
-        if (message.error !== undefined) request.reject(message.error);
+        if (message.error !== undefined) request.reject(new Error(String(message.error)));
         else request.resolve(message.result);
         return;
       }

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   createServer,
@@ -24,6 +24,13 @@ import type { Paths } from "./paths.js";
  * per RFC6455 §4.1), text frames (including fragmentation), ping/pong,
  * close, and one broadcast method for the bridge. Client frames arrive
  * masked (RFC6455 §5.1); server frames are sent unmasked.
+ *
+ * The socket is not open to anyone: the handshake requires a per-process
+ * token (in the URL the CLI prints, served only on loopback) and, when an
+ * Origin header is present, that the origin is the loopback page we served.
+ * A page on another origin cannot load that URL and so cannot open the
+ * socket; an unguessable token means a stale link from a previous run does
+ * not open this one.
  */
 export type ServerOptions = {
   host: string;
@@ -37,14 +44,24 @@ export type CliServer = {
   server: Server;
   /** The port actually bound (the requested port, or the one chosen when 0). */
   port: number;
+  /**
+   * The per-process token a client must present to open /api. The CLI prints
+   * it in the URL it tells the author to open; the server holds it and never
+   * serves it in a page, so a page on another origin cannot obtain it.
+   */
+  token: string;
   /** Broadcast one JSON-serialisable message to every connected client. */
   broadcast(message: unknown): void;
   /**
    * Register the handler for messages arriving from a client. The value is
    * the parsed JSON when the frame is valid JSON, else the raw string.
-   * The bridge registers its request handler here.
+   * `reply` sends a message back to the client that sent this one (a
+   * unicast); `broadcast` reaches every client. The bridge registers its
+   * request handler here and answers requests with `reply`.
    */
-  onMessage(handler: (message: unknown) => void): void;
+  onMessage(
+    handler: (message: unknown, reply: (message: unknown) => void) => void,
+  ): void;
   close(): Promise<void>;
 };
 
@@ -172,6 +189,27 @@ function unmask(payload: Buffer, mask: Buffer): Buffer {
   return out;
 }
 
+/**
+ * Whether an Origin header is the loopback page we served.
+ *
+ * The page is loaded from `http://<host>:<port>` (or `localhost`), so a
+ * same-origin WebSocket carries that origin. A page on any other origin — the
+ * real threat, a malicious tab trying to reach the socket — does not.
+ */
+function isExpectedOrigin(origin: string, boundPort: number, host: string): boolean {
+  try {
+    const url = new URL(origin);
+    if (url.port !== String(boundPort)) return false;
+    return (
+      url.hostname === host ||
+      url.hostname === "127.0.0.1" ||
+      url.hostname === "localhost"
+    );
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // The server
 // ---------------------------------------------------------------------------
@@ -187,8 +225,18 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
   const root = normalize(options.rendererDir);
 
   const clients = new Set<WsClient>();
-  let messageHandler: ((message: unknown) => void) | null = null;
+  let messageHandler: ((
+    message: unknown,
+    reply: (message: unknown) => void,
+  ) => void) | null = null;
   let closePromise: Promise<void> | null = null;
+  // The token is generated per process and held only here; it is never written
+  // into a served page. The CLI prints it in the URL it tells the author to
+  // open, and the browser carries it back in the /api handshake.
+  const token = randomBytes(32).toString("hex");
+  // The port the kernel actually bound (set in the `listen` callback below);
+  // the Origin check needs it, and it is not known until then for `--port 0`.
+  let boundPort = port;
 
   const server = createServer((req, res) => {
     void handleRequest(req, res);
@@ -205,6 +253,24 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
       req.headers["sec-websocket-version"] === "13";
     if (url.pathname !== "/api" || !isUpgrade) {
       socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    // The token is the gate: the browser gets it from the URL the CLI printed
+    // (served only on loopback), so a page on another origin — which cannot
+    // load that URL — cannot open the socket. Unguessable and per-process, a
+    // stale link from a previous run does not open this one.
+    if (url.searchParams.get("token") !== token) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    // A second gate: when an Origin header is present, it must be the
+    // loopback page we served. Absent origins are allowed; the token still
+    // gates the connection.
+    const origin = req.headers.origin;
+    if (typeof origin === "string" && !isExpectedOrigin(origin, boundPort, host)) {
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       socket.destroy();
       return;
     }
@@ -314,16 +380,22 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
         length = Number(big);
         offset += 8;
       }
-      if (masked) offset += 4;
-      const total = offset + length;
-      if (buf.length < total) return; // wait for the rest of the frame
-      let payload = buf.subarray(offset, total);
+      // RFC6455 §5.1: a client MUST mask its frames, and a server MUST fail
+      // the connection on an unmasked one. Checked before the payload is read:
+      // for a masked frame the payload sits after the 4-byte masking key, so
+      // an unmasked frame is rejected here rather than read raw. (The old
+      // code nested this inside `if (masked)`, making it dead code.)
       if (!masked) {
         failProtocol(client, 1002);
         return;
       }
-      payload = unmask(payload, buf.subarray(offset - 4, offset));
-      }
+      offset += 4; // skip the masking key
+      const total = offset + length;
+      if (buf.length < total) return; // wait for the rest of the frame
+      const payload = unmask(
+        buf.subarray(offset, total),
+        buf.subarray(offset - 4, offset),
+      );
       client.pending = buf.subarray(total);
       dispatchFrame(client, fin, opcode, payload);
     }
@@ -341,6 +413,12 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
           failProtocol(client, 1002);
           return;
         }
+        // The limit is on the whole message, not each fragment: a run of
+        // small fragments can still total more than a page of JSON should.
+        if (client.fragment.data.length + payload.length > MAX_MESSAGE_BYTES) {
+          failProtocol(client, 1009);
+          return;
+        }
         client.fragment.data = Buffer.concat([client.fragment.data, payload]);
         if (fin) {
           const done = client.fragment;
@@ -352,6 +430,10 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
       case 0x2: // binary
         if (client.fragment) {
           failProtocol(client, 1002);
+          return;
+        }
+        if (payload.length > MAX_MESSAGE_BYTES) {
+          failProtocol(client, 1009);
           return;
         }
         if (fin) deliver(client, opcode, payload);
@@ -388,6 +470,23 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
 
   function deliver(client: WsClient, opcode: number, data: Buffer): void {
     if (!messageHandler) return;
+    // A reply goes back to the client that sent the message, not to every
+    // client: one tab's request is not a message for the others. `broadcast`
+    // is reserved for push channels, which every tab should see.
+    const reply = (message: unknown): void => {
+      if (client.closed) return;
+      let frame: Buffer;
+      try {
+        frame = encodeFrame(0x1, Buffer.from(JSON.stringify(message), "utf8"));
+      } catch {
+        return;
+      }
+      try {
+        client.socket.write(frame);
+      } catch {
+        detach(client);
+      }
+    };
     if (opcode === 0x1) {
       // The renderer speaks JSON; forward the parsed value, falling back to
       // the raw string when a frame is not JSON.
@@ -398,11 +497,11 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
       } catch {
         // Not JSON: the raw string is the message.
       }
-      messageHandler(value);
+      messageHandler(value, reply);
     } else {
       // Binary frames are not part of the app's protocol, but forward them
       // rather than dropping them silently.
-      messageHandler(data);
+      messageHandler(data, reply);
     }
   }
 
@@ -424,7 +523,9 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
     }
   }
 
-  function onMessage(handler: (message: unknown) => void): void {
+  function onMessage(
+    handler: (message: unknown, reply: (message: unknown) => void) => void,
+  ): void {
     messageHandler = handler;
   }
 
@@ -459,7 +560,8 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
       const address = server.address();
       const bound =
         address !== null && typeof address === "object" ? address.port : port;
-      resolveStart({ server, port: bound, broadcast, onMessage, close });
+      boundPort = bound;
+      resolveStart({ server, port: bound, token, broadcast, onMessage, close });
     });
   });
 }

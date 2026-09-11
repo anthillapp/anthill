@@ -17,6 +17,7 @@ import type {
   WorkspaceInfo,
 } from "../shared/ipc.js";
 import { RunPanel, type PendingApproval } from "./RunPanel.js";
+import { WorkflowPicker } from "./workflow/WorkflowPicker.js";
 import { SAMPLE_WORKFLOW } from "./sample-workflow.js";
 
 export function App() {
@@ -28,6 +29,8 @@ export function App() {
 
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [nodeRuns, setNodeRuns] = useState<NodeRun[]>([]);
+  // The candidates the CLI offered in place of a file dialog, if any.
+  const [openCandidates, setOpenCandidates] = useState<string[] | null>(null);
   const [approval, setApproval] = useState<PendingApproval | null>(null);
   const [failure, setFailure] = useState<RunPanelFailure>(null);
   const [starting, setStarting] = useState(false);
@@ -83,11 +86,17 @@ export function App() {
     setDirty(status.dirty);
   }, []);
 
-  const openWorkflow = useCallback(async () => {
-    const result = await window.anthill.openWorkflow();
-    if (!result.ok) return;
-    setWorkflow(result.opened.workflow);
-    setWorkflowPath(result.opened.path);
+  const openWorkflow = useCallback(async (path?: string) => {
+    const result = await window.anthill.openWorkflow(path);
+    if (result.ok) {
+      setWorkflow(result.opened.workflow);
+      setWorkflowPath(result.opened.path);
+      setOpenCandidates(null);
+    } else if ("candidates" in result && result.candidates) {
+      // The CLI has no file dialog; it offers the workflow files it knows
+      // about. Show the picker; a pick is a second call with the path.
+      setOpenCandidates(result.candidates);
+    }
   }, []);
 
   const saveWorkflow = useCallback(async () => {
@@ -166,7 +175,7 @@ export function App() {
           </span>
         ))}
 
-        <button onClick={openWorkflow}>Open…</button>
+        <button onClick={() => void openWorkflow()}>Open…</button>
         <button onClick={saveWorkflow}>Save</button>
         <button
           className="primary"
@@ -228,6 +237,13 @@ export function App() {
           </section>
         </aside>
       </div>
+      {openCandidates && (
+        <WorkflowPicker
+          candidates={openCandidates}
+          onPick={(path) => void openWorkflow(path)}
+          onClose={() => setOpenCandidates(null)}
+        />
+      )}
     </div>
   );
 }

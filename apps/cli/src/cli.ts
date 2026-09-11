@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-
 import { spawn } from "node:child_process";
-import { open, readFile, rm, writeFile } from "node:fs/promises";
+import { open, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import { ensureDataDir, resolvePaths } from "./paths.js";
@@ -20,6 +19,12 @@ import { createBridge } from "./bridge.js";
  *   --no-browser     do not try to open a browser; print the URL instead
  *   --workspace <p>  start with this workspace already selected
  *   --data-dir <p>   where to keep the CLI's own files (default ~/.anthill/cli)
+ *
+ * The file's leading hashbang (`#!/usr/bin/env node`) is load-bearing: the
+ * package's `bin` entry points at the compiled file, and `npm` runs it as an
+ * executable. Without it, a direct `anthill` falls through to the shell, which
+ * cannot run a `.js` file. TypeScript preserves a leading hashbang in the
+ * emitted JavaScript, so the compiled `cli.js` carries it too.
  */
 export type CliOptions = {
   port: number;
@@ -62,8 +67,11 @@ function parsePort(raw: string): number {
 /**
  * Parse `process.argv.slice(2)` into `CliOptions`.
  *
- * Both `--flag value` and `--flag=value` are accepted; an unknown argument or
- * a missing value is an error on stderr.
+ * Both `--flag value` and `--flag=value` are accepted; an unknown argument,
+ * a missing value, or a value that looks like another option is an error on
+ * stderr. Failing at the point of the mistake (rather than only at the end,
+ * when a swallowed flag has already been consumed as a value) is what makes
+ * the error message point at the real problem.
  */
 export function parseArgs(argv: string[]): CliOptions {
   let port = DEFAULT_PORT;
@@ -85,10 +93,22 @@ export function parseArgs(argv: string[]): CliOptions {
       }
     }
     // The value of `--flag value` (the next arg) or `--flag=value` (inline).
+    // A following token that looks like an option (`-…`) is not a value: it
+    // is the next flag, and reading it as a value is how `--host --no-browser`
+    // used to silently turn into `host = "--no-browser"`. Reject it here,
+    // at the point of the mistake, with a message that names the real problem.
+    // A legitimate value that merely starts with `-` (a negative port, a path
+    // like `-weird`) is still available via `--flag=value`.
     const take = (): [string, number] => {
       if (inline !== undefined) return [inline, 1];
       const next = argv[i + 1];
       if (next === undefined) fail(`${arg} needs a value`);
+      if (next.startsWith("-")) {
+        fail(
+          `${arg} needs a value, but the next argument (${next}) looks like an option. ` +
+            `Pass the value with ${arg}=<value>, or move ${next} after the value.`,
+        );
+      }
       return [next, 2];
     };
 
@@ -125,6 +145,12 @@ export function parseArgs(argv: string[]): CliOptions {
 const LOCK_FILE = "instance.lock";
 /** A lock older than this is stale even if its pid is still alive (pid reuse). */
 const LOCK_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * How many times to retry the exclusive create before giving up. Two is enough
+ * for the common case (one winner, the rest exit on the second pass); the
+ * budget exists so a pathological thrash fails honestly instead of looping.
+ */
+const MAX_LOCK_ATTEMPTS = 5;
 
 type LockRecord = {
   pid: number;
@@ -197,6 +223,19 @@ async function tryCreateFresh(
 }
 
 /**
+ * Whether the lock file still holds *our* record.
+ *
+ * A successful exclusive create is not, by itself, proof of ownership: a
+ * concurrent process taking over the same stale lock can remove the file and
+ * recreate it after our create lands. Re-reading and checking the pid is what
+ * turns "I created the file" into "I own the lock".
+ */
+async function verifyOurs(lockPath: string, pid: number): Promise<boolean> {
+  const record = await readLock(lockPath);
+  return record !== undefined && record.pid === pid;
+}
+
+/**
  * Claim this machine's single CLI instance.
  *
  * A lock file in the data directory holds the pid (and port) of the running
@@ -204,6 +243,17 @@ async function tryCreateFresh(
  * — the recorded pid is still alive — reports the first one's URL and exits
  * instead of starting a second server. A stale lock (the pid is gone, or the
  * lock is older than `LOCK_MAX_AGE_MS`) is taken over.
+ *
+ * The takeover is atomic, in the sense that matters: the lock is claimed with
+ * an exclusive create (`open(…, "wx")`, i.e. `O_CREAT | O_EXCL`), which can
+ * only ever succeed for one process. Taking over a stale lock means removing
+ * the file and exclusive-creating again; a plain `writeFile` over the stale
+ * file is not enough, because two processes can both read "stale" and both
+ * write, and the last write wins while both believe they hold the lock. After
+ * a successful create we re-read the file and check that it still holds our
+ * pid; if a concurrent taker removed and recreated it in the meantime, we see
+ * their pid, know we lost, and retry — at which point the winner's lock is
+ * fresh and alive, so we exit. Only one process ever ends up owning the lock.
  *
  * Returns a function that releases the lock on the way out.
  */
@@ -214,14 +264,29 @@ export async function acquireInstanceLock(
 ): Promise<() => Promise<void>> {
   await ensureDataDir(paths);
   const lockPath = join(paths.userData, LOCK_FILE);
-  const record: LockRecord = {
-    pid: process.pid,
-    port,
-    host,
-    startedAt: new Date().toISOString(),
-  };
 
-  if (!(await tryCreateFresh(lockPath, record))) {
+  for (let attempt = 0; attempt < MAX_LOCK_ATTEMPTS; attempt += 1) {
+    const record: LockRecord = {
+      pid: process.pid,
+      port,
+      host,
+      startedAt: new Date().toISOString(),
+    };
+
+    if (await tryCreateFresh(lockPath, record)) {
+      // We created the file. Verify we still own it (a concurrent taker may
+      // have removed and recreated it after our create landed).
+      if (await verifyOurs(lockPath, process.pid)) {
+        return releaseLock(lockPath);
+      }
+      // We lost the race; the file now belongs to someone. Loop: the next
+      // create will hit EEXIST, and the winner's lock is fresh and alive.
+      continue;
+    }
+
+    // EEXIST: someone else holds the file. A live holder means a real
+    // instance is running; a stale (or unreadable) record is taken over by
+    // removing the file and exclusive-creating again (the loop above).
     const existing = await readLock(lockPath);
     if (existing !== undefined && isFresh(existing)) {
       const url = `http://${existing.host}:${existing.port}/`;
@@ -233,13 +298,27 @@ export async function acquireInstanceLock(
       );
       process.exit(1);
     }
-    // Stale (or unreadable): take the lock over.
-    await writeFile(lockPath, JSON.stringify(record, null, 2), "utf8");
+    await rm(lockPath, { force: true });
   }
 
+  // Exhausted the attempts: more processes are thrashing this lock than the
+  // retry budget allows. Failing is the honest outcome; a forced write would
+  // reintroduce the race this whole protocol exists to avoid.
+  fail(
+    `Could not claim the single-instance lock at ${lockPath} after ` +
+      `${MAX_LOCK_ATTEMPTS} attempts; another instance is likely starting. Try again.`,
+  );
+}
+
+function releaseLock(lockPath: string): () => Promise<void> {
   return async () => {
     try {
-      await rm(lockPath, { force: true });
+      // Only remove a lock that still holds our pid: if we ever lost it, we
+      // must not delete the winner's lock on the way out.
+      const record = await readLock(lockPath);
+      if (record !== undefined && record.pid === process.pid) {
+        await rm(lockPath, { force: true });
+      }
     } catch {
       // A lock that outlives the process is harmless: once this pid is gone
       // the next start reads it as stale. Not worth failing a shutdown over.
@@ -331,7 +410,7 @@ export async function main(): Promise<void> {
     onMessage: server.onMessage,
   });
 
-  const url = `http://${options.host}:${server.port}/`;
+  const url = `http://${options.host}:${server.port}/?token=${server.token}`;
   if (options.openBrowser) {
     openBrowser(url);
   } else {

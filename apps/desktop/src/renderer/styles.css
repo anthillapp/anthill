@@ -7560,3 +7560,101 @@ button.presence-chip {
 .save-status.is-failed {
   color: var(--accent-700);
 }
+
+/* The CLI's answer to the desktop's file dialog: a list of the workflow
+   files the CLI knows about, so the author can pick one. */
+.picker {
+  width: min(560px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--canvas);
+  border-radius: var(--radius-slab);
+  box-shadow: var(--shadow-raised);
+}
+
+.picker-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border-bottom: 1px solid #efeded;
+}
+
+.picker-titles h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.picker-titles p {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-dim);
+}
+
+.picker-filter {
+  margin: 12px 18px 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--ink);
+  background: var(--canvas);
+  border: 1px solid #dcdad6;
+  border-radius: 8px;
+  outline: none;
+}
+
+.picker-filter:focus {
+  border-color: var(--accent);
+}
+
+.picker-list {
+  flex: 1;
+  margin: 12px 0 0;
+  padding: 0 12px 12px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.picker-list li {
+  margin: 0 6px 6px;
+}
+
+.picker-list li:last-child {
+  margin-bottom: 0;
+}
+
+.picker-list button {
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid #e6e4e0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.picker-list button:hover {
+  border-color: var(--accent);
+  background: var(--canvas);
+}
+
+.picker-list code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  word-break: break-all;
+}
+
+.picker-empty {
+  padding: 12px;
+  font-size: 13px;
+  color: var(--ink-dim);
+  text-align: center;
+}

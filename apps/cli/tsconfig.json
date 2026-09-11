@@ -15,6 +15,7 @@
     "src/cli.ts",
     "src/server.ts",
     "src/bridge.ts",
-    "src/paths.ts"
+    "src/paths.ts",
+    "../desktop/src/main/live/hook-handler.ts"
   ]
 }

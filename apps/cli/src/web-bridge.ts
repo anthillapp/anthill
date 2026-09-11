@@ -43,6 +43,21 @@ type Pending = {
   reject: (reason: unknown) => void;
 };
 
+/**
+ * A server-side failure arrives over the wire as a plain value (a string, or a
+ * small object) — an `Error` does not survive JSON. Wrap it so the renderer
+ * always rejects with a real `Error`, not a bare string it has to String() to
+ * read.
+ */
+function toError(reason: unknown): Error {
+  if (reason instanceof Error) return reason;
+  if (typeof reason === "object" && reason !== null && "message" in reason) {
+    const message = (reason as { message: unknown }).message;
+    return new Error(typeof message === "string" ? message : String(message));
+  }
+  return new Error(String(reason));
+}
+
 type PushMessage = {
   channel?: unknown;
   payload?: unknown;
@@ -63,7 +78,14 @@ export function installWebBridge(): Promise<AnthillApi> {
   return new Promise((resolve, reject) => {
     const protocol =
       window.location.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(`${protocol}//${window.location.host}/api`);
+    // The token the server requires to open /api. It comes from the URL the
+    // CLI printed (served only on loopback); a page on another origin never
+    // has it, so it cannot open the socket.
+    const token = new URLSearchParams(window.location.search).get("token");
+    const socket = new WebSocket(
+      `${protocol}//${window.location.host}/api` +
+        (token ? `?token=${encodeURIComponent(token)}` : ""),
+    );
 
     const pending = new Map<number, Pending>();
     const pushHandlers = new Map<string, Set<(payload: unknown) => void>>();
@@ -90,7 +112,7 @@ export function installWebBridge(): Promise<AnthillApi> {
         const request = pending.get(message.id as number);
         if (!request) return;
         pending.delete(message.id as number);
-        if (message.error !== undefined) request.reject(new Error(String(message.error)));
+        if (message.error !== undefined) request.reject(toError(message.error));
         else request.resolve(message.result);
         return;
       }
@@ -105,6 +127,8 @@ export function installWebBridge(): Promise<AnthillApi> {
     // only resolves once the socket is open, so by the time a renderer calls
     // a method the socket is ready; the `open` guard covers the edge where a
     // call lands in the gap between `readyState` flipping and the first send.
+    // A socket that is already closing or closed will never (re)open, so
+    // waiting on `open` there would hang the request forever — reject instead.
     const invoke = (channel: string, ...args: unknown[]): Promise<unknown> => {
       const id = nextId;
       nextId += 1;
@@ -115,9 +139,14 @@ export function installWebBridge(): Promise<AnthillApi> {
         };
         if (socket.readyState === WebSocket.OPEN) {
           send();
+        } else if (socket.readyState === WebSocket.CONNECTING) {
+          // Not open yet, but it will be: wait for `open`.
+          socket.addEventListener("open", send, { once: true });
         } else {
+          // CLOSING or CLOSED: it will never (re)open. Reject now and drop
+          // the pending entry so the `close` handler does not double-reject.
           pending.delete(id);
-          reject(new Error("The connection to the CLI is not open."));
+          reject(new Error("The connection to the CLI is closed."));
         }
       });
     };

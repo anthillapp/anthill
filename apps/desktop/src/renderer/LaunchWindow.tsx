@@ -24,6 +24,7 @@ import { AgentList } from "./agents/AgentList.js";
 import { useAgentLibrary } from "./agents/useAgentLibrary.js";
 import { useHarnessConnections } from "./harness/useHarnessConnections.js";
 import { AnthillMark } from "./AnthillMark.js";
+import { WorkflowPicker } from "./workflow/WorkflowPicker.js";
 
 export type LaunchWindowProps = {
   /** Start from a template, or blank. */
@@ -523,9 +524,19 @@ function LaunchIntro({
     file is read again by the screen that opens it; that keeps one path for
     actually loading a workflow, which is the part worth not duplicating.
   */
-  const onChooseFile = useCallback(async () => {
-    const result = await window.anthill.openWorkflow();
-    if (result.ok) onOpen(result.opened.path);
+  // The candidates the CLI offered in place of a file dialog, if any.
+  const [pickerCandidates, setPickerCandidates] = useState<string[] | null>(null);
+
+  const onChooseFile = useCallback(async (path?: string) => {
+    const result = await window.anthill.openWorkflow(path);
+    if (result.ok) {
+      onOpen(result.opened.path);
+      setPickerCandidates(null);
+    } else if ("candidates" in result && result.candidates) {
+      // The CLI has no file dialog; it offers the workflow files it knows
+      // about. Show the picker; a pick is a second call with the path.
+      setPickerCandidates(result.candidates);
+    }
   }, [onOpen]);
 
   return (
@@ -567,6 +578,14 @@ function LaunchIntro({
       </button>
 
       <p className="launch-foot">Turn an idea into a workflow</p>
+
+      {pickerCandidates && (
+        <WorkflowPicker
+          candidates={pickerCandidates}
+          onPick={(path) => void onChooseFile(path)}
+          onClose={() => setPickerCandidates(null)}
+        />
+      )}
     </>
   );
 }

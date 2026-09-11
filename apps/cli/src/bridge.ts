@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { spawn } from "node:child_process";
+import { basename, dirname, join, resolve } from "node:path";
 
 import {
   captureGitStatus,
@@ -9,6 +10,7 @@ import {
 import { parseWorkflow } from "@anthill/workflow-schema";
 import {
   checkWorkflowCompatibility,
+  INTERPRETERS,
   migrateWorkflow,
   type InterpreterId,
 } from "@anthill/workflow";
@@ -44,7 +46,6 @@ import {
 import {
   detectInterpreters,
   runDraft,
-  signInToInterpreter,
   type DraftRunOptions,
 } from "../../desktop/src/main/interpreters.js";
 import { readCodexModels } from "../../desktop/src/main/codex-models.js";
@@ -90,9 +91,19 @@ export type BridgeOptions = {
   broadcast(message: unknown): void;
   /**
    * Register the handler for messages arriving from a client (the server's
-   * `onMessage`). The bridge installs its request dispatcher here.
+   * `onMessage`). `reply` sends a message back to the client that sent it;
+   * the bridge answers request channels with `reply` (a unicast) and uses
+   * `broadcast` only for push channels, which every client should see.
    */
-  onMessage(handler: (message: unknown) => void): void;
+  onMessage(
+    handler: (message: unknown, reply: (message: unknown) => void) => void,
+  ): void;
+  /**
+   * Print a line to the author's console (defaults to `console.log`). The
+   * sign-in flow uses it to surface a command there is no portable way to
+   * run on the author's behalf.
+   */
+  notify?: (message: string) => void;
 };
 
 export type Bridge = {
@@ -116,6 +127,7 @@ type Push = (channel: string, payload: unknown) => void;
 
 export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   const { paths, workspace } = options;
+  const notify = options.notify ?? console.log;
 
   // The recents store is the one reused module that used to read its location
   // from a host API; point it at the CLI's data dir and home.
@@ -159,12 +171,12 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   function liveSetupService(): ObservationSetupService {
     liveSetup ??= new ObservationSetupService({
       prefsPath: join(paths.userData, "live-observation-setup.json"),
-      // The hook handler is bundled with the CLI's main-process output.
-      // The hook handler is a runtime script path, not an import: the CLI does
-      // not bundle it, so this is the best-effort location (the compiled
-      // desktop module). If it is absent, `ObservationSetupService` reports
-      // "not found" rather than failing the boot.
-      hookHandlerPath: join(__dirname, "../../desktop/src/main/live-hook-handler.js"),
+      // The hook handler is bundled with the CLI's main-process output: it is
+      // a runtime script path, not an import, so the CLI compiles it (it is
+      // in the CLI tsconfig's include) and points the marker at the compiled
+      // module. If it is absent, `ObservationSetupService` reports "not found"
+      // rather than failing the boot.
+      hookHandlerPath: join(__dirname, "../../desktop/src/main/live/hook-handler.js"),
     });
     return liveSetup;
   }
@@ -248,13 +260,46 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     if (typeof requested === "string" && requested) {
       return openWorkflowAt(requested);
     }
-    // No path and no dialog to ask: cancelled, like the desktop's cancelled dialog.
-    return { ok: false as const, cancelled: true as const };
+    // No path: the desktop shows a file dialog. The CLI has no dialog to show,
+    // so it offers the candidates it knows about — the recents and the workflow
+    // files in the configured workspace — and lets the renderer pick one.
+    const candidates = await openWorkflowCandidates();
+    return candidates.length > 0
+      ? { ok: false as const, cancelled: true as const, candidates }
+      : { ok: false as const, cancelled: true as const };
   });
+
+  /**
+   * The workflow files the CLI can name: the recents (most recent first), then
+   * the `.workflow.json` files in the configured workspace. Deduplicated, the
+   * first (most recent) occurrence kept. The CLI's answer to the desktop's
+   * file dialog, which the renderer turns into a picker.
+   */
+  async function openWorkflowCandidates(): Promise<string[]> {
+    const found: string[] = [];
+    for (const recent of await listRecents()) {
+      found.push(recent.path);
+    }
+    if (workspace) {
+      const { readdir } = await import("node:fs/promises");
+      try {
+        const root = resolve(workspace);
+        const entries = await readdir(root, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isFile() && entry.name.endsWith(".workflow.json")) {
+            found.push(join(root, entry.name));
+          }
+        }
+      } catch {
+        // The workspace is not readable; the recents are still offered.
+      }
+    }
+    return [...new Set(found)];
+  }
 
   register(IpcChannel.workflowSave, async (args) => {
     const request = args[0] as SaveWorkflowRequest;
-    const { readFile, writeFile } = await import("node:fs/promises");
+    const { readFile, writeFile, access } = await import("node:fs/promises");
     // What the last successful save left behind, read from the file itself.
     const saved: SavedRecord = request.path
       ? await readFile(request.path, "utf8").then(
@@ -276,14 +321,37 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
       request.path,
       saved,
     );
-    let path = request.path;
+    let path: string;
     if (destination.kind === "ask") {
-      // No dialog to ask in the CLI: a new save (or one whose old path no
-      // longer holds) has nowhere to go, so it is cancelled, like a cancelled
-      // dialog on the desktop.
-      return { kind: "cancelled" as const };
+      if (!request.path) {
+        // A new save: there is no remembered path, so derive one under the
+        // configured workspace. Without a workspace there is nowhere to go.
+        if (!workspace) return { kind: "cancelled" as const };
+        path = join(resolve(workspace), basename(destination.suggested));
+      } else if (saved.kind === "missing") {
+        // The saved file was deleted on purpose. Recreating it silently would
+        // undo that, so the save is cancelled, like a cancelled dialog.
+        return { kind: "cancelled" as const };
+      } else {
+        // Renamed since the last save: the suggested path is next to the old
+        // file (a new file, not a recreation), so it goes there. A rename is
+        // not a decision to move house.
+        path = destination.suggested;
+      }
+      // Never overwrite a file the author has not asked to replace: a web
+      // save has no dialog to warn about it.
+      try {
+        await access(path);
+        return { kind: "cancelled" as const };
+      } catch {
+        // The path does not exist; the write is safe.
+      }
+    } else {
+      // A "write" destination: the remembered path, which holds (the name
+      // matched and the file is there), so the write goes where it went last
+      // time.
+      path = destination.path;
     }
-    path = destination.path;
     try {
       await writeFile(
         path,
@@ -346,9 +414,19 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     workspace ? resolve(workspace) : null,
   );
 
-  register(IpcChannel.interpreterSignIn, async (args) =>
-    signInToInterpreter(String(args[0])),
-  );
+  register(IpcChannel.interpreterSignIn, async (args) => {
+    const id = String(args[0]);
+    const item = INTERPRETERS.find((candidate) => candidate.id === id);
+    if (!item) return { ok: false, error: `Unknown interpreter: ${id}` };
+    // The CLI is the author's terminal: surface the command here rather than
+    // opening a second terminal. There is no portable way to open a terminal
+    // on Linux, and the author is already in one. The sign-in is the
+    // author's own; Anthill only hands over the exact command.
+    notify(
+      `Sign in to ${item.label}: run \`${item.signIn}\` in this terminal, then come back.`,
+    );
+    return { ok: true };
+  });
 
   register(IpcChannel.pathsCheck, async (args) =>
     Object.fromEntries(
@@ -363,10 +441,31 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     if (typeof args[0] !== "string") return false;
     const target = expandHome(args[0]);
     if (!existsSync(target)) return false;
-    // Reveal, never open: the CLI has no shell to select the item in a file
-    // manager, so it reports the path exists and lets the renderer show it.
+    // Reveal, never open: open the containing directory in the file manager
+    // (`xdg-open` on a directory opens it; it never executes the file). Best
+    // effort — if no file manager is available, the path still exists and the
+    // renderer can show it.
+    revealInFileManager(dirname(target));
     return true;
   });
+
+  /**
+   * Best-effort, non-blocking: open a directory in the default file manager.
+   * A no-op when no file manager is available (there is no portable way to
+   * guarantee one on Linux). Never executes the file — it opens the folder.
+   */
+  function revealInFileManager(dir: string): void {
+    try {
+      const child = spawn("xdg-open", [dir], {
+        stdio: "ignore",
+        detached: true,
+      });
+      child.on("error", () => undefined);
+      child.unref();
+    } catch {
+      // No file manager; the reveal is a no-op.
+    }
+  }
 
   register(IpcChannel.interpretersDetect, async () => detectInterpreters());
 
@@ -525,9 +624,11 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     }
   }
 
-  // The dispatcher: an incoming WS message is { id, channel, args }.
-  // Dispatch to the handler map and send the response back over the WS.
-  options.onMessage((message) => {
+  // The dispatcher: an incoming WS message is { id, channel, args }. Dispatch
+  // to the handler map and answer over the unicast `reply` (a response to one
+  // tab's request is not a message for the others; push channels use
+  // `broadcast`).
+  options.onMessage((message, reply) => {
     const call = message as { id?: unknown; channel?: unknown; args?: unknown[] };
     if (
       typeof call !== "object" ||
@@ -541,18 +642,14 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     void (async () => {
       const handler = handlers[channel];
       if (!handler) {
-        options.broadcast({
-          id,
-          channel,
-          error: `No handler for channel "${channel}".`,
-        });
+        reply({ id, channel, error: `No handler for channel "${channel}".` });
         return;
       }
       try {
         const result = await handler(args);
-        options.broadcast({ id, channel, result });
+        reply({ id, channel, result });
       } catch (error) {
-        options.broadcast({
+        reply({
           id,
           channel,
           error: error instanceof Error ? error.message : String(error),

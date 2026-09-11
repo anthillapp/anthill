@@ -228,10 +228,16 @@ export type OpenedWorkflow = {
  * Opening can fail for a reason the user needs explained — a workflow from a newer
  * build, or a file that is not a workflow at all. Returned rather than thrown so
  * the renderer can show the real reason instead of a generic schema error.
+ *
+ * `cancelled` with `candidates` is the CLI's answer to the desktop's file
+ * dialog: there is no dialog to show, so the CLI offers the workflow files it
+ * knows about (the recents and the files in the configured workspace) and the
+ * renderer lets the author pick one. A `cancelled` without `candidates` is a
+ * genuine cancellation (the desktop's dialog was dismissed).
  */
 export type OpenWorkflowResult =
   | { ok: true; opened: OpenedWorkflow }
-  | { ok: false; cancelled: true }
+  | { ok: false; cancelled: true; candidates?: string[] }
   | { ok: false; error: string };
 
 export type SaveWorkflowRequest = {

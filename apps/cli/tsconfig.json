@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "out",
+    "types": ["node"]
+  },
+  "include": [
+    "src/cli.ts",
+    "src/server.ts",
+    "src/bridge.ts",
+    "src/paths.ts",
+    "../desktop/src/main/live/hook-handler.ts"
+  ]
+}

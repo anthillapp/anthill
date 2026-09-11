@@ -1,0 +1,22 @@
+{
+  "name": "@anthill/cli",
+  "version": "0.6.3",
+  "private": true,
+  "description": "Anthill on Linux: a CLI that opens the app as a web interface on 127.0.0.1.",
+  "main": "out/cli/src/cli.js",
+  "bin": {
+    "anthill": "out/cli/src/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.4",
+    "@vitejs/plugin-react": "^4.3.3",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.0"
+  }
+}

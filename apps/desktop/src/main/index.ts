@@ -71,6 +71,7 @@ import {
   forgetRecent,
   listRecents,
   rememberRecent,
+  setRecentsPaths,
 } from "./recents.js";
 
 /**
@@ -942,6 +943,7 @@ void app.whenReady().then(async () => {
   // with no window and no message.
   applyAppIcon();
   applyMenu();
+  setRecentsPaths({ userData: app.getPath("userData"), home: app.getPath("home") });
   registerIpcHandlers();
   createWindow();
 

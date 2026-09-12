@@ -15,12 +15,15 @@ import type {
   WorkflowNode,
 } from "./types.js";
 
+import { NODE_ID_PATTERN } from "./types.js";
+
 /* -------------------------------------------------------------------------- */
 /* Error codes                                                                */
 /* -------------------------------------------------------------------------- */
 
 export const VALIDATION_CODES = {
   DUPLICATE_NODE_ID: "DUPLICATE_NODE_ID",
+  INVALID_NODE_ID: "INVALID_NODE_ID",
   DUPLICATE_EDGE_ID: "DUPLICATE_EDGE_ID",
   NO_START_NODE: "NO_START_NODE",
   MULTIPLE_START_NODES: "MULTIPLE_START_NODES",
@@ -250,6 +253,16 @@ export function validateWorkflow(
       continue;
     }
     nodesById.set(node.id, node);
+  }
+
+  for (const node of nodes) {
+    if (!NODE_ID_PATTERN.test(node.id)) {
+      errors.push({
+        code: VALIDATION_CODES.INVALID_NODE_ID,
+        message: `Node id "${node.id}" must match ${NODE_ID_PATTERN.source} (no whitespace) to be reportable by the progress channels.`,
+        nodeId: node.id,
+      });
+    }
   }
 
   const seenEdgeIds = new Set<string>();

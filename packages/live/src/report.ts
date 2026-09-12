@@ -62,6 +62,9 @@ export function parseReportLine(line: string): HarnessReport | undefined {
   if (typeof candidate.runId !== "string" || candidate.runId.length === 0) return undefined;
   if (typeof candidate.nonce !== "string" || candidate.nonce.length === 0) return undefined;
   if (typeof candidate.at !== "string" || candidate.at.length === 0) return undefined;
+  // The evidence fold passes `at` to `Date.parse` and then `toISOString`; an
+  // unparseable value would throw out of the poll. Drop it as malformed.
+  if (Number.isNaN(Date.parse(candidate.at))) return undefined;
   if (candidate.kind === "run") {
     return { kind: "run", runId: candidate.runId, nonce: candidate.nonce, at: candidate.at };
   }

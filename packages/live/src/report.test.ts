@@ -31,6 +31,11 @@ describe("harness reports", () => {
     expect(parseReportLine('"a string"')).toBeUndefined();
   });
 
+  it("drops a line whose at is not a parseable date (the evidence fold would throw on it)", () => {
+    expect(parseReportLine(JSON.stringify({ kind: "step", runId: marker.runId, nonce: marker.nonce, stepId: "read", at: "not-a-date" }))).toBeUndefined();
+    expect(parseReportLine(JSON.stringify({ kind: "run", runId: marker.runId, nonce: marker.nonce, at: "yesterday" }))).toBeUndefined();
+  });
+
   it("needs both halves of the marker before it will claim a report", () => {
     const report = { kind: "step" as const, runId: marker.runId, nonce: "000000", stepId: "read", at: "2026-08-29T10:01:00.000Z" };
     expect(isReportFor(report, marker)).toBe(false);

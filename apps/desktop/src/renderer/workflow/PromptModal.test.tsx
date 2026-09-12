@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Workflow } from "@anthill/workflow-schema";
 import { parseMarker } from "@anthill/live";
 
-import type { ExportWorkflowResponse } from "../../shared/ipc.js";
+import type { ExportWorkflowResponse, IpcCapabilities } from "../../shared/ipc.js";
 
 import { PromptModal } from "./PromptModal.js";
 
@@ -98,7 +98,7 @@ function stub(
   const api = {
     chooseRunFolder: vi.fn(async (): Promise<string | null> => CHOSEN),
     codexModels: vi.fn(async () => ({ models: [], agentSupport })),
-    capabilities: vi.fn(async () => ({ contract: 12, channels: [] })),
+    capabilities: vi.fn(async (): Promise<IpcCapabilities> => ({ contract: 12, channels: [] })),
     liveSetupStatus: vi.fn(async () => ({ dismissed: true, trigger: "", harnesses: [setup] })),
     liveSetupInstall: vi.fn(async () => ({
       ok: true as const,
@@ -648,6 +648,44 @@ describe("waiting for the session", () => {
     fireEvent.click(copyButton());
     await waitFor(() => expect(stubbed.copied).toHaveLength(1));
     expect(screen.queryByText(/Waiting for the session/)).toBeNull();
+  });
+});
+
+/**
+ * The integration point that selects the report channel.
+ *
+ * The shell serving the renderer decides whether the prompt tells the harness
+ * to report through the CLI (the only shell with the `anthill` binary) or to
+ * print marker lines (the channel that works everywhere). A shell that cannot
+ * be asked is the desktop: the printed markers are the fallback.
+ */
+describe("selecting the report channel", () => {
+  it("opts the CLI shell into CLI-reported progress when capabilities say shell: cli", async () => {
+    const stubbed = stub();
+    stubbed.api.capabilities.mockResolvedValue({ contract: 12, channels: [], shell: "cli" });
+    open();
+    await toHandover();
+    fireEvent.click(copyButton());
+    await waitFor(() => expect(stubbed.copied).toHaveLength(1));
+    const prompt = stubbed.copied[0];
+    expect(prompt).toContain("anthill run");
+    expect(prompt).toContain("anthill step");
+    expect(prompt).not.toContain("ANTHILL-RUN");
+    expect(prompt).not.toContain("ANTHILL-STEP");
+  });
+
+  it("keeps marker (tag) reporting when the capability query rejects", async () => {
+    const stubbed = stub();
+    stubbed.api.capabilities.mockRejectedValue(new Error("no bridge"));
+    open();
+    await toHandover();
+    fireEvent.click(copyButton());
+    await waitFor(() => expect(stubbed.copied).toHaveLength(1));
+    const prompt = stubbed.copied[0];
+    expect(prompt).toContain("ANTHILL-RUN");
+    expect(prompt).toContain("ANTHILL-STEP");
+    expect(prompt).not.toContain("anthill run");
+    expect(prompt).not.toContain("anthill step");
   });
 });
 

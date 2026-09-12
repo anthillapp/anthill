@@ -54,6 +54,7 @@ import {
 import { createServices, detectRuntimes, startRun, type RunServices } from "./services.js";
 import { detectInterpreters, runDraft, signInToInterpreter } from "./interpreters.js";
 import { readCodexModels } from "./codex-models.js";
+import { readPiModels } from "./pi-models.js";
 import { readCodexAgentSupport } from "./codex-capability.js";
 import { adoptUserPath } from "./user-path.js";
 import { isRealLoadFailure, loadFailureUrl } from "./load-failure.js";
@@ -709,6 +710,14 @@ function registerIpcHandlers(): void {
     // for custom agents still lists its models perfectly well, and the screen
     // needs to offer the choice while saying it will not be applied.
     return { models: catalog?.models ?? [], ...(catalog?.fetchedAt ? { fetchedAt: catalog.fetchedAt } : {}), agentSupport };
+  });
+
+  // Read-only, and nothing is run: pi lists its models on request and keeps
+  // no cache file, so the catalogue is asked for live and a missing CLI
+  // leaves it `undefined` rather than an empty list.
+  handle(IpcChannel.piModels, async () => {
+    await userPath;
+    return await readPiModels();
   });
 
   // One drafting run at a time, which is what the screen offers. Held here so

@@ -121,10 +121,10 @@ describe("what each scene must not stop saying", () => {
   });
 
   it("shows the other CLI each time the pill has been delivered", () => {
-    // Anthill hands over to two tools and the copy beside the picture says
-    // both; drawing one of them for ever made the illustration narrower than
-    // the sentence next to it. The swap rides the pill's loop, because that
-    // is what a reader sitting on this step actually watches happen.
+    // Anthill hands over to three tools and the copy beside the picture says
+    // all three; drawing one of them for ever made the illustration narrower
+    // than the sentence next to it. The swap rides the pill's loop, because
+    // that is what a reader sitting on this step actually watches happen.
     show();
     const cliName = () => document.querySelector(".ex-cli-head")?.textContent?.trim();
     const delivered = () => fireEvent.animationIteration(document.querySelector(".ex-fly") as Element);
@@ -134,6 +134,9 @@ describe("what each scene must not stop saying", () => {
 
     delivered();
     expect(cliName()).toBe("Codex");
+
+    delivered();
+    expect(cliName()).toBe("Pi");
 
     delivered();
     expect(cliName()).toBe("Claude Code");

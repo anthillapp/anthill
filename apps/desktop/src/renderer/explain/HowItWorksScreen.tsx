@@ -81,7 +81,7 @@ export function HowItWorksScreen({ onBack, onCreate }: HowItWorksScreenProps) {
             <p className="how-lede">
               You design a workflow here — the steps, who carries each one out, and what
               happens when work comes back. Anthill compiles it into a prompt you paste into
-              Claude Code or Codex yourself, then watches what that session writes on this
+              Claude Code, Codex, or Pi yourself, then watches what that session writes on this
               machine and shows you where it got to.
             </p>
 

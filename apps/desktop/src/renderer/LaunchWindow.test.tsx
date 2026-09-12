@@ -50,6 +50,7 @@ function stub(recents: RecentWorkflow[], runs: PendingRun[] = [], events: unknow
     agentsList: vi.fn(async () => []),
     detectInterpreters: vi.fn(async () => []),
     codexModels: vi.fn(async () => undefined),
+    piModels: vi.fn(async () => undefined),
     // Opening asks for a file from this screen, so the stub has to answer.
     openWorkflow: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
   };

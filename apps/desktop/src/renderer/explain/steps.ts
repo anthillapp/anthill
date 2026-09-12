@@ -16,7 +16,7 @@ export const EXPLAIN_STEPS: readonly ExplainStep[] = [
   },
   {
     title: "Hand it over",
-    body: "Anthill writes an agent file per role into your project, then compiles the whole workflow into one prompt with a run marker at the top. You copy it, paste it into Claude Code or Codex, and start the session yourself.",
+    body: "Anthill writes an agent file per role into your project, then compiles the whole workflow into one prompt with a run marker at the top. You copy it, paste it into Claude Code, Codex, or Pi, and start the session yourself.",
   },
   {
     title: "Watch it run",

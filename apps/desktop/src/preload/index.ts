@@ -64,6 +64,7 @@ const api: AnthillApi = {
   revealPath: (path: string) => ipcRenderer.invoke(IpcChannel.pathReveal, path),
   detectInterpreters: () => ipcRenderer.invoke(IpcChannel.interpretersDetect),
   codexModels: () => ipcRenderer.invoke(IpcChannel.codexModels),
+  piModels: () => ipcRenderer.invoke(IpcChannel.piModels),
   draftFromPrompt: (request: PromptDraftRequest) =>
     ipcRenderer.invoke(IpcChannel.promptDraft, request),
   cancelPromptDraft: () => ipcRenderer.invoke(IpcChannel.promptDraftCancel),

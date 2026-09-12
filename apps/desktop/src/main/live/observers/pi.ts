@@ -32,6 +32,13 @@
  * user stopped it. A turn ending is not a session ending, so a `stop` settles
  * into "completed" only after the same silence that would otherwise be
  * called "observation lost" — the same rule the Claude Code observer uses.
+ *
+ * A session file can outlive its runs: the same file holds earlier work.
+ * Records written before the Anthill marker is pasted belong to that earlier
+ * work, so when the first matching marker is found the run-local state (stop
+ * reason, failure, settlement, usage, reported activity) is reset. An earlier
+ * `error` must not fail the new run, and an earlier `stop` must not settle it
+ * before pi has answered.
  */
 
 import { readdir, stat } from "node:fs/promises";
@@ -360,6 +367,21 @@ function str(value: unknown): string | undefined {
 }
 
 /**
+ * Clear the run-local state when the first matching marker is found.
+ *
+ * A session file can hold earlier work. Records written before the marker —
+ * an earlier `error`, an earlier `stop` — belong to that earlier work and
+ * must not fail or settle the run that has not even been pasted in yet.
+ */
+function resetRunState(state: FileState): void {
+  state.lastStopReason = undefined;
+  state.failure = undefined;
+  state.settled = false;
+  state.usageSeen.clear();
+  state.reportedActivityAt = undefined;
+}
+
+/**
  * Read only what is needed, from one chunk of newly written session file.
  *
  * A free function taking the marker as an argument, so nothing about which run
@@ -418,14 +440,20 @@ function scan(
 
     if (message.role === "user") {
       const carries = (value: unknown) => typeof value === "string" && textCarriesMarker(value, marker);
-      if (carries(message.content)) {
+      const matchedOnce = () => {
+        // The first marker this run has seen. Records before it are the
+        // session's earlier work, so the run-local state is cleared then.
+        if (!state.matched) resetRunState(state);
         state.matched = true;
+      };
+      if (carries(message.content)) {
+        matchedOnce();
         events.push({ ...base, kind: "prompt.submit", title: "The workflow was pasted in" });
       } else if (Array.isArray(message.content)) {
         // The user's content may be a string or an array of text blocks.
         for (const block of message.content) {
           if (isRecord(block) && carries(block.text)) {
-            state.matched = true;
+            matchedOnce();
             events.push({ ...base, kind: "prompt.submit", title: "The workflow was pasted in" });
           }
         }

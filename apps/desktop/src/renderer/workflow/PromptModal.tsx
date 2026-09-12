@@ -3,7 +3,8 @@
  *
  * Anthill does not run the workflow. This screen prepares files, optionally
  * installs local observation hooks, and hands over a single prompt the author
- * copies, pastes into their own Claude Code or Codex, and starts themselves.
+ * copies, pastes into their own Claude Code, Codex, or Pi, and starts
+ * themselves.
  * After that Anthill only observes, by reading what the CLI writes on this
  * machine.
  *
@@ -161,10 +162,22 @@ export function PromptModal({
    */
   const [detection, setDetection] = useState<"waiting" | "ambiguous">("waiting");
 
-  const observation: ObservationState = observationState(setup, installFailed !== undefined);
+  /**
+   * Pi has no hook mechanism, so its observation is passive: there is nothing
+   * to install, and Anthill reads the session file pi writes on this machine.
+   * The hook-based setup status never names pi, so pi's state is not derived
+   * from it — it is `passive` on its own, and it is watchable, which is what
+   * lets a pi run's handover close and go live.
+   */
+  const observation: ObservationState =
+    cli === "pi" ? "passive" : observationState(setup, installFailed !== undefined);
   const face = OBSERVATION_FACE[observation];
   /** Whether Anthill will have anything to watch with. */
-  const willWatch = observation === "ready" || observation === "silent" || observation === "limited";
+  const willWatch =
+    observation === "ready" ||
+    observation === "silent" ||
+    observation === "limited" ||
+    observation === "passive";
 
   // The marker names the CLI, so switching harness mid-workflow mints a new one
   // rather than quietly telling the wrong tool's story.
@@ -328,7 +341,7 @@ export function PromptModal({
 
   /** How the handover receipt describes whatever step 2 ended as. */
   const liveReceipt =
-    observation === "ready"
+    observation === "ready" || observation === "passive"
       ? { tone: "ok", text: "Live progress on" }
       : observation === "limited"
         ? { tone: "unsure", text: "Live progress will be limited" }
@@ -501,7 +514,9 @@ export function PromptModal({
                   ? "Nothing is installed until you enable it."
                   : observation === "unavailable"
                     ? "There is nothing to install for a CLI Anthill cannot find."
-                    : "Already set up — nothing is written again."}
+                    : observation === "passive"
+                      ? "Nothing to install — this tool has no hook mechanism."
+                      : "Already set up — nothing is written again."}
               </span>
             </footer>
           </>

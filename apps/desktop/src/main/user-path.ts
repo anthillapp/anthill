@@ -5,9 +5,10 @@
  * An app launched from Finder or the Dock is started by launchd, not by a
  * shell, so it inherits a bare system `PATH` — no `~/.local/bin`, no Homebrew,
  * no nvm, no asdf. Every one of those is where a coding CLI normally lives.
- * Anthill's whole relationship with Claude Code and Codex is "find the command
- * the author already has", so in a packaged build it found neither and said
- * they were not installed. They were; nobody had told the app where to look.
+ * Anthill's whole relationship with Claude Code, Codex, and Pi is "find the
+ * command the author already has", so in a packaged build it found none of
+ * them and said they were not installed. They were; nobody had told the app
+ * where to look.
  *
  * It never showed up in development because `npm run dev:desktop` starts
  * Electron *from a shell*, which is exactly the environment the bug is absent

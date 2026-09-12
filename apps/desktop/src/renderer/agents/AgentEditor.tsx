@@ -21,7 +21,12 @@ import { configuredHarnesses, harnessProfile, type AgentModels } from "@anthill/
 
 import type { HarnessTarget } from "@anthill/workflow-schema";
 
-import type { CodexModelCatalog, GlobalAgentProfile, RecentWorkflow } from "../../shared/ipc.js";
+import type {
+  CodexModelCatalog,
+  GlobalAgentProfile,
+  PiModelCatalog,
+  RecentWorkflow,
+} from "../../shared/ipc.js";
 import type { HarnessConnections } from "../harness/useHarnessConnections.js";
 import { ConnectHarness } from "../harness/ConnectHarness.js";
 import { AgentModelFields } from "./AgentModelFields.js";
@@ -75,6 +80,8 @@ export type AgentEditorProps = {
   connections: HarnessConnections;
   /** Codex's own model catalogue, and what its installed CLI can honour. */
   codex: CodexModelCatalog | undefined;
+  /** What pi listed for this machine, or undefined when the CLI was not reached. */
+  pi: PiModelCatalog | undefined;
   /** Which tool's setup sheet is open, if any. */
   connecting: HarnessTarget | undefined;
   onConnect: (target: HarnessTarget | undefined) => void;
@@ -99,6 +106,7 @@ export function AgentEditor({
   leaving,
   connections,
   codex,
+  pi,
   connecting,
   onConnect,
   onPatch,
@@ -238,6 +246,7 @@ export function AgentEditor({
           needsReview={profile.modelNeedsReview}
           connections={connections}
           codex={codex}
+          pi={pi}
           onConnect={onConnect}
           onChange={(models) => onPatch({ models })}
           fieldRef={modelField}

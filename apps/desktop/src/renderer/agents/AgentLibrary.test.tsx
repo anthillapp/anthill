@@ -137,6 +137,7 @@ function stub(
     agentsList: vi.fn(async () => held),
     detectInterpreters: vi.fn(async () => tools),
     codexModels: vi.fn(async () => catalog ?? undefined),
+    piModels: vi.fn(async () => undefined),
     signInToInterpreter: vi.fn(async () => ({ ok: true })),
     agentsCreate: vi.fn(async (input: GlobalAgentInput) => {
       issued += 1;

@@ -448,6 +448,43 @@ async function writePi(dir: string, sessionId: string, body: string) {
   await writeFile(join(project, `1750000000000_${sessionId}.jsonl`), body, "utf8");
 }
 
+/**
+ * A session file that holds earlier work: an assistant message that ended
+ * before the Anthill prompt was pasted in. The run-local state those earlier
+ * records set must not leak into the run that the marker starts.
+ */
+function piSessionWithEarlierWork(
+  sessionId: string,
+  earlier: { stopReason: string; errorMessage?: string },
+) {
+  const at = new Date().toISOString();
+  const rows: unknown[] = [
+    { type: "session", version: 3, id: sessionId, timestamp: at, cwd: "/tmp/scratch" },
+    {
+      type: "message",
+      id: "m0",
+      parentId: null,
+      timestamp: at,
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Earlier work." }],
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+        stopReason: earlier.stopReason,
+        ...(earlier.errorMessage ? { errorMessage: earlier.errorMessage } : {}),
+      },
+    },
+    {
+      type: "message",
+      id: "m1",
+      parentId: "m0",
+      timestamp: at,
+      message: { role: "user", content: MARKED_PROMPT },
+    },
+  ];
+  return rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+}
+
 describe("the pi observer", () => {
   it("says so when there is nothing on this machine to read", async () => {
     const observer = new PiObserver(join(await root(), "missing"));
@@ -546,6 +583,44 @@ describe("the pi observer", () => {
     await writePi(dir, "sess-pi", piSession("sess-pi", { marked: false }));
     const capabilities = await new PiObserver(dir).detectCapabilities();
     expect(capabilities).toMatchObject({ reportsCompletion: true, reportsFailure: true });
+  });
+
+  /**
+   * A session file can outlive its runs: the same file holds earlier work.
+   * An `error` recorded before the marker must not fail the run, and a `stop`
+   * recorded before the marker must not settle it before pi has answered.
+   */
+  it("does not fail the run on an error recorded before the marker", async () => {
+    const dir = await root();
+    await writePi(
+      dir,
+      "sess-pi",
+      piSessionWithEarlierWork("sess-pi", {
+        stopReason: "error",
+        errorMessage: "an earlier error",
+      }),
+    );
+
+    const run = { ...pending("pi"), detectedSessionId: "sess-pi", state: "detected_live" as const };
+    const { evidence } = await new PiObserver(dir).poll(run, new Date().toISOString());
+    expect(evidence.some((item) => item.kind === "failed")).toBe(false);
+  });
+
+  it("does not settle the run on a stop recorded before the marker", async () => {
+    const dir = await root();
+    await writePi(
+      dir,
+      "sess-pi",
+      piSessionWithEarlierWork("sess-pi", { stopReason: "stop" }),
+    );
+
+    const observer = new PiObserver(dir);
+    const run = { ...pending("pi"), detectedSessionId: "sess-pi", state: "detected_live" as const };
+    // Six minutes of silence after the prompt was pasted in — long enough to
+    // settle a turn that had ended, if one had.
+    const muchLater = new Date(Date.now() + 6 * 60_000).toISOString();
+    const { evidence } = await observer.poll(run, muchLater);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
   });
 });
 

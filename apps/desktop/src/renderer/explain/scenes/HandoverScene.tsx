@@ -42,14 +42,14 @@ export function HandoverScene() {
   /**
    * How many times the pill has flown, which is what picks the window's CLI.
    *
-   * The illustration cycles between two of the tools Anthill hands over to;
+   * The illustration cycles through the three tools Anthill hands over to;
    * the swap rides the loop rather than the step, because the loop is what a
    * reader sitting on this step actually sees happen — and it lands at the end
    * of a flight, when the pill has faded and nothing is travelling, so the
    * window changes identity between deliveries rather than under one.
    */
   const [flights, setFlights] = useState(0);
-  const cli: MarkerCli = flights % 2 === 0 ? "claude-code" : "codex";
+  const cli: MarkerCli = (["claude-code", "codex", "pi"] as MarkerCli[])[flights % 3];
 
   return (
     <div>

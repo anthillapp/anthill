@@ -10,7 +10,8 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { acquireInstanceLock, parseArgs } from "./cli.js";
+import { acquireInstanceLock, parseArgs, runReportCommand } from "./cli.js";
+import type { HarnessReport } from "@anthill/live";
 
 /**
  * Run `parseArgs` expecting it to fail, and return what it said on stderr.
@@ -96,6 +97,114 @@ describe("parseArgs", () => {
 
   it("still accepts a value that starts with `-` via `flag=value`", () => {
     expect(parseArgs(["--host=-weird"]).host).toBe("-weird");
+  });
+});
+
+describe("runReportCommand", () => {
+  /** A write that records the reports instead of touching the file system. */
+  function recorder(): { reports: HarnessReport[]; write: (report: HarnessReport) => Promise<void> } {
+    const reports: HarnessReport[] = [];
+    return { reports, write: async (report) => reports.push(report) };
+  }
+
+  it("records a run report and says so", async () => {
+    const { reports, write } = recorder();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const code = await runReportCommand(["run", "ANT-1A2B3C4D", "9f8e7d"], write);
+      expect(code).toBe(0);
+      expect(reports).toEqual([
+        expect.objectContaining({ kind: "run", runId: "ANT-1A2B3C4D", nonce: "9f8e7d" }),
+      ]);
+      expect(log.mock.calls.flat().join(" ")).toContain("Run reported.");
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("records a step report and names the step", async () => {
+    const { reports, write } = recorder();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const code = await runReportCommand(["step", "ANT-1A2B3C4D", "9f8e7d", "implement"], write);
+      expect(code).toBe(0);
+      expect(reports).toEqual([
+        expect.objectContaining({ kind: "step", runId: "ANT-1A2B3C4D", nonce: "9f8e7d", stepId: "implement" }),
+      ]);
+      expect(log.mock.calls.flat().join(" ")).toContain("Step implement reported.");
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("fails when a value is missing", async () => {
+    const { write } = recorder();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await runReportCommand(["run", "ANT-1A2B3C4D"], write)).toBe(1);
+      expect(await runReportCommand(["step", "ANT-1A2B3C4D", "9f8e7d"], write)).toBe(1);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("fails when a value is extra", async () => {
+    const { write } = recorder();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await runReportCommand(["run", "a", "b", "c"], write)).toBe(1);
+      expect(await runReportCommand(["step", "a", "b", "c", "d"], write)).toBe(1);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("fails on an empty value", async () => {
+    const { write } = recorder();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await runReportCommand(["run", "", "9f8e7d"], write)).toBe(1);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("fails on a value with whitespace", async () => {
+    const { write } = recorder();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await runReportCommand(["step", "ANT 1", "9f8e7d", "implement"], write)).toBe(1);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("fails on an unknown command, with the usage", async () => {
+    const { write } = recorder();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await runReportCommand(["bogus"], write)).toBe(1);
+      const message = error.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(message).toContain("unknown command");
+      expect(message).toContain("anthill run <runId> <nonce>");
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("fails, without reporting, when the write fails", async () => {
+    const { reports } = recorder();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failing = async () => {
+      throw new Error("disk full");
+    };
+    try {
+      expect(await runReportCommand(["run", "ANT-1A2B3C4D", "9f8e7d"], failing)).toBe(1);
+      expect(reports).toEqual([]);
+      expect(error.mock.calls.map((call) => call.join(" ")).join("\n")).toContain("disk full");
+    } finally {
+      error.mockRestore();
+    }
   });
 });
 

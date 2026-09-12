@@ -16,6 +16,7 @@
     "src/server.ts",
     "src/bridge.ts",
     "src/paths.ts",
+    "src/report.ts",
     "../desktop/src/main/live/hook-handler.ts"
   ]
 }

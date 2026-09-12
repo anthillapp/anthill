@@ -87,6 +87,18 @@ export type IpcCapabilities = {
   contract: number;
   /** Every channel the running main process actually registered a handler for. */
   channels: string[];
+  /**
+   * Which shell is serving the renderer.
+   *
+   * The renderer is the same bundle in both shells; this is how it finds
+   * out whether the harness it is about to instruct can reach the Anthill
+   * CLI. The CLI shell says `cli`, and its prompts therefore tell the
+   * harness to report through `anthill run` / `anthill step`. The desktop
+   * shell says `desktop`, and its prompts keep the printed marker lines.
+   * Additive: an old renderer that does not read it is unaffected, and an
+   * old main process that does not send it is read as `desktop`.
+   */
+  shell?: "desktop" | "cli";
 };
 
 /**

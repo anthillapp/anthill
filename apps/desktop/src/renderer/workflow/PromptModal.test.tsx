@@ -98,6 +98,7 @@ function stub(
   const api = {
     chooseRunFolder: vi.fn(async (): Promise<string | null> => CHOSEN),
     codexModels: vi.fn(async () => ({ models: [], agentSupport })),
+    capabilities: vi.fn(async () => ({ contract: 12, channels: [] })),
     liveSetupStatus: vi.fn(async () => ({ dismissed: true, trigger: "", harnesses: [setup] })),
     liveSetupInstall: vi.fn(async () => ({
       ok: true as const,

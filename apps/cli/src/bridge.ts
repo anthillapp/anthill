@@ -242,6 +242,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   register(IpcChannel.appCapabilities, async () => ({
     contract: IPC_CONTRACT,
     channels: [...registered],
+    shell: "cli",
   }));
 
   // No relaunch in the CLI: there is nothing to restart. Returning false lets

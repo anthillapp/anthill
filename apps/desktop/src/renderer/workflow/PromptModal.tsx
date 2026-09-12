@@ -147,6 +147,29 @@ export function PromptModal({
   const [failure, setFailure] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Whether the shell serving this renderer is the CLI.
+   *
+   * Only the CLI shell has the `anthill` binary the harness can reach, so
+   * only there does the prompt tell the harness to report through the CLI
+   * instead of printing marker lines. A shell that cannot be asked is
+   * treated as the desktop: the printed markers are the channel that works
+   * everywhere.
+   */
+  const [reportViaCli, setReportViaCli] = useState(false);
+  useEffect(() => {
+    let live = true;
+    window.anthill
+      .capabilities()
+      .then((caps) => {
+        if (live) setReportViaCli(caps.shell === "cli");
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
   /** The harness's observation setup, once main has been asked. */
   const [setup, setSetup] = useState<ObservationHarnessSetup | undefined>();
   const [installFailed, setInstallFailed] = useState<string | undefined>();
@@ -197,12 +220,12 @@ export function PromptModal({
   const result = useMemo<BootstrapResult | null>(() => {
     if (!validation.valid) return null;
     try {
-      return buildBootstrapPrompt(workflow, marker);
+      return buildBootstrapPrompt(workflow, marker, { reportViaCli });
     } catch (problem) {
       if (problem instanceof WorkflowCompileError) return null;
       throw problem;
     }
-  }, [workflow, validation.valid, marker]);
+  }, [workflow, validation.valid, marker, reportViaCli]);
 
   const files = result?.files ?? [];
   /** Nothing to place means nothing to ask about: no first step, not an empty one. */

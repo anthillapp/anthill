@@ -52,7 +52,9 @@ describe("the cli report observer", () => {
       pending(),
       new Date().toISOString(),
     );
-    expect(evidence).toEqual([{ kind: "activity", sessionId: "sess-1", at: "2026-08-29T10:00:01.000Z" }]);
+    expect(evidence).toEqual([
+      { kind: "activity", sessionId: "sess-1", at: "2026-08-29T10:00:01.000Z", channel: "anthill:report" },
+    ]);
     expect(events).toEqual([]);
   });
 
@@ -64,7 +66,9 @@ describe("the cli report observer", () => {
       pending(),
       new Date().toISOString(),
     );
-    expect(evidence).toEqual([{ kind: "activity", sessionId: "sess-1", at: "2026-08-29T10:00:02.000Z" }]);
+    expect(evidence).toEqual([
+      { kind: "activity", sessionId: "sess-1", at: "2026-08-29T10:00:02.000Z", channel: "anthill:report" },
+    ]);
     expect(events).toEqual([
       {
         at: "2026-08-29T10:00:02.000Z",
@@ -115,6 +119,36 @@ describe("the cli report observer", () => {
     expect(events[0]).toMatchObject({ blockId: "one" });
   });
 
+  it("reads a done report as completion, with a session end", async () => {
+    const path = await reportFile([
+      { kind: "done", runId: RUN_ID, nonce: NONCE, at: at("2026-08-29T10:00:03.000Z") },
+    ]);
+    const { evidence, events } = await new CliReportObserver(path).poll(
+      pending(),
+      new Date().toISOString(),
+    );
+    expect(evidence).toEqual([
+      {
+        kind: "completed",
+        sessionId: "sess-1",
+        channel: "anthill:report",
+        at: "2026-08-29T10:00:03.000Z",
+        detail: "The harness reported the work as finished.",
+      },
+    ]);
+    expect(events).toEqual([
+      {
+        at: "2026-08-29T10:00:03.000Z",
+        cli: "claude-code",
+        source: "anthill",
+        channel: "anthill:report",
+        sessionId: "sess-1",
+        kind: "session.end",
+        title: "The harness reported the work as finished",
+      },
+    ]);
+  });
+
   it("matches before a session is known, with the synthetic session id", async () => {
     const path = await reportFile([
       { kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "one", at: at("2026-08-29T10:00:02.000Z") },
@@ -123,7 +157,9 @@ describe("the cli report observer", () => {
       pending({ detectedSessionId: undefined, state: "pending_after_copy" }),
       new Date().toISOString(),
     );
-    expect(evidence).toEqual([{ kind: "activity", sessionId: "cli-report", at: "2026-08-29T10:00:02.000Z" }]);
+    expect(evidence).toEqual([
+      { kind: "activity", sessionId: "cli-report", at: "2026-08-29T10:00:02.000Z", channel: "anthill:report" },
+    ]);
     expect(events[0]).toMatchObject({ sessionId: "cli-report" });
   });
 

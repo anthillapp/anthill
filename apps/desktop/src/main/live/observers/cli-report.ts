@@ -2,10 +2,10 @@
  * Reading the progress reports a harness makes to the Anthill CLI.
  *
  * When the prompt tells the harness to use the CLI, the harness runs
- * `anthill run` and `anthill step`; the CLI appends one JSON line per call
- * to `~/.anthill/cli/harness-reports.jsonl`. This observer tails that file,
- * matches each line against the run it is watching (both halves of the
- * marker), and turns a match into evidence.
+ * `anthill run`, `anthill step`, and `anthill done`; the CLI appends one
+ * JSON line per call to `~/.anthill/cli/harness-reports.jsonl`. This
+ * observer tails that file, matches each line against the run it is
+ * watching (both halves of the marker), and turns a match into evidence.
  *
  * Passive, like everything else here. It reads a file the CLI wrote and
  * writes nothing back: the report file is Anthill's own state, and the
@@ -33,7 +33,13 @@ import { isReportFor, parseReportLine, type Evidence, type PendingRun } from "@a
 import type { ObservationEventDraft, PollResult } from "./types.js";
 import { newCursor, readNewLines, type TailCursor } from "./tail.js";
 
-/** The report file, in the CLI's default data directory. */
+/**
+ * The report file, in the CLI's default data directory.
+ *
+ * The desktop shell has no `--data-dir` of its own: it reads the default
+ * location, where a CLI started without one writes. A `stat` per poll on a
+ * possibly-missing file is the price of that, and it is intentional.
+ */
 export const REPORT_LOG = join(homedir(), ".anthill", "cli", "harness-reports.jsonl");
 
 export class CliReportObserver {
@@ -56,7 +62,9 @@ export class CliReportObserver {
    * alive, at the moment the CLI recorded it — the report's own time, not
    * the poll's. A step report is also a `step.marker` event: the harness
    * said which step it was on, and that is the one thing no other channel
-   * can know.
+   * can know. A `done` report is the harness saying the work is finished:
+   * it is `completed` evidence, the run's own "finished" state, and a
+   * `session.end` event.
    */
   async poll(run: PendingRun, _now: string): Promise<PollResult> {
     let cursor = this.cursors.get(run.anthillRunId);
@@ -75,7 +83,26 @@ export class CliReportObserver {
     for (const line of chunk.lines) {
       const report = parseReportLine(line);
       if (report === undefined || !isReportFor(report, marker)) continue;
-      evidence.push({ kind: "activity", sessionId, at: report.at });
+      if (report.kind === "done") {
+        evidence.push({
+          kind: "completed",
+          sessionId,
+          channel: "anthill:report",
+          at: report.at,
+          detail: "The harness reported the work as finished.",
+        });
+        events.push({
+          at: report.at,
+          cli: run.selectedCli,
+          source: "anthill",
+          channel: "anthill:report",
+          sessionId,
+          kind: "session.end",
+          title: "The harness reported the work as finished",
+        });
+        continue;
+      }
+      evidence.push({ kind: "activity", sessionId, at: report.at, channel: "anthill:report" });
       if (report.kind === "step") {
         events.push({
           at: report.at,

@@ -140,6 +140,60 @@ describe("evidence", () => {
     expect(back.statusMessage).toContain("not finished after all");
   });
 
+  it("says a report is a report, not a local session", () => {
+    // The review's point: a lone `run` report used to say "found this run's
+    // marker in a local session", which is not what happened. The message
+    // says what actually happened.
+    const viaReport = applyEvidence(run(), {
+      kind: "activity",
+      sessionId: "cli-report",
+      at: later(20_000),
+      channel: "anthill:report",
+    });
+    expect(viaReport.state).toBe("detected_live");
+    expect(viaReport.statusMessage).toBe("The harness reported this run through the Anthill CLI.");
+  });
+
+  it("says a report that revives a finished run is a report, not a session", () => {
+    const done = applyEvidence(applyEvidence(run(), strongMatch), {
+      kind: "completed",
+      sessionId: "sess-1",
+      channel: "anthill:report",
+      at: later(9_000),
+    });
+    const back = applyEvidence(done, {
+      kind: "activity",
+      sessionId: "sess-1",
+      at: later(20_000),
+      channel: "anthill:report",
+    });
+    expect(back.state).toBe("detected_live");
+    expect(back.statusMessage).toBe(
+      "The harness reported again through the Anthill CLI, so it was not finished after all.",
+    );
+  });
+
+  it("settles a report-only run on a done report, on the harness's own word", () => {
+    // No transcript was ever found: the only evidence is the harness's own
+    // reports. The run can still finish — the review's point that the
+    // channel could only ever end in `observation_lost`.
+    const live = applyEvidence(run(), {
+      kind: "activity",
+      sessionId: "cli-report",
+      at: later(20_000),
+      channel: "anthill:report",
+    });
+    const done = applyEvidence(live, {
+      kind: "completed",
+      sessionId: "cli-report",
+      channel: "anthill:report",
+      at: later(30_000),
+      detail: "The harness reported the work as finished.",
+    });
+    expect(done.state).toBe("completed");
+    expect(done.statusMessage).toBe("The harness reported the work as finished.");
+  });
+
   it("is not taken back by activity from the turn that already ended", () => {
     // An observer that re-reads an unchanged file reports the same last-written
     // moment again. That is the finished turn being described a second time,
@@ -595,6 +649,28 @@ describe("resuming a lost run from evidence", () => {
     );
     expect(resumed?.state).toBe("completed");
     expect(resumed?.statusMessage).toBe("Finished.");
+  });
+
+  it("is not resumed by a report from a session it never tied", () => {
+    // The done report names the synthetic report session, not the session the
+    // run was reading. Recovery is about the session coming back, and a
+    // report is not that — the path stays as it was.
+    const at = later(60 * 60_000);
+    expect(
+      resumeFromEvidence(
+        lostAndClosed(),
+        [
+          {
+            kind: "completed",
+            sessionId: "cli-report",
+            channel: "anthill:report",
+            at,
+            detail: "done",
+          },
+        ],
+        at,
+      ),
+    ).toBeUndefined();
   });
 
   it("never resumes a run Look again would refuse", () => {

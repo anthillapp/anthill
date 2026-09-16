@@ -98,6 +98,11 @@ describe("the CLI instruction", () => {
     expect(text).toContain(`${CLI_NAME} step ${marker.runId} ${marker.nonce} <step-id>`);
   });
 
+  it("names the done command, so a CLI-reported run can finish", () => {
+    const text = cliInstruction(marker);
+    expect(text).toContain(`${CLI_NAME} done ${marker.runId} ${marker.nonce}`);
+  });
+
   it("lists the step ids next to the instruction, for the same reason as the marker section", () => {
     const text = cliInstruction(marker, [
       { id: "read", name: "Read the note" },

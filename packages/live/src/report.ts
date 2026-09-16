@@ -2,10 +2,11 @@
  * A progress report a harness makes to the Anthill CLI.
  *
  * When the prompt tells the harness to use the CLI, the harness runs
- * `anthill run <runId> <nonce>` once and `anthill step <runId> <nonce>
- * <step-id>` per step. The CLI appends one JSON line per call to a local
- * file, and the live observer reads that file afterwards, the same way the
- * hook observer reads the hook log.
+ * `anthill run <runId> <nonce>` once, `anthill step <runId> <nonce>
+ * <step-id>` per step, and `anthill done <runId> <nonce>` once the work is
+ * finished. The CLI appends one JSON line per call to a local file, and the
+ * live observer reads that file afterwards, the same way the hook observer
+ * reads the hook log.
  *
  * The line carries both halves of the correlation marker. The run id on its
  * own is not enough: a prompt copied at some other time can still be in
@@ -34,6 +35,13 @@ export type HarnessReport =
       runId: string;
       nonce: string;
       stepId: string;
+      at: string;
+    }
+  | {
+      /** The harness said the work is finished. */
+      kind: "done";
+      runId: string;
+      nonce: string;
       at: string;
     };
 
@@ -77,6 +85,9 @@ export function parseReportLine(line: string): HarnessReport | undefined {
       stepId: candidate.stepId,
       at: candidate.at,
     };
+  }
+  if (candidate.kind === "done") {
+    return { kind: "done", runId: candidate.runId, nonce: candidate.nonce, at: candidate.at };
   }
   return undefined;
 }

@@ -148,10 +148,11 @@ export const CLI_NAME = "anthill";
  * The instruction for a prompt that reports through the CLI instead of
  * printing marker lines.
  *
- * The harness runs `anthill run ...` once and `anthill step ...` per step.
- * The CLI appends a line per call to a local file Anthill reads afterwards.
- * The work is not affected either way: a command that cannot be run is
- * skipped, and the step ids are the same ones the marker section names.
+ * The harness runs `anthill run ...` once, `anthill step ...` per step, and
+ * `anthill done ...` once the work is finished. The CLI appends a line per
+ * call to a local file Anthill reads afterwards. The work is not affected
+ * either way: a command that cannot be run is skipped, and the step ids are
+ * the same ones the marker section names.
  */
 export function cliInstruction(
   marker: RunMarker,
@@ -172,6 +173,10 @@ export function cliInstruction(
     "an earlier one:**",
     "",
     `    ${CLI_NAME} step ${marker.runId} ${marker.nonce} <step-id>`,
+    "",
+    "**Once the work is finished:**",
+    "",
+    `    ${CLI_NAME} done ${marker.runId} ${marker.nonce}`,
   ];
 
   // The ids belong next to the instruction rather than at the end of the

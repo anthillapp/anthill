@@ -99,8 +99,15 @@ export type Evidence =
     }
   /** More than one session on this machine carries this run's marker. */
   | { kind: "ambiguous"; sessionIds: string[]; channel: string; at: string }
-  /** The matched session wrote something new. */
-  | { kind: "activity"; sessionId: string; at: string }
+  /**
+   * The matched session wrote something new.
+   *
+   * `channel` says which channel the evidence came through, so the status
+   * message can be true: a report through the CLI is not a local session
+   * record, and saying otherwise would tell the author something that did
+   * not happen.
+   */
+  | { kind: "activity"; sessionId: string; at: string; channel?: string }
   /**
    * A tool this session started has not reported back yet.
    *
@@ -355,14 +362,21 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
         return { ...run, expiresAt: windowFrom(run, evidence.at), lastObservedAt: evidence.at };
       }
       const resumed = run.state === "completed" || run.state === "observation_lost";
+      // A report is the harness talking to the CLI, not a local session
+      // record: the message says what actually happened.
+      const viaReport = evidence.channel === "anthill:report";
       return {
         ...run,
         state: "detected_live",
         expiresAt: windowFrom(run, evidence.at),
         lastObservedAt: evidence.at,
-        statusMessage: resumed
-          ? "The session started writing again, so it was not finished after all."
-          : "Anthill found this run's marker in a local session.",
+        statusMessage: viaReport
+          ? resumed
+            ? "The harness reported again through the Anthill CLI, so it was not finished after all."
+            : "The harness reported this run through the Anthill CLI."
+          : resumed
+            ? "The session started writing again, so it was not finished after all."
+            : "Anthill found this run's marker in a local session.",
       };
     }
 

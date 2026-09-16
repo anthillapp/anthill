@@ -161,7 +161,28 @@ async function toHandover() {
   await screen.findByRole("heading", { name: /^Hand over to|^Paste it into/ });
 }
 
-const copyButton = () => screen.getByRole("button", { name: /^Copy prompt$|^Copy again$|^Try that folder again$/ });
+/**
+ * The copy button, once it is safe to press.
+ *
+ * While the shell is still being asked, the button is disabled — the prompt
+ * is not worth copying before it is known whether it will report through the
+ * CLI. Waiting for the enabled state is part of the contract these tests
+ * exercise.
+ */
+const copyButton = async () => {
+  const button = await screen.findByRole("button", {
+    name: /^Copy prompt$|^Copy again$|^Try that folder again$/,
+  });
+  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  return button;
+};
+
+/** The "copy without the files" button, once it is safe to press. */
+const copyWithoutFilesButton = async () => {
+  const button = await screen.findByRole("button", { name: "Copy without agent files" });
+  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  return button;
+};
 
 /**
  * A workflow that genuinely produces no agent files.
@@ -185,7 +206,7 @@ describe("the handover", () => {
     open();
     await toHandover();
 
-    fireEvent.click(copyButton());
+    fireEvent.click(await copyButton());
     await waitFor(() => expect(order).toEqual(["files", "observe", "clipboard"]));
     expect(api.liveObserve).toHaveBeenCalledTimes(1);
   });
@@ -196,7 +217,7 @@ describe("the handover", () => {
     await toHandover();
 
     const shown = screen.getByText(/^ANT-/).textContent as string;
-    fireEvent.click(copyButton());
+    fireEvent.click(await copyButton());
     await waitFor(() => expect(copied).toHaveLength(1));
 
     const marker = parseMarker(copied[0]);
@@ -213,7 +234,7 @@ describe("the handover", () => {
     const { copied, requests } = stub();
     open();
     await toHandover();
-    fireEvent.click(copyButton());
+    fireEvent.click(await copyButton());
     await waitFor(() => expect(copied).toHaveLength(1));
 
     const request = requests[0] as { bootstrapPromptHash: string };
@@ -341,7 +362,7 @@ describe("the three steps", () => {
     stub();
     const onRunRoot = open();
     await toHandover();
-    fireEvent.click(copyButton());
+    fireEvent.click(await copyButton());
     await waitFor(() => expect(screen.getByText(/agent file written/)).toBeTruthy());
     expect(onRunRoot).not.toHaveBeenCalled();
   });
@@ -414,7 +435,7 @@ describe("writing the agent files", () => {
     const { api, order } = stub();
     open();
     await toHandover();
-    fireEvent.click(copyButton());
+    fireEvent.click(await copyButton());
     await waitFor(() => expect(order).toContain("clipboard"));
     expect(order.indexOf("files")).toBeLessThan(order.indexOf("clipboard"));
     expect((api.exportWorkflow.mock.calls[0] as unknown[])[0]).toMatchObject({ root: CHOSEN });
@@ -424,7 +445,7 @@ describe("writing the agent files", () => {
     stub();
     open();
     await toHandover();
-    fireEvent.click(copyButton());
+    fireEvent.click(await copyButton());
     await screen.findByRole("heading", { name: "Paste it into Claude Code" });
     expect(screen.getByText(/1 agent file written/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Copy again" })).toBeTruthy();
@@ -437,7 +458,7 @@ describe("writing the agent files", () => {
     api.exportWorkflow.mockResolvedValueOnce({ ok: false, error: "disk full" });
     open();
     await toHandover();
-    fireEvent.click(copyButton());
+    fireEvent.click(await copyButton());
 
     await waitFor(() => expect(order).toContain("clipboard"));
     expect(screen.getByText("disk full")).toBeTruthy();
@@ -451,7 +472,7 @@ describe("writing the agent files", () => {
     const { api, order } = stub();
     open(workflow);
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy without agent files" }));
+    fireEvent.click(await copyWithoutFilesButton());
     await waitFor(() => expect(order).toContain("clipboard"));
     expect(api.exportWorkflow).not.toHaveBeenCalled();
   });
@@ -461,7 +482,7 @@ describe("writing the agent files", () => {
     stub();
     open(workflow);
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy without agent files" }));
+    fireEvent.click(await copyWithoutFilesButton());
     // Step 1 also says a workflow without the files "runs as one agent", so
     // this waits on the footer's whole sentence — a looser match resolves
     // against the step the copy is supposed to leave.
@@ -474,7 +495,7 @@ describe("writing the agent files", () => {
     const { api, order } = stub();
     open(withoutAgents());
     await toHandover();
-    fireEvent.click(copyButton());
+    fireEvent.click(await copyButton());
     await waitFor(() => expect(order).toContain("clipboard"));
     expect(api.exportWorkflow).not.toHaveBeenCalled();
   });
@@ -601,7 +622,7 @@ describe("waiting for the session", () => {
     const stubbed = stub();
     open(withRoot(CHOSEN), vi.fn(), onClose);
     await toHandover();
-    fireEvent.click(copyButton());
+    fireEvent.click(await copyButton());
     await waitFor(() => expect(stubbed.copied).toHaveLength(1));
     return { ...stubbed, onClose };
   }
@@ -645,7 +666,7 @@ describe("waiting for the session", () => {
     const stubbed = stub(harness({ cliAvailable: false, hookEntriesPresent: false, hookInstalled: false }));
     open();
     await toHandover();
-    fireEvent.click(copyButton());
+    fireEvent.click(await copyButton());
     await waitFor(() => expect(stubbed.copied).toHaveLength(1));
     expect(screen.queryByText(/Waiting for the session/)).toBeNull();
   });
@@ -665,7 +686,7 @@ describe("selecting the report channel", () => {
     stubbed.api.capabilities.mockResolvedValue({ contract: 12, channels: [], shell: "cli" });
     open();
     await toHandover();
-    fireEvent.click(copyButton());
+    fireEvent.click(await copyButton());
     await waitFor(() => expect(stubbed.copied).toHaveLength(1));
     const prompt = stubbed.copied[0];
     expect(prompt).toContain("anthill run");
@@ -679,13 +700,26 @@ describe("selecting the report channel", () => {
     stubbed.api.capabilities.mockRejectedValue(new Error("no bridge"));
     open();
     await toHandover();
-    fireEvent.click(copyButton());
+    fireEvent.click(await copyButton());
     await waitFor(() => expect(stubbed.copied).toHaveLength(1));
     const prompt = stubbed.copied[0];
     expect(prompt).toContain("ANTHILL-RUN");
     expect(prompt).toContain("ANTHILL-STEP");
     expect(prompt).not.toContain("anthill run");
     expect(prompt).not.toContain("anthill step");
+  });
+
+  it("withholds Copy while it is still learning the shell", async () => {
+    // The race the review caught: `reportViaCli` used to start `false`, so a
+    // copy in that window handed over the echo-instruction prompt from a CLI
+    // shell. Now the button is disabled until the answer is known.
+    const stubbed = stub();
+    stubbed.api.capabilities.mockImplementation(() => new Promise(() => undefined));
+    open();
+    await toHandover();
+    const button = screen.getByRole("button", { name: "Copy prompt" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/Waiting to learn how this shell runs/)).toBeTruthy();
   });
 });
 

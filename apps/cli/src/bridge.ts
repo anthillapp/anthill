@@ -67,6 +67,7 @@ import {
   setRecentsPaths,
 } from "../../desktop/src/main/recents.js";
 import type { Paths } from "./paths.js";
+import { reportPath } from "./report.js";
 
 /**
  * The CLI's answer to the desktop's preload: it maps every `IpcChannel`
@@ -162,7 +163,14 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
       new PendingRunStore(join(paths.userData, "live-sessions.json")),
       (snapshot) => push(LIVE_SNAPSHOT_CHANNEL, snapshot),
       () => new Date().toISOString(),
-      { journalDir: join(paths.userData, "live-observations") },
+      {
+        journalDir: join(paths.userData, "live-observations"),
+        // The report file lives in the CLI's own data directory: with
+        // `--data-dir X`, the observer reads reports from `X`, exactly where
+        // `anthill run --data-dir X` writes them, instead of falling back
+        // to the default directory.
+        reportLogPath: reportPath(paths),
+      },
       (runId, events) => push(LIVE_EVENTS_CHANNEL, { runId, events }),
     );
     return live;

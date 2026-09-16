@@ -275,3 +275,119 @@ describe("work still in flight", () => {
     expect(evidence).toEqual([]);
   });
 });
+
+/**
+ * The delegations a session says it is still waiting on.
+ *
+ * ANT-75. Claude Code puts a \`background_tasks\` list on its Stop records —
+ * its own account of what it dispatched and has not finished. Measured over
+ * the reported session: seventeen tasks, sixteen of which left the list when
+ * they finished, so the list is maintained rather than appended to and is
+ * worth reading. The seventeenth is why it still expires.
+ */
+describe("work the session handed to somebody else", () => {
+  const NOW = "2026-08-29T10:10:00.000Z";
+  const at = (iso: string, data: Record<string, unknown>) => ({ ...line(data), recordedAt: iso });
+  const task = (id: string, description: string, status = "running") => ({
+    id,
+    type: "subagent",
+    status,
+    description,
+    agent_type: "developer",
+  });
+  const stop = (iso: string, tasks: unknown[]) =>
+    at(iso, { hook_event_name: "Stop", background_tasks: tasks });
+
+  it("reports the session as working while it says it is waiting", async () => {
+    const path = await log([stop("2026-08-29T10:05:00.000Z", [task("t1", "Stage 2 OCR")])]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    expect(evidence).toContainEqual(
+      expect.objectContaining({ kind: "working", sessionId: "sess-1", at: NOW }),
+    );
+    const working = evidence.find((item) => item.kind === "working");
+    expect(working && "detail" in working && working.detail).toContain("Stage 2 OCR");
+  });
+
+  it("stops once the task leaves the list, which is how finishing is reported", async () => {
+    // No terminal status ever appears — every entry in the reported session
+    // said "running". A finished task is simply gone from the next record.
+    const path = await log([
+      stop("2026-08-29T10:05:00.000Z", [task("t1", "Stage 2 OCR")]),
+      stop("2026-08-29T10:06:00.000Z", []),
+    ]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    expect(evidence.some((item) => item.kind === "working")).toBe(false);
+  });
+
+  it("keeps saying so on a poll that reads nothing new", async () => {
+    const path = await log([stop("2026-08-29T10:05:00.000Z", [task("t1", "Stage 2 OCR")])]);
+    const observer = new HookLogObserver(path);
+    await observer.poll(pending(), "2026-08-29T10:05:01.000Z");
+    const { evidence, events } = await observer.poll(pending(), NOW);
+    expect(events).toEqual([]);
+    expect(evidence.some((item) => item.kind === "working")).toBe(true);
+  });
+
+  it("gives up on a task listed for longer than it can be believed", async () => {
+    // The seventeenth: a shell task called "Wait for fixture OCR tests to
+    // finish", carried for five hours, long after the work it named was over.
+    // Against it, the longest delegation genuinely running lasted 81 minutes —
+    // and spent none of that silent, because its subagent's own hooks arrive
+    // under this session.
+    const path = await log([
+      stop("2026-08-29T09:00:00.000Z", [task("stuck", "Wait for fixture OCR tests to finish")]),
+    ]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    expect(evidence.some((item) => item.kind === "working")).toBe(false);
+  });
+
+  it("ignores an entry that is not running", async () => {
+    const path = await log([stop("2026-08-29T10:05:00.000Z", [task("t1", "Done already", "completed")])]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    expect(evidence.some((item) => item.kind === "working")).toBe(false);
+  });
+
+  it("says nothing about another session's list", async () => {
+    const path = await log([
+      {
+        ...stop("2026-08-29T10:05:00.000Z", [task("t1", "Someone else")]),
+        data: { session_id: "other", hook_event_name: "Stop", background_tasks: [task("t1", "x")] },
+      },
+    ]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    expect(evidence).toEqual([]);
+  });
+});
+
+/**
+ * Whether this log is carrying news about a run.
+ *
+ * The transcript observer asks, because what it may infer from silence depends
+ * on whether anything else is listening (ANT-75).
+ */
+describe("what the hook log says it covers", () => {
+  it("covers a run once it has kept a line for it", async () => {
+    const path = await log([line({ hook_event_name: "PreToolUse", tool_name: "Bash" })]);
+    const observer = new HookLogObserver(path);
+    expect(observer.watching(RUN_ID)).toBe(false);
+    await observer.poll(pending(), new Date().toISOString());
+    expect(observer.watching(RUN_ID)).toBe(true);
+  });
+
+  it("does not claim a run whose lines belong to another session", async () => {
+    const path = await log([
+      { ...line({ hook_event_name: "PreToolUse" }), data: { session_id: "other", hook_event_name: "PreToolUse" } },
+    ]);
+    const observer = new HookLogObserver(path);
+    await observer.poll(pending(), new Date().toISOString());
+    expect(observer.watching(RUN_ID)).toBe(false);
+  });
+
+  it("forgets a run it is told to forget", async () => {
+    const path = await log([line({ hook_event_name: "PreToolUse", tool_name: "Bash" })]);
+    const observer = new HookLogObserver(path);
+    await observer.poll(pending(), new Date().toISOString());
+    observer.forget(RUN_ID);
+    expect(observer.watching(RUN_ID)).toBe(false);
+  });
+});

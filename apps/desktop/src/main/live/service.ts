@@ -314,7 +314,9 @@ export class LiveSessionService {
     let evidence: Evidence[] = [];
     let drafts: ObservationEventDraft[] = [];
     try {
-      const result = await observer.poll(run, now);
+      const result = await observer.poll(run, now, {
+        hooksWatching: this.hooks.watching(run.anthillRunId),
+      });
       evidence = result.evidence;
       drafts = result.events;
     } catch {

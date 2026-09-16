@@ -86,6 +86,22 @@ function toolTarget(name: string | undefined, input: unknown): string | undefine
 type OpenCall = { at: string; toolName?: string };
 
 /**
+ * A delegation the session itself reports as still running.
+ *
+ * Claude Code puts a `background_tasks` list on its `Stop` and
+ * `SubagentStop` records: the work it dispatched and has not finished. It is
+ * the session's own account of what is outstanding, which is a far better
+ * answer than inferring one from silence — and it is maintained rather than
+ * appended to. Measured over the session ANT-75 was reported from: seventeen
+ * tasks, sixteen of which left the list when they finished.
+ *
+ * `since` is when *Anthill* first saw it listed, not when the session started
+ * it, because the expiry below is about how long a record has gone
+ * uncorroborated rather than how long work may take.
+ */
+type BackgroundTask = { since: string; description?: string };
+
+/**
  * How long an unfinished tool call is still taken as a sign of life.
  *
  * Nothing ever retracts a `PreToolUse`. A session killed mid-tool, or a hook
@@ -120,6 +136,23 @@ export class HookLogObserver {
    * became that the session was gone (ANT-71).
    */
   private readonly open = new Map<string, Map<string, OpenCall>>();
+  /**
+   * Delegations the session last said were still running, per run.
+   *
+   * Kept apart from `open` because the two are different claims: an open tool
+   * call is work this session is doing right now, a background task is work it
+   * handed to somebody else and has not heard back about.
+   */
+  private readonly background = new Map<string, Map<string, BackgroundTask>>();
+  /**
+   * Runs this log has actually said something about.
+   *
+   * Not "are hooks installed" — that a log file exists somewhere says nothing
+   * about whether *this* session writes to it. The question other readers need
+   * answered is narrower and is the one that matters: is this run being
+   * watched by a second channel, or is the transcript on its own?
+   */
+  private readonly covered = new Set<string>();
 
   constructor(path: string = HOOK_LOG) {
     this.path = path;
@@ -129,6 +162,8 @@ export class HookLogObserver {
     this.cursors.delete(runId);
     this.reportedAt.delete(runId);
     this.open.delete(runId);
+    this.background.delete(runId);
+    this.covered.delete(runId);
   }
 
   /** Whether hooks are installed and have ever recorded anything. */
@@ -162,11 +197,17 @@ export class HookLogObserver {
       inFlight = new Map<string, OpenCall>();
       this.open.set(run.anthillRunId, inFlight);
     }
+    let delegated = this.background.get(run.anthillRunId);
+    if (!delegated) {
+      delegated = new Map<string, BackgroundTask>();
+      this.background.set(run.anthillRunId, delegated);
+    }
 
     const chunk = await readNewLines(this.path, cursor);
     // A log that has not grown can still be saying something: a tool that
-    // opened before this poll and has not closed is work in flight now.
-    if (!chunk.grew) return { evidence: this.stillWorking(inFlight, sessionId, now), events: [] };
+    // opened before this poll and has not closed is work in flight now, and so
+    // is a delegation the session last reported as still running.
+    if (!chunk.grew) return { evidence: this.stillWorking(inFlight, delegated, sessionId, now), events: [] };
 
     const events: ObservationEventDraft[] = [];
     for (const line of chunk.lines) {
@@ -181,8 +222,36 @@ export class HookLogObserver {
       const data = isRecord(row.data) ? row.data : undefined;
       if (!data) continue;
       if (str(data.session_id) !== run.detectedSessionId) continue;
+      this.covered.add(run.anthillRunId);
 
       const name = str(data.hook_event_name) ?? str(row.eventType) ?? "";
+
+      /*
+        The session's own list of what it is still waiting on.
+
+        Read before the event kind is checked, because it rides on records
+        this reader otherwise has no use for, and it is a *replacement* rather
+        than an addition: a task that has finished is simply no longer in the
+        list, which is what makes the list worth trusting.
+      */
+      if (Array.isArray(data.background_tasks)) {
+        const listed = new Map<string, BackgroundTask>();
+        for (const task of data.background_tasks) {
+          if (!isRecord(task)) continue;
+          const id = str(task.id);
+          if (!id || str(task.status) !== "running") continue;
+          const description = str(task.description);
+          listed.set(id, {
+            // Kept from the first sighting, so the expiry measures how long a
+            // record has gone uncorroborated rather than restarting each poll.
+            since: delegated.get(id)?.since ?? (str(row.recordedAt) ?? now),
+            ...(description ? { description } : {}),
+          });
+        }
+        delegated.clear();
+        for (const [id, task] of listed) delegated.set(id, task);
+      }
+
       const kind = KIND[name];
       if (!kind) continue;
 
@@ -256,7 +325,10 @@ export class HookLogObserver {
       this.reportedAt.set(run.anthillRunId, newest);
       evidence.push({ kind: "activity", sessionId, at: newest });
     }
-    return { evidence: [...evidence, ...this.stillWorking(inFlight, sessionId, now)], events };
+    return {
+      evidence: [...evidence, ...this.stillWorking(inFlight, delegated, sessionId, now)],
+      events,
+    };
   }
 
   /**
@@ -269,17 +341,48 @@ export class HookLogObserver {
    */
   private stillWorking(
     inFlight: Map<string, OpenCall>,
+    delegated: Map<string, BackgroundTask>,
     sessionId: string,
     now: string,
   ): Evidence[] {
-    let newest: OpenCall | undefined;
+    let newest: { at: string; detail?: string } | undefined;
+    const consider = (at: string, detail?: string) => {
+      if (!newest || at > newest.at) newest = { at, ...(detail ? { detail } : {}) };
+    };
+
     for (const [id, call] of inFlight) {
-      if (Date.parse(now) - Date.parse(call.at) > IN_FLIGHT_TTL_MS) {
+      if (this.tooOld(call.at, now)) {
         inFlight.delete(id);
         continue;
       }
-      if (!newest || call.at > newest.at) newest = call;
+      consider(call.at, call.toolName ? `${call.toolName} has been running since ${call.at}.` : undefined);
     }
+
+    /*
+      A delegation the session says it is waiting on.
+
+      Expired on the same clock and for the same reason as an open tool call:
+      nothing ever retracts either. The session ANT-75 was reported from ended
+      with one still listed — a shell task called "Wait for fixture OCR tests
+      to finish", carried for five hours, long after the work it named was
+      over. Against that, the longest delegation that was genuinely running
+      lasted eighty-one minutes, and it spent none of that time silent: its
+      subagent's own hooks arrive under this session, so real work keeps
+      saying so through the ordinary channel and does not need this one.
+    */
+    for (const [id, task] of delegated) {
+      if (this.tooOld(task.since, now)) {
+        delegated.delete(id);
+        continue;
+      }
+      consider(
+        task.since,
+        task.description
+          ? `The session is still waiting on "${task.description}".`
+          : "The session is still waiting on work it handed to somebody else.",
+      );
+    }
+
     if (!newest) return [];
     return [
       {
@@ -287,8 +390,23 @@ export class HookLogObserver {
         sessionId,
         at: now,
         since: newest.at,
-        ...(newest.toolName ? { detail: `${newest.toolName} has been running since ${newest.at}.` } : {}),
+        ...(newest.detail ? { detail: newest.detail } : {}),
       },
     ];
+  }
+
+  /**
+   * Whether this log is carrying news about a run, as a matter of record.
+   *
+   * The transcript observer asks, because what it may infer from silence
+   * depends on whether anything else is listening (ANT-75).
+   */
+  watching(runId: string): boolean {
+    return this.covered.has(runId);
+  }
+
+  /** Whether a record has gone uncorroborated for longer than it is believed. */
+  private tooOld(since: string, now: string): boolean {
+    return Date.parse(now) - Date.parse(since) > IN_FLIGHT_TTL_MS;
   }
 }

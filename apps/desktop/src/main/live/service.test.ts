@@ -789,3 +789,132 @@ describe("a session waiting on a tool it started", () => {
     expect(only(h.service.snapshot()).state).toBe("observation_lost");
   });
 });
+
+/**
+ * A delegating session that actually finished.
+ *
+ * ANT-75, end to end, because that is where it bit: every observer behaved as
+ * written and the run still came to rest at "Observation lost" with its last
+ * step unknown, so the diagram never went green. The reported session made 14
+ * backgrounded delegations, ended its turn cleanly at 04:09:14, and wrote
+ * nothing after.
+ */
+describe("a session that delegated in the background and then finished", () => {
+  const START = "2026-08-29T10:00:00.000Z";
+  const at = (ms: number) => new Date(Date.parse(START) + ms).toISOString();
+
+  /** Dispatch to a background agent, take the receipt, end the turn. */
+  async function delegatedAndDone(h: Harness) {
+    const file = join(h.claudeRoot, "-tmp-scratch", "sess-1.jsonl");
+    const rows = [
+      {
+        type: "assistant",
+        sessionId: "sess-1",
+        timestamp: at(60_000),
+        message: {
+          role: "assistant",
+          stop_reason: "tool_use",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_9",
+              name: "Agent",
+              input: { subagent_type: "developer", run_in_background: true },
+            },
+          ],
+        },
+      },
+      {
+        type: "user",
+        sessionId: "sess-1",
+        timestamp: at(62_000),
+        message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_9" }] },
+      },
+      {
+        type: "assistant",
+        sessionId: "sess-1",
+        timestamp: at(64_000),
+        message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "Done." }] },
+      },
+    ];
+    await appendFile(file, rows.map((row) => JSON.stringify(row)).join("\n") + "\n", "utf8");
+  }
+
+  async function live(): Promise<Harness> {
+    const h = await harness(START);
+    await h.service.start();
+    await h.service.startObservation(observeRequest);
+    await writeTranscript(h.claudeRoot, "sess-1");
+    h.setNow(at(10_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("detected_live");
+    return h;
+  }
+
+  it("is reported as finished, so the diagram can go green", async () => {
+    const h = await live();
+    // The hook channel is carrying this run, which is what lets the transcript
+    // stop assuming the handover is still outstanding. Opened and closed, so
+    // nothing is left in flight to keep the session looking busy.
+    await hookLine(h.hookLogPath, "sess-1", "PreToolUse", at(30_000), "toolu_1");
+    await hookLine(h.hookLogPath, "sess-1", "PostToolUse", at(31_000), "toolu_1");
+    h.setNow(at(40_000));
+    await h.service.poll();
+
+    await delegatedAndDone(h);
+    h.setNow(at(70_000));
+    await h.service.poll();
+
+    // Quiet on every channel, well past the settle window.
+    h.setNow(at(70_000 + 12 * 60_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("completed");
+  });
+
+  it("is not reported as finished while the session says it is still waiting", async () => {
+    const h = await live();
+    await hookLine(h.hookLogPath, "sess-1", "PreToolUse", at(30_000), "toolu_1");
+    await hookLine(h.hookLogPath, "sess-1", "PostToolUse", at(31_000), "toolu_1");
+    h.setNow(at(40_000));
+    await h.service.poll();
+
+    await delegatedAndDone(h);
+    // Its own account of what is outstanding, on the record.
+    await appendFile(
+      h.hookLogPath,
+      JSON.stringify({
+        source: "anthill-observation-hook",
+        harness: "claude-code",
+        eventType: "Stop",
+        recordedAt: at(66_000),
+        data: {
+          session_id: "sess-1",
+          hook_event_name: "Stop",
+          background_tasks: [
+            { id: "bg1", type: "subagent", status: "running", description: "Stage 2 OCR" },
+          ],
+        },
+      }) + "\n",
+      "utf8",
+    );
+    h.setNow(at(70_000));
+    await h.service.poll();
+
+    h.setNow(at(70_000 + 12 * 60_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("detected_live");
+  });
+
+  it("stays unfinished when the transcript is the only channel", async () => {
+    // No hook line was ever kept for this run, so nothing can retract the
+    // handover and the old assumption is still the honest one.
+    const h = await live();
+    await delegatedAndDone(h);
+    h.setNow(at(70_000));
+    await h.service.poll();
+
+    h.setNow(at(70_000 + 12 * 60_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).not.toBe("completed");
+  });
+});

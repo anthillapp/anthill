@@ -33,6 +33,19 @@ export type ObserverCapabilities = {
  */
 export type ObservationEventDraft = Omit<ObservationEvent, "runId" | "seq" | "recordedAt">;
 
+/**
+ * What an observer can only learn from the others.
+ *
+ * Each observer reads one channel and knows nothing of the rest, which is
+ * right until a reader has to decide what silence *means* — and that depends
+ * entirely on whether anybody else is still listening. The service knows, so
+ * the service says.
+ */
+export type ObservationContext = {
+  /** Whether the hook log is carrying news about this run. */
+  hooksWatching: boolean;
+};
+
 export type PollResult = {
   /** What this poll says about whether the run matches a local session. */
   evidence: Evidence[];
@@ -65,7 +78,7 @@ export interface LiveSessionObserver {
    * Empty results mean nothing has changed, which is not the same as nothing
    * being there.
    */
-  poll(run: PendingRun, now: string): Promise<PollResult>;
+  poll(run: PendingRun, now: string, context?: ObservationContext): Promise<PollResult>;
   /** Forget per-run reading positions once a run closes. */
   forget(runId: string): void;
 }

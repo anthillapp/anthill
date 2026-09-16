@@ -1044,6 +1044,69 @@ describe("a session that delegates and then waits", () => {
     expect(evidence.some((item) => item.kind === "completed")).toBe(true);
   });
 
+  /**
+   * The other half of the trade <issue>ANT-70</issue> made.
+   *
+   * Making \`dispatched\` sticky for backgrounded delegation stopped Anthill
+   * calling a working session finished. It also stopped it calling a finished
+   * session finished: one backgrounded delegation and the flag never cleared,
+   * so a workflow that demonstrably completed sat at "Observation lost" with
+   * its last step unknown and the diagram never went green (ANT-75).
+   *
+   * The flag now stands down when the hook log is carrying news about the run,
+   * because then the question is answered by evidence rather than by a
+   * permanent assumption. With no hooks, the transcript is alone and the
+   * assumption is still the honest answer.
+   */
+  const watched = { hooksWatching: true };
+
+  async function lookWith(body: string, quietMs: number, context?: { hooksWatching: boolean }) {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-scratch", "sess-1", body);
+    return new ClaudeCodeObserver(dir).poll(pending("claude-code"), at(quietMs), context);
+  }
+
+  it("settles a backgrounded delegation once another channel is watching", async () => {
+    const { evidence } = await lookWith(backgrounded("sess-1", "Agent"), 12 * 60_000, watched);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(true);
+  });
+
+  it("still refuses to settle it when the transcript is the only channel", async () => {
+    // Nothing can retract the handover here, so the assumption stands.
+    const { evidence } = await lookWith(backgrounded("sess-1", "Agent"), 12 * 60_000);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+    const { evidence: explicit } = await lookWith(
+      backgrounded("sess-1", "Agent"),
+      12 * 60_000,
+      { hooksWatching: false },
+    );
+    expect(explicit.some((item) => item.kind === "completed")).toBe(false);
+  });
+
+  it("does not settle on a delegation that has not come back, watched or not", async () => {
+    // \`awaiting\` is a different claim: a foreground delegation whose result
+    // has not arrived is work this file will describe, once it does.
+    const body = transcript("sess-2", [
+      assistant(
+        "sess-2",
+        4_000,
+        [{ type: "tool_use", id: "toolu_1", name: "Task", input: { subagent_type: "reader" } }],
+        "tool_use",
+      ),
+      assistant("sess-2", 6_000, [{ type: "text", text: "Handed it over." }], "end_turn"),
+    ]);
+    const { evidence } = await lookWith(body, 12 * 60_000, watched);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+  });
+
+  it("still settles an ordinary session when a channel is watching", async () => {
+    const body = transcript("sess-4", [
+      assistant("sess-4", 4_000, [{ type: "text", text: "It says pumpernickel." }], "end_turn"),
+    ]);
+    const { evidence } = await lookWith(body, 12 * 60_000, watched);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(true);
+  });
+
   it("still settles a foreground delegation that came back", async () => {
     // The guard must not swallow the ordinary case: a foreground Agent's
     // result is the work itself, and the session really has finished.

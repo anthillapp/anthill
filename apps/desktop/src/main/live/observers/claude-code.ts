@@ -40,6 +40,7 @@ import {
 import {
   isThisRun,
   type LiveSessionObserver,
+  type ObservationContext,
   type ObservationEventDraft,
   type ObserverCapabilities,
   type PollResult,
@@ -156,7 +157,7 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
     this.seen.delete(runId);
   }
 
-  async poll(run: PendingRun, now: string): Promise<PollResult> {
+  async poll(run: PendingRun, now: string, context?: ObservationContext): Promise<PollResult> {
     const files = await this.candidates(run);
     if (files === undefined) {
       return {
@@ -318,7 +319,29 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
       // only honest thing it can say about that silence is that it cannot see
       // anything, which is what the quiet path already says and what it says
       // recoverably.
-      const handedOff = state.awaiting.size > 0 || state.dispatched;
+      /*
+        Work handed somewhere this file will not describe.
+
+        `dispatched` is sticky, because nothing in *this* channel ever says the
+        background work is over. That was the only protection available when it
+        was written, and as the sole gate it is too strong: one backgrounded
+        delegation and the session could never be reported as finished again,
+        so a workflow that demonstrably completed sat at "Observation lost"
+        with its last step unknown and the diagram never went green (ANT-75).
+
+        It stands down when the hook log is carrying news about this run,
+        because then the question is answered by evidence instead: a delegate
+        that is genuinely working writes hooks under this same session — 2830
+        of them in the reported run, 212 during one thirty-six minute stretch
+        where this file said nothing — and the session's own
+        `background_tasks` list says outright what it is still waiting on.
+        Silence across every channel then means what it says.
+
+        With no hooks on this run the transcript is alone again, nothing can
+        retract the handover, and the sticky flag remains the honest answer.
+      */
+      const handedOff =
+        state.awaiting.size > 0 || (state.dispatched && !context?.hooksWatching);
       if (
         !state.settled &&
         !handedOff &&

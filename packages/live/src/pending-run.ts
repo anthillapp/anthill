@@ -238,7 +238,14 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
   // Anthill's inference from a quiet turn, and a session that writes again has
   // just disproved it — so activity, and only activity, can take it back.
   if (run.state === "failed") return run;
-  if (run.state === "completed" && evidence.kind !== "activity") return run;
+  // `working` joins `activity` here for the same reason: "completed" is an
+  // inference drawn from silence, and both of these are positive statements
+  // about right now that contradict it. One says the session wrote something,
+  // the other that it has work outstanding — either disproves the silence the
+  // conclusion rests on (ANT-75).
+  if (run.state === "completed" && evidence.kind !== "activity" && evidence.kind !== "working") {
+    return run;
+  }
 
   switch (evidence.kind) {
     case "match": {
@@ -309,7 +316,13 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
       if (run.detectedSessionId && run.detectedSessionId !== evidence.sessionId) return run;
       // Only for a session already being followed. A run still waiting for its
       // first match is not made live by a tool call it has not tied to itself.
-      if (run.state !== "detected_live" && run.state !== "observation_lost") return run;
+      if (
+        run.state !== "detected_live" &&
+        run.state !== "observation_lost" &&
+        run.state !== "completed"
+      ) {
+        return run;
+      }
       return {
         ...run,
         state: "detected_live",

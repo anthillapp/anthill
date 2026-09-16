@@ -1525,3 +1525,118 @@ describe("the author of a message", () => {
     expect(message?.author).toEqual({ kind: "main" });
   });
 });
+
+/**
+ * What a delegate said.
+ *
+ * ANT-54. The Live Session feed showed a subagent's tool calls and the moment
+ * it finished, and never a word it wrote — the page said so itself, in the
+ * list of things Anthill cannot tell you. The words were on disk the whole
+ * time: Claude Code writes each delegate to
+ * \`<project>/<sessionId>/subagents/agent-*.jsonl\`, and the observer walked one
+ * directory level and never looked inside.
+ *
+ * Measured on a live session while fixing it: two delegate transcripts, 75 and
+ * 424 records, holding twelve messages the feed had no way to show.
+ */
+describe("a session's delegates", () => {
+  const at = (ms: number) => new Date(Date.parse("2026-08-29T10:00:00.000Z") + ms).toISOString();
+
+  async function writeDelegate(dir: string, project: string, sessionId: string, file: string, rows: unknown[]) {
+    await mkdir(join(dir, project, sessionId, "subagents"), { recursive: true });
+    await writeFile(
+      join(dir, project, sessionId, "subagents", file),
+      rows.map((row) => JSON.stringify(row)).join("\n") + "\n",
+      "utf8",
+    );
+  }
+
+  /** A delegate turn: the parent's session id, and every row a sidechain. */
+  const said = (text: string, when: number, stop?: string) => ({
+    type: "assistant",
+    sessionId: "sess-1",
+    isSidechain: true,
+    timestamp: at(when),
+    message: {
+      role: "assistant",
+      ...(stop ? { stop_reason: stop } : {}),
+      content: [{ type: "text", text }],
+    },
+  });
+
+  /** A run that started when these fixtures did, so nothing predates it. */
+  function following(): PendingRun {
+    return {
+      ...createPendingRun({
+        anthillRunId: RUN_ID,
+        correlationNonce: NONCE,
+        selectedCli: "claude-code",
+        promptVersion: "1",
+        bootstrapPromptHash: "abcd1234",
+        now: at(0),
+      }),
+      detectedSessionId: "sess-1",
+      state: "detected_live" as const,
+    };
+  }
+
+  async function followed(rows: unknown[]) {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-scratch", "sess-1", claudeTranscript("sess-1", { marked: true }));
+    await writeDelegate(dir, "-tmp-scratch", "sess-1", "agent-a1.jsonl", rows);
+    return new ClaudeCodeObserver(dir).poll(following(), at(60_000));
+  }
+
+  it("reads what the delegate wrote", async () => {
+    const { events } = await followed([said("Written to docs/00-open-questions.md.", 10_000)]);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: "message",
+        detail: "Written to docs/00-open-questions.md.",
+      }),
+    );
+  });
+
+  it("says a subagent wrote it, not the session", async () => {
+    const { events } = await followed([said("Nine schemas parse.", 10_000)]);
+    const message = events.find((event) => event.kind === "message");
+    expect(message?.author?.kind).toBe("subagent");
+  });
+
+  it("does not ask a delegate to carry the run marker", async () => {
+    // It was never handed one: the marker is in the prompt somebody pasted
+    // into the session. Where the file sits answers the same question better.
+    const { events } = await followed([said("No marker anywhere in here.", 10_000)]);
+    expect(events.some((event) => event.kind === "message")).toBe(true);
+  });
+
+  it("counts a delegate's turn as the session being alive", async () => {
+    const { evidence } = await followed([said("Still going.", 10_000)]);
+    expect(evidence).toContainEqual(expect.objectContaining({ kind: "activity", sessionId: "sess-1" }));
+  });
+
+  it("never lets a delegate finishing settle the run", async () => {
+    // A subagent ending its turn is not the session ending, however long the
+    // quiet that follows.
+    const { evidence } = await followed([said("My part is done.", 10_000, "end_turn")]);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+  });
+
+  it("looks only under the session it is following", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-scratch", "sess-1", claudeTranscript("sess-1", { marked: true }));
+    await writeDelegate(dir, "-tmp-scratch", "sess-9", "agent-other.jsonl", [
+      { ...said("Somebody else's delegate.", 10_000), sessionId: "sess-9" },
+    ]);
+    const { events } = await new ClaudeCodeObserver(dir).poll(following(), at(60_000));
+    expect(events.some((event) => event.detail === "Somebody else's delegate.")).toBe(false);
+  });
+
+  it("looks for none at all before a session has been matched", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-scratch", "sess-1", claudeTranscript("sess-1", { marked: false }));
+    await writeDelegate(dir, "-tmp-scratch", "sess-1", "agent-a1.jsonl", [said("Too early.", 10_000)]);
+    const { events } = await new ClaudeCodeObserver(dir).poll(pending("claude-code"), at(60_000));
+    expect(events).toEqual([]);
+  });
+});

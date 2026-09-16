@@ -1003,3 +1003,41 @@ describe("the session's own elapsed time", () => {
     expect(elapsed()).toBe("—");
   });
 });
+
+/**
+ * What the page is still entitled to apologise for.
+ *
+ * The rail carried a standing note that a subagent's words were not written
+ * down to show. They were (ANT-54). A page that keeps apologising for
+ * something it now does teaches the reader to discount the rest of that list,
+ * so the note is gated on what actually arrived rather than on a claim about
+ * what can.
+ */
+describe("the note about what a subagent said", () => {
+  const NOTE = /What a subagent said/;
+
+  it("is gone once the delegate's own words are in the feed", async () => {
+    await show([
+      event({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "t1" }),
+      event({
+        kind: "message",
+        title: "Subagent",
+        detail: "Nine schemas parse.",
+        author: { kind: "subagent", name: "developer" },
+      }),
+    ]);
+    expect(screen.queryByText(NOTE)).toBeNull();
+  });
+
+  it("stays for a delegation whose words never arrived", async () => {
+    // Codex has no subagent concept to record, and an old journal has no
+    // delegate transcripts behind it. The reader is still owed the note.
+    await show([event({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "t1" })]);
+    expect(screen.getByText(NOTE)).toBeTruthy();
+  });
+
+  it("is never shown for a session that delegated nothing", async () => {
+    await show([event({ kind: "tool.start", title: "Bash", toolUseId: "t1" })]);
+    expect(screen.queryByText(NOTE)).toBeNull();
+  });
+});

@@ -194,20 +194,36 @@ export function LiveSessionPage({
    * Whether this session delegated to a subagent.
    *
    * Kept apart from a handover because the two are missing different things
-   * and the reader is owed the difference. A delegation's *steps* are counted
-   * — the delegate announces them and they move the diagram — while its turns
-   * are not written into this session's transcript at all, so its messages
-   * are the one part that cannot appear in the feed (ANT-54).
-   *
-   * That is a fact about the record, not about Anthill's reading of it: across
-   * every transcript on the machine this was measured on, `isSidechain` is
-   * present and false throughout, and Codex's rollouts have no subagent
-   * concept to record in the first place. So the feed is not hiding a message
-   * it received; there was never one to receive, and saying so beats leaving a
-   * gap the reader has to explain to themselves.
+   * and the reader is owed the difference. A delegation's *steps* are counted:
+   * the delegate announces them and they move the diagram.
    */
   const delegated = useMemo(
     () => events.some((event) => event.kind === "subagent.start"),
+    [events],
+  );
+
+  /**
+   * Whether this session's delegates are being read, rather than only counted.
+   *
+   * This used to be settled in advance, and settled wrongly. The reasoning was
+   * that a delegate's turns are not written into the session's transcript, so
+   * its messages could not appear in the feed — a fact about the record rather
+   * than about Anthill's reading of it, and the page said so in as many words.
+   *
+   * The record had them all along. Claude Code files each delegate's own
+   * transcript beside the session's, under `<sessionId>/subagents`, carrying
+   * the parent's id and marked `isSidechain` throughout; the observer walked
+   * one directory level and never looked inside (ANT-54). The measurement that
+   * "isSidechain is present and false throughout" was taken over the one file
+   * that could not contain a delegate's turn.
+   *
+   * So the question is answered by what actually arrived rather than by a
+   * claim about what can: if a delegate's words are in the feed, the page has
+   * nothing to apologise for, and Codex — which has no subagent concept to
+   * record — still gets the honest note.
+   */
+  const readsDelegates = useMemo(
+    () => events.some((event) => event.author?.kind === "subagent"),
     [events],
   );
 
@@ -441,7 +457,15 @@ export function LiveSessionPage({
               <li>Whether the agent is actually following the workflow.</li>
               <li>Why it took one path rather than another.</li>
               <li>Anything the CLI does not write down on this machine.</li>
-              {delegated ? (
+              {/*
+                This list said, until ANT-54, that a subagent's words were not
+                written down to show. They were — Claude Code files each
+                delegate's own transcript beside the session's, and Anthill
+                simply never opened the folder. The claim has to go with the
+                limit: a page that keeps apologising for something it now does
+                teaches the reader to discount the rest of this list.
+              */}
+              {delegated && !readsDelegates ? (
                 <li>
                   What a subagent said. This session delegated work, and the record keeps the
                   delegation and the moment it ended — never the delegate&rsquo;s own turns.

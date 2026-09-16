@@ -95,11 +95,29 @@ function goesToBackground(name: string, input: Record<string, unknown>): boolean
 
 const CHANNEL = "claude-code:transcript";
 
+/** A transcript worth reading, and whose turns it holds. */
+type Candidate = { path: string; delegate: boolean };
+
 type FileState = {
   /** How far into the transcript this run has read. Bytes, always. */
   cursor: TailCursor;
   sessionId?: string;
   matched: boolean;
+  /**
+   * Whether this file is a delegate's own transcript rather than the session's.
+   *
+   * Claude Code writes each subagent to
+   * `<project>/<sessionId>/subagents/agent-*.jsonl`, carrying the parent's
+   * `sessionId` and marking every row `isSidechain`. Those files hold what the
+   * delegate actually said — the thing the Live Session page could never show
+   * (ANT-54) — and they are the session's work as much as the main file is.
+   *
+   * What they are not is a second opinion about the session's *state*. A
+   * delegate ending its turn is not the session ending, so nothing here is
+   * allowed to settle the run; these files bring events and signs of life and
+   * nothing else.
+   */
+  delegate?: boolean;
   /** Delegations whose result has not come back yet, by tool-use id. */
   awaiting: Set<string>;
   /**
@@ -178,16 +196,23 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
     const events: ObservationEventDraft[] = [];
     const grew = new Set<string>();
 
-    for (const path of files) {
+    for (const { path, delegate } of files) {
       const state =
         states.get(path) ??
         {
           cursor: newCursor(),
-          matched: false,
+          // A delegate's transcript carries no run marker — the marker is in
+          // the prompt somebody pasted into the session, and a subagent was
+          // never handed it. Where the file *is* answers the question the
+          // marker answers for the main transcript, and answers it better: a
+          // file under this session's own `subagents` folder is this
+          // session's, as a matter of the tool's own filing.
+          matched: delegate,
           settled: false,
           awaiting: new Set<string>(),
           dispatched: false,
           usageSeen: new Set<string>(),
+          ...(delegate ? { delegate: true } : {}),
         };
       states.set(path, state);
 
@@ -344,6 +369,11 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
         state.awaiting.size > 0 || (state.dispatched && !context?.hooksWatching);
       if (
         !state.settled &&
+        // A delegate ending its turn is not the session ending. These files
+        // are read for what was said and done in them, never for a verdict on
+        // the run — the session's own transcript is the only thing entitled
+        // to settle it.
+        !state.delegate &&
         !handedOff &&
         state.lastStopReason &&
         TERMINAL_STOP.has(state.lastStopReason) &&
@@ -377,14 +407,14 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
     };
   }
 
-  private async candidates(run: PendingRun): Promise<string[] | undefined> {
+  private async candidates(run: PendingRun): Promise<Candidate[] | undefined> {
     const projects = await readdir(this.root).catch(() => undefined);
     if (projects === undefined) return undefined;
 
     // A minute of slack, because a session can be started a moment before the
     // copy finishes and clocks are not exact.
     const floor = Date.parse(run.createdAt) - 60_000;
-    const paths: string[] = [];
+    const found: Candidate[] = [];
 
     for (const project of projects) {
       const dir = join(this.root, project);
@@ -393,10 +423,28 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
         if (!name.endsWith(".jsonl")) continue;
         const path = join(dir, name);
         const info = await stat(path).catch(() => undefined);
-        if (info && info.mtimeMs >= floor) paths.push(path);
+        if (info && info.mtimeMs >= floor) found.push({ path, delegate: false });
+      }
+
+      /*
+        The delegates of the session being followed.
+
+        Only once there is a session to follow, and only that session's own
+        folder: before a match there is nothing to look under, and walking
+        every session's delegates would be a directory tree per poll for
+        files belonging to somebody else's run.
+      */
+      if (!run.detectedSessionId) continue;
+      const nest = join(dir, run.detectedSessionId, "subagents");
+      const delegates = await readdir(nest).catch(() => [] as string[]);
+      for (const name of delegates) {
+        if (!name.endsWith(".jsonl")) continue;
+        const path = join(nest, name);
+        const info = await stat(path).catch(() => undefined);
+        if (info && info.mtimeMs >= floor) found.push({ path, delegate: true });
       }
     }
-    return paths;
+    return found;
   }
 
   private statesFor(runId: string): Map<string, FileState> {

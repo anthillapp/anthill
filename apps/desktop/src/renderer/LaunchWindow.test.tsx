@@ -510,3 +510,32 @@ describe("Open Existing Workflow", () => {
     expect(screen.queryByRole("button", { name: /Open Existing Workflow…/ })).toBeNull();
   });
 });
+
+/**
+ * Which Anthill you are looking at.
+ *
+ * Two of them run on this machine — the installed one and the one served from
+ * the repo — and they look identical while behaving differently, because the
+ * repo runs several fixes ahead of the last release. Telling them apart by
+ * version number stops working the moment a release catches up.
+ */
+describe("the dev build badge", () => {
+  it("marks a renderer served by the dev server", async () => {
+    // vitest runs the renderer the same way the dev server does, so this is
+    // the live branch here.
+    await show([]);
+    expect(screen.getByText("dev build")).toBeTruthy();
+  });
+
+  it("keeps saying the version and what the app is", async () => {
+    await show([]);
+    const line = document.querySelector(".launch-version");
+    expect(line?.textContent).toContain(`Version ${__ANTHILL_VERSION__}`);
+    expect(line?.textContent).toContain("local-first");
+  });
+
+  it("sits beside the version rather than replacing anything", async () => {
+    await show([]);
+    expect(screen.getByText("dev build").closest(".launch-version")).toBeTruthy();
+  });
+});

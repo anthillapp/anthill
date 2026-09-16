@@ -546,7 +546,20 @@ function LaunchIntro({
       {/* From package.json at build time. It was a literal, and it drifted —
           the screen said 0.4 while the manifest said 0.0.1, and the disk image
           was named after the manifest. */}
-      <p className="launch-version">Version {__ANTHILL_VERSION__} · local-first</p>
+      <p className="launch-version">
+        Version {__ANTHILL_VERSION__} · local-first
+        {/*
+          Which Anthill this is.
+
+          Two of them run on this machine — the one in /Applications and the
+          one served from the repo — and they look identical while behaving
+          differently, because the repo is usually several fixes ahead. Telling
+          them apart by version number stops working the moment a release
+          catches up. `import.meta.env.DEV` is true only when the renderer is
+          being served by the dev server, which is exactly the distinction.
+        */}
+        {import.meta.env.DEV ? <span className="launch-dev">dev build</span> : null}
+      </p>
       <p className="launch-blurb">
         Design a workflow for AI coding agents, then hand the workflow to the agent
         that carries it out.

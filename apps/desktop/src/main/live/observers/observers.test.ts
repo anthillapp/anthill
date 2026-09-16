@@ -1542,13 +1542,28 @@ describe("the author of a message", () => {
 describe("a session's delegates", () => {
   const at = (ms: number) => new Date(Date.parse("2026-08-29T10:00:00.000Z") + ms).toISOString();
 
-  async function writeDelegate(dir: string, project: string, sessionId: string, file: string, rows: unknown[]) {
+  async function writeDelegate(
+    dir: string,
+    project: string,
+    sessionId: string,
+    file: string,
+    rows: unknown[],
+    meta?: Record<string, unknown>,
+  ) {
     await mkdir(join(dir, project, sessionId, "subagents"), { recursive: true });
     await writeFile(
       join(dir, project, sessionId, "subagents", file),
       rows.map((row) => JSON.stringify(row)).join("\n") + "\n",
       "utf8",
     );
+    // The sibling Claude Code writes beside every delegate, naming what it was for.
+    if (meta) {
+      await writeFile(
+        join(dir, project, sessionId, "subagents", file.replace(/\.jsonl$/, ".meta.json")),
+        JSON.stringify(meta),
+        "utf8",
+      );
+    }
   }
 
   /** A delegate turn: the parent's session id, and every row a sidechain. */
@@ -1580,12 +1595,43 @@ describe("a session's delegates", () => {
     };
   }
 
-  async function followed(rows: unknown[]) {
+  async function followed(rows: unknown[], meta?: Record<string, unknown>) {
     const dir = await root();
     await writeClaude(dir, "-tmp-scratch", "sess-1", claudeTranscript("sess-1", { marked: true }));
-    await writeDelegate(dir, "-tmp-scratch", "sess-1", "agent-a1.jsonl", rows);
+    await writeDelegate(dir, "-tmp-scratch", "sess-1", "agent-a1.jsonl", rows, meta);
     return new ClaudeCodeObserver(dir).poll(following(), at(60_000));
   }
+
+  /** The shape Claude Code actually writes, copied from a live session. */
+  const META = {
+    agentType: "general-purpose",
+    description: "Survey session observation",
+    toolUseId: "toolu_01DGF",
+    spawnDepth: 1,
+    requestShape: "background",
+  };
+
+  it("signs the delegate's words with what it was for", async () => {
+    // The feed said "Subagent" and nothing else, on a run with two of them
+    // (ANT-54). The description is the label that tells them apart.
+    const { events } = await followed([said("Exploring the repository structure.", 10_000)], META);
+    const message = events.find((event) => event.kind === "message");
+    expect(message?.author).toEqual({ kind: "subagent", name: "Survey session observation" });
+  });
+
+  it("falls back to the agent type when no description was given", async () => {
+    const { events } = await followed([said("On it.", 10_000)], { agentType: "macos-developer" });
+    const message = events.find((event) => event.kind === "message");
+    expect(message?.author).toEqual({ kind: "subagent", name: "macos-developer" });
+  });
+
+  it("stays an unnamed subagent when the record names nothing", async () => {
+    // No meta file at all, or one that cannot be read: a subagent, honestly,
+    // rather than a name invented from a nearby Task call.
+    const { events } = await followed([said("Nameless.", 10_000)]);
+    const message = events.find((event) => event.kind === "message");
+    expect(message?.author).toEqual({ kind: "subagent" });
+  });
 
   it("reads what the delegate wrote", async () => {
     const { events } = await followed([said("Written to docs/00-open-questions.md.", 10_000)]);

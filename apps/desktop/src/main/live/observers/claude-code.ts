@@ -24,7 +24,7 @@
  * stops reads as quiet, and permission prompts are only visible through hooks.
  */
 
-import { readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -96,7 +96,34 @@ function goesToBackground(name: string, input: Record<string, unknown>): boolean
 const CHANNEL = "claude-code:transcript";
 
 /** A transcript worth reading, and whose turns it holds. */
-type Candidate = { path: string; delegate: boolean };
+type Candidate = { path: string; delegate: boolean; name?: string };
+
+/**
+ * What a delegate was for, in the tool's own words.
+ *
+ * Beside each delegate's transcript Claude Code writes a `.meta.json` naming
+ * the agent type it was spawned as and the description the dispatching call
+ * gave it. The description is the better label: every delegate in the session
+ * ANT-54 was verified on was spawned as `general-purpose`, which tells a
+ * reader nothing, while "Survey session observation" and "Survey workflow
+ * compilation" told them apart at a glance. The type is kept as the fallback
+ * for a delegate spawned without one.
+ *
+ * A file that is missing or unreadable names nothing, and the delegate is
+ * shown as what it is — a subagent — rather than as a guess.
+ */
+async function delegateName(transcript: string): Promise<string | undefined> {
+  const meta = transcript.replace(/\.jsonl$/, ".meta.json");
+  const text = await readFile(meta, "utf8").catch(() => undefined);
+  if (!text) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (!isRecord(parsed)) return undefined;
+    return str(parsed.description) ?? str(parsed.agentType);
+  } catch {
+    return undefined;
+  }
+}
 
 type FileState = {
   /** How far into the transcript this run has read. Bytes, always. */
@@ -118,6 +145,8 @@ type FileState = {
    * nothing else.
    */
   delegate?: boolean;
+  /** What the delegate was for, from its own `.meta.json`. See `delegateName`. */
+  delegateName?: string;
   /** Delegations whose result has not come back yet, by tool-use id. */
   awaiting: Set<string>;
   /**
@@ -196,7 +225,7 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
     const events: ObservationEventDraft[] = [];
     const grew = new Set<string>();
 
-    for (const { path, delegate } of files) {
+    for (const { path, delegate, name: label } of files) {
       const state =
         states.get(path) ??
         {
@@ -213,6 +242,7 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
           dispatched: false,
           usageSeen: new Set<string>(),
           ...(delegate ? { delegate: true } : {}),
+          ...(label ? { delegateName: label } : {}),
         };
       states.set(path, state);
 
@@ -441,7 +471,9 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
         if (!name.endsWith(".jsonl")) continue;
         const path = join(nest, name);
         const info = await stat(path).catch(() => undefined);
-        if (info && info.mtimeMs >= floor) found.push({ path, delegate: true });
+        if (!info || info.mtimeMs < floor) continue;
+        const label = await delegateName(path);
+        found.push({ path, delegate: true, ...(label ? { name: label } : {}) });
       }
     }
     return found;
@@ -569,11 +601,15 @@ function scan(
 
         A sidechain turn is named only if the record names it. Reaching for
         the `subagent_type` of a nearby Task call would be a guess dressed as
-        evidence.
+        evidence. The record does name it, in the `.meta.json` Claude Code
+        writes beside each delegate's transcript — read once when the file is
+        found and carried on its state — and that is what a delegate's turns
+        are signed with (ANT-54).
       */
+      const named = str(row.agentName) ?? state.delegateName;
       const author: { kind: "main" } | { kind: "subagent"; name?: string } =
         row.isSidechain === true
-          ? { kind: "subagent", ...(str(row.agentName) ? { name: str(row.agentName) as string } : {}) }
+          ? { kind: "subagent", ...(named ? { name: named } : {}) }
           : { kind: "main" };
       state.lastStopReason = str(message?.stop_reason);
       state.settled = false;

@@ -229,6 +229,18 @@ export function ConnectHarness({ target, connection, onRecheck, onClose }: Conne
           </p>
         ) : null}
 
+        {/* The honest reading of a CLI that would not answer the sign-in
+            question: the tool counts as connected, but the author is told the
+            check was not made — so a signed-out tool is not discovered only
+            as a failed run. */}
+        {connection.status === "on" && connection.info?.signedIn === undefined ? (
+          <p className="connect-note">
+            Anthill cannot check {harness.displayName}&rsquo;s sign-in, so it is shown as
+            connected. If a workflow fails to start, check {harness.displayName} is
+            signed in from its own window.
+          </p>
+        ) : null}
+
         <div className="connect-actions">
           <button
             ref={primary}

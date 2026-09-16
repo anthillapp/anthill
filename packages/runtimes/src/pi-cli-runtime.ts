@@ -30,8 +30,7 @@ export const PI_DEFAULT_COMMAND = "pi";
 /**
  * Builds the argv for a single non-interactive pi invocation.
  *
- * !!! ASSUMPTION — VERIFY AGAINST THE REAL CLI !!!
- * The shape assumed here is:
+ * The shape is:
  *
  *   pi -p [--model <model>] [--thinking <level>] [...extra]
  *

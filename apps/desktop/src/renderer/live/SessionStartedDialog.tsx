@@ -16,7 +16,7 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 
-import type { PendingRun } from "@anthill/live";
+import { CLI_LABEL, type PendingRun } from "@anthill/live";
 
 import { PresenceChip } from "./PresenceChip.js";
 
@@ -85,7 +85,7 @@ export function SessionStartedDialog({
 
         <h2 id="session-started-title">A session started running this workflow</h2>
         <p className="session-started-how">
-          {run.selectedCli === "codex" ? "Codex" : run.selectedCli === "pi" ? "Pi" : "Claude Code"} began a session on this machine,
+          {CLI_LABEL[run.selectedCli]} began a session on this machine,
           and its records carry the run marker Anthill copied with the prompt.
         </p>
 

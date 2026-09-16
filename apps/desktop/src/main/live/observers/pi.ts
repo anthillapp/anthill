@@ -80,6 +80,16 @@ const NON_WORK = new Set(["model_change", "thinking_level_change", "label", "ses
 
 const CHANNEL = "pi:session";
 
+/**
+ * How long an open tool call may go unanswered before it is no longer
+ * believed. The same silence that closes a matched session: a tool that
+ * has not returned for this long is not "running", it is gone.
+ */
+const IN_FLIGHT_TTL_MS = TIMING.silenceTtlMs;
+
+/** A tool call that opened and has not returned, by the call's id. */
+type OpenCall = { at: string; toolName?: string };
+
 type FileState = {
   /** How far into the session file this run has read. Bytes, always. */
   cursor: TailCursor;
@@ -100,6 +110,8 @@ type FileState = {
   settled: boolean;
   /** Set when the session recorded a failure; the run is then done. */
   failure?: string;
+  /** Tool calls that opened and have not returned, by the call's id. */
+  openTools: Map<string, OpenCall>;
 };
 
 export class PiObserver implements LiveSessionObserver {
@@ -159,7 +171,13 @@ export class PiObserver implements LiveSessionObserver {
     for (const path of files) {
       const state =
         states.get(path) ??
-        { cursor: newCursor(), matched: false, settled: false, usageSeen: new Set<string>() };
+        {
+          cursor: newCursor(),
+          matched: false,
+          settled: false,
+          usageSeen: new Set<string>(),
+          openTools: new Map(),
+        };
       states.set(path, state);
 
       const chunk = await readNewLines(path, state.cursor);
@@ -295,6 +313,13 @@ export class PiObserver implements LiveSessionObserver {
         });
       }
 
+      // A tool that opened and has not returned is work in flight now,
+      // whether or not this file grew this poll. A failed run is handled
+      // above (and `continue`s), and a settled run is over.
+      if (!state.settled) {
+        evidence.push(...workingEvidence(state, sessionId, now));
+      }
+
       // Whatever was pushed above already told the run how fresh this session
       // is. Recording that here is what stops the next poll from repeating it
       // as new activity.
@@ -379,6 +404,54 @@ function resetRunState(state: FileState): void {
   state.settled = false;
   state.usageSeen.clear();
   state.reportedActivityAt = undefined;
+  state.openTools.clear();
+}
+
+/**
+ * Whether an open tool call is too old to be believed.
+ *
+ * The same silence that closes a matched session: a tool that has not
+ * returned for this long is not "running", it is gone, and keeping it would
+ * keep a finished run looking alive.
+ */
+function tooOld(since: string, now: string): boolean {
+  return Date.parse(now) - Date.parse(since) > IN_FLIGHT_TTL_MS;
+}
+
+/**
+ * "Something is running" — said only while something demonstrably is.
+ *
+ * A tool call that opened and has not returned is work in flight. Reported at
+ * `now` rather than at the call's own moment, because that is the claim: not
+ * that the session wrote at this instant, but that as of this instant it has
+ * work outstanding. A call too old to believe is dropped as it is found, so a
+ * stale record cannot keep saying it forever. Mirrors the Claude Code
+ * observer's `stillWorking()`.
+ */
+function workingEvidence(state: FileState, sessionId: string, now: string): Evidence[] {
+  let newest: { at: string; detail?: string } | undefined;
+  for (const [id, call] of state.openTools) {
+    if (tooOld(call.at, now)) {
+      state.openTools.delete(id);
+      continue;
+    }
+    if (!newest || call.at > newest.at) {
+      newest = {
+        at: call.at,
+        ...(call.toolName ? { detail: `${call.toolName} has been running since ${call.at}.` } : {}),
+      };
+    }
+  }
+  if (!newest) return [];
+  return [
+    {
+      kind: "working",
+      sessionId,
+      at: now,
+      since: newest.at,
+      ...(newest.detail ? { detail: newest.detail } : {}),
+    },
+  ];
 }
 
 /**
@@ -394,6 +467,21 @@ function scan(
   marker: { runId: string; nonce: string },
   events: ObservationEventDraft[],
 ): void {
+  // Work recorded before the marker belongs to the session's earlier runs.
+  // Hold it aside; when the marker arrives, discard it — except the session
+  // metadata that is deliberately needed. If the marker never arrives in this
+  // pass, the held events are dropped when this pass ends.
+  const held: ObservationEventDraft[] = [];
+  const emit = (event: ObservationEventDraft): void => {
+    if (state.matched) events.push(event);
+    else held.push(event);
+  };
+  const releaseHeld = (): void => {
+    for (const event of held) {
+      if (event.kind === "session.start") events.push(event);
+    }
+    held.length = 0;
+  };
   for (const line of lines) {
     if (!line.startsWith("{")) continue;
     let row: Record<string, unknown>;
@@ -413,7 +501,7 @@ function scan(
     if (row.type === "session") {
       const id = str(row.id);
       if (id) state.sessionId = id;
-      events.push({
+      emit({
         at,
         cli: "pi",
         source: "session",
@@ -442,19 +530,23 @@ function scan(
       const carries = (value: unknown) => typeof value === "string" && textCarriesMarker(value, marker);
       const matchedOnce = () => {
         // The first marker this run has seen. Records before it are the
-        // session's earlier work, so the run-local state is cleared then.
-        if (!state.matched) resetRunState(state);
+        // session's earlier work, so the run-local state is cleared and the
+        // pre-marker events are discarded (except the session metadata) then.
+        if (!state.matched) {
+          resetRunState(state);
+          releaseHeld();
+        }
         state.matched = true;
       };
       if (carries(message.content)) {
         matchedOnce();
-        events.push({ ...base, kind: "prompt.submit", title: "The workflow was pasted in" });
+        emit({ ...base, kind: "prompt.submit", title: "The workflow was pasted in" });
       } else if (Array.isArray(message.content)) {
         // The user's content may be a string or an array of text blocks.
         for (const block of message.content) {
           if (isRecord(block) && carries(block.text)) {
             matchedOnce();
-            events.push({ ...base, kind: "prompt.submit", title: "The workflow was pasted in" });
+            emit({ ...base, kind: "prompt.submit", title: "The workflow was pasted in" });
           }
         }
       }
@@ -464,12 +556,14 @@ function scan(
     if (message.role === "toolResult") {
       // A tool result closes the call that opened it. Only the outcome is
       // read; the result body stays where pi wrote it.
-      events.push({
+      const toolCallId = str(message.toolCallId);
+      if (toolCallId) state.openTools.delete(toolCallId);
+      emit({
         ...base,
         kind: "tool.end",
         title: "Tool finished",
         ok: message.isError !== true,
-        ...(str(message.toolCallId) ? { toolUseId: str(message.toolCallId) as string } : {}),
+        ...(toolCallId ? { toolUseId: toolCallId } : {}),
       });
       continue;
     }
@@ -485,7 +579,7 @@ function scan(
       if (usage && messageId && !state.usageSeen.has(messageId)) {
         state.usageSeen.add(messageId);
         const num = (value: unknown) => (typeof value === "number" ? value : 0);
-        events.push({
+        emit({
           ...base,
           kind: "usage",
           title: "Token usage recorded",
@@ -508,7 +602,7 @@ function scan(
         if (block.type === "text") {
           const text = str(block.text) ?? "";
           for (const blockId of parseStepMarkers(text, marker)) {
-            events.push({
+            emit({
               ...base,
               kind: "step.marker",
               title: "Step announced",
@@ -523,7 +617,7 @@ function scan(
           if (said) {
             // pi's assistant records are the session's own; the file has no
             // subagent concept, so there is no other author this could be.
-            events.push({ ...base, kind: "message", title: "Message", detail: said, author: { kind: "main" } });
+            emit({ ...base, kind: "message", title: "Message", detail: said, author: { kind: "main" } });
           }
           continue;
         }
@@ -531,7 +625,10 @@ function scan(
         if (block.type === "toolCall") {
           const name = str(block.name) ?? "a tool";
           const id = str(block.id);
-          events.push({
+          // A tool call that opened and has not returned is work in flight.
+          // It is closed by the matching tool result, or when the turn ends.
+          if (id) state.openTools.set(id, { at, toolName: name });
+          emit({
             ...base,
             kind: "tool.start",
             title: name,
@@ -544,7 +641,9 @@ function scan(
       // A recorded failure is a failure, not a silence to settle over.
       if (state.lastStopReason === "error") {
         state.failure = str(message.errorMessage) ?? "pi recorded an error.";
-        events.push({
+        // The turn is over, so no tool is still running.
+        state.openTools.clear();
+        emit({
           ...base,
           kind: "error",
           title: "pi recorded an error",
@@ -552,7 +651,8 @@ function scan(
         });
       } else if (state.lastStopReason === "aborted") {
         state.failure = "The session was aborted.";
-        events.push({
+        state.openTools.clear();
+        emit({
           ...base,
           kind: "error",
           title: "The session was aborted",
@@ -570,7 +670,11 @@ function scan(
         timestamp and title in the fingerprint do.
       */
       if (state.lastStopReason && TERMINAL_STOP.has(state.lastStopReason)) {
-        events.push({
+        // A natural stop means every tool has returned, so nothing is left
+        // open. Clearing here is what stops a stale call from keeping a
+        // finished run looking alive.
+        state.openTools.clear();
+        emit({
           ...base,
           kind: "turn.end",
           title: "The agent finished its turn",

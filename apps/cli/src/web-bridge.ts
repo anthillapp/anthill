@@ -199,6 +199,7 @@ export function installWebBridge(): Promise<AnthillApi> {
       revealPath: (path: string) => invoke(IpcChannel.pathReveal, path),
       detectInterpreters: () => invoke(IpcChannel.interpretersDetect),
       codexModels: () => invoke(IpcChannel.codexModels),
+      piModels: () => invoke(IpcChannel.piModels),
       draftFromPrompt: (request: PromptDraftRequest) =>
         invoke(IpcChannel.promptDraft, request),
       cancelPromptDraft: () => invoke(IpcChannel.promptDraftCancel),

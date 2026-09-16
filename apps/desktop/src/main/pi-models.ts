@@ -46,13 +46,28 @@ export const PI_THINKING_LEVELS = ["minimal", "low", "medium", "high", "xhigh", 
  * nothing: the two would say the same thing to the screen (no model to offer),
  * and the honest answer when pi could not be reached is that it was not
  * reached, not that it offers nothing.
+ *
+ * The answer is kept once per process. pi keeps no model cache file, so the
+ * catalogue is asked for live — but asking on every LaunchWindow mount would
+ * spawn `pi --list-models` (with its 5s timeout) on machines that may not
+ * have pi. The first answer, a catalogue or `undefined`, is what later mounts
+ * get; the command runs at most once per process. An injected `spawnFn` (the
+ * test seam) bypasses the cache so a test can drive the spawn directly.
  */
+let piModelsPromise: Promise<PiModelList | undefined> | undefined;
+
 export async function readPiModels(options: { spawnFn?: SpawnFn } = {}): Promise<PiModelList | undefined> {
+  if (options.spawnFn) return await askPiForModels(options.spawnFn);
+  if (!piModelsPromise) piModelsPromise = askPiForModels();
+  return piModelsPromise;
+}
+
+async function askPiForModels(spawnFn?: SpawnFn): Promise<PiModelList | undefined> {
   const outcome = await runProcess({
     command: "pi",
     args: ["--list-models"],
     timeoutMs: 5_000,
-    ...(options.spawnFn ? { spawnFn: options.spawnFn } : {}),
+    ...(spawnFn ? { spawnFn } : {}),
   }).catch(() => undefined);
   if (!outcome || outcome.spawnError || outcome.exitCode !== 0) return undefined;
   return parsePiModels(outcome.stdout);

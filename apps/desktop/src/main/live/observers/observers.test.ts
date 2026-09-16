@@ -470,6 +470,7 @@ function piSessionWithEarlierWork(
         content: [{ type: "text", text: "Earlier work." }],
         provider: "anthropic",
         model: "claude-sonnet-4-5",
+        usage: { input: 100, output: 200, cacheRead: 0, cacheWrite: 0, totalTokens: 300 },
         stopReason: earlier.stopReason,
         ...(earlier.errorMessage ? { errorMessage: earlier.errorMessage } : {}),
       },
@@ -602,8 +603,18 @@ describe("the pi observer", () => {
     );
 
     const run = { ...pending("pi"), detectedSessionId: "sess-pi", state: "detected_live" as const };
-    const { evidence } = await new PiObserver(dir).poll(run, new Date().toISOString());
+    const { evidence, events } = await new PiObserver(dir).poll(run, new Date().toISOString());
+    // State: the earlier error does not fail the run.
     expect(evidence.some((item) => item.kind === "failed")).toBe(false);
+    // Emitted events: the earlier work's message, usage, and turn-end do not
+    // leak into the run the marker starts. The session metadata and the marker
+    // itself do surface.
+    expect(events.some((event) => event.kind === "message")).toBe(false);
+    expect(events.some((event) => event.kind === "usage")).toBe(false);
+    expect(events.some((event) => event.kind === "turn.end")).toBe(false);
+    expect(events.some((event) => event.kind === "error")).toBe(false);
+    expect(events.some((event) => event.kind === "session.start")).toBe(true);
+    expect(events.some((event) => event.kind === "prompt.submit")).toBe(true);
   });
 
   it("does not settle the run on a stop recorded before the marker", async () => {
@@ -619,8 +630,17 @@ describe("the pi observer", () => {
     // Six minutes of silence after the prompt was pasted in — long enough to
     // settle a turn that had ended, if one had.
     const muchLater = new Date(Date.now() + 6 * 60_000).toISOString();
-    const { evidence } = await observer.poll(run, muchLater);
+    const { evidence, events } = await observer.poll(run, muchLater);
+    // State: the earlier stop does not settle the run.
     expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+    // Emitted events: the earlier work's message, usage, and turn-end do not
+    // leak into the run the marker starts. The session metadata and the marker
+    // itself do surface.
+    expect(events.some((event) => event.kind === "message")).toBe(false);
+    expect(events.some((event) => event.kind === "usage")).toBe(false);
+    expect(events.some((event) => event.kind === "turn.end")).toBe(false);
+    expect(events.some((event) => event.kind === "session.start")).toBe(true);
+    expect(events.some((event) => event.kind === "prompt.submit")).toBe(true);
   });
 });
 

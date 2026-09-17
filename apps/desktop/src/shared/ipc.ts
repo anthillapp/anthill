@@ -51,6 +51,9 @@ export const IpcChannel = {
   agentsUpdate: "agents:update",
   agentsDuplicate: "agents:duplicate",
   agentsRemove: "agents:remove",
+  assistantThreadRead: "assistant:thread-read",
+  assistantThreadWrite: "assistant:thread-write",
+  assistantThreadClear: "assistant:thread-clear",
   liveEvents: "live:events",
   liveSetupStatus: "live-setup:status",
   liveSetupDismiss: "live-setup:dismiss",
@@ -81,7 +84,7 @@ export const IpcChannel = {
  * quietly showed nothing. Bump this whenever a channel is added, and the
  * renderer can find out before it subscribes to something that will never fire.
  */
-export const IPC_CONTRACT = 13;
+export const IPC_CONTRACT = 14;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -739,6 +742,18 @@ export interface AnthillApi {
   agentsUpdate(id: string, input: Partial<GlobalAgentInput>): Promise<GlobalAgentProfile | undefined>;
   agentsDuplicate(id: string): Promise<GlobalAgentProfile | undefined>;
   agentsRemove(id: string): Promise<boolean>;
+  /**
+   * The assistant's thread for one workflow, oldest turn first.
+   *
+   * Turns cross as they were written. Main remembers them; the panel owns what
+   * a turn is and checks the shape on the way back in, so a record written by
+   * an older Anthill costs the malformed turns and not the conversation.
+   */
+  assistantThreadRead(workflowId: string): Promise<unknown[]>;
+  /** Record the thread as it now stands. The whole thread, not an append. */
+  assistantThreadWrite(workflowId: string, turns: unknown[]): Promise<void>;
+  /** Forget one workflow's thread. Only ever called from an explicit ask. */
+  assistantThreadClear(workflowId: string): Promise<void>;
   /**
    * Everything Anthill observed for one run, oldest first.
    *

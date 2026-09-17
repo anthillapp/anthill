@@ -65,19 +65,37 @@ const reply = (body: unknown) => ({
   command: "claude …",
 });
 
-/** Replies in order; the last one repeats, so one draft covers a single ask. */
+/**
+ * Replies in order; the last one repeats, so one draft covers a single ask.
+ *
+ * The thread record is part of the stub because the panel no longer owns the
+ * conversation — it reads it on open and writes it back as it changes, which is
+ * what makes closing the panel survivable (ANT-82). `threads` stands in for
+ * Anthill's own file and persists across mounts within a test.
+ */
 function stub(...drafts: unknown[]) {
   let at = 0;
   const draftFromPrompt = vi.fn(async () => drafts[Math.min(at++, drafts.length - 1)]);
   const cancelPromptDraft = vi.fn(async () => undefined);
+  const threads: Record<string, unknown[]> = {};
+  const assistantThreadRead = vi.fn(async (id: string) => threads[id] ?? []);
+  const assistantThreadWrite = vi.fn(async (id: string, turns: unknown[]) => {
+    threads[id] = turns;
+  });
+  const assistantThreadClear = vi.fn(async (id: string) => {
+    delete threads[id];
+  });
   (window as unknown as { anthill: unknown }).anthill = {
     detectInterpreters: vi.fn(async () => [
       { id: "claude-code", label: "Claude Code", available: true },
     ]),
     draftFromPrompt,
     cancelPromptDraft,
+    assistantThreadRead,
+    assistantThreadWrite,
+    assistantThreadClear,
   };
-  return { draftFromPrompt, cancelPromptDraft };
+  return { draftFromPrompt, cancelPromptDraft, threads, assistantThreadClear };
 }
 
 /** Renders with mentions lifted, the way the screen owns them. */
@@ -576,5 +594,96 @@ describe("a request that does not say enough", () => {
     await waitFor(() => expect(draftFromPrompt).toHaveBeenCalledTimes(2));
     const second = (draftFromPrompt.mock.calls[1] as unknown[])[0] as { instruction: string };
     expect(second.instruction).not.toContain("Earlier in this exchange");
+  });
+});
+
+/**
+ * The thread outlives the panel (ANT-82).
+ *
+ * The record was `useState` here, so ✕ destroyed it: reopening the assistant
+ * over the same workflow began from an empty sheet, and every request, refusal
+ * and proposal argued out was gone. These are the panel's half of the fix —
+ * what it shows on open, and the one action that is allowed to empty it.
+ */
+describe("the conversation, after the panel closes", () => {
+  it("is still there when the assistant is reopened over the same workflow", async () => {
+    stub(reply(proposal));
+    const first = mount();
+    await ask();
+    await screen.findByText(/Add a review step between/);
+
+    // ✕ unmounts everything this component holds.
+    first.view.unmount();
+
+    mount();
+    expect(await screen.findByText(/Add a review step between/)).toBeTruthy();
+    expect(screen.getByText("Add a review step after implement.")).toBeTruthy();
+  });
+
+  it("brings a decided proposal back decided, and does not reapply it", async () => {
+    stub(reply(proposal));
+    const first = mount();
+    await ask();
+    await screen.findByText(/Add a review step between/);
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await screen.findByText("Applied to the canvas.");
+    first.view.unmount();
+
+    const { onApply } = mount();
+    expect(await screen.findByText("Applied to the canvas.")).toBeTruthy();
+    // Restoring shows what was decided; it never re-decides it.
+    expect(onApply).not.toHaveBeenCalled();
+  });
+
+  it("belongs to the workflow, not to the panel", async () => {
+    stub(reply(proposal));
+    const first = mount();
+    await ask();
+    await screen.findByText(/Add a review step between/);
+    first.view.unmount();
+
+    mount({ workflow: { ...workflow, id: "workflow-2", name: "Something else" } });
+    await waitFor(() => expect(screen.getByText(/Describe a change to the diagram/)).toBeTruthy());
+    expect(screen.queryByText(/Add a review step between/)).toBeNull();
+  });
+
+  it("does not offer to clear a conversation that has not happened", async () => {
+    stub(reply(proposal));
+    mount();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "Clear history" })).toBeNull();
+  });
+
+  it("clears only when asked twice, and says what it costs", async () => {
+    const { assistantThreadClear } = stub(reply(proposal));
+    mount();
+    await ask();
+    await screen.findByText(/Add a review step between/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear history" }));
+    expect(screen.getByText(/removes 2 messages/)).toBeTruthy();
+    expect(assistantThreadClear).not.toHaveBeenCalled();
+
+    // Backing out leaves the thread exactly as it was.
+    fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(screen.getByText(/Add a review step between/)).toBeTruthy();
+    expect(assistantThreadClear).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear history" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear anyway" }));
+    await waitFor(() => expect(assistantThreadClear).toHaveBeenCalledWith("workflow-1"));
+    expect(screen.queryByText(/Add a review step between/)).toBeNull();
+  });
+
+  it("does not clear when the panel is closed", async () => {
+    const { assistantThreadClear } = stub(reply(proposal));
+    const { onClose } = mount();
+    await ask();
+    await screen.findByText(/Add a review step between/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close the assistant" }));
+    await act(async () => undefined);
+    expect(onClose).toHaveBeenCalled();
+    expect(assistantThreadClear).not.toHaveBeenCalled();
   });
 });

@@ -87,6 +87,12 @@ const api: AnthillApi = {
     ipcRenderer.invoke(IpcChannel.agentsUpdate, id, input),
   agentsDuplicate: (id: string) => ipcRenderer.invoke(IpcChannel.agentsDuplicate, id),
   agentsRemove: (id: string) => ipcRenderer.invoke(IpcChannel.agentsRemove, id),
+  assistantThreadRead: (workflowId: string) =>
+    ipcRenderer.invoke(IpcChannel.assistantThreadRead, workflowId),
+  assistantThreadWrite: (workflowId: string, turns: unknown[]) =>
+    ipcRenderer.invoke(IpcChannel.assistantThreadWrite, workflowId, turns),
+  assistantThreadClear: (workflowId: string) =>
+    ipcRenderer.invoke(IpcChannel.assistantThreadClear, workflowId),
   liveEvents: (runId: string) => ipcRenderer.invoke(IpcChannel.liveEvents, runId),
   onLiveEvents: (
     listener: (payload: { runId: string; events: ObservationEvent[] }) => void,

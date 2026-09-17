@@ -41,6 +41,7 @@ import {
 } from "@anthill/workflow";
 import type { InterpreterId } from "@anthill/workflow";
 import type { InterpreterInfo } from "../../shared/ipc.js";
+import { useAssistantThread, type ChatTurn } from "./assistant-thread.js";
 
 export type DescribeChangeAssistantProps = {
   workflow: Workflow;
@@ -52,50 +53,8 @@ export type DescribeChangeAssistantProps = {
   onClose: () => void;
 };
 
-/**
- * One turn in the thread.
- *
- * `declined` and `failed` are turns rather than a separate error banner: a
- * refusal is a result the author asked for and belongs in the record beside
- * the request that drew it, not in a strip that the next message wipes.
- *
- * Waiting is deliberately *not* a turn. It has no place in the record — it is
- * a thing happening now, not a thing that happened — and modelling it as one
- * would mean adding and then removing an entry from a history whose whole
- * promise is that nothing leaves it.
- */
-export type ChatTurn =
-  | { kind: "user"; text: string; mentions: string[] }
-  | { kind: "declined"; summary: string }
-  /**
-   * The interpreter needs one thing decided before it can propose anything.
-   *
-   * `asked` travels with it so the answer can be sent back as the second half
-   * of one exchange. Without it, "the login one" is read as a fresh request
-   * and means nothing (ANT-36).
-   */
-  | { kind: "question"; question: string; asked: string }
-  | { kind: "failed"; error: string }
-  | {
-      kind: "proposal";
-      summary: string;
-      /** What it would do, as of the last time it was worked out. */
-      changes: EditChange[];
-      /**
-       * The operations themselves, kept so the proposal can be applied later.
-       *
-       * Not the resulting workflow. A proposal is a set of operations against
-       * ids, and the workflow it would produce depends on what the workflow is
-       * *now* — so applying is always a fresh `applyEditProposal` against the
-       * current graph. Storing the result instead was a real bug: a proposal
-       * held while the author edited the canvas would, on Apply, replace their
-       * work with a graph computed before those edits existed.
-       */
-      proposal: EditProposal;
-      resolved?: "applied" | "discarded";
-      /** Why a later application refused, when one did. */
-      error?: string;
-    };
+/** What one turn is, and the record that outlives this panel, live together. */
+export type { ChatTurn };
 
 const SETTING_KEY = "anthill.promptInterpreter";
 
@@ -164,8 +123,16 @@ export function DescribeChangeAssistant({
   onClose,
 }: DescribeChangeAssistantProps) {
   const [request, setRequest] = useState("");
-  const [chat, setChat] = useState<ChatTurn[]>([]);
+  /*
+    The thread is not this component's to lose. It is read from Anthill's own
+    record when the panel opens and written back as it changes, so closing the
+    panel — which unmounts everything here — leaves the conversation where it
+    was rather than destroying it (ANT-82).
+  */
+  const { turns: chat, setTurns: setChat, ready, clear } = useAssistantThread(workflow.id);
   const [asking, setAsking] = useState(false);
+  /** Clearing is two presses, because it is the one action that does lose the record. */
+  const [confirmingClear, setConfirmingClear] = useState(false);
   const [interpreters, setInterpreters] = useState<InterpreterInfo[] | null>(null);
   const composer = useRef<HTMLTextAreaElement | null>(null);
   const thread = useRef<HTMLDivElement | null>(null);
@@ -349,19 +316,55 @@ export function DescribeChangeAssistant({
             whole workflow, never whatever happens to be selected. */}
         <h2>Assistant</h2>
         <span className="spacer" />
+        {/* Only offered when there is something to lose, and never where the
+            close button is: closing keeps the thread, and the two must not be
+            a slip apart. */}
+        {chat.length > 0 ? (
+          <button
+            type="button"
+            className={confirmingClear ? "danger" : "link"}
+            onClick={() => {
+              if (!confirmingClear) {
+                setConfirmingClear(true);
+                return;
+              }
+              setConfirmingClear(false);
+              clear();
+            }}
+          >
+            {confirmingClear ? "Clear anyway" : "Clear history"}
+          </button>
+        ) : null}
         <button
           type="button"
           className="icon-button"
           aria-label="Close the assistant"
           title="Close the assistant"
-          onClick={onClose}
+          onClick={() => {
+            setConfirmingClear(false);
+            onClose();
+          }}
         >
           ✕
         </button>
       </header>
 
+      {/* What clearing actually costs, said before it is done rather than after. */}
+      {confirmingClear ? (
+        <p className="assistant-clear-note">
+          This removes {chat.length} {chat.length === 1 ? "message" : "messages"} from this
+          workflow's conversation, on this machine, for good. Applied changes stay on the
+          canvas; what was said about them does not.{" "}
+          <button type="button" className="link" onClick={() => setConfirmingClear(false)}>
+            Keep it
+          </button>
+        </p>
+      ) : null}
+
       <div className="assistant-thread" ref={thread}>
-        {chat.length === 0 && !asking ? (
+        {/* Held back until the record has been read: a conversation that is
+            about to arrive must not be announced as an empty one first. */}
+        {ready && chat.length === 0 && !asking ? (
           <p className="assistant-idle">
             Describe a change to the diagram and{" "}
             {chosen ? chosen.label : "a local CLI"} proposes it. Nothing changes until you

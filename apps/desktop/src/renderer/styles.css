@@ -5865,6 +5865,29 @@ button.state-chip {
   font-weight: 600;
 }
 
+/* Offered quietly, next to a close button that keeps the thread: the two
+   actions are a slip apart, so only one of them looks like a decision. */
+.assistant-top .link {
+  font-size: 12px;
+}
+
+.assistant-top .danger {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.assistant-clear-note {
+  flex: none;
+  margin: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-100);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
 .assistant-thread {
   flex: 1;
   min-height: 0;

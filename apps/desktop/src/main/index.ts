@@ -67,6 +67,7 @@ import { desktopUserDataPath } from "./user-data.js";
 import { LiveSessionService, type LiveSessionSnapshot } from "./live/service.js";
 import { ObservationSetupService } from "./live/setup.js";
 import { AgentLibraryStore } from "./agent-library.js";
+import { AssistantThreadStore } from "./assistant-threads.js";
 import { PendingRunStore } from "./live/store.js";
 import {
   forgetRecent,
@@ -211,6 +212,7 @@ const userPath = adoptUserPath().catch(() => false);
 let live: LiveSessionService | undefined;
 let liveSetup: ObservationSetupService | undefined;
 let agents: AgentLibraryStore | undefined;
+let assistantThreads: AssistantThreadStore | undefined;
 
 /**
  * `~` is a shell convenience, not a path. Agents write it constantly, and
@@ -219,6 +221,13 @@ let agents: AgentLibraryStore | undefined;
 function expandHome(path: string): string {
   if (path === "~") return app.getPath("home");
   return path.startsWith("~/") ? join(app.getPath("home"), path.slice(2)) : path;
+}
+
+function assistantThreadStore(): AssistantThreadStore {
+  assistantThreads ??= new AssistantThreadStore(
+    join(app.getPath("userData"), "assistant-threads.json"),
+  );
+  return assistantThreads;
 }
 
 function agentLibrary(): AgentLibraryStore {
@@ -787,6 +796,24 @@ function registerIpcHandlers(): void {
     agentLibrary().duplicate(id),
   );
   handle(IpcChannel.agentsRemove, async (_event, id: string) => agentLibrary().remove(id));
+
+  /*
+    The assistant's thread, per workflow.
+
+    Read and written whole: the panel owns what a turn is and what the thread
+    currently contains, and this side only remembers it faithfully. Clearing is
+    its own channel because it is its own decision — closing the panel must
+    never reach it (ANT-82).
+  */
+  handle(IpcChannel.assistantThreadRead, async (_event, workflowId: string) =>
+    assistantThreadStore().read(workflowId),
+  );
+  handle(IpcChannel.assistantThreadWrite, async (_event, workflowId: string, turns: unknown[]) =>
+    assistantThreadStore().write(workflowId, Array.isArray(turns) ? turns : []),
+  );
+  handle(IpcChannel.assistantThreadClear, async (_event, workflowId: string) =>
+    assistantThreadStore().clear(workflowId),
+  );
   handle(IpcChannel.liveEvents, async (_event, runId: string) =>
     liveService().events(runId),
   );

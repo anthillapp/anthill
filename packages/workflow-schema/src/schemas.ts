@@ -28,10 +28,17 @@ import {
   EDGE_ANCHORS,
   EDGE_ROUTINGS,
   HARNESS_TARGETS,
+  NODE_ID_PATTERN,
   OUTCOME_KINDS,
 } from "./types.js";
 
 const nonEmptyString = z.string().min(1);
+
+/** A workflow node id: non-empty and drawn from the class the progress channels accept. */
+const nodeId = z.string().regex(
+  NODE_ID_PATTERN,
+  `node id must match ${NODE_ID_PATTERN.source}`,
+);
 
 /** `Record<string, unknown>` — written two-arg so it works on zod 3 and 4. */
 const unknownRecord = z.record(z.string(), z.unknown());
@@ -70,7 +77,7 @@ export const NodePositionSchema = z.object({
 });
 
 export const WorkflowNodeSchema = z.object({
-  id: nonEmptyString,
+  id: nodeId,
   type: NodeTypeSchema,
   name: z.string(),
   config: unknownRecord,

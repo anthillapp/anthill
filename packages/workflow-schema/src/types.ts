@@ -112,6 +112,17 @@ export type WorkflowNode = {
 };
 
 /**
+ * The character class a workflow node id may be drawn from.
+ *
+ * It is the same class the progress channels accept: the tag marker's step
+ * line parses `[A-Za-z0-9_.:-]+`, and the CLI `step` command rejects any
+ * value with whitespace. An id outside this class would be accepted by the
+ * schema yet unreportable, so the schema and the graph validation both
+ * enforce it.
+ */
+export const NODE_ID_PATTERN = /^[A-Za-z0-9_.:-]+$/;
+
+/**
  * Which side of a block a connection attaches to.
  *
  * Purely presentational: the engine ignores it. It exists so a diagram round

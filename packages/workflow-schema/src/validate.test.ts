@@ -185,6 +185,33 @@ describe("validateWorkflow", () => {
     expect(result.valid).toBe(true);
   });
 
+  it("flags a node id with whitespace as INVALID_NODE_ID (not reportable)", () => {
+    const result = validateWorkflow(
+      workflow(
+        [node("start", "start"), node("code review", "agent", agentConfig())],
+        [edge("e1", "start", "code review")],
+      ),
+    );
+    expect(codes(result)).toContain("INVALID_NODE_ID");
+  });
+
+  it("accepts node ids from the full reportable character class", () => {
+    const result = validateWorkflow(
+      workflow(
+        [
+          node("start:1", "start"),
+          node("code.review:1", "agent", agentConfig()),
+          node("end.done", "end"),
+        ],
+        [
+          edge("e1", "start:1", "code.review:1"),
+          edge("e2", "code.review:1", "end.done"),
+        ],
+      ),
+    );
+    expect(codes(result)).not.toContain("INVALID_NODE_ID");
+  });
+
   describe("exactly one start node", () => {
     it("fails when there is no start node", () => {
       const result = validateWorkflow(

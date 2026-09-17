@@ -34,6 +34,28 @@ describe("WorkflowSchema / parseWorkflow", () => {
     expect(workflow.edges[0]?.source).toBe("start");
   });
 
+  it("rejects a node id with whitespace (not reportable by the progress channels)", () => {
+    const wf = {
+      ...minimalWorkflow,
+      nodes: [
+        { ...minimalWorkflow.nodes[0], id: "code review" },
+        minimalWorkflow.nodes[1],
+      ],
+    };
+    expect(() => parseWorkflow(wf)).toThrow(SchemaValidationError);
+  });
+
+  it("accepts node ids using the full reportable character class", () => {
+    const wf = {
+      ...minimalWorkflow,
+      nodes: [
+        { ...minimalWorkflow.nodes[0], id: "code.review:1" },
+        { ...minimalWorkflow.nodes[1], id: "deploy_to:prod" },
+      ],
+    };
+    expect(() => parseWorkflow(wf)).not.toThrow();
+  });
+
   it("parses a full workflow with inputs, positions, conditions and metadata", () => {
     const workflow = parseWorkflow({
       id: "wf_2",

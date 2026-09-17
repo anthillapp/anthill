@@ -147,6 +147,37 @@ export function PromptModal({
   const [failure, setFailure] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Whether the shell serving this renderer is the CLI.
+   *
+   * Only the CLI shell has the `anthill` binary the harness can reach, so
+   * only there does the prompt tell the harness to report through the CLI
+   * instead of printing marker lines. A shell that cannot be asked is
+   * treated as the desktop: the printed markers are the channel that works
+   * everywhere.
+   *
+   * Unknown until the capability query answers: a copy before the answer
+   * would hand over a prompt built for the wrong shell, so the Copy button
+   * waits for it.
+   */
+  const [reportViaCli, setReportViaCli] = useState<boolean | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    window.anthill
+      .capabilities()
+      .then((caps) => {
+        if (live) setReportViaCli(caps.shell === "cli");
+      })
+      .catch(() => {
+        // A shell that cannot be asked is treated as the desktop: the
+        // printed markers are the channel that works everywhere.
+        if (live) setReportViaCli(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
   /** The harness's observation setup, once main has been asked. */
   const [setup, setSetup] = useState<ObservationHarnessSetup | undefined>();
   const [installFailed, setInstallFailed] = useState<string | undefined>();
@@ -197,12 +228,12 @@ export function PromptModal({
   const result = useMemo<BootstrapResult | null>(() => {
     if (!validation.valid) return null;
     try {
-      return buildBootstrapPrompt(workflow, marker);
+      return buildBootstrapPrompt(workflow, marker, { reportViaCli });
     } catch (problem) {
       if (problem instanceof WorkflowCompileError) return null;
       throw problem;
     }
-  }, [workflow, validation.valid, marker]);
+  }, [workflow, validation.valid, marker, reportViaCli]);
 
   const files = result?.files ?? [];
   /** Nothing to place means nothing to ask about: no first step, not an empty one. */
@@ -279,6 +310,9 @@ export function PromptModal({
   const copy = useCallback(
     async (withFiles: boolean) => {
       if (!result) return;
+      // The prompt is built for the shell once it is known; a copy before
+      // the capability query answers would hand over the wrong one.
+      if (reportViaCli === undefined) return;
       setError(null);
       try {
         if (withFiles && hasAgents && folder) {
@@ -311,7 +345,7 @@ export function PromptModal({
         setError(problem instanceof Error ? problem.message : "The prompt could not be copied.");
       }
     },
-    [files, folder, hasAgents, marker, onObserving, result, workflow.id, workflow.name],
+    [files, folder, hasAgents, marker, onObserving, result, reportViaCli, workflow.id, workflow.name],
   );
 
   /** Back to naming a folder. The copy, if there was one, is not undone. */
@@ -456,7 +490,7 @@ export function PromptModal({
               {/* Named rather than refused: an author whose prompt is going to a
                   machine Anthill cannot see needs a way through, and the cost
                   of taking it belongs on the button, not in a dead end. */}
-              <button type="button" onClick={() => void copy(false)}>
+              <button type="button" onClick={() => void copy(false)} disabled={reportViaCli === undefined}>
                 Copy without agent files
               </button>
               <span className="hint">Nothing is written until you pick a folder.</span>
@@ -640,7 +674,12 @@ export function PromptModal({
             </div>
 
             <footer className="handover-foot">
-              <button type="button" className="primary" onClick={() => void copy(true)}>
+              <button
+                type="button"
+                className="primary"
+                disabled={reportViaCli === undefined}
+                onClick={() => void copy(true)}
+              >
                 {placement === "failed"
                   ? "Try that folder again"
                   : copiedPrompt
@@ -651,15 +690,17 @@ export function PromptModal({
                 Back
               </button>
               <span className="hint">
-                {!hasAgents
-                  ? "No agent files: this workflow is one agent."
-                  : placement === "failed"
-                    ? "The prompt is already copied."
-                    : !folder
-                      ? "Copied without the agent files — that session runs as one agent."
-                      : copiedPrompt
-                        ? "The session is yours now — Anthill only watches."
-                        : "Files land first, then the clipboard."}
+                {reportViaCli === undefined
+                  ? "Waiting to learn how this shell runs before the prompt can be copied."
+                  : !hasAgents
+                    ? "No agent files: this workflow is one agent."
+                    : placement === "failed"
+                      ? "The prompt is already copied."
+                      : !folder
+                        ? "Copied without the agent files — that session runs as one agent."
+                        : copiedPrompt
+                          ? "The session is yours now — Anthill only watches."
+                          : "Files land first, then the clipboard."}
               </span>
             </footer>
           </>

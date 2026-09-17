@@ -10,22 +10,23 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { acquireInstanceLock, parseArgs } from "./cli.js";
+import { acquireInstanceLock, extractDataDir, parseArgs, runReportCommand } from "./cli.js";
+import type { HarnessReport } from "@anthill/live";
 
 /**
- * Run `parseArgs` expecting it to fail, and return what it said on stderr.
+ * Run a parser expecting it to fail, and return what it said on stderr.
  * `fail()` calls `process.exit(1)`, so the exit is turned into a sentinel
  * throw that this helper catches; the `console.error` output is what the
  * author actually reads, and what these tests assert on.
  */
-function expectFailure(argv: string[]): string {
+function expectFailure(run: () => void): string {
   const exit = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
     throw new Error(`exit:${code ?? 0}`);
   }) as never);
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
   let message = "";
   try {
-    parseArgs(argv);
+    run();
   } catch (caught) {
     if (!(caught instanceof Error) || !caught.message.startsWith("exit:")) {
       throw caught;
@@ -77,25 +78,184 @@ describe("parseArgs", () => {
     // The regression the review caught: `--host --no-browser` used to read
     // `--no-browser` as the host, and only failed at the end. Now it fails
     // here, naming the real problem.
-    const message = expectFailure(["--host", "--no-browser"]);
+    const message = expectFailure(() => parseArgs(["--host", "--no-browser"]));
     expect(message).toContain("--host needs a value");
     expect(message).toContain("--no-browser");
   });
 
   it("fails when a value-required flag is the last argument", () => {
-    expect(expectFailure(["--port"])).toContain("--port needs a value");
+    expect(expectFailure(() => parseArgs(["--port"]))).toContain("--port needs a value");
   });
 
   it("fails on a bad port", () => {
-    expect(expectFailure(["--port", "not-a-number"])).toContain("--port");
+    const message = expectFailure(() => parseArgs(["--port", "not-a-number"]));
+    expect(message).toContain("--port");
   });
 
   it("fails on an unknown argument", () => {
-    expect(expectFailure(["--bogus"])).toContain("unknown argument");
+    expect(expectFailure(() => parseArgs(["--bogus"]))).toContain("unknown argument");
   });
 
   it("still accepts a value that starts with `-` via `flag=value`", () => {
     expect(parseArgs(["--host=-weird"]).host).toBe("-weird");
+  });
+});
+
+describe("runReportCommand", () => {
+  /** A write that records the reports instead of touching the file system. */
+  function recorder(): { reports: HarnessReport[]; write: (report: HarnessReport) => Promise<void> } {
+    const reports: HarnessReport[] = [];
+    return { reports, write: async (report) => reports.push(report) };
+  }
+
+  it("records a run report and says so", async () => {
+    const { reports, write } = recorder();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const code = await runReportCommand(["run", "ANT-1A2B3C4D", "9f8e7d"], write);
+      expect(code).toBe(0);
+      expect(reports).toEqual([
+        expect.objectContaining({ kind: "run", runId: "ANT-1A2B3C4D", nonce: "9f8e7d" }),
+      ]);
+      expect(log.mock.calls.flat().join(" ")).toContain("Run reported.");
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("records a step report and names the step", async () => {
+    const { reports, write } = recorder();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const code = await runReportCommand(["step", "ANT-1A2B3C4D", "9f8e7d", "implement"], write);
+      expect(code).toBe(0);
+      expect(reports).toEqual([
+        expect.objectContaining({ kind: "step", runId: "ANT-1A2B3C4D", nonce: "9f8e7d", stepId: "implement" }),
+      ]);
+      expect(log.mock.calls.flat().join(" ")).toContain("Step implement reported.");
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("records a done report and says so", async () => {
+    const { reports, write } = recorder();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const code = await runReportCommand(["done", "ANT-1A2B3C4D", "9f8e7d"], write);
+      expect(code).toBe(0);
+      expect(reports).toEqual([
+        expect.objectContaining({ kind: "done", runId: "ANT-1A2B3C4D", nonce: "9f8e7d" }),
+      ]);
+      expect(log.mock.calls.flat().join(" ")).toContain("Done reported.");
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("fails when a value is missing", async () => {
+    const { write } = recorder();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await runReportCommand(["run", "ANT-1A2B3C4D"], write)).toBe(1);
+      expect(await runReportCommand(["step", "ANT-1A2B3C4D", "9f8e7d"], write)).toBe(1);
+      expect(await runReportCommand(["done", "ANT-1A2B3C4D"], write)).toBe(1);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("fails when a value is extra", async () => {
+    const { write } = recorder();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await runReportCommand(["run", "a", "b", "c"], write)).toBe(1);
+      expect(await runReportCommand(["step", "a", "b", "c", "d"], write)).toBe(1);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("fails on an empty value", async () => {
+    const { write } = recorder();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await runReportCommand(["run", "", "9f8e7d"], write)).toBe(1);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("fails on a value with whitespace", async () => {
+    const { write } = recorder();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await runReportCommand(["step", "ANT 1", "9f8e7d", "implement"], write)).toBe(1);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("fails on an unknown command, with the usage", async () => {
+    const { write } = recorder();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await runReportCommand(["bogus"], write)).toBe(1);
+      const message = error.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(message).toContain("unknown command");
+      expect(message).toContain("anthill run <runId> <nonce>");
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("fails, without reporting, when the write fails", async () => {
+    const { reports } = recorder();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failing = async () => {
+      throw new Error("disk full");
+    };
+    try {
+      expect(await runReportCommand(["run", "ANT-1A2B3C4D", "9f8e7d"], failing)).toBe(1);
+      expect(reports).toEqual([]);
+      expect(error.mock.calls.map((call) => call.join(" ")).join("\n")).toContain("disk full");
+    } finally {
+      error.mockRestore();
+    }
+  });
+});
+
+describe("extractDataDir", () => {
+  it("reads --data-dir after the command, leaving the rest of the argv", () => {
+    expect(extractDataDir(["run", "ANT-1A2B3C4D", "9f8e7d", "--data-dir", "/d"])).toEqual({
+      dataDir: "/d",
+      argv: ["run", "ANT-1A2B3C4D", "9f8e7d"],
+    });
+  });
+
+  it("reads `--data-dir=<value>`", () => {
+    expect(extractDataDir(["step", "a", "b", "c", "--data-dir=/d"])).toEqual({
+      dataDir: "/d",
+      argv: ["step", "a", "b", "c"],
+    });
+  });
+
+  it("leaves the argv untouched when the flag is absent", () => {
+    expect(extractDataDir(["run", "a", "b"])).toEqual({ dataDir: undefined, argv: ["run", "a", "b"] });
+  });
+
+  it("fails, at the point of the mistake, when the value looks like an option", () => {
+    // The same rule as the server's `parseArgs`: a flag that needs a value
+    // never swallows the next option.
+    const message = expectFailure(() => extractDataDir(["run", "a", "b", "--data-dir", "--port"]));
+    expect(message).toContain("--data-dir needs a value");
+    expect(message).toContain("--port");
+  });
+
+  it("fails when the flag is the last argument", () => {
+    expect(expectFailure(() => extractDataDir(["run", "a", "b", "--data-dir"]))).toContain(
+      "--data-dir needs a value",
+    );
   });
 });
 

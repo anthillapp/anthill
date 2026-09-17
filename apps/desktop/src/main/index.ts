@@ -412,7 +412,11 @@ function handle(
 function registerIpcHandlers(): void {
   handle(
     IpcChannel.appCapabilities,
-    async (): Promise<IpcCapabilities> => ({ contract: IPC_CONTRACT, channels: [...registered] }),
+    async (): Promise<IpcCapabilities> => ({
+      contract: IPC_CONTRACT,
+      channels: [...registered],
+      shell: "desktop",
+    }),
   );
 
   /**

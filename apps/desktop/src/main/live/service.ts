@@ -37,6 +37,7 @@ import {
 } from "@anthill/live";
 
 import { ClaudeCodeObserver } from "./observers/claude-code.js";
+import { CliReportObserver } from "./observers/cli-report.js";
 import { CodexObserver } from "./observers/codex.js";
 import { HookLogObserver } from "./observers/hooks.js";
 import type {
@@ -80,12 +81,14 @@ export type ObservationRoots = {
   claudeRoot?: string;
   codexRoot?: string;
   hookLogPath?: string;
+  reportLogPath?: string;
   journalDir?: string;
 };
 
 export class LiveSessionService {
   private readonly observers: Record<MarkerCli, LiveSessionObserver>;
   private readonly hooks: HookLogObserver;
+  private readonly reports: CliReportObserver;
   private readonly journal: ObservationJournal;
   private timer: NodeJS.Timeout | undefined;
   private capabilities: ObserverCapabilities[] = [];
@@ -108,6 +111,9 @@ export class LiveSessionService {
       codex: roots.codexRoot ? new CodexObserver(roots.codexRoot) : new CodexObserver(),
     };
     this.hooks = roots.hookLogPath ? new HookLogObserver(roots.hookLogPath) : new HookLogObserver();
+    this.reports = roots.reportLogPath
+      ? new CliReportObserver(roots.reportLogPath)
+      : new CliReportObserver();
     this.journal = new ObservationJournal(roots.journalDir ?? "");
   }
 
@@ -209,6 +215,7 @@ export class LiveSessionService {
     this.observers["claude-code"].forget(runId);
     this.observers.codex.forget(runId);
     this.hooks.forget(runId);
+    this.reports.forget(runId);
   }
 
   /** Tell everyone what is now true, and hand the same thing back. */
@@ -332,6 +339,17 @@ export class LiveSessionService {
       drafts = [...drafts, ...hooked.events];
     } catch {
       // No hooks installed, or the log is unreadable. Neither is an error.
+    }
+
+    // Reports are read the same way: a file the CLI writes on the harness's
+    // behalf, matched on the marker's two halves. Not gated on a session
+    // match — a report can arrive before the session file does.
+    try {
+      const reported = await this.reports.poll(run, now);
+      evidence = [...evidence, ...reported.evidence];
+      drafts = [...drafts, ...reported.events];
+    } catch {
+      // The CLI was never run, or the file is unreadable. Neither is an error.
     }
 
     return { evidence, drafts };

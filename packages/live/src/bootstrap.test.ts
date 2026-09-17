@@ -142,3 +142,39 @@ describe("the promise made about agent files", () => {
     expect(bootstrapPrompt).not.toContain("fixed when this session started");
   });
 });
+
+/**
+ * The prompt's progress channel.
+ *
+ * By default the harness prints marker lines; a shell that runs the Anthill
+ * CLI on this machine (the Linux CLI) can instead tell the harness to call
+ * it. The marker itself is unchanged either way: it is in the pasted text
+ * and reaches the session file without the agent's cooperation.
+ */
+describe("the progress channel", () => {
+  it("asks for printed marker lines by default", () => {
+    const { bootstrapPrompt } = buildBootstrapPrompt(workflow("claude-code"), marker);
+    expect(bootstrapPrompt).toContain(`ANTHILL-RUN ${marker.runId} ${marker.nonce}`);
+    expect(bootstrapPrompt).not.toContain("anthill run");
+  });
+
+  it("instructs the harness to use the CLI when asked to", () => {
+    const { bootstrapPrompt } = buildBootstrapPrompt(workflow("claude-code"), marker, { reportViaCli: true });
+    expect(bootstrapPrompt).toContain(`anthill run ${marker.runId} ${marker.nonce}`);
+    expect(bootstrapPrompt).toContain(`anthill step ${marker.runId} ${marker.nonce} <step-id>`);
+    // The printed lines are gone, not doubled: a prompt that asked for both
+    // channels would make an agent do the work twice for no benefit.
+    expect(bootstrapPrompt).not.toContain("ANTHILL-RUN");
+    expect(bootstrapPrompt).not.toContain("ANTHILL-STEP");
+  });
+
+  it("still carries the marker in the pasted text, either way", () => {
+    const { bootstrapPrompt } = buildBootstrapPrompt(workflow("claude-code"), marker, { reportViaCli: true });
+    expect(textCarriesMarker(bootstrapPrompt, marker)).toBe(true);
+  });
+
+  it("lists the step ids in the CLI instruction too", () => {
+    const { bootstrapPrompt } = buildBootstrapPrompt(workflow("claude-code"), marker, { reportViaCli: true });
+    expect(bootstrapPrompt).toContain("`read` — Read the note");
+  });
+});

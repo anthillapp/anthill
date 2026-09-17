@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   MARKER_VERSION,
+  CLI_NAME,
+  cliInstruction,
   newNonce,
   newRunId,
   parseMarker,
@@ -86,5 +88,39 @@ describe("step markers", () => {
   it("finds the marker inside surrounding prose", () => {
     const text = "I'll start now.\n\n    ANTHILL-STEP ANT-1A2B3C4D 9f8e7d review\n\nReading the diff.";
     expect(parseStepMarkers(text, marker)).toEqual(["review"]);
+  });
+});
+
+describe("the CLI instruction", () => {
+  it("names the command, the run, and the nonce", () => {
+    const text = cliInstruction(marker);
+    expect(text).toContain(`${CLI_NAME} run ${marker.runId} ${marker.nonce}`);
+    expect(text).toContain(`${CLI_NAME} step ${marker.runId} ${marker.nonce} <step-id>`);
+  });
+
+  it("names the done command, so a CLI-reported run can finish", () => {
+    const text = cliInstruction(marker);
+    expect(text).toContain(`${CLI_NAME} done ${marker.runId} ${marker.nonce}`);
+  });
+
+  it("lists the step ids next to the instruction, for the same reason as the marker section", () => {
+    const text = cliInstruction(marker, [
+      { id: "read", name: "Read the note" },
+      { id: "review", name: "Review it" },
+    ]);
+    const instruction = text.indexOf("Use exactly these step ids");
+    const ids = text.indexOf("`read` — Read the note");
+    expect(instruction).toBeGreaterThan(0);
+    expect(ids).toBeGreaterThan(instruction);
+  });
+
+  it("carries no secrets, no ports, and no local paths", () => {
+    const text = cliInstruction(marker, [{ id: "read", name: "Read" }]);
+    expect(text).not.toMatch(/\/Users\/|\/home\/|[A-Za-z]:\\/);
+    expect(text).not.toMatch(/api[_-]?key|token|secret|password|bearer|\b\d{4,5}\b/i);
+  });
+
+  it("says a command that cannot be run is skipped, not fatal", () => {
+    expect(cliInstruction(marker)).toContain("if a command cannot\nbe run, continue without it");
   });
 });

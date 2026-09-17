@@ -26,6 +26,7 @@ type Harness = {
   store: PendingRunStore;
   claudeRoot: string;
   hookLogPath: string;
+  reportLogPath: string;
   storePath: string;
   published: LiveSessionSnapshot[];
   setNow: (iso: string) => void;
@@ -42,14 +43,21 @@ async function harness(startAt = "2026-08-29T10:00:00.000Z"): Promise<Harness> {
   let now = startAt;
 
   const hookLogPath = join(dir, "hooks", "events.jsonl");
+  const reportLogPath = join(dir, "cli", "harness-reports.jsonl");
   const service = new LiveSessionService(
     store,
     (snapshot) => published.push(snapshot),
     () => now,
-    { claudeRoot, codexRoot: join(dir, "codex"), journalDir: join(dir, "observations"), hookLogPath },
+    {
+      claudeRoot,
+      codexRoot: join(dir, "codex"),
+      journalDir: join(dir, "observations"),
+      hookLogPath,
+      reportLogPath,
+    },
   );
 
-  return { service, store, claudeRoot, hookLogPath, storePath, published, setNow: (iso) => (now = iso) };
+  return { service, store, claudeRoot, hookLogPath, reportLogPath, storePath, published, setNow: (iso) => (now = iso) };
 }
 
 /** One line in the log the user's installed hooks write. */
@@ -279,6 +287,102 @@ describe("recovery across a restart", () => {
     ).toISOString();
     const store = new PendingRunStore(h.storePath);
     expect(await store.load(wayLater)).toHaveLength(0);
+  });
+});
+
+/** One line in the report file the harness's CLI writes. */
+async function reportLine(path: string, report: Record<string, unknown>) {
+  await mkdir(join(path, ".."), { recursive: true });
+  await appendFile(path, JSON.stringify(report) + "\n", "utf8");
+}
+
+describe("the harness's own report", () => {
+  const START = "2026-08-29T10:00:00.000Z";
+  const at = (ms: number) => new Date(Date.parse(START) + ms).toISOString();
+
+  it("is a sign of life before a transcript is found", async () => {
+    const h = await harness(START);
+    await h.service.start();
+    await h.service.startObservation(observeRequest);
+
+    // The harness says it is here, through the CLI, before any transcript
+    // carries the marker.
+    await reportLine(h.reportLogPath, {
+      kind: "run",
+      runId: RUN_ID,
+      nonce: NONCE,
+      at: at(30_000),
+    });
+    h.setNow(at(30_000));
+    await h.service.poll();
+
+    const run = only(h.service.snapshot());
+    expect(run.state).toBe("detected_live");
+    expect(run.lastObservedAt).toBe(at(30_000));
+  });
+
+  it("lands the steps the harness announces", async () => {
+    const h = await harness(START);
+    await h.service.start();
+    await h.service.startObservation(observeRequest);
+
+    await reportLine(h.reportLogPath, {
+      kind: "step",
+      runId: RUN_ID,
+      nonce: NONCE,
+      stepId: "implement",
+      at: at(40_000),
+    });
+    h.setNow(at(40_000));
+    await h.service.poll();
+
+    const events = await h.service.events(RUN_ID);
+    expect(events).toContainEqual(
+      expect.objectContaining({ kind: "step.marker", blockId: "implement", source: "anthill" }),
+    );
+  });
+
+  it("ignores a report for a different run", async () => {
+    const h = await harness(START);
+    await h.service.start();
+    await h.service.startObservation(observeRequest);
+
+    await reportLine(h.reportLogPath, {
+      kind: "step",
+      runId: "ANT-DEADBEEF",
+      nonce: NONCE,
+      stepId: "implement",
+      at: at(40_000),
+    });
+    h.setNow(at(40_000));
+    await h.service.poll();
+
+    expect(await h.service.events(RUN_ID)).toHaveLength(0);
+  });
+
+  it("keeps a quiet session alive on the report's clock", async () => {
+    const h = await harness(START);
+    await h.service.start();
+    await h.service.startObservation(observeRequest);
+    await writeTranscript(h.claudeRoot, "sess-1");
+    h.setNow(at(10_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("detected_live");
+
+    // The transcript goes quiet; the harness keeps reporting through the CLI.
+    for (const minute of [2, 6, 12]) {
+      await reportLine(h.reportLogPath, {
+        kind: "step",
+        runId: RUN_ID,
+        nonce: NONCE,
+        stepId: `part-${minute}`,
+        at: at(minute * 60_000),
+      });
+      h.setNow(at(minute * 60_000));
+      await h.service.poll();
+      expect(only(h.service.snapshot()).state).toBe("detected_live");
+    }
+    expect(only(h.service.snapshot()).lastObservedAt).toBe(at(12 * 60_000));
   });
 });
 

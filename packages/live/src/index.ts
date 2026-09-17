@@ -1,6 +1,7 @@
 export * from "./marker.js";
 export * from "./pending-run.js";
 export * from "./bootstrap.js";
+export * from "./report.js";
 export * from "./observation-event.js";
 export * from "./excerpt.js";
 export * from "./attribution.js";

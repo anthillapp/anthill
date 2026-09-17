@@ -136,6 +136,63 @@ export function echoInstruction(
   return lines.join("\n");
 }
 
+/**
+ * The name of the CLI the harness is told to call.
+ *
+ * The instruction embeds the run id and nonce, which the marker already
+ * carries, and nothing else: no paths, no ports, no tokens.
+ */
+export const CLI_NAME = "anthill";
+
+/**
+ * The instruction for a prompt that reports through the CLI instead of
+ * printing marker lines.
+ *
+ * The harness runs `anthill run ...` once, `anthill step ...` per step, and
+ * `anthill done ...` once the work is finished. The CLI appends a line per
+ * call to a local file Anthill reads afterwards. The work is not affected
+ * either way: a command that cannot be run is skipped, and the step ids are
+ * the same ones the marker section names.
+ */
+export function cliInstruction(
+  marker: RunMarker,
+  steps: readonly { id: string; name: string }[] = [],
+): string {
+  const lines = [
+    "## Progress reports",
+    "",
+    "Run these commands in a shell. They tell the Anthill window on this machine",
+    "which step the work is on. They do not affect the work: if a command cannot",
+    "be run, continue without it.",
+    "",
+    "**Once, before you begin:**",
+    "",
+    `    ${CLI_NAME} run ${marker.runId} ${marker.nonce}`,
+    "",
+    "**Immediately before you start each step, and again whenever you come back to",
+    "an earlier one:**",
+    "",
+    `    ${CLI_NAME} step ${marker.runId} ${marker.nonce} <step-id>`,
+    "",
+    "**Once the work is finished:**",
+    "",
+    `    ${CLI_NAME} done ${marker.runId} ${marker.nonce}`,
+  ];
+
+  // The ids belong next to the instruction rather than at the end of the
+  // prompt, for the same reason as the marker section's.
+  if (steps.length > 0) {
+    lines.push(
+      "",
+      "Use exactly these step ids:",
+      "",
+      ...steps.map((step) => `- \`${step.id}\` — ${step.name}`),
+    );
+  }
+
+  return lines.join("\n");
+}
+
 export const RUN_TOKEN = "ANTHILL-RUN";
 export const STEP_TOKEN = "ANTHILL-STEP";
 

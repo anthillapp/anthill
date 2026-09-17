@@ -19,12 +19,24 @@
 import type { Workflow } from "@anthill/workflow-schema";
 import { compile, type CompileResult } from "@anthill/workflow";
 
-import { echoInstruction, renderMarker, type RunMarker } from "./marker.js";
+import { cliInstruction, echoInstruction, renderMarker, type RunMarker } from "./marker.js";
 
 export type BootstrapResult = CompileResult & {
   /** The prompt to copy: marker, set-up, then the workflow. */
   bootstrapPrompt: string;
   marker: RunMarker;
+};
+
+export type BootstrapOptions = {
+  /**
+   * Instruct the harness to report through the Anthill CLI instead of
+   * printing marker lines.
+   *
+   * The CLI is only present where the app runs as a CLI (Linux), so this
+   * is set by the shell that knows it has the binary. A shell that cannot
+   * ask leaves the prompt to the marker lines, which work everywhere.
+   */
+  reportViaCli?: boolean;
 };
 
 /**
@@ -39,7 +51,11 @@ function workflowSteps(workflow: Workflow): { id: string; name: string }[] {
     .map((node) => ({ id: node.id, name: node.name }));
 }
 
-export function buildBootstrapPrompt(workflow: Workflow, marker: RunMarker): BootstrapResult {
+export function buildBootstrapPrompt(
+  workflow: Workflow,
+  marker: RunMarker,
+  options: BootstrapOptions = {},
+): BootstrapResult {
   const compiled = compile(workflow);
   const sections: string[] = [renderMarker(marker)];
 
@@ -81,7 +97,11 @@ export function buildBootstrapPrompt(workflow: Workflow, marker: RunMarker): Boo
     );
   }
 
-  sections.push(echoInstruction(marker, workflowSteps(workflow)));
+  sections.push(
+    options.reportViaCli
+      ? cliInstruction(marker, workflowSteps(workflow))
+      : echoInstruction(marker, workflowSteps(workflow)),
+  );
   sections.push("---");
   sections.push(compiled.prompt.trimEnd());
 

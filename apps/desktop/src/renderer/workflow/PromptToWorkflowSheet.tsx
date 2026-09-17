@@ -47,6 +47,7 @@ import {
   PREVIEW_NODES,
   PREVIEW_SIZE,
   previewPath,
+  type PreviewNode,
 } from "./draft-preview.js";
 
 export type PromptToWorkflowSheetProps = {
@@ -696,10 +697,10 @@ function ChooseInterpreter({
 /**
  * The wait, shown rather than described.
  *
- * A list of four stage names read as a hung window. The graph draws itself in
- * the canvas's own vocabulary — the dotted grid, a Start pill, blocks with
- * their category rules, a next edge, a rework return, a question path — so the
- * minute of waiting previews the thing being built. It is a loop, not a
+ * A list of five stage names read as a hung window. The graph draws itself in
+ * the canvas's own vocabulary — the dotted grid, a labelled Start, blocks in
+ * the anatomy of a real one, a next edge, a rework return, a question path — so
+ * the minute of waiting previews the thing being built. It is a loop, not a
  * progress bar: it says "working", and the stage list below says how far.
  *
  * Under `prefers-reduced-motion` every animation stops and the graph is simply
@@ -719,82 +720,17 @@ function Running({
   return (
     <>
       <div className="drafting-card">
-        <span className="kicker">{interpreterLabel} is reading your prompt</span>
-        <h2 aria-live="polite">{STAGES[Math.max(at, 0)].label}</h2>
-
-        <div className="drafting-graph" aria-hidden="true">
-          {/*
-            One coordinate system, on purpose. Blocks used to be HTML elements
-            placed in CSS pixels while edges were hand-typed path data, and
-            keeping the two in agreement was arithmetic nobody re-did when the
-            layout moved — so most of the edges ended in empty space. Both come
-            out of the same geometry now, and an edge is given a block and a
-            side rather than a destination, so it cannot land anywhere but on a
-            port.
-          */}
-          <svg
-            width={PREVIEW_SIZE.width}
-            height={PREVIEW_SIZE.height}
-            viewBox={`0 0 ${PREVIEW_SIZE.width} ${PREVIEW_SIZE.height}`}
-          >
-            <defs>
-              {(["next", "rework", "question"] as const).map((tone) => (
-                <marker
-                  key={tone}
-                  id={`draft-arrow-${tone}`}
-                  viewBox="0 0 10 10"
-                  refX="9"
-                  refY="5"
-                  markerWidth="6"
-                  markerHeight="6"
-                  orient="auto-start-reverse"
-                  className={`draft-arrow tone-${tone}`}
-                >
-                  <path d="M 0 1 L 9 5 L 0 9 z" />
-                </marker>
-              ))}
-            </defs>
-
-            {PREVIEW_EDGES.map((edge) => (
-              <path
-                key={edge.id}
-                className={`anim-edge tone-${edge.tone}`}
-                style={{ animationDelay: `${edge.delay}s` }}
-                d={previewPath(edge)}
-                pathLength={1}
-                markerEnd={`url(#draft-arrow-${edge.tone})`}
-              />
-            ))}
-
-            {PREVIEW_NODES.map((node) => (
-              <g
-                key={node.id}
-                className="anim-node"
-                style={{ animationDelay: `${node.delay}s` }}
-              >
-                <rect
-                  className="anim-node-body"
-                  x={node.x}
-                  y={node.y}
-                  width={node.w}
-                  height={node.h}
-                  rx={node.pill ? node.h / 2 : 9}
-                />
-                {node.tone === "plain" ? null : (
-                  <rect
-                    className={`anim-node-rule tone-${node.tone}`}
-                    x={node.x}
-                    y={node.y + 1}
-                    width={4}
-                    height={node.h - 2}
-                    rx={2}
-                  />
-                )}
-              </g>
-            ))}
-          </svg>
-          <i className="anim-sweep" />
+        {/*
+          The stage changes with no user action behind it, which is exactly the
+          case a live region is for. It sits on the pair, so the announcement
+          carries the tool's name with the stage.
+        */}
+        <div className="drafting-head" aria-live="polite">
+          <span className="kicker">{interpreterLabel} is reading your prompt</span>
+          <h2>{STAGES[Math.max(at, 0)].label}</h2>
         </div>
+
+        <DraftingPanel />
       </div>
 
       <div className="slab">
@@ -824,5 +760,126 @@ function Running({
         <span className="hint">Cancelling leaves your prompt untouched.</span>
       </div>
     </>
+  );
+}
+
+/**
+ * The panel: the canvas at a smaller scale, assembling itself.
+ *
+ * Decoration, and it says so — everything it conveys is in the heading and the
+ * stage list as text, and without `aria-hidden` a screen reader is handed five
+ * nameless blocks and fourteen empty bars.
+ *
+ * One coordinate system, on purpose. Blocks used to be HTML elements placed in
+ * CSS pixels while edges were hand-typed path data, and keeping the two in
+ * agreement was arithmetic nobody re-did when the layout moved — so most of the
+ * edges ended in empty space. Both come out of `draft-preview.ts` now, and an
+ * edge is given a block and a side rather than a destination, so it cannot land
+ * anywhere but on a port.
+ *
+ * Exported for its tests: the panel is an animation, and the couplings worth
+ * holding are between this markup and the stylesheet.
+ */
+export function DraftingPanel() {
+  return (
+    <div className="drafting-graph" aria-hidden="true">
+      <svg
+        width={PREVIEW_SIZE.width}
+        height={PREVIEW_SIZE.height}
+        viewBox={`0 0 ${PREVIEW_SIZE.width} ${PREVIEW_SIZE.height}`}
+      >
+        <defs>
+          {(["next", "rework", "question"] as const).map((tone) => (
+            <marker
+              key={tone}
+              id={`draft-arrow-${tone}`}
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+              className={`draft-arrow tone-${tone}`}
+            >
+              <path d="M 0 1 L 9 5 L 0 9 z" />
+            </marker>
+          ))}
+        </defs>
+
+        {PREVIEW_EDGES.map((edge) => (
+          <path
+            key={edge.id}
+            className={`anim-edge tone-${edge.tone} is-${edge.stroke}`}
+            style={{ animationDelay: `${edge.delay}s` }}
+            d={previewPath(edge)}
+            // Only a drawn connection is normalised: a dash pattern measured
+            // against a path declared one unit long is a solid line, and the
+            // two conditional edges fade rather than draw.
+            pathLength={edge.stroke === "solid" ? 1 : undefined}
+            markerEnd={`url(#draft-arrow-${edge.tone})`}
+          />
+        ))}
+      </svg>
+
+      {PREVIEW_NODES.map((node) => (
+        <DraftBlock key={node.id} node={node} />
+      ))}
+
+      {/*
+        A light band crossing the panel. Deliberately not a progress bar:
+        Anthill cannot measure how far along a draft is, so nothing here may
+        imply it can.
+      */}
+      <i className="anim-sweep" />
+    </div>
+  );
+}
+
+/**
+ * One block in the preview panel.
+ *
+ * A control block carries its real name; a step block does not. Start and Done
+ * are not being decided by the interpreter, so hiding them behind a skeleton
+ * would be a small lie — while everything it *is* deciding (the action, the
+ * name, the agent, how many passes) is an unwritten line.
+ *
+ * The bars are HTML rather than SVG because a shimmer is a moving CSS gradient
+ * and an SVG rect cannot carry one. Position and size still come from the same
+ * table the edges are drawn from, so there is no second copy of the layout.
+ */
+function DraftBlock({ node }: { node: PreviewNode }) {
+  const frame = {
+    left: node.x,
+    top: node.y,
+    width: node.w,
+    height: node.h,
+    animationDelay: `${node.delay}s`,
+  };
+
+  if (node.kind !== "step") {
+    return (
+      <div className={`anim-node dr-pill is-${node.kind}`} style={frame}>
+        <i className="dr-pill-dot" />
+        {node.kind === "start" ? "Start" : "Done"}
+      </div>
+    );
+  }
+
+  const { action, index, title, chips } = node.skeleton;
+  return (
+    <div className="anim-node dr-card" style={frame}>
+      <div className="dr-card-top">
+        <i className={`dr-dot cat-${node.tone}`} />
+        <i className="sk" style={{ width: action.w, height: action.h }} />
+        <i className="dr-card-gap" />
+        <i className="sk" style={{ width: index.w, height: index.h }} />
+      </div>
+      <i className="sk dr-title" style={{ width: title.w, height: title.h }} />
+      <div className="dr-card-chips">
+        {chips.map((chip, at) => (
+          <i key={at} className="sk dr-chip" style={{ width: chip.w, height: chip.h }} />
+        ))}
+      </div>
+    </div>
   );
 }

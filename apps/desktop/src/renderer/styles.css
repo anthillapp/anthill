@@ -1699,34 +1699,32 @@ ul.plain {
   gap: 9px;
 }
 
+/* The word at the end of the row carries the state; the dot is a second
+   channel, never the only one. */
 .stage {
   display: flex;
   align-items: center;
   gap: 10px;
   font-size: 13px;
-  color: var(--ink-3);
+  color: var(--ink);
 }
 
 .stage .stage-mark {
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  border: 1.5px solid var(--border);
+  border: 1.5px solid var(--field-border);
   flex: none;
 }
 
-.stage.done {
-  color: var(--ink-2);
+/* Not reached: the row is there, and quiet about it. */
+.stage.next {
+  color: var(--ink-dim);
 }
 
 .stage.done .stage-mark {
-  background: var(--ink-3);
-  border-color: var(--ink-3);
-}
-
-.stage.now {
-  color: var(--ink);
-  font-weight: 600;
+  background: var(--settled);
+  border-color: var(--settled);
 }
 
 .stage.now .stage-mark {
@@ -1737,7 +1735,8 @@ ul.plain {
 .stage .stage-note {
   font-size: 11.5px;
   font-weight: 400;
-  color: var(--ink-3);
+  white-space: nowrap;
+  color: var(--accent-700);
 }
 
 /* ---------------- generated-plan assembly ---------------- */
@@ -2095,7 +2094,16 @@ ul.plain {
   color: var(--ink);
 }
 
-/* The canvas's own grid, so the wait previews the thing being built. */
+.drafting-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The canvas's own grid, at the canvas's own 22px step, so the wait previews
+   the surface the author is about to work in rather than an abstract loader.
+   `overflow: hidden` clips the sweep band and any node overshoot. */
 .drafting-graph {
   position: relative;
   width: 560px;
@@ -2114,14 +2122,10 @@ ul.plain {
   top: 0;
 }
 
-/* Every edge is normalised to `pathLength="1"`, so one keyframe draws a short
-   connection and a long rework return at the same rate instead of one snapping
-   while the other lags. */
 .drafting-graph .anim-edge {
-  stroke: #7d7979;
+  stroke: #9b9797;
   stroke-width: 1.75;
   fill: none;
-  stroke-dasharray: 1;
   animation: edge-in 5.2s ease-in-out infinite both;
 }
 
@@ -2131,30 +2135,131 @@ ul.plain {
 
 .drafting-graph .anim-edge.tone-question {
   stroke: #56aee0;
-  stroke-width: 2;
+}
+
+/* A drawn connection is normalised to `pathLength="1"` in the markup, so one
+   keyframe draws a 20px hop and a curve back across the diagram at the same
+   rate instead of one snapping while the other lags. */
+.drafting-graph .anim-edge.is-solid {
+  stroke-dasharray: 1;
+}
+
+/* A dashed stroke cannot also be drawn by `stroke-dashoffset`: its pattern *is*
+   the dasharray, so overwriting it to draw the line would flatten the dashes
+   and lose the meaning the dash carries. The conditional connections keep their
+   pattern and fade in instead — and keep their real length, because a dash
+   measured against a normalised path of length 1 is a solid line. */
+
+.drafting-graph .anim-edge.is-dashed {
+  stroke-dasharray: 7 5;
+  animation-name: edge-fade;
+}
+
+.drafting-graph .anim-edge.is-dotted {
+  stroke-dasharray: 2 5;
+  animation-name: edge-fade;
 }
 
 /* The arrowhead is a marker on the connection itself, so it travels with it and
    cannot be left behind pointing at nothing. */
-.drafting-graph .draft-arrow path { fill: #7d7979; }
+.drafting-graph .draft-arrow path { fill: #9b9797; }
 .drafting-graph .draft-arrow.tone-rework path { fill: var(--unclear); }
 .drafting-graph .draft-arrow.tone-question path { fill: #56aee0; }
 
 .drafting-graph .anim-node {
+  position: absolute;
+  box-sizing: border-box;
+  background: var(--surface);
+  border: 1px solid var(--field-border);
   animation: node-in 5.2s cubic-bezier(0.2, 0.7, 0.2, 1) infinite both;
-  transform-box: fill-box;
-  transform-origin: center;
 }
 
-.drafting-graph .anim-node-body {
-  fill: var(--surface);
-  stroke: #d7d3d3;
-  stroke-width: 1;
+/*
+ * A control block is labelled with its real name; a step block is not.
+ *
+ * Start and Done are not being decided by the interpreter, so hiding them
+ * behind a skeleton would be a small lie. Everything the interpreter *is*
+ * deciding — action, name, agent, passes — is an unwritten line.
+ */
+.drafting-graph .dr-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 11px;
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgba(32, 30, 29, 0.08);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--ink-2);
 }
 
-.drafting-graph .anim-node-rule.tone-build { fill: #6b5bd2; }
-.drafting-graph .anim-node-rule.tone-verify { fill: var(--unclear); }
-.drafting-graph .anim-node-rule.tone-question { fill: #56aee0; }
+.drafting-graph .dr-pill-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  box-sizing: border-box;
+  border-radius: 50%;
+}
+
+.drafting-graph .is-start .dr-pill-dot { background: var(--ink-3); }
+.drafting-graph .is-done .dr-pill-dot { border: 1.5px solid var(--ink-quiet); }
+
+/* The anatomy of a real block, at the editor's own proportions: category dot,
+   action, pass counter, name, then the agent's chips. */
+.drafting-graph .dr-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  box-shadow: var(--shadow-card);
+}
+
+.drafting-graph .dr-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.drafting-graph .dr-card-gap { flex: 1; }
+
+.drafting-graph .dr-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 2px;
+}
+
+.drafting-graph .dr-dot.cat-build { background: #6b5bd2; }
+.drafting-graph .dr-dot.cat-verify { background: var(--unclear); }
+
+.drafting-graph .dr-card-chips {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: auto;
+}
+
+.drafting-graph .dr-title { border-radius: 3px; }
+.drafting-graph .dr-chip { border-radius: 999px; }
+
+/* An empty white card reads as a broken placeholder. A shimmering bar reads as
+   a value being written. That is the entire reason this exists. */
+.drafting-graph .sk {
+  display: block;
+  flex: none;
+  border-radius: 3px;
+  background-image: linear-gradient(90deg, #ececec 0%, #f6f5f5 42%, #ececec 84%);
+  background-size: 220% 100%;
+  animation: sk-shimmer 2.1s ease-in-out infinite;
+}
+
+@keyframes sk-shimmer {
+  0%, 100% { background-position: 120% 0; }
+  50% { background-position: -20% 0; }
+}
 
 .drafting-graph .anim-sweep {
   position: absolute;
@@ -2172,12 +2277,19 @@ ul.plain {
   100% { opacity: 0; }
 }
 
-/* Opacity finishes with the stroke rather than ahead of it: the arrowhead is
-   part of the same rendered element, and fading it up early would show it
+/* Opacity finishes with the stroke rather than ahead of it: the arrowhead is a
+   marker on the same element and is painted at the far end of the path however
+   little of the line has been drawn, so fading it up early would show it
    waiting at a block the line has not reached. */
 @keyframes edge-in {
   0%, 8% { stroke-dashoffset: 1; opacity: 0; }
   34%, 92% { stroke-dashoffset: 0; opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes edge-fade {
+  0%, 8% { opacity: 0; }
+  26%, 92% { opacity: 1; }
   100% { opacity: 0; }
 }
 
@@ -2203,14 +2315,18 @@ ul.plain {
   }
 }
 
-/* The graph is decoration around a stage list that is already words. */
+/* The graph is decoration around a stage list that is already words, so motion
+   off leaves it complete, still and legible rather than half-drawn. `.sk` is in
+   this list on purpose: a shimmer is exactly the kind of thing that reads as a
+   fault when motion is unwelcome. */
 @media (prefers-reduced-motion: reduce) {
   .canvas-assemble {
     animation: none;
   }
   .drafting-graph .anim-node,
   .drafting-graph .anim-edge,
-  .drafting-graph .anim-sweep {
+  .drafting-graph .anim-sweep,
+  .drafting-graph .sk {
     animation: none !important;
     opacity: 1 !important;
     stroke-dashoffset: 0 !important;

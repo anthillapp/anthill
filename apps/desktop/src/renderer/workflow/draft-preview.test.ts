@@ -15,6 +15,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  EDGE_DRAWN_AT,
+  EDGE_FADED_AT,
+  LOOP_SECONDS,
+  NODE_VISIBLE_AT,
   PREVIEW_EDGES,
   PREVIEW_NODES,
   PREVIEW_SIZE,
@@ -113,14 +117,26 @@ describe("the connections", () => {
     }
   });
 
-  it("appear only after the block they point at", () => {
-    // A connection drawn to a block that has not been revealed yet is the same
-    // dangling fragment, reached through time rather than through space.
+  it("finish no earlier than the blocks they join are there to be joined", () => {
+    // A connection that lands on a block nobody can see yet is the same
+    // dangling fragment, reached through time rather than through space — and
+    // the arrowhead is painted at the far end of the path from the first frame,
+    // so what matters is when the line is *finished*, not when it starts. A
+    // delay is not that moment: every one of these keyframes holds at zero for
+    // the first slice of its cycle.
+    const nodeSeen = (node: PreviewNode) => node.delay + LOOP_SECONDS * NODE_VISIBLE_AT;
     for (const edge of PREVIEW_EDGES) {
-      const target = byId.get(edge.to) as PreviewNode;
-      const source = byId.get(edge.from) as PreviewNode;
-      expect(edge.delay).toBeGreaterThanOrEqual(target.delay);
-      expect(edge.delay).toBeGreaterThanOrEqual(source.delay);
+      const at = edge.stroke === "solid" ? EDGE_DRAWN_AT : EDGE_FADED_AT;
+      const arrived = edge.delay + LOOP_SECONDS * at;
+      expect(arrived).toBeGreaterThanOrEqual(nodeSeen(byId.get(edge.to) as PreviewNode));
+      expect(arrived).toBeGreaterThanOrEqual(nodeSeen(byId.get(edge.from) as PreviewNode));
+    }
+  });
+
+  it("all finish inside the loop that draws them", () => {
+    for (const edge of PREVIEW_EDGES) {
+      const at = edge.stroke === "solid" ? EDGE_DRAWN_AT : EDGE_FADED_AT;
+      expect(edge.delay + LOOP_SECONDS * at).toBeLessThan(LOOP_SECONDS);
     }
   });
 
@@ -138,21 +154,74 @@ describe("the connections", () => {
     }
   });
 
-  it("give the rework return more room than a step across", () => {
-    // It has to get out from under the block it leaves and travel back across
-    // the diagram; the same short handle produced a kink.
-    const rework = PREVIEW_EDGES.find((edge) => edge.tone === "rework");
-    const next = PREVIEW_EDGES.find((edge) => edge.tone === "next");
+  it("give a return across the diagram more room than a step across", () => {
+    // It has to get out from under the block it leaves and travel back the way
+    // it came; the same short handle produced a kink.
+    const backwards = PREVIEW_EDGES.filter(
+      (edge) => (byId.get(edge.to) as PreviewNode).x < (byId.get(edge.from) as PreviewNode).x,
+    );
+    expect(backwards.length).toBeGreaterThan(0);
     const reach = (d: string) => {
       const n = (d.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
       return Math.abs(n[2] - n[0]) + Math.abs(n[3] - n[1]);
     };
-    expect(reach(previewPath(rework!))).toBeGreaterThan(reach(previewPath(next!)));
+    const forward = PREVIEW_EDGES.find(
+      (edge) => (byId.get(edge.to) as PreviewNode).x > (byId.get(edge.from) as PreviewNode).x,
+    );
+    for (const edge of backwards) {
+      expect(reach(previewPath(edge))).toBeGreaterThan(reach(previewPath(forward!)));
+    }
+  });
+
+  it("keep both handles inside the span they cross", () => {
+    // The default reach on the 20px hop between the stacked blocks put the two
+    // control points the wrong side of each other, and the line drew itself
+    // backwards before settling — on a straight segment nobody would look at.
+    for (const edge of PREVIEW_EDGES) {
+      const n = (previewPath(edge).match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+      const [x0, y0, cx1, cy1, cx2, cy2, x1, y1] = n;
+      const span = Math.abs(x1 - x0) + Math.abs(y1 - y0);
+      const out = Math.abs(cx1 - x0) + Math.abs(cy1 - y0);
+      const back = Math.abs(cx2 - x1) + Math.abs(cy2 - y1);
+      expect(out).toBeLessThanOrEqual(span / 2);
+      expect(back).toBeLessThanOrEqual(span / 2);
+    }
+  });
+});
+
+describe("the step blocks", () => {
+  const steps = PREVIEW_NODES.filter((node) => node.kind === "step");
+
+  it("say nothing the interpreter has not decided yet", () => {
+    // Every line inside a step is a skeleton bar. Nothing here is derived from
+    // the draft in flight, because at this point there is no draft.
+    expect(steps).toHaveLength(3);
+    for (const node of steps) {
+      if (node.kind !== "step") throw new Error("filtered");
+      expect(node.skeleton.chips.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("are visibly different from one another", () => {
+    // Three identical cards read as three copies of one placeholder.
+    const shapes = steps.map((node) =>
+      node.kind === "step"
+        ? `${node.skeleton.action.w}/${node.skeleton.title.w}/${node.skeleton.chips.length}`
+        : "",
+    );
+    expect(new Set(shapes).size).toBe(steps.length);
+  });
+
+  it("leave the named blocks to the controls", () => {
+    // Start and Done are not being decided by the interpreter, so they carry
+    // their real names; a step never does.
+    const named = PREVIEW_NODES.filter((node) => node.kind !== "step").map((node) => node.kind);
+    expect(named).toEqual(["start", "done"]);
   });
 });
 
 describe("a port", () => {
-  const node: PreviewNode = { id: "n1", x: 10, y: 20, w: 100, h: 40, tone: "plain", delay: 0 };
+  const node: PreviewNode = { id: "n1", kind: "start", x: 10, y: 20, w: 100, h: 40, delay: 0 };
 
   it("is the middle of the side it names", () => {
     expect(port(node, "left")).toEqual({ x: 10, y: 40 });

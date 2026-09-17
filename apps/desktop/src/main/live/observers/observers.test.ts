@@ -16,11 +16,12 @@ import { applyEvidence, createPendingRun, type PendingRun } from "@anthill/live"
 
 import { ClaudeCodeObserver } from "./claude-code.js";
 import { CodexObserver } from "./codex.js";
+import { PiObserver } from "./pi.js";
 
 const RUN_ID = "ANT-1A2B3C4D";
 const NONCE = "9f8e7d";
 
-function pending(cli: "claude-code" | "codex"): PendingRun {
+function pending(cli: "claude-code" | "codex" | "pi"): PendingRun {
   return createPendingRun({
     anthillRunId: RUN_ID,
     correlationNonce: NONCE,
@@ -384,6 +385,265 @@ describe("the Codex observer", () => {
   });
 });
 
+/* ------------------------------------------------------------------ */
+/* pi                                                                  */
+/* ------------------------------------------------------------------ */
+
+function piSession(
+  sessionId: string,
+  options: {
+    marked: boolean;
+    stopReason?: string;
+    error?: string;
+    step?: string;
+    tool?: boolean;
+  },
+) {
+  const at = new Date().toISOString();
+  const rows: unknown[] = [
+    { type: "session", version: 3, id: sessionId, timestamp: at, cwd: "/tmp/scratch" },
+    {
+      type: "message",
+      id: "m1",
+      parentId: null,
+      timestamp: at,
+      message: { role: "user", content: options.marked ? MARKED_PROMPT : "Read the note." },
+    },
+  ];
+  if (options.step || options.tool || options.stopReason || options.error) {
+    rows.push({
+      type: "message",
+      id: "m2",
+      parentId: "m1",
+      timestamp: at,
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "PRIVATE-REASONING-SHOULD-NEVER-BE-READ" },
+          {
+            type: "text",
+            text: options.step
+              ? `ANTHILL-STEP ${RUN_ID} ${NONCE} ${options.step}`
+              : "It says pumpernickel.",
+          },
+          ...(options.tool
+            ? [{ type: "toolCall", id: "call_1", name: "bash", arguments: { command: "ls -la" } }]
+            : []),
+        ],
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+        usage: { input: 10, output: 20, cacheRead: 5, cacheWrite: 0, totalTokens: 35 },
+        stopReason:
+          options.stopReason ?? (options.error ? "error" : options.tool ? "toolUse" : "stop"),
+        ...(options.error ? { errorMessage: options.error } : {}),
+      },
+    });
+  }
+  return rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+}
+
+async function writePi(dir: string, sessionId: string, body: string) {
+  const project = join(dir, "--tmp-scratch--");
+  await mkdir(project, { recursive: true });
+  await writeFile(join(project, `1750000000000_${sessionId}.jsonl`), body, "utf8");
+}
+
+/**
+ * A session file that holds earlier work: an assistant message that ended
+ * before the Anthill prompt was pasted in. The run-local state those earlier
+ * records set must not leak into the run that the marker starts.
+ */
+function piSessionWithEarlierWork(
+  sessionId: string,
+  earlier: { stopReason: string; errorMessage?: string },
+) {
+  const at = new Date().toISOString();
+  const rows: unknown[] = [
+    { type: "session", version: 3, id: sessionId, timestamp: at, cwd: "/tmp/scratch" },
+    {
+      type: "message",
+      id: "m0",
+      parentId: null,
+      timestamp: at,
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Earlier work." }],
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+        usage: { input: 100, output: 200, cacheRead: 0, cacheWrite: 0, totalTokens: 300 },
+        stopReason: earlier.stopReason,
+        ...(earlier.errorMessage ? { errorMessage: earlier.errorMessage } : {}),
+      },
+    },
+    {
+      type: "message",
+      id: "m1",
+      parentId: "m0",
+      timestamp: at,
+      message: { role: "user", content: MARKED_PROMPT },
+    },
+  ];
+  return rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+}
+
+describe("the pi observer", () => {
+  it("says so when there is nothing on this machine to read", async () => {
+    const observer = new PiObserver(join(await root(), "missing"));
+    const capabilities = await observer.detectCapabilities();
+    expect(capabilities.available).toBe(false);
+
+    const { evidence } = await observer.poll(pending("pi"), new Date().toISOString());
+    expect(evidence).toEqual([
+      expect.objectContaining({ kind: "unobservable", channel: "pi:session" }),
+    ]);
+  });
+
+  it("recognises the session whose recorded user message carries the marker", async () => {
+    const dir = await root();
+    await writePi(dir, "sess-pi", piSession("sess-pi", { marked: true }));
+
+    const { evidence } = await new PiObserver(dir).poll(
+      pending("pi"),
+      new Date().toISOString(),
+    );
+    expect(evidence).toEqual([
+      expect.objectContaining({
+        kind: "match",
+        sessionId: "sess-pi",
+        confidence: "strong",
+        channel: "pi:session",
+      }),
+    ]);
+  });
+
+  it("does not call the session finished just because a turn ended", async () => {
+    const dir = await root();
+    await writePi(dir, "sess-pi", piSession("sess-pi", { marked: true, stopReason: "stop" }));
+    const observer = new PiObserver(dir);
+    const run = { ...pending("pi"), detectedSessionId: "sess-pi", state: "detected_live" as const };
+
+    await observer.poll(run, new Date().toISOString());
+    // Half a minute of thinking between turns is an agent working, not an agent
+    // that has stopped.
+    const soon = new Date(Date.now() + 45_000).toISOString();
+    const { evidence } = await observer.poll(run, soon);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+  });
+
+  it("calls it finished once the silence is as long as losing it would take", async () => {
+    const dir = await root();
+    await writePi(dir, "sess-pi", piSession("sess-pi", { marked: true, stopReason: "stop" }));
+    const observer = new PiObserver(dir);
+    const run = { ...pending("pi"), detectedSessionId: "sess-pi", state: "detected_live" as const };
+
+    await observer.poll(run, new Date().toISOString());
+    const muchLater = new Date(Date.now() + 6 * 60_000).toISOString();
+    const { evidence } = await observer.poll(run, muchLater);
+    expect(evidence).toContainEqual(expect.objectContaining({ kind: "completed" }));
+  });
+
+  it("reports a recorded error as a failure", async () => {
+    const dir = await root();
+    await writePi(
+      dir,
+      "sess-pi",
+      piSession("sess-pi", { marked: true, error: "the model stream stopped" }),
+    );
+
+    const run = { ...pending("pi"), detectedSessionId: "sess-pi", state: "detected_live" as const };
+    const { evidence } = await new PiObserver(dir).poll(run, new Date().toISOString());
+    expect(evidence).toContainEqual(
+      expect.objectContaining({ kind: "failed", detail: "the model stream stopped" }),
+    );
+  });
+
+  it("reports an aborted session as a failure", async () => {
+    const dir = await root();
+    await writePi(dir, "sess-pi", piSession("sess-pi", { marked: true, stopReason: "aborted" }));
+
+    const run = { ...pending("pi"), detectedSessionId: "sess-pi", state: "detected_live" as const };
+    const { evidence } = await new PiObserver(dir).poll(run, new Date().toISOString());
+    expect(evidence).toContainEqual(
+      expect.objectContaining({ kind: "failed", detail: "The session was aborted." }),
+    );
+  });
+
+  it("never carries a thinking block out of a session file", async () => {
+    const dir = await root();
+    await writePi(dir, "sess-pi", piSession("sess-pi", { marked: true, stopReason: "stop" }));
+    const { evidence, events } = await new PiObserver(dir).poll(
+      pending("pi"),
+      new Date().toISOString(),
+    );
+    expect(JSON.stringify(evidence)).not.toContain("PRIVATE-REASONING");
+    expect(JSON.stringify(events)).not.toContain("PRIVATE-REASONING");
+  });
+
+  it("advertises that it can report both completion and failure", async () => {
+    const dir = await root();
+    await writePi(dir, "sess-pi", piSession("sess-pi", { marked: false }));
+    const capabilities = await new PiObserver(dir).detectCapabilities();
+    expect(capabilities).toMatchObject({ reportsCompletion: true, reportsFailure: true });
+  });
+
+  /**
+   * A session file can outlive its runs: the same file holds earlier work.
+   * An `error` recorded before the marker must not fail the run, and a `stop`
+   * recorded before the marker must not settle it before pi has answered.
+   */
+  it("does not fail the run on an error recorded before the marker", async () => {
+    const dir = await root();
+    await writePi(
+      dir,
+      "sess-pi",
+      piSessionWithEarlierWork("sess-pi", {
+        stopReason: "error",
+        errorMessage: "an earlier error",
+      }),
+    );
+
+    const run = { ...pending("pi"), detectedSessionId: "sess-pi", state: "detected_live" as const };
+    const { evidence, events } = await new PiObserver(dir).poll(run, new Date().toISOString());
+    // State: the earlier error does not fail the run.
+    expect(evidence.some((item) => item.kind === "failed")).toBe(false);
+    // Emitted events: the earlier work's message, usage, and turn-end do not
+    // leak into the run the marker starts. The session metadata and the marker
+    // itself do surface.
+    expect(events.some((event) => event.kind === "message")).toBe(false);
+    expect(events.some((event) => event.kind === "usage")).toBe(false);
+    expect(events.some((event) => event.kind === "turn.end")).toBe(false);
+    expect(events.some((event) => event.kind === "error")).toBe(false);
+    expect(events.some((event) => event.kind === "session.start")).toBe(true);
+    expect(events.some((event) => event.kind === "prompt.submit")).toBe(true);
+  });
+
+  it("does not settle the run on a stop recorded before the marker", async () => {
+    const dir = await root();
+    await writePi(
+      dir,
+      "sess-pi",
+      piSessionWithEarlierWork("sess-pi", { stopReason: "stop" }),
+    );
+
+    const observer = new PiObserver(dir);
+    const run = { ...pending("pi"), detectedSessionId: "sess-pi", state: "detected_live" as const };
+    // Six minutes of silence after the prompt was pasted in — long enough to
+    // settle a turn that had ended, if one had.
+    const muchLater = new Date(Date.now() + 6 * 60_000).toISOString();
+    const { evidence, events } = await observer.poll(run, muchLater);
+    // State: the earlier stop does not settle the run.
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+    // Emitted events: the earlier work's message, usage, and turn-end do not
+    // leak into the run the marker starts. The session metadata and the marker
+    // itself do surface.
+    expect(events.some((event) => event.kind === "message")).toBe(false);
+    expect(events.some((event) => event.kind === "usage")).toBe(false);
+    expect(events.some((event) => event.kind === "turn.end")).toBe(false);
+    expect(events.some((event) => event.kind === "session.start")).toBe(true);
+    expect(events.some((event) => event.kind === "prompt.submit")).toBe(true);
+  });
+});
+
 describe("a session that was alive long before this run", () => {
   /** A transcript row from days ago, of the kind a long-lived session is full of. */
   function oldTranscript(sessionId: string) {
@@ -551,6 +811,42 @@ describe("what each CLI's records yield as activity", () => {
     const { events } = await new CodexObserver(dir).poll(pending("codex"), new Date().toISOString());
     expect(events).toContainEqual(
       expect.objectContaining({ kind: "step.marker", blockId: "test", source: "rollout" }),
+    );
+  });
+
+  it("reads an announced step out of a pi session file", async () => {
+    const dir = await root();
+    await writePi(dir, "sess-pi", piSession("sess-pi", { marked: true, step: "implement" }));
+    const { events } = await new PiObserver(dir).poll(pending("pi"), new Date().toISOString());
+    expect(events).toContainEqual(
+      expect.objectContaining({ kind: "step.marker", blockId: "implement", source: "session" }),
+    );
+  });
+
+  it("reads a pi tool call as activity, and the result that closes it", async () => {
+    const dir = await root();
+    const body =
+      piSession("sess-pi", { marked: true, tool: true }) +
+      JSON.stringify({
+        type: "message",
+        id: "m3",
+        parentId: "m2",
+        timestamp: new Date().toISOString(),
+        message: {
+          role: "toolResult",
+          toolCallId: "call_1",
+          toolName: "bash",
+          content: [{ type: "text", text: "total 0" }],
+          isError: false,
+        },
+      }) + "\n";
+    await writePi(dir, "sess-pi", body);
+    const { events } = await new PiObserver(dir).poll(pending("pi"), new Date().toISOString());
+    expect(events).toContainEqual(
+      expect.objectContaining({ kind: "tool.start", toolName: "bash", toolUseId: "call_1" }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ kind: "tool.end", toolUseId: "call_1", ok: true }),
     );
   });
 

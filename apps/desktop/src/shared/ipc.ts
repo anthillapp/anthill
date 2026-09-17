@@ -38,6 +38,7 @@ export const IpcChannel = {
   recentsForget: "recents:forget",
   interpretersDetect: "interpreters:detect",
   codexModels: "codex:models",
+  piModels: "pi:models",
   promptDraft: "prompt:draft",
   promptDraftCancel: "prompt:draft-cancel",
   liveObserve: "live:observe",
@@ -80,7 +81,7 @@ export const IpcChannel = {
  * quietly showed nothing. Bump this whenever a channel is added, and the
  * renderer can find out before it subscribes to something that will never fire.
  */
-export const IPC_CONTRACT = 12;
+export const IPC_CONTRACT = 13;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -443,6 +444,32 @@ export type CodexModelCatalog = {
   agentSupport: "supported" | "unsupported" | "unknown";
 };
 
+/** One model pi offers, as `pi --list-models` reports it. */
+export type PiModelOption = {
+  /** The pattern written to `--model`: `provider/model`. */
+  id: string;
+  label: string;
+  /**
+   * The thinking levels this model can run at.
+   *
+   * pi's levels are fixed by `--thinking`, not per-model, so a thinking-
+   * capable model offers the whole set and a non-thinking one offers none.
+   * `off` is omitted — it is the same as the UI's "inherit".
+   */
+  efforts: { id: string; hint?: string }[];
+};
+
+/**
+ * What pi listed for this machine.
+ *
+ * Read live with `pi --list-models` — pi keeps no model cache file, so there
+ * is no `fetchedAt` and no stale-cache caveat. `undefined` (not an empty
+ * list) when the CLI could not be reached.
+ */
+export type PiModelCatalog = {
+  models: PiModelOption[];
+};
+
 export type PromptDraftRequest = {
   interpreterId: InterpreterId;
   /** The full drafting instruction, built in the renderer from the author's prompt. */
@@ -661,6 +688,14 @@ export interface AnthillApi {
    * "Codex offers no models" is not something a missing file is evidence for.
    */
   codexModels(): Promise<CodexModelCatalog | undefined>;
+  /**
+   * pi's model catalogue, read live with `pi --list-models`, or `undefined`
+   * when the CLI could not be reached.
+   *
+   * `undefined` rather than an empty list: the two say different things, and
+   * "pi offers no models" is not something a missing binary is evidence for.
+   */
+  piModels(): Promise<PiModelCatalog | undefined>;
   /**
    * Run one drafting pass through a local CLI. Interpretation only: the process
    * gets no tools and an empty working directory, and nothing it says is

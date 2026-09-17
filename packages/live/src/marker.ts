@@ -17,7 +17,7 @@
  *   chosen CLI, and a timestamp.
  */
 
-export type MarkerCli = "codex" | "claude-code";
+export type MarkerCli = "codex" | "claude-code" | "pi";
 
 export type RunMarker = {
   /** Stable Anthill Run ID, created before the prompt leaves Anthill. */
@@ -244,7 +244,7 @@ export function parseMarker(text: string): RunMarker | undefined {
   const promptVersion = read(FIELD.promptVersion);
   const issuedAt = read(FIELD.issuedAt);
   if (!runId || !nonce || !issuedAt) return undefined;
-  if (cli !== "codex" && cli !== "claude-code") return undefined;
+  if (cli !== "codex" && cli !== "claude-code" && cli !== "pi") return undefined;
 
   const workflowId = read(FIELD.workflowId);
   return {

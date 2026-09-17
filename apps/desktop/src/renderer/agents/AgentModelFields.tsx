@@ -1,11 +1,13 @@
 /**
  * The agent's model, per coding tool.
  *
- * Two cards, and each answers for itself, because the two tools are genuinely
- * different: Claude Code's models are declared in Anthill's own table, Codex's
- * are discovered from the catalogue Codex keeps on this machine, and Codex has
- * a reasoning effort where Claude Code has none. One picker could only have
- * served both by pretending they share a vocabulary.
+ * A card per coding tool, and each answers for itself, because the tools are
+ * genuinely different: Claude Code's models are declared in Anthill's own
+ * table, Codex's are discovered from the catalogue Codex keeps on this
+ * machine, pi's are discovered from what `pi --list-models` reports on this
+ * machine, and Codex and pi have a reasoning effort where Claude Code has
+ * none. One picker could only have served them by pretending they share a
+ * vocabulary.
  *
  * A tool's connection and an agent's model stay separate facts. Whether Codex
  * is on this machine is a fact about the machine; which model this agent uses
@@ -28,8 +30,12 @@
 import { HARNESS_DEFAULT, harnessProfile, type AgentModels } from "@anthill/workflow";
 import { HARNESS_TARGETS, type HarnessTarget } from "@anthill/workflow-schema";
 
-import type { CodexModelCatalog, CodexModelOption } from "../../shared/ipc.js";
-import { INTERPRETER_LOGOS } from "../workflow/interpreter-logos.js";
+import type {
+  CodexModelCatalog,
+  CodexModelOption,
+  PiModelCatalog,
+} from "../../shared/ipc.js";
+import { interpreterLogo } from "../workflow/interpreter-logos.js";
 import { isConnected, type HarnessConnections, type ToolStatus } from "../harness/useHarnessConnections.js";
 
 /** What a picker carries when nobody has answered. Never stored. */
@@ -79,6 +85,12 @@ export type AgentModelFieldsProps = {
   connections: HarnessConnections;
   /** Codex's own catalogue, or undefined when Anthill has not been told. */
   codex: CodexModelCatalog | undefined;
+  /**
+   * What pi listed for this machine, or undefined when the CLI could not be
+   * reached. Read live on each window load — pi keeps no cache file, so there
+   * is no fetchedAt and no stale-cache caveat to show.
+   */
+  pi: PiModelCatalog | undefined;
   onConnect: (target: HarnessTarget) => void;
   onChange: (models: AgentModels) => void;
   /** So focus can be handed to a field once connecting has made one. */
@@ -90,6 +102,7 @@ export function AgentModelFields({
   needsReview,
   connections,
   codex,
+  pi,
   onConnect,
   onChange,
   fieldRef,
@@ -133,7 +146,7 @@ export function AgentModelFields({
       {!anyConnected ? (
         <p className="agent-models-intro">
           Connect a coding tool to choose models for this agent. One is enough to start —
-          you can add the other later. This agent keeps a separate model for each, because
+          you can add the others later. This agent keeps a separate model for each, because
           you start the session yourself and the tool you start is what decides.
         </p>
       ) : null}
@@ -148,9 +161,10 @@ export function AgentModelFields({
           const chosen = models?.[target];
           const stale = target === "codex" && live && codexStale;
 
-          /* Declared for Claude Code, discovered for Codex. A discovered list
-             Anthill has not been given is not an empty one, and the card says
-             the difference rather than showing a picker with nothing in it. */
+          /* Declared for Claude Code, discovered for Codex and pi. A
+             discovered list Anthill has not been given is not an empty one,
+             and the card says the difference rather than showing a picker
+             with nothing in it. */
           const options: CodexModelOption[] = harness.modelsAreDeclared
             ? harness.models.map((option) => ({
                 id: option.id,
@@ -158,7 +172,11 @@ export function AgentModelFields({
                 ...(option.hint ? { hint: option.hint } : {}),
                 efforts: [],
               }))
-            : (codex?.models ?? []);
+            : target === "codex"
+              ? (codex?.models ?? [])
+              : target === "pi"
+                ? (pi?.models ?? [])
+                : [];
 
           const picked = options.find((option) => option.id === chosen?.id);
           const efforts = picked?.efforts ?? [];
@@ -177,7 +195,7 @@ export function AgentModelFields({
           return (
             <div className={`tool-card${live ? " is-connected" : ""}`} key={target}>
               <div className="tool-card-top">
-                <img className="tool-logo" src={INTERPRETER_LOGOS[target]} alt="" />
+                <img className="tool-logo" src={interpreterLogo(target)} alt="" />
                 {/* A `label` only where there is a field to label. Pointing one
                     at the connect button would make its accessible name the
                     tool's name, when what it does is open the connection
@@ -274,7 +292,7 @@ export function AgentModelFields({
                       what it last listed for this machine — better than "what
                       this version supports" — but it is a cache with a date,
                       not a live check of the account. */}
-                  {!harness.modelsAreDeclared && codex?.fetchedAt ? (
+                  {!harness.modelsAreDeclared && target === "codex" && codex?.fetchedAt ? (
                     <p className="tool-note">
                       The models {harness.displayName} last listed for you, on{" "}
                       {new Date(codex.fetchedAt).toLocaleDateString()}.
@@ -292,12 +310,17 @@ export function AgentModelFields({
 
               {/* Connected, and Anthill has not been given its catalogue. Not
                   reported as "no models": a list nobody handed over is not a
-                  list that is empty. */}
+                  list that is empty. Codex's catalogue is a cache the CLI
+                  refreshes when it runs, so opening it once is the retry; pi's
+                  is read live when the window loads, so the retry is a reload.
+                  */}
               {live && options.length === 0 ? (
                 <p className="tool-note">
                   {harness.displayName} is connected, but Anthill has not been given its model
-                  list, so there is nothing to choose from yet. Open {harness.displayName}{" "}
-                  once and check again.
+                  list, so there is nothing to choose from yet. {" "}
+                  {target === "pi"
+                    ? "Check again when the window reloads."
+                    : `Open ${harness.displayName} once and check again.`}
                 </p>
               ) : null}
 

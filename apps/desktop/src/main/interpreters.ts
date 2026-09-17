@@ -79,6 +79,10 @@ async function readSignedIn(
   item: (typeof INTERPRETERS)[number],
   spawnFn?: SpawnFn,
 ): Promise<boolean | undefined> {
+  // Some interpreters have no non-interactive sign-in probe (pi's `pi auth
+  // check` refuses to run without a provider or model). Where the question
+  // cannot be asked, the answer is "unknown", not "signed out".
+  if (!item.statusArgs) return undefined;
   try {
     const outcome = await runProcess({
       command: item.command,

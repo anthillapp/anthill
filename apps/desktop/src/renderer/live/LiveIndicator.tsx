@@ -22,7 +22,7 @@ import {
 } from "@anthill/live";
 import type { LiveSnapshot } from "../../shared/ipc.js";
 
-import { INTERPRETER_LOGOS } from "../workflow/interpreter-logos.js";
+import { interpreterLogo } from "../workflow/interpreter-logos.js";
 import { relative, useNow } from "./elapsed.js";
 import { PresenceChip } from "./PresenceChip.js";
 import { mostRelevant, presenceKey, runsFor } from "./presence.js";
@@ -195,7 +195,7 @@ export function LiveIndicator({ workflowId, onOpenSession }: LiveIndicatorProps 
         ? createPortal(
             <div className="live-popover" ref={popover} style={{ top: spot.top, right: spot.right }}>
           <header>
-            <img src={INTERPRETER_LOGOS[run.selectedCli]} alt="" width={16} height={16} />
+            <img src={interpreterLogo(run.selectedCli)} alt="" width={16} height={16} />
             <strong>{statusLabel(run)}</strong>
           </header>
 

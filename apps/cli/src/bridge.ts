@@ -49,6 +49,7 @@ import {
   type DraftRunOptions,
 } from "../../desktop/src/main/interpreters.js";
 import { readCodexModels } from "../../desktop/src/main/codex-models.js";
+import { readPiModels } from "../../desktop/src/main/pi-models.js";
 import { readCodexAgentSupport } from "../../desktop/src/main/codex-capability.js";
 import { adoptUserPath } from "../../desktop/src/main/user-path.js";
 import {
@@ -484,6 +485,13 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     return { ...models, agentSupport: await readCodexAgentSupport() };
   });
 
+  // Read-only, and nothing is run: pi lists its models on request and keeps
+  // no cache file, so the catalogue is asked for live and a missing CLI
+  // leaves it `undefined` rather than an empty list.
+  register(IpcChannel.piModels, async () => {
+    return await readPiModels();
+  });
+
   register(IpcChannel.promptDraft, async (args) => {
     const request = args[0] as PromptDraftRequest;
     draftAbort?.abort();
@@ -730,6 +738,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     revealPath: (path: string) => handle(IpcChannel.pathReveal, path),
     detectInterpreters: () => handle(IpcChannel.interpretersDetect),
     codexModels: () => handle(IpcChannel.codexModels),
+    piModels: () => handle(IpcChannel.piModels),
     draftFromPrompt: (request: PromptDraftRequest) =>
       handle(IpcChannel.promptDraft, request),
     cancelPromptDraft: () => handle(IpcChannel.promptDraftCancel),

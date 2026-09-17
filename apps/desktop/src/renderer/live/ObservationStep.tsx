@@ -30,6 +30,7 @@ export type ObservationState =
   | "silent"
   | "limited"
   | "failed"
+  | "passive"
   | "unavailable";
 
 type Tone = "ok" | "unsure" | "bad" | "flat";
@@ -98,6 +99,20 @@ export const OBSERVATION_FACE: Record<ObservationState, Face> = {
     primary: "Retry",
     note: "Your own hooks were left untouched, and handing over still works — you just will not see progress.",
   },
+  /**
+   * A tool with no hook mechanism. There is nothing to install and nothing to
+   * fail: Anthill reads the session file the tool writes on this machine. The
+   * row must not offer an install, because there is no hook to write — that
+   * would be a button that does nothing.
+   */
+  passive: {
+    title: "Live progress is on — nothing to set up",
+    chip: "Passive",
+    tone: "ok",
+    install: false,
+    primary: "Continue",
+    note: "This tool has no hook mechanism, so there is nothing to install. Anthill reads the session file it writes on this machine and shows progress once the session starts.",
+  },
   unavailable: {
     title: "This CLI was not found on this machine",
     chip: "Unavailable",
@@ -157,8 +172,11 @@ export function ObservationStep({
       {/* The boundary before anything else, because everything below is a
           question about installing something on this machine. */}
       <p>
-        Anthill can install local observation hooks for {label}. It only observes the session
-        you start yourself — it does not run it, control it, or answer it.
+        {state === "passive"
+          ? `Anthill watches ${label} by reading the session file it writes on this machine — there is nothing to install, ${label} has no hook mechanism. `
+          : `Anthill can install local observation hooks for ${label}. `}
+        It only observes the session you start yourself — it does not run it, control it, or
+        answer it.
       </p>
 
       <div className={`state-panel tone-${face.tone}`}>
@@ -175,37 +193,43 @@ export function ObservationStep({
 
       {busy ? <p className="hint">Writing the hook entries…</p> : null}
 
-      <button
-        type="button"
-        className="tech-toggle"
-        aria-expanded={techOpen}
-        onClick={() => setTechOpen((open) => !open)}
-      >
-        <span className="tech-caret" aria-hidden="true">
-          ›
-        </span>
-        Technical details
-      </button>
-      {techOpen ? (
-        <dl className="tech-rows">
-          <dt>Config file</dt>
-          <dd>
-            <code>{harness?.configPath ?? "—"}</code>
-          </dd>
-          <dt>Handler</dt>
-          <dd>
-            <code>{harness?.hookHandlerPath ?? "—"}</code>
-          </dd>
-          <dt>Entries</dt>
-          <dd>
-            {harness ? `${harness.hookCommands.length} owned by Anthill` : "—"}
-            {harness?.hookLastEventAt ? ` · last event ${harness.hookLastEventAt}` : ""}
-          </dd>
-          <dt>Events</dt>
-          <dd>{harness ? harness.eventCategories.join(", ") : "—"}</dd>
-          <dt>Changes</dt>
-          <dd>{harness ? harness.changes.join(" ") : "—"}</dd>
-        </dl>
+      {/* There are no hook entries to show for a passive tool, so the whole
+          technical-details section is hidden rather than a wall of dashes. */}
+      {state !== "passive" ? (
+        <>
+          <button
+            type="button"
+            className="tech-toggle"
+            aria-expanded={techOpen}
+            onClick={() => setTechOpen((open) => !open)}
+          >
+            <span className="tech-caret" aria-hidden="true">
+              ›
+            </span>
+            Technical details
+          </button>
+          {techOpen ? (
+            <dl className="tech-rows">
+              <dt>Config file</dt>
+              <dd>
+                <code>{harness?.configPath ?? "—"}</code>
+              </dd>
+              <dt>Handler</dt>
+              <dd>
+                <code>{harness?.hookHandlerPath ?? "—"}</code>
+              </dd>
+              <dt>Entries</dt>
+              <dd>
+                {harness ? `${harness.hookCommands.length} owned by Anthill` : "—"}
+                {harness?.hookLastEventAt ? ` · last event ${harness.hookLastEventAt}` : ""}
+              </dd>
+              <dt>Events</dt>
+              <dd>{harness ? harness.eventCategories.join(", ") : "—"}</dd>
+              <dt>Changes</dt>
+              <dd>{harness ? harness.changes.join(" ") : "—"}</dd>
+            </dl>
+          ) : null}
+        </>
       ) : null}
 
       {/* The primary lives in the modal's footer; this is the one case where

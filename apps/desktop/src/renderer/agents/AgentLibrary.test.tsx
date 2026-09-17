@@ -52,7 +52,9 @@ function workflow(over: Partial<RecentWorkflow> = {}): RecentWorkflow {
   };
 }
 
-/** A machine with both coding tools installed and signed in. */
+/** A machine with all three coding tools installed. pi's sign-in cannot be
+    read non-interactively, so its `signedIn` is absent and Anthill counts it
+    as connected rather than holding it back. */
 function bothConnected(): InterpreterInfo[] {
   return [
     {
@@ -72,6 +74,14 @@ function bothConnected(): InterpreterInfo[] {
       available: true,
       signedIn: true,
       version: "0.9.0",
+    },
+    {
+      id: "pi",
+      label: "Pi",
+      command: "pi -p --no-tools",
+      boundary: "",
+      available: true,
+      version: "0.85.1",
     },
   ];
 }
@@ -127,6 +137,7 @@ function stub(
     agentsList: vi.fn(async () => held),
     detectInterpreters: vi.fn(async () => tools),
     codexModels: vi.fn(async () => catalog ?? undefined),
+    piModels: vi.fn(async () => undefined),
     signInToInterpreter: vi.fn(async () => ({ ok: true })),
     agentsCreate: vi.fn(async (input: GlobalAgentInput) => {
       issued += 1;
@@ -661,7 +672,7 @@ describe("choosing a model before a tool is connected", () => {
     await withoutTools();
 
     const cards = screen.getByRole("group", { name: "Model per coding tool" });
-    expect(within(cards).getAllByRole("button", { name: "Check again" })).toHaveLength(2);
+    expect(within(cards).getAllByRole("button", { name: "Check again" })).toHaveLength(3);
     expect(within(cards).queryByRole("combobox")).toBeNull();
     expect(screen.queryByText("Opus — Deepest reasoning, slowest")).toBeNull();
     expect(screen.queryByText("Not chosen")).toBeNull();
@@ -783,7 +794,9 @@ describe("choosing a model before a tool is connected", () => {
     fireEvent.click(await screen.findByText("Reviewer"));
 
     expect(
-      await screen.findByText(/has not been given its model list/),
+      await screen.findByText(
+        /OpenAI Codex CLI is connected, but Anthill has not been given its model list/,
+      ),
     ).toBeTruthy();
     expect(screen.queryByLabelText("OpenAI Codex CLI model for this agent")).toBeNull();
   });

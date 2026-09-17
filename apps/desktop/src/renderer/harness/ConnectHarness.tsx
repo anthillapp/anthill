@@ -23,7 +23,7 @@ import { useEffect, useRef } from "react";
 import { harnessProfile, interpreterDefinition } from "@anthill/workflow";
 import type { HarnessTarget } from "@anthill/workflow-schema";
 
-import { INTERPRETER_LOGOS } from "../workflow/interpreter-logos.js";
+import { interpreterLogo } from "../workflow/interpreter-logos.js";
 import type { HarnessConnection } from "./useHarnessConnections.js";
 
 /** One line of the sheet's account of where it got to. */
@@ -196,7 +196,7 @@ export function ConnectHarness({ target, connection, onRecheck, onClose }: Conne
         aria-label={`Connect ${harness.displayName}`}
       >
         <div className="connect-top">
-          <img className="tool-logo is-mark" src={INTERPRETER_LOGOS[target]} alt="" />
+          <img className="tool-logo is-mark" src={interpreterLogo(target)} alt="" />
           <span className="kicker">Connect · {harness.displayName}</span>
         </div>
 
@@ -226,6 +226,18 @@ export function ConnectHarness({ target, connection, onRecheck, onClose }: Conne
           <p className="connect-note">
             Signing in happens in {harness.displayName}&rsquo;s own window. Anthill never sees
             it: the browser flow and the account are yours.
+          </p>
+        ) : null}
+
+        {/* The honest reading of a CLI that would not answer the sign-in
+            question: the tool counts as connected, but the author is told the
+            check was not made — so a signed-out tool is not discovered only
+            as a failed run. */}
+        {connection.status === "on" && connection.info?.signedIn === undefined ? (
+          <p className="connect-note">
+            Anthill cannot check {harness.displayName}&rsquo;s sign-in, so it is shown as
+            connected. If a workflow fails to start, check {harness.displayName} is
+            signed in from its own window.
           </p>
         ) : null}
 

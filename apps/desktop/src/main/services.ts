@@ -9,6 +9,7 @@
 import {
   CodexCliRuntime,
   ClaudeCodeRuntime,
+  PiCliRuntime,
   CodexAcpRuntime,
   ClaudeCodeAcpRuntime,
   type AgentRuntime,
@@ -35,6 +36,7 @@ export function createRuntimes(): AgentRuntime[] {
   return [
     new ClaudeCodeRuntime(),
     new CodexCliRuntime(),
+    new PiCliRuntime(),
     // Honest placeholders: these report themselves unavailable until a real
     // ACP/MCP client exists. They are listed so the UI can show that the
     // bridge path is planned but not usable yet.

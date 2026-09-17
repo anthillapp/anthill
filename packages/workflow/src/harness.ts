@@ -99,9 +99,40 @@ const CODEX: HarnessProfile = {
   supportsPerAgentModel: true,
 };
 
+/**
+ * pi, the pi.dev coding agent.
+ *
+ * Its models are *discovered*, not declared: pi maintains its own catalogue on
+ * the machine (`pi --list-models`), and a copy pasted into this table would be
+ * a guess about somebody else's product that goes stale on their release
+ * schedule — so the list stays empty here and the app reads the real one.
+ *
+ * pi has no subagent-file concept the way Claude Code (`.claude/agents/*.md`)
+ * and Codex (`.codex/agents/*.toml`) do: it extends the model with skills,
+ * prompt templates and pi packages rather than per-agent model files. So blocks
+ * are inlined into the prompt and the per-agent model is not honoured, the same
+ * way it was before Codex's agent files were found.
+ *
+ * It does have a separate reasoning-effort setting (`--thinking <level>`), so
+ * that flag is offered.
+ */
+const PI: HarnessProfile = {
+  target: "pi",
+  displayName: "Pi",
+  models: [],
+  modelsAreDeclared: false,
+  // What a pi invocation that names no model gets: the model of the session
+  // that spawned it. Anthill cannot know what that is, and says so rather than
+  // naming one.
+  defaultModel: "the session's model",
+  supportsReasoningEffort: true,
+  supportsPerAgentModel: false,
+};
+
 export const HARNESS_PROFILES: Record<HarnessTarget, HarnessProfile> = {
   "claude-code": CLAUDE_CODE,
   codex: CODEX,
+  pi: PI,
 };
 
 export function harnessProfile(target: HarnessTarget): HarnessProfile {

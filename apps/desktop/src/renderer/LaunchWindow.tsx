@@ -18,7 +18,12 @@ import { isWatching, type LiveSessionState, type PendingRun } from "@anthill/liv
 
 import type { HarnessTarget } from "@anthill/workflow-schema";
 
-import type { CodexModelCatalog, LiveSnapshot, RecentWorkflow } from "../shared/ipc.js";
+import type {
+  CodexModelCatalog,
+  LiveSnapshot,
+  PiModelCatalog,
+  RecentWorkflow,
+} from "../shared/ipc.js";
 import { AgentEditor } from "./agents/AgentEditor.js";
 import { AgentList } from "./agents/AgentList.js";
 import { useAgentLibrary } from "./agents/useAgentLibrary.js";
@@ -138,6 +143,27 @@ export function LaunchWindow({
       .codexModels()
       .then((found) => {
         if (live) setCodex(found);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+  /**
+   * What pi listed for this machine, read once for the window.
+   *
+   * Live rather than cached: pi keeps no model cache file, so there is no
+   * fetchedAt to show and no stale-cache caveat to carry. A failure costs
+   * the list, not the window — the card then says the list was not given
+   * rather than that pi offers nothing.
+   */
+  const [pi, setPi] = useState<PiModelCatalog | undefined>();
+  useEffect(() => {
+    let live = true;
+    void window.anthill
+      .piModels()
+      .then((found) => {
+        if (live) setPi(found);
       })
       .catch(() => undefined);
     return () => {
@@ -340,6 +366,7 @@ export function LaunchWindow({
             leaving={agents.leaving}
             connections={connections}
             codex={codex}
+            pi={pi}
             connecting={connecting}
             onConnect={setConnecting}
             onPatch={agents.patch}

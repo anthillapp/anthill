@@ -19,6 +19,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import type { RecentWorkflow } from "../shared/ipc.js";
+import { CLI_LABEL, type MarkerCli } from "@anthill/live";
 
 /** How many to remember. Long enough to find last week's, short enough to scan. */
 const LIMIT = 12;
@@ -131,8 +132,10 @@ export function describeWorkflow(
       ),
     ),
   ];
-  const harness =
-    workflow.target === "codex" ? "Codex CLI" : workflow.target === "claude-code" ? "Claude Code" : undefined;
+  const target = workflow.target;
+  const isMarkerCli = (value: unknown): value is MarkerCli =>
+    value === "codex" || value === "claude-code" || value === "pi";
+  const harness = isMarkerCli(target) ? CLI_LABEL[target] : undefined;
 
   return {
     ...(typeof workflow.name === "string" && workflow.name.trim() ? { name: workflow.name } : {}),

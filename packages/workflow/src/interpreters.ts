@@ -11,7 +11,7 @@
  * file that grants access; if one ever appears, it is a bug.
  */
 
-export type InterpreterId = "claude-code" | "codex";
+export type InterpreterId = "claude-code" | "codex" | "pi";
 
 export type InterpreterDefinition = {
   id: InterpreterId;
@@ -52,8 +52,13 @@ export type InterpreterDefinition = {
    * `undefined` from the reader means the question could not be answered —
    * an unfamiliar version, a changed format. That is not the same as "signed
    * out", and nothing should tell the author to sign in on the strength of it.
+   *
+   * Absent when the CLI has no reliable non-interactive sign-in check at all
+   * (pi signs in through its own interactive prompt, or a key it already
+   * holds). Then the question is not asked; the answer is `undefined`, and
+   * nothing may read that as a sign-out.
    */
-  statusArgs: string[];
+  statusArgs?: string[];
   readStatus: (stdout: string, exitCode: number | null) => boolean | undefined;
 };
 
@@ -125,6 +130,32 @@ export const INTERPRETERS: InterpreterDefinition[] = [
       "-o",
       replyFile,
       "-",
+    ],
+  },
+  {
+    id: "pi",
+    label: "Pi",
+    command: "pi",
+    boundary:
+      "Runs with every tool disabled in an empty temporary folder. It can read your prompt and answer; it cannot open, change or run anything.",
+    replyFrom: "stdout",
+    // pi signs in through its own interactive prompt (run `pi`, then `/login`)
+    // or a key it already holds; there is no one-shot non-interactive login
+    // command, so this is the TUI the author types into.
+    signIn: "pi",
+    // pi has no non-interactive sign-in status command that works without a
+    // provider argument; `pi auth check` alone exits 2. The question is not
+    // asked, so the answer stays `undefined` rather than being read as a
+    // sign-out.
+    statusArgs: undefined,
+    readStatus: () => undefined,
+    args: () => [
+      // `-p` prints the answer and exits; a piped prompt is merged into the
+      // initial prompt, which is how the drafting instruction reaches it.
+      "-p",
+      // The whole boundary in one flag: with no tools there is nothing to
+      // permit, nothing to sandbox, and nothing to ask about.
+      "--no-tools",
     ],
   },
 ];

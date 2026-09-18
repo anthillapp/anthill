@@ -32,6 +32,7 @@ import { HARNESS_PROFILES, WorkflowCompileError, runRoot } from "@anthill/workfl
 import {
   MARKER_VERSION,
   buildBootstrapPrompt,
+  workflowSteps,
   newNonce,
   newRunId,
   type BootstrapResult,
@@ -350,6 +351,9 @@ export function PromptModal({
           bootstrapPromptHash: await hashPrompt(result.bootstrapPrompt),
           ...(workflow.id ? { workflowId: workflow.id } : {}),
           ...(workflow.name ? { workflowName: workflow.name } : {}),
+          // The same list the prompt told the session to announce, so a step
+          // reported back can be named rather than left as a block id.
+          steps: workflowSteps(workflow),
         });
         await navigator.clipboard.writeText(result.bootstrapPrompt);
         setCopiedPrompt(true);

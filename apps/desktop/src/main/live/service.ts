@@ -34,10 +34,12 @@ import {
   type Evidence,
   type MarkerCli,
   type PendingRun,
+  type RunStep,
 } from "@anthill/live";
 
 import { ClaudeCodeObserver } from "./observers/claude-code.js";
 import { CliReportObserver } from "./observers/cli-report.js";
+import { forgetAnnounced, noticesFor, type AnnouncedSteps, type StepNotice } from "./step-notices.js";
 import { CodexObserver } from "./observers/codex.js";
 import { PiObserver } from "./observers/pi.js";
 import { HookLogObserver } from "./observers/hooks.js";
@@ -75,6 +77,8 @@ export type StartObservationInput = {
   bootstrapPromptHash: string;
   workflowId?: string;
   workflowName?: string;
+  /** The steps the marker named, so a transition can be reported in words. */
+  steps?: RunStep[];
 };
 
 /** Where each CLI keeps its records. Overridable so the service is testable. */
@@ -97,6 +101,8 @@ export class LiveSessionService {
   private polling = false;
   /** When lost runs were last checked, in epoch ms. Zero means never. */
   private recoveryLookedAt = 0;
+  /** The step each run has already been announced as reaching. See step-notices.ts. */
+  private readonly announced: AnnouncedSteps = new Map();
 
   constructor(
     private readonly store: PendingRunStore,
@@ -105,6 +111,14 @@ export class LiveSessionService {
     roots: ObservationRoots = {},
     /** Told when a run's observed activity grew, so the page can catch up. */
     private readonly publishEvents: (runId: string, events: ObservationEvent[]) => void = () => undefined,
+    /**
+     * Where a step transition worth interrupting someone for is handed off to.
+     *
+     * Injected, and deliberately not `Notification` itself: whether one is
+     * wanted is a preference this service has no business reading, and
+     * delivering one is a platform's business rather than an observer's.
+     */
+    private readonly onStepNotice: (notice: StepNotice) => void = () => undefined,
   ) {
     this.observers = {
       "claude-code": roots.claudeRoot
@@ -218,6 +232,7 @@ export class LiveSessionService {
     for (const observer of Object.values(this.observers)) observer.forget(runId);
     this.hooks.forget(runId);
     this.reports.forget(runId);
+    forgetAnnounced(this.announced, runId);
   }
 
   /** Tell everyone what is now true, and hand the same thing back. */
@@ -287,7 +302,7 @@ export class LiveSessionService {
 
   private async advance(run: PendingRun, now: string): Promise<PendingRun> {
     const { evidence, drafts } = await this.read(run, now);
-    await this.record(run, drafts);
+    const added = await this.record(run, drafts);
 
     let next = run;
     for (const item of evidence) next = applyEvidence(next, item);
@@ -297,6 +312,7 @@ export class LiveSessionService {
     if (hasGoneQuiet(next, now)) next = applyEvidence(next, { kind: "quiet", at: now });
     next = expireIfStale(next, now);
 
+    this.offerNotices(next, added);
     return next;
   }
 
@@ -309,8 +325,10 @@ export class LiveSessionService {
    */
   private async recover(run: PendingRun, now: string): Promise<PendingRun> {
     const { evidence, drafts } = await this.read(run, now);
-    await this.record(run, drafts);
-    return resumeFromEvidence(run, evidence, now) ?? run;
+    const added = await this.record(run, drafts);
+    const next = resumeFromEvidence(run, evidence, now) ?? run;
+    this.offerNotices(next, added);
+    return next;
   }
 
   /** Everything the run's channels have gained since they were last read. */
@@ -358,11 +376,31 @@ export class LiveSessionService {
   }
 
   /** Write what was read into the journal, and say so if any of it was new. */
-  private async record(run: PendingRun, drafts: ObservationEventDraft[]): Promise<void> {
-    if (drafts.length === 0) return;
+  private async record(
+    run: PendingRun,
+    drafts: ObservationEventDraft[],
+  ): Promise<ObservationEvent[]> {
+    if (drafts.length === 0) return [];
     const added = await this.journal.append(run.anthillRunId, drafts);
-    if (added.length > 0) {
-      this.publishEvents(run.anthillRunId, await this.journal.tail(run.anthillRunId));
-    }
+    if (added.length === 0) return [];
+    this.publishEvents(run.anthillRunId, await this.journal.tail(run.anthillRunId));
+    return added;
+  }
+
+  /**
+   * Offer whatever the run just did as something worth interrupting for.
+   *
+   * Given the run as it is *after* this poll's evidence has been folded in, not
+   * before. The first poll that finds a session both discovers it and reads its
+   * first step marker, and against the pre-evidence run that step belongs to a
+   * run still listed as waiting for a session — so the one notification most
+   * worth having would be the one always refused.
+   *
+   * Only events the journal accepted as new are offered, which is what keeps a
+   * lost run being picked back up from replaying every step it ever announced.
+   */
+  private offerNotices(run: PendingRun, added: readonly ObservationEvent[]): void {
+    if (added.length === 0) return;
+    for (const notice of noticesFor(run, added, this.announced)) this.onStepNotice(notice);
   }
 }

@@ -6,12 +6,13 @@
  * actually come back for — their workflows — off the first screen.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { PendingRun } from "@anthill/live";
 
 import { HowItWorksScreen } from "./explain/HowItWorksScreen.js";
 import { explainerDue, markExplainerSeen } from "./explain/first-run.js";
 import { LaunchWindow } from "./LaunchWindow.js";
+import { SettingsSheet } from "./SettingsSheet.js";
 import { WorkflowScreen } from "./workflow/WorkflowScreen.js";
 
 type Start =
@@ -29,6 +30,17 @@ export function Root() {
    * one explainer, not two that can drift apart.
    */
   const [explaining, setExplaining] = useState(() => explainerDue());
+  /**
+   * Settings live here rather than on a screen.
+   *
+   * ⌘, used to reach the live-observation card inside the workflow editor,
+   * which meant the one place preferences were kept could not be opened from
+   * the launch window at all. At this level it opens over whatever is showing.
+   */
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  useEffect(() => window.anthill.onOpenSettings(() => setSettingsOpen(true)), []);
+
+  const settings = settingsOpen ? <SettingsSheet onClose={() => setSettingsOpen(false)} /> : null;
 
   const leaveExplainer = () => {
     markExplainerSeen();
@@ -37,35 +49,41 @@ export function Root() {
 
   if (explaining) {
     return (
-      <HowItWorksScreen
-        onBack={leaveExplainer}
-        onCreate={() => {
-          leaveExplainer();
-          setStart({ kind: "templates" });
-        }}
-      />
+      <>
+        {settings}
+        <HowItWorksScreen
+          onBack={leaveExplainer}
+          onCreate={() => {
+            leaveExplainer();
+            setStart({ kind: "templates" });
+          }}
+        />
+      </>
     );
   }
 
   if (start) {
     return (
-      <WorkflowScreen
-        start={start}
-        onExit={() => setStart(null)}
-      />
+      <>
+        {settings}
+        <WorkflowScreen start={start} onExit={() => setStart(null)} />
+      </>
     );
   }
 
   return (
-    <LaunchWindow
-      onNewWorkflow={() => setStart({ kind: "templates" })}
-      onFromPrompt={() => setStart({ kind: "prompt" })}
-      onOpen={(path) => setStart({ kind: "open", ...(path ? { path } : {}) })}
-      // A row Anthill is following opens straight onto its session: that is
-      // what the author clicked it for.
-      onOpenLive={(path, run) => setStart({ kind: "open", path, live: run })}
-      onExplain={() => setExplaining(true)}
-    />
+    <>
+      {settings}
+      <LaunchWindow
+        onNewWorkflow={() => setStart({ kind: "templates" })}
+        onFromPrompt={() => setStart({ kind: "prompt" })}
+        onOpen={(path) => setStart({ kind: "open", ...(path ? { path } : {}) })}
+        // A row Anthill is following opens straight onto its session: that is
+        // what the author clicked it for.
+        onOpenLive={(path, run) => setStart({ kind: "open", path, live: run })}
+        onExplain={() => setExplaining(true)}
+      />
+    </>
   );
 }
 

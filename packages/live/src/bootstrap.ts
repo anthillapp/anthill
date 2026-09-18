@@ -44,8 +44,14 @@ export type BootstrapOptions = {
  *
  * Start and end carry no work, so nobody announces them; everything else is
  * something the agent can be asked to call out as it reaches it.
+ *
+ * Exported because this list is also what a step announcement can be *read
+ * back* as: the run keeps it so a marker arriving later can be reported in the
+ * author's own words. One definition, so what a notification can name is
+ * exactly what the prompt asked for and never a step the session was never
+ * told about.
  */
-function workflowSteps(workflow: Workflow): { id: string; name: string }[] {
+export function workflowSteps(workflow: Workflow): { id: string; name: string }[] {
   return workflow.nodes
     .filter((node) => node.type !== "start" && node.type !== "end")
     .map((node) => ({ id: node.id, name: node.name }));

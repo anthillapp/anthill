@@ -19,6 +19,7 @@ import {
   PROMPT_DRAFT_STAGE_CHANNEL,
   RUN_EVENT_CHANNEL,
   type AnthillApi,
+  type AppSettings,
   type ApprovalResponse,
   type ExportWorkflowRequest,
   type LiveObserveRequest,
@@ -93,6 +94,10 @@ const api: AnthillApi = {
     ipcRenderer.invoke(IpcChannel.assistantThreadWrite, workflowId, turns),
   assistantThreadClear: (workflowId: string) =>
     ipcRenderer.invoke(IpcChannel.assistantThreadClear, workflowId),
+  settingsRead: () => ipcRenderer.invoke(IpcChannel.settingsRead),
+  settingsWrite: (patch: Partial<AppSettings>) =>
+    ipcRenderer.invoke(IpcChannel.settingsWrite, patch),
+  notificationsProbe: () => ipcRenderer.invoke(IpcChannel.notificationsProbe),
   liveEvents: (runId: string) => ipcRenderer.invoke(IpcChannel.liveEvents, runId),
   onLiveEvents: (
     listener: (payload: { runId: string; events: ObservationEvent[] }) => void,

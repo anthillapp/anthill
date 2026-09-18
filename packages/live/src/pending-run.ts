@@ -45,6 +45,17 @@ export type PendingRun = {
   workflowId?: string;
   /** Workflow name, so the indicator can say what is running. Not the prompt. */
   workflowName?: string;
+  /**
+   * The steps the marker named, as they were called when the prompt was copied.
+   *
+   * Kept with the run because the workflow lives in the editor and a run
+   * outlives the screen that started it — and because these are exactly the
+   * ids the prompt told the session to announce, so a marker that arrives
+   * naming one of them can be named back in the author's own words. A run
+   * started before this existed has none, and anything that reads them has to
+   * treat an unknown id as unknown rather than guess.
+   */
+  steps?: RunStep[];
   promptVersion: string;
   selectedCli: MarkerCli;
   createdAt: string;
@@ -191,6 +202,9 @@ export function isVisible(run: PendingRun): boolean {
   return run.state !== "idle" && !run.dismissedAt;
 }
 
+/** One step of the workflow a run was copied from: the marker's id, and its name. */
+export type RunStep = { id: string; name: string };
+
 export type NewRunInput = {
   anthillRunId: string;
   correlationNonce: string;
@@ -199,6 +213,7 @@ export type NewRunInput = {
   bootstrapPromptHash: string;
   workflowId?: string;
   workflowName?: string;
+  steps?: RunStep[];
   now: string;
 };
 
@@ -211,6 +226,7 @@ export function createPendingRun(input: NewRunInput): PendingRun {
     bootstrapPromptHash: input.bootstrapPromptHash,
     ...(input.workflowId ? { workflowId: input.workflowId } : {}),
     ...(input.workflowName ? { workflowName: input.workflowName } : {}),
+    ...(input.steps && input.steps.length > 0 ? { steps: input.steps } : {}),
     createdAt: input.now,
     expiresAt: new Date(Date.parse(input.now) + TIMING.pendingTtlMs).toISOString(),
     state: "pending_after_copy",

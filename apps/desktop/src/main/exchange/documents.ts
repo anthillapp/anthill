@@ -8,7 +8,7 @@ import type { ExchangeView, ExchangeReadyRequest, ExchangeRevokeRequest, Exchang
 import type { PendingRun } from "@anthill/live";
 import { captureSavedRevision } from "./working-copy.js";
 
-export function inExchange(store: ExchangeStore, path: string): boolean {
+function inExchange(store: ExchangeStore, path: string): boolean {
   const part = relative(store.root, resolve(path));
   return part !== ".." && !part.startsWith(`..${sep}`) && !isAbsolute(part);
 }

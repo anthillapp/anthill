@@ -36,10 +36,10 @@ import { SERVER_INSTRUCTIONS } from "./instructions.js";
 import { readOptions, type ServerOptions } from "./options.js";
 import { registerExchangeTools } from "./tools.js";
 
-export const SERVER_NAME = "anthill";
+const SERVER_NAME = "anthill";
 
 /** The repository's version, which every workspace here carries in step. */
-export const SERVER_VERSION = "0.6.6";
+const SERVER_VERSION = "0.6.6";
 
 /**
  * What the process ends on when the transport fails.
@@ -52,16 +52,16 @@ export const SERVER_VERSION = "0.6.6";
  * which is a fault in how the server was started rather than in what it was
  * asked.
  */
-export const TRANSPORT_FAILURE_EXIT_CODE = 1;
+const TRANSPORT_FAILURE_EXIT_CODE = 1;
 
 /**
  * What stderr is told when the transport fails.
  *
- * Its own function so the wording can be held to account by a test without the
- * test owning this process's streams, and because a string built inside an
- * event handler is a string nothing ever reads back.
+ * Its own function because a string built inside an event handler is a string
+ * nothing ever reads back. The wording is the whole of what a harness gets when
+ * the connection dies, and the wiring test matches on it from the outside.
  */
-export function transportFailureLine(error: unknown): string {
+function transportFailureLine(error: unknown): string {
   const reason = error instanceof Error ? error.message : String(error);
   return `${SERVER_NAME} mcp server: the connection to the harness failed: ${reason}\n`;
 }
@@ -69,10 +69,13 @@ export function transportFailureLine(error: unknown): string {
 /**
  * A server with the four tools registered, ready to be connected to a transport.
  *
- * Separate from starting one so a test can build it without owning the process's
- * stdio.
+ * Separate from starting one because the two decide different things: this
+ * decides what the server can answer, and `runServer` decides which streams it
+ * answers on and what the process ends with. Neither is reachable from a unit
+ * test — the wiring test spawns the built program and speaks JSON-RPC to it,
+ * which is the only way to see what a harness sees.
  */
-export function createMcpServer(options: ServerOptions): McpServer {
+function createMcpServer(options: ServerOptions): McpServer {
   const server = new McpServer(
     { name: SERVER_NAME, title: "Anthill", version: SERVER_VERSION },
     { instructions: SERVER_INSTRUCTIONS },
@@ -89,7 +92,7 @@ export function createMcpServer(options: ServerOptions): McpServer {
  * argument is reported and the process ends on its own — and so the same
  * function can be called from a test.
  */
-export async function runServer(argv: readonly string[]): Promise<number> {
+async function runServer(argv: readonly string[]): Promise<number> {
   const read = readOptions(argv);
   if (!read.ok) {
     process.stderr.write(`${read.message}\n`);

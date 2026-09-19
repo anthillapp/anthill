@@ -149,7 +149,7 @@ export function inboxDonePath(root: string, key: string): string {
   return join(inboxDoneDir(root), `${inboxSegment(key)}.json`);
 }
 
-export function inboxSegment(key: string): string {
+function inboxSegment(key: string): string {
   return safeSegment(key, "unnamed-drop");
 }
 

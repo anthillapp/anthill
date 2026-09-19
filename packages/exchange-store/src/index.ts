@@ -30,74 +30,32 @@
 
 export const PACKAGE_NAME = "@anthill/exchange-store";
 
+/*
+ * What the two importers actually import, and nothing else.
+ *
+ * The store's answers reach them through `ExchangeStore`, so the layout, the
+ * record parsers, the problem builder and the path helpers are internal: this
+ * package exists to be the only thing that knows where a handover is kept, and
+ * an exported `revisionPath` is an invitation to know it elsewhere. Anything
+ * needed from here later can be exported then, against a caller — which is not
+ * true the other way round, because an export nothing imports still has to be
+ * kept working.
+ */
 export {
   ExchangeStore,
   type AddRevisionResult,
-  type BindResult,
-  type BindRun,
-  type ConsumeInboxResult,
-  type CreateResult,
-  type DamagedDrop,
-  type DropInboxResult,
   type Eligibility,
   type EligibilityRefusal,
   type ExchangeWorkflow,
-  type InboxDropInput,
-  type InboxListing,
-  type MarkReadyResult,
-  type RevokeReadyResult,
 } from "./store.js";
 
 export {
-  EXCHANGE_STORE_VERSION,
-  encodeRecord,
-  parseBinding,
-  parseIdentity,
-  parseInboxDrop,
-  parseReadiness,
-  parseRevision,
-  parseRevocation,
   type Binding,
   type InboxDrop,
-  type InboxKind,
-  type RecordRead,
   type RevisionAuthor,
-  type StoredIdentity,
-  type StoredReadiness,
   type StoredRevision,
-  type StoredRevocation,
 } from "./records.js";
 
-export {
-  EXCHANGE_DIR_NAME,
-  bindingPath,
-  bindingsDir,
-  exchangeRoot,
-  identityPath,
-  inboxDonePath,
-  inboxDir,
-  inboxDoneDir,
-  inboxPath,
-  keyFromInboxFileName,
-  readyPath,
-  revisionFromFileName,
-  revisionFromReadyFileName,
-  revisionFromRevokedFileName,
-  revisionPath,
-  revisionStem,
-  revisionsDir,
-  revokedPath,
-  safeSegment,
-  workflowDir,
-  workflowSegment,
-  workflowsDir,
-  workingCopyPath,
-} from "./paths.js";
+export { EXCHANGE_STORE_PROBLEM_CODES } from "./problems.js";
 
-export {
-  EXCHANGE_STORE_PROBLEM_CODES,
-  storeProblem,
-  type ExchangeStoreProblemCode,
-} from "./problems.js";
-
-export { appDataDir, defaultDataDir, type DataDirEnvironment } from "./data-dir.js";
+export { defaultDataDir } from "./data-dir.js";

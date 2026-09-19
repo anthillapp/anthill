@@ -25,14 +25,14 @@ export type ServerOptions = {
   dataDir: string;
 };
 
-export type OptionsResult =
+type OptionsResult =
   | { ok: true; options: ServerOptions }
   | { ok: false; message: string };
 
 /** The flag, spelled once so the parser and the message cannot disagree. */
 const DATA_DIR_FLAG = "--data-dir";
 
-export const USAGE = `anthill-mcp [${DATA_DIR_FLAG} <path>]
+const USAGE = `anthill-mcp [${DATA_DIR_FLAG} <path>]
 
   ${DATA_DIR_FLAG} <path>  Absolute Anthill user-data directory, holding the exchange this
                     server writes into. Defaults to the installed desktop app's,

@@ -66,6 +66,7 @@ export function Root() {
     // an answer of "yes, show me" that nothing visibly happened about. The
     // question of whether to interrupt was already put and already answered.
     setSettingsFrom(null);
+    setExplaining(false);
   }, []);
 
   useEffect(() => window.anthill.onOpenWorkflow(openHandedOver), [openHandedOver]);

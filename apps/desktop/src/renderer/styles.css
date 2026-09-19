@@ -8550,3 +8550,16 @@ button.presence-chip {
   box-shadow: none;
   border-color: var(--dark-border);
 }
+.exchange-handover {
+  flex: 0 0 auto;
+  border-bottom: 1px solid #d8d8d8;
+  padding: 10px 16px;
+  background: #fafafa;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 13px;
+}
+.exchange-handover-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+.exchange-handover p { margin: 6px 0; overflow-wrap: anywhere; }
+.exchange-handover summary { cursor: pointer; }
+.exchange-task { white-space: pre-wrap; }

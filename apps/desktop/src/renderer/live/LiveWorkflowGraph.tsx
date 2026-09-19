@@ -20,6 +20,7 @@ import {
   ZOOM_STEP,
   blockRect,
   buildCanvasModel,
+  withDisplayLayout,
   useWheelZoom,
   zoomAbout,
   type Workflow,
@@ -222,12 +223,13 @@ function edgeTone(
 }
 
 export function LiveWorkflowGraph({
-  workflow,
+  workflow: sourceWorkflow,
   view,
   sessionState,
   selectedBlockId,
   onSelect,
 }: LiveWorkflowGraphProps) {
+  const workflow = useMemo(() => withDisplayLayout(sourceWorkflow), [sourceWorkflow]);
   const model = useMemo(() => buildCanvasModel(workflow), [workflow]);
   const surface = useRef<HTMLDivElement>(null);
   /** For the running block's "so far" — the one figure on the graph that ticks. */

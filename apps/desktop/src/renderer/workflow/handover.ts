@@ -138,7 +138,17 @@ function pillFor(input: HandoverInput): HandoverPill {
  */
 function blockedBecause(input: HandoverInput): string | undefined {
   const { view } = input;
-  if (input.dirty || !input.matches)
+  /*
+   * Two claims, not one, and only the second of them blocks.
+   *
+   * "The document has edits nobody has written" drives the Unsaved chip; "the
+   * working copy is no longer the revision the exchange holds" is what makes
+   * an approval a decision about something the reader cannot see. They are
+   * usually true together and they are not the same sentence: an edit that
+   * was undone leaves the document dirty and its content identical, and
+   * refusing there would refuse an approval of exactly what is on screen.
+   */
+  if (!input.matches)
     return `Unsaved or unrecorded changes are not approved. Save them, then approve revision ${view.revision}.`;
   if (input.problemCount > 0)
     return input.problemCount === 1

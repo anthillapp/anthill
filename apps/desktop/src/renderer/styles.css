@@ -8579,7 +8579,7 @@ button.presence-chip {
    decoration: the exchange validates that a workflow targets the tool that
    handed it over, so switching saves fine and the revision silently becomes
    one that can never be bound. */
-.wf-source {
+.wf-toolbar .wf-source {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -8595,9 +8595,9 @@ button.presence-chip {
   color: var(--ink-quiet);
   cursor: pointer;
 }
-.wf-source:hover { background: rgba(255, 255, 255, 0.09); }
+.wf-toolbar .wf-source:hover { background: rgba(255, 255, 255, 0.09); }
 
-.wf-source .logo {
+.wf-toolbar .wf-source .logo {
   width: 13px;
   height: 13px;
   flex: none;
@@ -8608,13 +8608,13 @@ button.presence-chip {
   background-position: center;
 }
 
-.wf-source .lock { flex: none; opacity: 0.75; }
+.wf-toolbar .wf-source .lock { flex: none; opacity: 0.75; }
 
 /* Two pills, never one. "Does the graph compile" and "where does this stand
    with the agent" are different facts that disagree regularly — a valid graph
    waiting for approval, a broken one whose earlier revision is already
    running — so one pill would always be hiding one of them. */
-.wf-pill {
+.wf-toolbar .wf-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -8629,18 +8629,18 @@ button.presence-chip {
 /* Only the handover pill carries a dot and the extra weight. The validation
    pill is one of a row of quiet indicators; the handover pill is a claim
    about work that may be under way, and it is read at a glance. */
-.wf-pill i { width: 6px; height: 6px; flex: none; display: block; border-radius: 50%; }
-.wf-pill-handover { font-weight: 600; }
+.wf-toolbar .wf-pill i { width: 6px; height: 6px; flex: none; display: block; border-radius: 50%; }
+.wf-toolbar .wf-pill-handover { font-weight: 600; }
 
 /* "No problems", not "Ready" — Ready now belongs to the handover, where it
    means the work may begin. Clickable only when there is something to open. */
-.wf-pill-validation.is-clean {
+.wf-toolbar .wf-pill-validation.is-clean {
   border: 1px solid rgba(63, 143, 94, 0.5);
   background: rgba(63, 143, 94, 0.16);
   color: #a9e0bd;
 }
 
-.wf-pill-validation.has-problems {
+.wf-toolbar .wf-pill-validation.has-problems {
   border: 1px solid rgba(255, 151, 131, 0.45);
   background: rgba(255, 151, 131, 0.12);
   color: var(--accent-300);
@@ -8649,30 +8649,30 @@ button.presence-chip {
 
 /* Only the state that asks something of the reader is coloured; the states
    that merely report stay quiet. */
-.wf-pill-handover.is-draft,
-.wf-pill-handover.is-bound { background: rgba(255, 255, 255, 0.09); color: var(--ink-quiet); }
-.wf-pill-handover.is-draft i,
-.wf-pill-handover.is-bound i { background: var(--on-dark-dimmer); }
+.wf-toolbar .wf-pill-handover.is-draft,
+.wf-toolbar .wf-pill-handover.is-bound { background: rgba(255, 255, 255, 0.09); color: var(--ink-quiet); }
+.wf-toolbar .wf-pill-handover.is-draft i,
+.wf-toolbar .wf-pill-handover.is-bound i { background: var(--on-dark-dimmer); }
 
-.wf-pill-handover.is-waiting { background: rgba(216, 162, 26, 0.18); color: #e8c675; }
-.wf-pill-handover.is-waiting i { background: #d8a21a; }
+.wf-toolbar .wf-pill-handover.is-waiting { background: rgba(216, 162, 26, 0.18); color: #e8c675; }
+.wf-toolbar .wf-pill-handover.is-waiting i { background: #d8a21a; }
 
-.wf-pill-handover.is-approved,
-.wf-pill-handover.is-ready { background: rgba(47, 143, 95, 0.18); color: #a9e0bd; }
-.wf-pill-handover.is-approved i,
-.wf-pill-handover.is-ready i { background: #2f8f5f; }
+.wf-toolbar .wf-pill-handover.is-approved,
+.wf-toolbar .wf-pill-handover.is-ready { background: rgba(47, 143, 95, 0.18); color: #a9e0bd; }
+.wf-toolbar .wf-pill-handover.is-approved i,
+.wf-toolbar .wf-pill-handover.is-ready i { background: #2f8f5f; }
 
 /* Running is the same blue that means running on the canvas and in the
    session feed. Bound is grey. A binding is not evidence a session is alive,
    and the colour carries half of how that is said. */
-.wf-pill-handover.is-running { background: rgba(86, 174, 224, 0.18); color: #bcdcf1; }
-.wf-pill-handover.is-running i { background: #56aee0; }
+.wf-toolbar .wf-pill-handover.is-running { background: rgba(86, 174, 224, 0.18); color: #bcdcf1; }
+.wf-toolbar .wf-pill-handover.is-running i { background: #56aee0; }
 
 /* The primary slot. For a handover, Prompt is not merely redundant — it mints
    a fresh run id and registers a second, unrelated run from the same
    workflow. The slot holds the decision the person actually has, when they
    have one. */
-.wf-primary {
+.wf-toolbar .wf-primary {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -8688,16 +8688,16 @@ button.presence-chip {
   color: #fff;
   cursor: pointer;
 }
-.wf-primary:hover { background: var(--accent-600); }
+.wf-toolbar .wf-primary:hover { background: var(--accent-600); }
 
 /* Blocked, not hidden. A grey button with no reason teaches nothing — the
    reason is in the title and, at length, in the notice card. */
-.wf-primary[aria-disabled="true"] {
+.wf-toolbar .wf-primary[aria-disabled="true"] {
   background: rgba(255, 255, 255, 0.1);
   color: var(--on-dark-dim);
   cursor: not-allowed;
 }
-.wf-primary[aria-disabled="true"]:hover { background: rgba(255, 255, 255, 0.1); }
+.wf-toolbar .wf-primary[aria-disabled="true"]:hover { background: rgba(255, 255, 255, 0.1); }
 
 /* The notice card. Three conditions need a sentence and cannot be a pill. It
    floats over the canvas rather than sitting in the layout: the exchange is

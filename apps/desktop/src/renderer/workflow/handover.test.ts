@@ -35,13 +35,17 @@ it("offers the approval only where the decision can be made", () => {
 });
 
 it("blocks the approval with a reason rather than removing it", () => {
-  const dirty = model({}, { dirty: true });
-  expect(dirty.primary?.label).toBe("Ready for agent");
-  expect(dirty.primary?.blocked).toContain("Save them, then approve revision 1");
+  const stale = model({}, { matches: false });
+  expect(stale.primary?.label).toBe("Ready for agent");
+  expect(stale.primary?.blocked).toContain("Save them, then approve revision 1");
 
-  // The same claim, arrived at differently: the open document is no longer the
-  // revision the exchange holds, whether or not anything is unwritten.
-  expect(model({}, { matches: false }).primary?.blocked).toContain("Unsaved or unrecorded");
+  /*
+   * Dirty alone does not block, and that is the point of keeping the two
+   * claims apart: an edit that was undone leaves the document unwritten and
+   * its content identical to the revision the exchange holds, and refusing
+   * there would refuse an approval of exactly what is on screen.
+   */
+  expect(model({}, { dirty: true }).primary?.blocked).toBeUndefined();
 
   expect(model({}, { problemCount: 1 }).primary?.blocked).toBe(
     "1 problem in the workflow blocks approval. Open the problems list and fix it first.",

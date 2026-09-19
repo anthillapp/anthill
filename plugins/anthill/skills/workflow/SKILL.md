@@ -134,12 +134,18 @@ Go on to `get_ready_revision` and bind.
 
 Two ways, and the user picks:
 
-**They edit it in Anthill.** They change the graph and press Save. When they
-come back — whatever they say — call `get_workflow` before you do anything else.
-A higher revision number means they saved: say which revision you can now see,
-confirm that is what they want worked on, and only then bind. Never bind the
-revision you submitted after they have told you they were going to change it;
-read what is there now.
+**They edit it in Anthill.** Say, in as many words, that you will not know they
+have finished unless they tell you — Anthill has no way to reach this session,
+so saving changes the workflow and nothing reaches you. Ask them to say when
+they are done.
+
+Then, when they come back — whatever they say — call `get_workflow` before you
+do anything else. A higher revision number means they saved: say which revision
+you can now see, confirm that is what they want worked on, and only then bind.
+If the number has not moved, say so rather than assuming they changed their
+mind: a save that did not land is worth knowing about, and they may simply have
+forgotten to press it. Never bind the revision you submitted after they have
+told you they were going to change it; read what is there now.
 
 **They ask you to change it.** You cannot revise a stored workflow: the tools
 create one and read it, and there is no third thing. Say so plainly — the

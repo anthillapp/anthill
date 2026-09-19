@@ -47,7 +47,7 @@ import {
   snapToGrid,
 } from "./workflow-canvas-model";
 import { assemblyPlan } from "./assembly";
-import { withDisplayLayout } from "./display-layout";
+import { useDisplayLayout } from "./use-display-layout";
 
 /** What the canvas has selected: a block, or one block's output. */
 export type WorkflowSelection =
@@ -140,7 +140,7 @@ export function WorkflowCanvas({
   className,
   style,
 }: WorkflowCanvasProps) {
-  const workflow = useMemo(() => withDisplayLayout(sourceWorkflow), [sourceWorkflow]);
+  const workflow = useDisplayLayout(sourceWorkflow);
   const surface = useRef<HTMLDivElement>(null);
   /** Where the dragged arrowhead is now, and what it is over. */
   const [pointer, setPointer] = useState<Point | null>(null);

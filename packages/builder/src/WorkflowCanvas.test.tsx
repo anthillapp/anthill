@@ -700,3 +700,69 @@ describe("assembling an accepted draft", () => {
     expect({ left: after.style.left, top: after.style.top }).toEqual(at);
   });
 });
+
+/**
+ * A workflow handed over by a harness arrives without positions, so the canvas
+ * has to invent them. They are a view and never a revision — nothing here is
+ * written back — but they are what the author is looking at, and a block that
+ * moved because a different block was added would be the canvas rearranging
+ * their drawing underneath them.
+ */
+describe("a workflow handed over without positions", () => {
+  function handover(): Workflow {
+    return {
+      id: "handover",
+      name: "Handover",
+      version: "1",
+      target: "claude-code",
+      metadata: { workflow: { agents: [{ id: "r1", name: "Developer" }] } },
+      nodes: [
+        { id: "start", type: "start", name: "Start", config: {} },
+        {
+          id: "a",
+          type: "agent",
+          name: "Implement",
+          config: { actionKind: "agent-step", agentId: "r1", task: "x" },
+        },
+        {
+          id: "b",
+          type: "agent",
+          name: "Review",
+          config: { actionKind: "llm-review", agentId: "r1", task: "y" },
+        },
+        { id: "end", type: "end", name: "End", config: {} },
+      ],
+      edges: [
+        { id: "e1", source: "start", target: "a" },
+        { id: "e2", source: "a", target: "b" },
+        { id: "e3", source: "b", target: "end" },
+      ],
+    };
+  }
+
+  const boxes = () =>
+    ["start", "a", "b", "end"].map((id) => {
+      const block = screen.getByTestId(`workflow-block-${id}`);
+      return { id, left: block.style.left, top: block.style.top };
+    });
+
+  it("leaves the blocks already on screen where they are when one is added", () => {
+    const props = {
+      onChange: vi.fn<(next: Workflow) => void>(),
+      selection: NO_SELECTION as WorkflowSelection,
+      onSelectionChange: vi.fn<(selection: WorkflowSelection) => void>(),
+      linking: null as LinkingState,
+      onLinkingChange: vi.fn<(linking: LinkingState) => void>(),
+    };
+    const view = render(<WorkflowCanvas {...props} workflow={handover()} />);
+    const before = boxes();
+
+    const grown = handover();
+    grown.nodes.push({ id: "c", type: "agent", name: "Check", config: {} });
+    grown.edges.push({ id: "e4", source: "b", target: "c" });
+    view.rerender(<WorkflowCanvas {...props} workflow={grown} />);
+
+    expect(boxes()).toEqual(before);
+    expect(screen.getByTestId("workflow-block-c")).toBeInTheDocument();
+  });
+});

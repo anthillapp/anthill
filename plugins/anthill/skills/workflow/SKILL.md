@@ -42,19 +42,24 @@ connection fixed a moment ago may still look broken. `/anthill:workflow doctor` 
 the host thinks, and `claude mcp list` says what is actually reachable.
 
 **Find out who you are.** Every handover records the session that made it, and
-Anthill matches it against your own session files so a run can be picked up again
-after it goes quiet. Run:
+Anthill reads that session's own records to show what the work is doing. Run:
 
 ```bash
-echo "${CLAUDE_CODE_HOST_SESSION_ID:-}"
+echo "${CLAUDE_CODE_SESSION_ID:-}"
 ```
 
-Strip a leading `local_` if there is one; what remains is the session id. If the
-variable is empty, say that you could not establish this session's identity and
-ask the user whether to continue without it — a handover can still be made, but
-the run will not be recoverable once it goes quiet. **Never invent one, and never
-reuse an id from another session.** It is the one field where a plausible guess
-does more damage than an admitted gap.
+That is this session's own id, the one its transcript is named for and carries
+inside. **`CLAUDE_CODE_HOST_SESSION_ID` is not it** — that names the app that
+started you, it carries a `local_` prefix, and it is the same value for every
+session that app spawns, so a handover recorded under it would name somebody
+else's conversation. It has been used by mistake once; do not reach for it.
+
+If the variable is empty, say that you could not establish this session's
+identity and ask the user whether to continue without it — a handover can still
+be made, but Anthill will have nothing to read, so the graph will show only the
+steps you report and none of the work. **Never invent one, and never reuse an id
+from another session.** It is the one field where a plausible guess does more
+damage than an admitted gap.
 
 ## Handing a workflow over
 

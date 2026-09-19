@@ -366,15 +366,15 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       // `isSessionId` holding, and a cast would say so without checking.
       const session = isSessionId(given) ? given : undefined;
 
-      const at = typeof revision === "number" && Number.isSafeInteger(revision) && revision >= 1
+      const exactRevision = typeof revision === "number" && Number.isSafeInteger(revision) && revision >= 1
         ? revision : undefined;
-      const content = typeof digest === "string" && digest.trim() ? digest : undefined;
+      const exactDigest = typeof digest === "string" && digest.trim() ? digest : undefined;
       // The length is judged here too, now that the schema no longer does it:
       // a key of any size would otherwise be written into a binding that is
       // never rewritten.
-      const key = typeof idempotencyKey === "string" && idempotencyKey.trim() &&
+      const bindingKey = typeof idempotencyKey === "string" && idempotencyKey.trim() &&
         idempotencyKey.length <= MAX_BIND_KEY_LENGTH ? idempotencyKey : undefined;
-      if (at === undefined || content === undefined || key === undefined) {
+      if (exactRevision === undefined || exactDigest === undefined || bindingKey === undefined) {
         return result(bindText, {
           outcome: "invalid", workflowId,
           problems: [{ code: "BIND_PRECONDITION_REQUIRED", message:
@@ -382,7 +382,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         });
       }
       const url = workflowUrl(workflowId);
-      const bound = await store.bindRequest(workflowId, at, content, key, session,
+      const bound = await store.bindRequest(workflowId, exactRevision, exactDigest, bindingKey, session,
         () => ({ runId: mintRunId(), nonce: mintNonce() }));
 
       if (bound.outcome !== "bound" && bound.outcome !== "already_bound") {
@@ -396,7 +396,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
                 : "conflict",
           workflowId,
           ...(bound.outcome !== "no_such_workflow" ? { url } : {}),
-          revision: at,
+          revision: exactRevision,
           ...(bound.reason ? { reason: bound.reason } : {}),
           ...problemFields(bound.problems, refused),
         });

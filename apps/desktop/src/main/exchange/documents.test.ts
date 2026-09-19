@@ -46,6 +46,27 @@ it("gates only the reviewed saved revision, never the next edit", async () => {
   expect((await store.readRevision(workflow.id, 1))?.workflow.name).toBe("Fix the crash");
 });
 
+/*
+ * Readiness never carries to the next revision, which is right — and leaves an
+ * approval standing on the revision it was made for. The head is then a draft
+ * and the approved revision is still what a brand-new bind is handed, so a
+ * view that reported only the head's state said nothing was authorised while
+ * something was.
+ */
+it("reports the approval an edit left behind, which is still what a bind takes", async () => {
+  const { store, path, workflow } = await fixture();
+  const view = (await readExchangeView(store, path, workflow.id))!;
+  expect(view.approved).toBeUndefined();
+  expect(await readyExchangeRevision(store, { path, ...view })).toEqual({ ok: true });
+  expect((await readExchangeView(store, path, workflow.id))?.approved).toMatchObject({ revision: 1 });
+
+  await saveExchangeCopy(store, path, { ...workflow, name: "Edited" });
+  expect(await readExchangeView(store, path, workflow.id)).toMatchObject({
+    revision: 2, state: "draft", approved: { revision: 1 },
+  });
+  expect(await store.eligibleRevision(workflow.id)).toMatchObject({ eligible: true, revision: { revision: 1 } });
+});
+
 it("refuses approval when the disk copy was edited outside Anthill", async () => {
   const { store, path, workflow } = await fixture();
   const view = (await readExchangeView(store, path, workflow.id))!;

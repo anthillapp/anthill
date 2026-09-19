@@ -36,6 +36,16 @@ export function ExchangeHandover({ workflow, path, dirty, runs }: {
   if (!view) return error ? <p className="exchange-handover" role="alert">{error}</p> : null;
   const matches = revisionDigest(stampWorkflowFormat(workflow)) === view.digest;
   const description = describeState(view.state, view.mode);
+  /**
+   * An approval left behind by an earlier revision.
+   *
+   * Readiness belongs to one revision and never carries forward, so editing an
+   * approved workflow leaves the head unapproved and the older approval intact
+   * — and under an approval gate that older revision is what a new run is
+   * given. The panel used to say "waiting for you" and nothing else, which
+   * read as "nothing is authorised" while something was.
+   */
+  const standing = view.approved && view.approved.revision !== view.revision ? view.approved : undefined;
   const approve = async () => {
     if (!path || dirty || !matches || busy) return;
     setBusy(true);
@@ -61,6 +71,26 @@ export function ExchangeHandover({ workflow, path, dirty, runs }: {
         ) : null}
       </div>
       <p>{description.detail}</p>
+      {/*
+        What to do about it, in the same words the MCP server reads out to the
+        harness. Dropping it left the app naming a state and never saying what
+        follows from it, while the agent on the other side of the handover was
+        being told.
+      */}
+      {description.next ? <p>{description.next}</p> : null}
+      {/*
+        The one sentence that says what the button does not do, beside the
+        button. It was inside a disclosure about provenance, which is where
+        somebody goes to read the original task — not where they look before
+        deciding whether pressing this starts an agent.
+      */}
+      <p>Ready for agent records your decision only. Anthill does not start or control the external session.</p>
+      {standing ? (
+        <p>
+          Revision {standing.revision} is still approved{standing.at ? `, from ${new Date(standing.at).toLocaleString()}` : ""}, so
+          it — not revision {view.revision} — is the one an agent may take. Approving this revision replaces that approval.
+        </p>
+      ) : null}
       {dirty || !matches ? <p>Unsaved or unrecorded changes are not approved. Save and review them first.</p> : null}
       {view.bindings.map((binding) => {
         const run = runs.find((item) => item.anthillRunId === binding.runId);
@@ -73,7 +103,6 @@ export function ExchangeHandover({ workflow, path, dirty, runs }: {
         <summary>Original task and source</summary>
         <p className="exchange-task">{view.source.taskText}</p>
         <p>Source session: <code>{view.source.sessionId}</code></p>
-        <p>Ready for agent records your decision only. Anthill does not start or control the external session.</p>
       </details>
       {view.problems.length > 0 ? <ul>{view.problems.map((problem, index) => <li key={index}>{problem.message}</li>)}</ul> : null}
       {error ? <p role="alert">{error}</p> : null}

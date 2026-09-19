@@ -53,6 +53,12 @@ export async function readExchangeView(store: ExchangeStore, path: string, workf
     workflowId, source: identity.source, mode: identity.mode,
     revision: head.revision, digest: head.digest,
     state: bound ? "bound" : ready ? "ready_for_agent" : "draft",
+    // Reported whichever revision it names, including one the editor has moved
+    // on from. Readiness deliberately does not carry to the next revision, so
+    // an approval of revision 1 stands after an edit makes revision 2 — the
+    // head is a draft and the approval is still what a new run would be given.
+    // Reporting only the head's state left that standing approval invisible.
+    ...(stored.ready ? { approved: { revision: stored.ready.revision, ...(stored.ready.at ? { at: stored.ready.at } : {}) } } : {}),
     problems, bindings: stored.bindings.map(({ runId, revision }) => ({ runId, revision })),
   };
 }

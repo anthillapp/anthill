@@ -298,9 +298,21 @@ export type ExchangeView = {
   workflowId: string;
   source: ExchangeSource;
   mode: HandoverMode;
+  /** What is true of the head revision — the one the editor has open. */
   state: RevisionState;
   revision: number;
   digest: string;
+  /**
+   * The revision an approval still stands on, when one does.
+   *
+   * Reported separately from `state`, and not only when the two agree. Under
+   * an approval gate, approving revision 1 and then editing leaves the head at
+   * revision 2 with nothing approving it — which `state` correctly calls a
+   * draft — while the approval of revision 1 is untouched and is still what a
+   * new run would be given. Saying only "draft" told the user nothing was
+   * authorised while something was.
+   */
+  approved?: { revision: number; at?: string };
   problems: ExchangeProblem[];
   bindings: { runId: string; revision: number }[];
 };

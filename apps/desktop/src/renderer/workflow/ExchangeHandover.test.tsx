@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { revisionDigest } from "@anthill/workflow-exchange";
+import { describeState, revisionDigest } from "@anthill/workflow-exchange";
+import type { HandoverMode, RevisionState } from "@anthill/workflow-exchange";
 import { stampWorkflowFormat } from "@anthill/workflow";
 import type { Workflow } from "@anthill/workflow-schema";
 import type { ExchangeView } from "../../shared/ipc.js";
@@ -44,6 +45,56 @@ it("labels an older binding without claiming it is running", async () => {
   render(<ExchangeHandover workflow={workflow} path="/tmp/workflow.json" dirty={false} runs={[]} />);
   expect(await screen.findByText("Bound to revision 1 · your edits are revision 2")).toBeTruthy();
   expect(screen.queryByText(/Running revision/)).toBeNull();
+});
+
+/*
+ * The app and the MCP server read the same `describeState`, and the server
+ * reads the next-step sentence out to the harness. The app dropping it meant
+ * the person was told the name of a state and the agent was told what to do
+ * about it.
+ */
+it("says what to do next in every state, in the same words the harness is given", async () => {
+  for (const mode of ["approval-gate", "show-and-go"] as const satisfies readonly HandoverMode[]) {
+    for (const state of ["draft", "ready_for_agent", "bound"] as const satisfies readonly RevisionState[]) {
+      api({ mode, state });
+      render(<ExchangeHandover workflow={workflow} path="/tmp/workflow.json" dirty={false} runs={[]} />);
+      const next = describeState(state, mode).next!;
+      expect(next).toBeTruthy();
+      expect(await screen.findByText(next)).toBeTruthy();
+      cleanup();
+    }
+  }
+});
+
+/* Provenance is where somebody reads the original task, not where they look
+   before deciding whether pressing a button starts an agent. */
+it("says Anthill starts nothing where the button is, not inside the provenance disclosure", async () => {
+  api();
+  render(<ExchangeHandover workflow={workflow} path="/tmp/workflow.json" dirty={false} runs={[]} />);
+  const sentence = await screen.findByText(/Anthill does not start or control the external session/);
+  expect(sentence.closest("details")).toBeNull();
+});
+
+/*
+ * Approving revision 1 and then editing leaves the head at revision 2 with
+ * nothing approving it — and revision 1 still approved, still what a new bind
+ * takes. The panel said "waiting for you" and stopped there.
+ */
+it("says an approval left on an earlier revision is still the one an agent may take", async () => {
+  api({ revision: 2, state: "draft", approved: { revision: 1, at: "2026-09-18T09:00:00.000Z" } });
+  render(<ExchangeHandover workflow={workflow} path="/tmp/workflow.json" dirty={false} runs={[]} />);
+  const standing = await screen.findByText(/Revision 1 is still approved/);
+  expect(standing.textContent).toBe(
+    `Revision 1 is still approved, from ${new Date("2026-09-18T09:00:00.000Z").toLocaleString()}, ` +
+      "so it — not revision 2 — is the one an agent may take. Approving this revision replaces that approval.",
+  );
+});
+
+it("does not repeat the approval on the revision that carries it", async () => {
+  api({ revision: 1, state: "ready_for_agent", approved: { revision: 1 } });
+  render(<ExchangeHandover workflow={workflow} path="/tmp/workflow.json" dirty={false} runs={[]} />);
+  await screen.findByText("Approved");
+  expect(screen.queryByText(/still approved/)).toBeNull();
 });
 
 it("reports a failed approval and leaves the draft unapproved", async () => {

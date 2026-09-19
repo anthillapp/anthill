@@ -21,11 +21,12 @@
  * can see, it says.
  */
 
-import { WorkflowSchema, type Workflow } from "@anthill/workflow-schema";
+import { HARNESS_TARGETS, WorkflowSchema, type Workflow } from "@anthill/workflow-schema";
 
 import {
   EXCHANGE_PROBLEM_CODES,
   EXCHANGE_VERSION,
+  HANDOVER_MODES,
   isHandoverMode,
   isSourceHarness,
   type DraftSubmission,
@@ -128,7 +129,7 @@ export function readSubmission(value: unknown): ReadSubmissionResult {
       fieldProblem(
         value.mode,
         "mode",
-        '"show-and-go" or "approval-gate"',
+        anyOf(HANDOVER_MODES),
         "Show-and-go lets the work begin as soon as the workflow validates; approval-gate waits until the user has marked a revision ready.",
       ),
     );
@@ -198,9 +199,7 @@ function readSource(value: unknown, problems: ExchangeProblem[]): ExchangeSource
 
   const harness = isSourceHarness(value.harness) ? value.harness : undefined;
   if (harness === undefined) {
-    problems.push(
-      fieldProblem(value.harness, "source.harness", '"claude-code", "codex" or "pi"'),
-    );
+    problems.push(fieldProblem(value.harness, "source.harness", anyOf(HARNESS_TARGETS)));
   }
 
   const sessionId = readNonBlankString(value.sessionId);
@@ -258,6 +257,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readNonBlankString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+/**
+ * The values a field may take, as a person reads them: `"a", "b" or "c"`.
+ *
+ * Taken from the list the check itself uses rather than written out beside it.
+ * The two were a literal and `isSourceHarness`, which agreed only for as long
+ * as nobody added a fourth tool — and the sentence a sender reads to find out
+ * what it sent wrong is the copy that would have gone stale.
+ */
+function anyOf(values: readonly string[]): string {
+  const quoted = values.map((value) => JSON.stringify(value));
+  if (quoted.length < 2) return quoted.join("");
+  return `${quoted.slice(0, -1).join(", ")} or ${quoted.at(-1)}`;
 }
 
 /**

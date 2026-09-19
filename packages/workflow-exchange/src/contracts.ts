@@ -97,10 +97,19 @@ export type DraftSubmission = {
   source: ExchangeSource;
   mode: HandoverMode;
   /**
-   * The workflow this submission revises, when it revises one.
+   * The workflow this submission is addressed to, when it is addressed to one.
    *
-   * Absent on a first submission — Anthill assigns identity, so a harness
-   * cannot claim a workflow it has not been given.
+   * Absent on a first submission, and never an id Anthill handed out. Identity
+   * is the document's own `workflow.id`, which the harness brings with it and
+   * the store files the handover under — it has to be, because that id is how
+   * a run is tied to the document the user has open. Nothing requires it to be
+   * unique or hard to guess, and `createEmptyWorkflow` calls every blank
+   * document `workflow`, so an id that is already taken is refused rather than
+   * merged into what is there.
+   *
+   * This field says only which workflow the sender believes it is revising, so
+   * that a submission whose address and document disagree can be refused
+   * instead of quietly filed under one of the two.
    */
   workflowId?: string;
   workflow: Workflow;

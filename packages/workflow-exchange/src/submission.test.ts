@@ -8,6 +8,7 @@
  * question at a time.
  */
 
+import { HARNESS_TARGETS } from "@anthill/workflow-schema";
 import { describe, expect, it } from "vitest";
 
 import { EXCHANGE_PROBLEM_CODES, EXCHANGE_VERSION } from "./contracts.js";
@@ -153,6 +154,22 @@ describe("readSubmission", () => {
       "source.sessionId",
       "source.taskText",
     ]);
+  });
+
+  it("names every tool it would have accepted, from the list it checks against", () => {
+    const result = readSubmission(
+      handover({
+        source: { harness: "cursor", sessionId: "session-abc", taskText: "Fix the crash." },
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // Derived rather than written out: a fourth tool becomes submittable by
+    // being added in one place, and the sentence the sender reads follows it.
+    for (const target of HARNESS_TARGETS) {
+      expect(result.problems[0]?.message).toContain(`"${target}"`);
+    }
   });
 
   it("tells an absent field apart from a wrong one", () => {

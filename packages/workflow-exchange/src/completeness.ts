@@ -132,9 +132,8 @@ const ASKS: Record<string, string> = {
  * The question written for one problem code, if there is one.
  *
  * Exported so the table's coverage can be checked against the validator's own
- * vocabulary — a code that gains a rule and never gains a question is a
- * handover that stalls on something the user is never asked about — and so a
- * caller holding a bare code can put the same question as everyone else.
+ * vocabulary: a code that gains a rule and never gains a question is a handover
+ * that stalls on something the user is never asked about.
  */
 export function askFor(code: string): string | undefined {
   return ASKS[code];

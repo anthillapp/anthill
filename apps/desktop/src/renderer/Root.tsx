@@ -6,13 +6,13 @@
  * actually come back for — their workflows — off the first screen.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { PendingRun } from "@anthill/live";
 
 import { HowItWorksScreen } from "./explain/HowItWorksScreen.js";
 import { explainerDue, markExplainerSeen } from "./explain/first-run.js";
 import { LaunchWindow } from "./LaunchWindow.js";
-import { SettingsSheet } from "./SettingsSheet.js";
+import { SettingsScreen } from "./settings/SettingsScreen.js";
 import { WorkflowScreen } from "./workflow/WorkflowScreen.js";
 
 type Start =
@@ -31,58 +31,66 @@ export function Root() {
    */
   const [explaining, setExplaining] = useState(() => explainerDue());
   /**
-   * Settings live here rather than on a screen.
+   * Settings is a screen, and it remembers where it came from.
    *
-   * ⌘, used to reach the live-observation card inside the workflow editor,
-   * which meant the one place preferences were kept could not be opened from
-   * the launch window at all. At this level it opens over whatever is showing.
+   * It was a modal over whatever was showing, which is what let a card nested
+   * inside it own the page instead. As a screen it has somewhere to be — and
+   * something to return to: you opened it from the middle of something, and
+   * dropping you on the launch window afterwards would lose that.
+   *
+   * `null` means Settings is closed; otherwise it holds the screen to go back
+   * to, which is why a closed Settings and one opened from the launcher are
+   * different values.
    */
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  useEffect(() => window.anthill.onOpenSettings(() => setSettingsOpen(true)), []);
-
-  const settings = settingsOpen ? <SettingsSheet onClose={() => setSettingsOpen(false)} /> : null;
+  const [settingsFrom, setSettingsFrom] = useState<"launch" | "workflow" | null>(null);
+  const openSettings = useCallback(() => {
+    setSettingsFrom((current) => current ?? (start ? "workflow" : "launch"));
+  }, [start]);
+  useEffect(() => window.anthill.onOpenSettings(openSettings), [openSettings]);
 
   const leaveExplainer = () => {
     markExplainerSeen();
     setExplaining(false);
   };
 
-  if (explaining) {
-    return (
-      <>
-        {settings}
-        <HowItWorksScreen
-          onBack={leaveExplainer}
-          onCreate={() => {
-            leaveExplainer();
-            setStart({ kind: "templates" });
-          }}
-        />
-      </>
-    );
-  }
+  const screen = explaining ? (
+    <HowItWorksScreen
+      onBack={leaveExplainer}
+      onCreate={() => {
+        leaveExplainer();
+        setStart({ kind: "templates" });
+      }}
+    />
+  ) : start ? (
+    <WorkflowScreen start={start} onExit={() => setStart(null)} onSettings={openSettings} />
+  ) : (
+    <LaunchWindow
+      onNewWorkflow={() => setStart({ kind: "templates" })}
+      onFromPrompt={() => setStart({ kind: "prompt" })}
+      onOpen={(path) => setStart({ kind: "open", ...(path ? { path } : {}) })}
+      // A row Anthill is following opens straight onto its session: that is
+      // what the author clicked it for.
+      onOpenLive={(path, run) => setStart({ kind: "open", path, live: run })}
+      onExplain={() => setExplaining(true)}
+      onSettings={openSettings}
+    />
+  );
 
-  if (start) {
-    return (
-      <>
-        {settings}
-        <WorkflowScreen start={start} onExit={() => setStart(null)} />
-      </>
-    );
-  }
+  /*
+    The screen behind Settings is hidden, not unmounted.
 
+    Settings is a screen and takes the window, but the thing it was opened
+    from is a workflow someone is in the middle of — with edits that have not
+    been saved and an undo history that only exists in that component. Swapping
+    it out would throw both away for the sake of reading a preference.
+
+    `display: contents` rather than a wrapper with layout of its own, so the
+    screen's own flex chain reaches the root unchanged when it is showing.
+  */
   return (
     <>
-      {settings}
-      <LaunchWindow
-        onNewWorkflow={() => setStart({ kind: "templates" })}
-        onFromPrompt={() => setStart({ kind: "prompt" })}
-        onOpen={(path) => setStart({ kind: "open", ...(path ? { path } : {}) })}
-        // A row Anthill is following opens straight onto its session: that is
-        // what the author clicked it for.
-        onOpenLive={(path, run) => setStart({ kind: "open", path, live: run })}
-        onExplain={() => setExplaining(true)}
-      />
+      <div style={{ display: settingsFrom ? "none" : "contents" }}>{screen}</div>
+      {settingsFrom ? <SettingsScreen onLeave={() => setSettingsFrom(null)} /> : null}
     </>
   );
 }

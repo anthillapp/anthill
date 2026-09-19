@@ -203,6 +203,7 @@ async function openAgents() {
       onFromPrompt={() => undefined}
       onOpen={() => undefined}
       onExplain={() => undefined}
+      onSettings={() => undefined}
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: /^Agents\b/ }));

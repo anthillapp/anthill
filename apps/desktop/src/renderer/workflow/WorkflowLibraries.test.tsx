@@ -36,6 +36,7 @@ function renderRail(custom: { label: string; summary: string }[]) {
       onAddCustom={() => undefined}
       onAddBlock={() => undefined}
       onSelectAgent={() => undefined}
+      onSettings={() => undefined}
     />,
   );
 }

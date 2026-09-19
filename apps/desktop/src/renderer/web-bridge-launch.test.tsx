@@ -104,6 +104,7 @@ describe("the browser shell offers the renderer's full contract", () => {
         onOpen={() => undefined}
         onOpenLive={() => undefined}
         onExplain={() => undefined}
+        onSettings={() => undefined}
       />,
     );
 

@@ -68,6 +68,8 @@ import { LiveSessionPage } from "../live/LiveSessionPage.js";
 
 export type WorkflowScreenProps = {
   onExit: () => void;
+  /** The rail's door to Settings. App-level, so the screen only forwards it. */
+  onSettings: () => void;
   /**
    * What the launch window sent the author here to do. Without it the workflow
    * would show its own start screen on top of the one they just used.
@@ -78,7 +80,74 @@ export type WorkflowScreenProps = {
     | { kind: "open"; path?: string; live?: PendingRun };
 };
 
-export function WorkflowScreen({ onExit, start }: WorkflowScreenProps) {
+/**
+ * One step of the undo history, drawn rather than typeset.
+ *
+ * These were the glyphs `↶ ↷`, which sat off-centre in their buttons, came
+ * out at a different weight from every other icon in the bar, and changed
+ * shape with the font. An SVG is the same icon everywhere.
+ *
+ * Unavailable it dims rather than disappears — and stays focusable, with a
+ * title that says why. A control that vanishes teaches nothing: the reader
+ * cannot tell whether it is gone because there is nothing to do or because
+ * they misremembered it existing.
+ */
+function StepButton({
+  direction,
+  available,
+  onStep,
+}: {
+  direction: "back" | "forward";
+  available: boolean;
+  onStep: () => void;
+}) {
+  const back = direction === "back";
+  const label = back ? "Step back" : "Step forward";
+  return (
+    <button
+      type="button"
+      className="icon-button icon-btn on-dark"
+      aria-label={label}
+      aria-disabled={available ? undefined : true}
+      title={
+        available
+          ? `${label} (${back ? "⌘Z" : "⇧⌘Z"})`
+          : back
+            ? "Nothing to undo"
+            : "Nothing to redo"
+      }
+      onClick={() => {
+        if (available) onStep();
+      }}
+    >
+      <svg
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        {back ? (
+          <>
+            <path d="M9 14 4 9l5-5" />
+            <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+          </>
+        ) : (
+          <>
+            <path d="m15 14 5-5-5-5" />
+            <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
+          </>
+        )}
+      </svg>
+    </button>
+  );
+}
+
+export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProps) {
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   /**
    * Where the workflow has been, and where it was stepped back from.
@@ -652,35 +721,13 @@ export function WorkflowScreen({ onExit, start }: WorkflowScreenProps) {
         <span className="screen-name">Workflow</span>
 
         <input
-          className="title-input"
+          className="title-input on-dark"
           value={workflow.name}
           onChange={(event) =>
             editWorkflow((current) => ({ ...current, name: event.target.value }))
           }
           placeholder="Workflow name"
         />
-
-        <label className="harness">
-          <span>Harness</span>
-          <select
-            value={workflow.target ?? ""}
-            onChange={(event) =>
-              editWorkflow((current) => ({
-                ...current,
-                target: event.target.value as HarnessTarget,
-              }))
-            }
-          >
-            <option value="" disabled>
-              Choose…
-            </option>
-            {HARNESS_TARGETS.map((target) => (
-              <option key={target} value={target}>
-                {HARNESS_PROFILES[target].displayName}
-              </option>
-            ))}
-          </select>
-        </label>
 
         <span className="spacer" />
 
@@ -713,27 +760,45 @@ export function WorkflowScreen({ onExit, start }: WorkflowScreenProps) {
           <span className="pill on">Ready</span>
         )}
 
+        {/* It compiles into the prompt and decides which harness the prompt
+            targets, so it belongs beside the button that hands it over — not
+            on the far side of the bar next to the workflow's name. */}
+        <label className="harness harness-picker">
+          <span>Harness</span>
+          {/* The picker is the control; the select inside it is not. */}
+          <select
+            value={workflow.target ?? ""}
+            onChange={(event) =>
+              editWorkflow((current) => ({
+                ...current,
+                target: event.target.value as HarnessTarget,
+              }))
+            }
+          >
+            <option value="" disabled>
+              Choose…
+            </option>
+            {HARNESS_TARGETS.map((target) => (
+              <option key={target} value={target}>
+                {HARNESS_PROFILES[target].displayName}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <span className="divider" />
         {/* Beside the document actions, because that is what a step is: the
             whole workflow moving, not something inside it changing. */}
-        <button
-          className="icon-button"
-          aria-label="Step back"
-          title="Step back (⌘Z)"
-          disabled={!canStepBack(history)}
-          onClick={() => step("back")}
-        >
-          ↶
-        </button>
-        <button
-          className="icon-button"
-          aria-label="Step forward"
-          title="Step forward (⇧⌘Z)"
-          disabled={!canStepForward(history)}
-          onClick={() => step("forward")}
-        >
-          ↷
-        </button>
+        <StepButton
+          direction="back"
+          available={canStepBack(history)}
+          onStep={() => step("back")}
+        />
+        <StepButton
+          direction="forward"
+          available={canStepForward(history)}
+          onStep={() => step("forward")}
+        />
 
         <button onClick={newWorkflow}>New</button>
         <button onClick={() => void open()}>Open</button>
@@ -774,6 +839,7 @@ export function WorkflowScreen({ onExit, start }: WorkflowScreenProps) {
 
       <div className="body">
         <WorkflowLibraries
+          onSettings={onSettings}
           workflow={workflow}
           onChange={editWorkflow}
           tab={library}

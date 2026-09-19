@@ -79,7 +79,7 @@ async function workflow() {
   stubApi();
   render(
     <StrictMode>
-      <WorkflowScreen onExit={() => undefined} />
+      <WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />
     </StrictMode>,
   );
   const template = await screen.findByText(/Implement, test, fix/);
@@ -238,7 +238,7 @@ describe("the live session page and what main knows", () => {
       return () => undefined;
     });
 
-    render(<WorkflowScreen onExit={() => undefined} />);
+    render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />);
     await openTemplateAndLearnId();
     for (const listener of listeners) {
       listener({ runs: [{ ...observed, workflowId: observedWorkflowId }], capabilities: [] });
@@ -292,7 +292,7 @@ describe("the live session page and what main knows", () => {
       capabilities: [],
     });
 
-    render(<WorkflowScreen onExit={() => undefined} />);
+    render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />);
     const template = await screen.findByText(/One agent solves it/);
     fireEvent.click(template.closest("button") as HTMLElement);
     await screen.findByRole("button", { name: "Prompt" });
@@ -311,7 +311,7 @@ describe("the live session page and what main knows", () => {
       return () => undefined;
     });
 
-    render(<WorkflowScreen onExit={() => undefined} />);
+    render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />);
     await openTemplateAndLearnId();
     for (const listener of listeners) {
       listener({ runs: [{ ...observed, workflowId: observedWorkflowId }], capabilities: [] });
@@ -429,11 +429,24 @@ describe("the describe-a-change assistant", () => {
 describe("stepping through edits", () => {
   const back = () => screen.getByRole("button", { name: "Step back" }) as HTMLButtonElement;
   const forward = () => screen.getByRole("button", { name: "Step forward" }) as HTMLButtonElement;
+  /*
+    Unavailable is `aria-disabled`, not `disabled` (ANT-85).
+
+    A disabled button is removed from the tab order, so a keyboard user cannot
+    reach it and cannot read the title that says why it does nothing. Dimmed
+    and still reachable teaches; gone teaches nothing.
+  */
+  const unavailable = (button: HTMLButtonElement) =>
+    button.getAttribute("aria-disabled") === "true";
 
   it("offers nowhere to go on a freshly opened workflow", async () => {
     await workflow();
-    expect(back().disabled).toBe(true);
-    expect(forward().disabled).toBe(true);
+    expect(unavailable(back())).toBe(true);
+    expect(unavailable(forward())).toBe(true);
+    // Reachable, so the title can explain itself.
+    expect(back().disabled).toBe(false);
+    expect(back().title).toBe("Nothing to undo");
+    expect(forward().title).toBe("Nothing to redo");
   });
 
   it("takes an edit back and puts it forward again", async () => {
@@ -441,13 +454,13 @@ describe("stepping through edits", () => {
     const name = screen.getByDisplayValue(/Implement, test, fix/) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "Renamed workflow" } });
 
-    expect(back().disabled).toBe(false);
+    expect(unavailable(back())).toBe(false);
     fireEvent.click(back());
     expect((screen.getByDisplayValue(/Implement, test, fix/) as HTMLInputElement).value).toContain(
       "Implement, test, fix",
     );
 
-    expect(forward().disabled).toBe(false);
+    expect(unavailable(forward())).toBe(false);
     fireEvent.click(forward());
     expect(screen.getByDisplayValue("Renamed workflow")).toBeTruthy();
   });
@@ -460,10 +473,10 @@ describe("stepping through edits", () => {
       ) as HTMLInputElement;
     fireEvent.change(name(), { target: { value: "First" } });
     fireEvent.click(back());
-    expect(forward().disabled).toBe(false);
+    expect(unavailable(forward())).toBe(false);
 
     fireEvent.change(name(), { target: { value: "Second" } });
-    expect(forward().disabled).toBe(true);
+    expect(unavailable(forward())).toBe(true);
   });
 
   it("covers an edit made from the assistant, not only the canvas", async () => {
@@ -472,7 +485,7 @@ describe("stepping through edits", () => {
     fireEvent.change(screen.getByDisplayValue(/Implement, test, fix/), {
       target: { value: "Edited" },
     });
-    expect(back().disabled).toBe(false);
+    expect(unavailable(back())).toBe(false);
   });
 });
 
@@ -552,7 +565,7 @@ describe("what Save says for itself", () => {
     api.saveWorkflow = vi.fn(
       () => new Promise<SaveWorkflowResult>((resolve) => { land = resolve; }),
     );
-    render(<WorkflowScreen onExit={() => undefined} />);
+    render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />);
     const template = await screen.findByText(/Implement, test, fix/);
     fireEvent.click(template.closest("button") as HTMLElement);
     await screen.findByRole("button", { name: "Prompt" });
@@ -570,7 +583,7 @@ describe("what Save says for itself", () => {
   it("claims nothing when the author cancels the dialog", async () => {
     const api = stubApi();
     api.saveWorkflow = vi.fn(async (): Promise<SaveWorkflowResult> => ({ kind: "cancelled" }));
-    render(<WorkflowScreen onExit={() => undefined} />);
+    render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />);
     const template = await screen.findByText(/Implement, test, fix/);
     fireEvent.click(template.closest("button") as HTMLElement);
     await screen.findByRole("button", { name: "Prompt" });
@@ -585,7 +598,7 @@ describe("what Save says for itself", () => {
     api.saveWorkflow = vi.fn(
       async (): Promise<SaveWorkflowResult> => ({ kind: "failed", error: "no space left on device" }),
     );
-    render(<WorkflowScreen onExit={() => undefined} />);
+    render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />);
     const template = await screen.findByText(/Implement, test, fix/);
     fireEvent.click(template.closest("button") as HTMLElement);
     await screen.findByRole("button", { name: "Prompt" });
@@ -603,7 +616,7 @@ describe("what Save says for itself", () => {
       () => new Promise<SaveWorkflowResult>((resolve) => { land = resolve; }),
     );
     api.saveWorkflow = calls;
-    render(<WorkflowScreen onExit={() => undefined} />);
+    render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />);
     const template = await screen.findByText(/Implement, test, fix/);
     fireEvent.click(template.closest("button") as HTMLElement);
     await screen.findByRole("button", { name: "Prompt" });
@@ -659,7 +672,7 @@ describe("saving from the keyboard", () => {
     api.saveWorkflow = vi.fn(
       async (): Promise<SaveWorkflowResult> => ({ kind: "failed", error: "read-only volume" }),
     );
-    render(<WorkflowScreen onExit={() => undefined} />);
+    render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />);
     const template = await screen.findByText(/Implement, test, fix/);
     fireEvent.click(template.closest("button") as HTMLElement);
     await screen.findByRole("button", { name: "Prompt" });
@@ -693,7 +706,7 @@ describe("saving from the keyboard", () => {
     api.saveWorkflow = vi.fn(
       () => new Promise<SaveWorkflowResult>((resolve) => { land = resolve; }),
     );
-    render(<WorkflowScreen onExit={() => undefined} />);
+    render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />);
     const template = await screen.findByText(/Implement, test, fix/);
     fireEvent.click(template.closest("button") as HTMLElement);
     await screen.findByRole("button", { name: "Prompt" });

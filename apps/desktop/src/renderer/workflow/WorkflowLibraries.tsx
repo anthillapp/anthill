@@ -30,6 +30,8 @@ export type WorkflowLibrariesProps = {
   onAddBlock: (block: LibraryBlock) => void;
   selectedAgentId?: string;
   onSelectAgent: (agentId: string | undefined) => void;
+  /** The rail's door to Settings, on both tabs. */
+  onSettings: () => void;
 };
 
 export function WorkflowLibraries({
@@ -42,6 +44,7 @@ export function WorkflowLibraries({
   onAddBlock,
   selectedAgentId,
   onSelectAgent,
+  onSettings,
 }: WorkflowLibrariesProps) {
   const agents = agentProfiles(workflow);
   const blockCount = totalBlockCount(custom);
@@ -77,6 +80,16 @@ export function WorkflowLibraries({
           onSelect={onSelectAgent}
         />
       )}
+
+      {/* The foot of the rail, on both tabs, where Claude Code and Codex keep
+          theirs. Not the top bar: that bar is about the document in front of
+          you, and an app-level door there competes with it. */}
+      <button type="button" className="rail-settings on-dark" onClick={onSettings}>
+        <span className="glyph" aria-hidden="true">
+          ⚙
+        </span>
+        Settings
+      </button>
     </aside>
   );
 }

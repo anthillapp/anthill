@@ -24,33 +24,34 @@ describe("the block library's default palette", () => {
     expect(screen.getByText("End")).toBeDefined();
   });
 
-  it("shows only palette-tier actions in a category by default", () => {
+  it("shows everything in a category, with nothing folded away", () => {
+    // The category already narrows the list to a handful, so a second fold
+    // inside it bought nothing and cost a row that had to be understood before
+    // the list could be trusted to be the list.
     renderLibrary();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "verify" } });
 
-    // Palette-tier Verify actions.
-    expect(screen.getByText("Check")).toBeDefined();
-    expect(screen.getByText("LLM Review")).toBeDefined();
-    expect(screen.getByText("Adversarial Review")).toBeDefined();
-    expect(screen.getByText("Run Tests")).toBeDefined();
-    expect(screen.getByText("Browser Check")).toBeDefined();
-
-    // Library-tier Verify actions must not be in the default list.
-    expect(screen.queryByText("Fact Check")).toBeNull();
-    expect(screen.queryByText("Code Review")).toBeNull();
-    expect(screen.queryByText("Criteria Review")).toBeNull();
-    expect(screen.queryByText("Security / Privacy Review")).toBeNull();
-    expect(screen.queryByText("Accessibility Review")).toBeNull();
+    for (const label of [
+      "Check",
+      "LLM Review",
+      "Adversarial Review",
+      "Run Tests",
+      "Browser Check",
+      "Fact Check",
+      "Code Review",
+      "Criteria Review",
+      "Security / Privacy Review",
+      "Accessibility Review",
+    ]) {
+      expect(screen.getByText(label)).toBeDefined();
+    }
   });
 
-  it("reveals the rest of the category through \"Show N more\"", () => {
+  it("offers nothing to expand, because there is nothing held back", () => {
     renderLibrary();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "verify" } });
-
-    expect(screen.queryByText("Fact Check")).toBeNull();
-    fireEvent.click(screen.getByText(/Show \d+ less common actions?/));
-    expect(screen.getByText("Fact Check")).toBeDefined();
-    expect(screen.getByText("Code Review")).toBeDefined();
+    expect(screen.queryByText(/less common actions?/)).toBeNull();
+    expect(screen.queryByText(/Show common actions only/)).toBeNull();
   });
 
   it("reaches a library-tier action through search without expanding anything", () => {

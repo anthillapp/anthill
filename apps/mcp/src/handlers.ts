@@ -30,6 +30,7 @@
 import {
   ExchangeStore,
   type Eligibility,
+  type EligibilityRefusal,
   type ExchangeWorkflow,
 } from "@anthill/exchange-store";
 import { MARKER_VERSION, cliInstruction, newNonce, newRunId, workflowSteps } from "@anthill/live";
@@ -40,6 +41,7 @@ import {
   readSubmission,
   type ExchangeProblem,
 } from "@anthill/workflow-exchange";
+import type { Workflow } from "@anthill/workflow-schema";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createHash } from "node:crypto";
 
@@ -162,6 +164,23 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
   const mintRunId = dependencies.mintRunId ?? (() => newRunId());
   const mintNonce = dependencies.mintNonce ?? (() => newNonce());
 
+  /**
+   * The revision an `incomplete` refusal is about, where there is one.
+   *
+   * Read only for that one reason, and only to put a block's name in front of
+   * each question: a refusal names the revision by number, and the names the
+   * user needs to hear are in the snapshot. Every other refusal is about the
+   * workflow rather than about anything inside it.
+   */
+  async function incompleteRevision(
+    workflowId: string,
+    reason: EligibilityRefusal | undefined,
+    revision: number | undefined,
+  ): Promise<Workflow | undefined> {
+    if (reason !== "incomplete" || revision === undefined) return undefined;
+    return (await store.readRevision(workflowId, revision))?.workflow;
+  }
+
   return {
     async createWorkflowDraft(input): Promise<CallToolResult> {
       const submitted = {
@@ -197,7 +216,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       // holds the name — which is the confusion the refusal exists to report.
       if (created.outcome !== "created" && created.outcome !== "already_exists") {
         return result(draftText, {
-          ...invalidDraft(problems),
+          ...invalidDraft(problems, submission.workflow),
           outcome: created.outcome === "refused" ? "incomplete" : "invalid",
           workflowId: created.workflowId,
         });
@@ -236,7 +255,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         ...(stored?.identity ? { mode: stored.identity.mode } : {}),
         displayed: false,
         displayRequested: drop.outcome !== "conflict",
-        ...(all.length > 0 ? { problems: all, questions: questionsFrom(all) } : {}),
+        ...(all.length > 0 ? { problems: all, questions: questionsFrom(all, submission.workflow) } : {}),
       });
     },
 
@@ -284,6 +303,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       const eligibility = await store.eligibleRevision(workflowId);
 
       if (!eligibility.eligible) {
+        const refused = await incompleteRevision(workflowId, eligibility.reason, eligibility.revision);
         // An id nothing was stored under is not a workflow that is not ready
         // yet. Relaying it as one tells the caller to wait for a user who has
         // nothing in front of them to approve, and no amount of waiting turns
@@ -292,7 +312,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
           return result(readyText, {
             outcome: "no_such_workflow",
             workflowId,
-            ...notReadyFields(eligibility),
+            ...notReadyFields(eligibility, refused),
           });
         }
 
@@ -300,7 +320,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
           outcome: "not_ready",
           workflowId,
           url: workflowUrl(workflowId),
-          ...notReadyFields(eligibility),
+          ...notReadyFields(eligibility, refused),
         });
       }
 
@@ -366,6 +386,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         () => ({ runId: mintRunId(), nonce: mintNonce() }));
 
       if (bound.outcome !== "bound" && bound.outcome !== "already_bound") {
+        const refused = await incompleteRevision(workflowId, bound.reason, bound.revision);
         return result(bindText, {
           outcome:
             bound.outcome === "no_such_workflow"
@@ -377,7 +398,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
           ...(bound.outcome !== "no_such_workflow" ? { url } : {}),
           revision: at,
           ...(bound.reason ? { reason: bound.reason } : {}),
-          ...problemFields(bound.problems),
+          ...problemFields(bound.problems, refused),
         });
       }
 
@@ -461,11 +482,11 @@ function result<Answer extends Record<string, unknown>>(
   };
 }
 
-function invalidDraft(problems: readonly ExchangeProblem[]): DraftAnswer {
+function invalidDraft(problems: readonly ExchangeProblem[], workflow?: Workflow): DraftAnswer {
   return {
     outcome: "invalid",
     problems: [...problems],
-    questions: questionsFrom(problems),
+    questions: questionsFrom(problems, workflow),
   };
 }
 
@@ -496,21 +517,28 @@ function eligibilityFields(eligibility: Eligibility): Partial<WorkflowAnswer> {
 /** The refusing half of an eligibility answer, for the two tools that relay one. */
 function notReadyFields(
   eligibility: Extract<Eligibility, { eligible: false }>,
+  workflow?: Workflow,
 ): Partial<ReadyAnswer & BindAnswer> {
   return {
     reason: eligibility.reason,
     ...(eligibility.mode ? { mode: eligibility.mode } : {}),
     ...(eligibility.revision !== undefined ? { revision: eligibility.revision } : {}),
-    ...problemFields(eligibility.problems),
+    ...problemFields(eligibility.problems, workflow),
   };
 }
 
-function problemFields(problems: readonly ExchangeProblem[] | undefined): {
+/**
+ * The problems and the questions they carry.
+ *
+ * The workflow is passed wherever there is one, because a question about a
+ * step is unanswerable without the step's name — see `questionsFrom`.
+ */
+function problemFields(problems: readonly ExchangeProblem[] | undefined, workflow?: Workflow): {
   problems?: ExchangeProblem[];
   questions?: string[];
 } {
   if (!problems || problems.length === 0) return {};
-  return { problems: [...problems], questions: questionsFrom(problems) };
+  return { problems: [...problems], questions: questionsFrom(problems, workflow) };
 }
 
 /**

@@ -105,6 +105,44 @@ function completeWorkflow(overrides: Partial<Workflow> = {}): Workflow {
   };
 }
 
+/**
+ * Five steps, none of them finished, and five different blocks to ask about.
+ *
+ * Every step carries everything but its task, so the only thing wrong with
+ * this workflow is the same thing five times over — which is the case a list
+ * of questions keyed on the question alone collapses into one.
+ */
+function fiveUnfinishedSteps(overrides: Partial<Workflow> = {}): Workflow {
+  const names = ["Investigate", "Fix it", "Cover it", "Review it", "Ship it"];
+  return completeWorkflow({
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      ...names.map((name, index) => ({
+        id: `step-${index + 1}`,
+        type: "agent" as const,
+        name,
+        config: {
+          actionKind: "implement",
+          task: "",
+          agentId: "agent-1",
+          expectedOutput: "A patch, and a test that fails without it.",
+          successCriteria: ["The new test fails on the old code."],
+        },
+      })),
+      { id: "end", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "edge-0", source: "start", target: "step-1" },
+      ...names.map((_, index) => ({
+        id: `edge-${index + 1}`,
+        source: `step-${index + 1}`,
+        target: index + 1 < names.length ? `step-${index + 2}` : "end",
+      })),
+    ],
+    ...overrides,
+  });
+}
+
 function draftInput(overrides: Partial<CreateDraftInput> = {}): CreateDraftInput {
   return {
     idempotencyKey: "handover-7",
@@ -216,6 +254,46 @@ describe("create_workflow_draft", () => {
     expect(await store.readRevision("workflow-1", 1)).toBeUndefined();
     expect(await inbox(store)).toHaveLength(0);
     expect(answerOf(await handlers.createWorkflowDraft(draftInput())).outcome).toBe("created");
+  });
+
+  it("asks about every unfinished block by name, not once for all five", async () => {
+    const { handlers } = await openTools();
+
+    const result = await handlers.createWorkflowDraft(
+      draftInput({ workflow: fiveUnfinishedSteps() }),
+    );
+    const answer = answerOf(result);
+    const questions = answer.questions as string[];
+
+    // One question per block. Keyed on the sentence alone, the model was
+    // handed a single "What exactly should this step do?" and asked to put it
+    // to the user, who had five steps and no way to tell which was meant.
+    expect(answer.outcome).toBe("incomplete");
+    expect(questions).toHaveLength(5);
+    for (const name of ["Investigate", "Fix it", "Cover it", "Review it", "Ship it"]) {
+      expect(questions.filter((question) => question.startsWith(`${name}: `))).toHaveLength(1);
+    }
+    for (const question of questions) expect(textOf(result)).toContain(question);
+  });
+
+  it("still asks a question about the workflow itself only once", async () => {
+    const { handlers } = await openTools();
+
+    const answer = answerOf(
+      await handlers.createWorkflowDraft(
+        draftInput({
+          workflow: fiveUnfinishedSteps({ brief: { doneCriteria: ["The suite passes."] } }),
+        }),
+      ),
+    );
+    const questions = answer.questions as string[];
+
+    // The missing goal belongs to no block, and five steps reading from it is
+    // still one question.
+    const goal = questions.filter((question) => question.includes("What is this work for?"));
+    expect(goal).toHaveLength(1);
+    expect(goal[0]).toBe(goal[0].trim());
+    expect(questions).toHaveLength(6);
   });
 
   it("refuses a handover that cannot be read, and stores nothing", async () => {
@@ -502,6 +580,28 @@ describe("bind_run", () => {
       expect(textOf(result).length, where).toBeGreaterThan(0);
     }
     expect((await store.readWorkflow("workflow-1"))?.bindings).toHaveLength(0);
+  });
+
+  it("shows the way on when a binding key has already been spent", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    const first = answerOf(await handlers.bindRun(bindInput()));
+
+    // A harness that restarted: it repeats the key it was told to repeat, from
+    // a session with a new id, and the run it is trying to rejoin is already
+    // on disk. Refused — but not into a dead end.
+    const again = await handlers.bindRun(bindInput({ sessionId: "session-restarted" }));
+
+    expect(answerOf(again).outcome).toBe("conflict");
+    expect(textOf(again)).toContain("Use a new idempotencyKey for a deliberate new run");
+    expect(textOf(again)).toContain("get_workflow");
+    expect((await store.readWorkflow("workflow-1"))?.bindings).toHaveLength(1);
+
+    // And what get_workflow then has to say: both halves of what the reporting
+    // commands take, not just the run id.
+    expect(textOf(await handlers.getWorkflow({ workflowId: "workflow-1" }))).toContain(
+      `${first.runId} (nonce ${first.nonce})`,
+    );
   });
 
   it("returns the committed binding after restart and a later edit, refusing key reuse", async () => {

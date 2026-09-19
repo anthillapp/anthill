@@ -207,7 +207,11 @@ export function workflowText(answer: WorkflowAnswer): string {
   );
   facts.push(
     answer.bindings && answer.bindings.length > 0
-      ? `Runs: ${answer.bindings.map((binding) => `${binding.runId} on revision ${binding.revision}`).join(", ")}`
+      ? // The nonce beside the run id, because the two together are what the
+        // reporting commands take: this is where a harness that lost them —
+        // one that restarted, and cannot bind again because its key is spent
+        // — comes to find them.
+        `Runs: ${answer.bindings.map((binding) => `${binding.runId} (nonce ${binding.nonce}) on revision ${binding.revision}`).join(", ")}`
       : "Runs: none bound",
   );
   parts.push(bulleted(facts));
@@ -300,6 +304,13 @@ export function bindText(answer: BindAnswer): string {
     return join([
       `Nothing was bound to ${answer.workflowId}.`,
       ...detail(answer.questions, answer.problems),
+      // Both ways on, because the common cause of this is a harness that
+      // restarted: it repeats the binding key it was told to repeat, from a
+      // session with a new id, and the run it is trying to rejoin is already
+      // on disk. Without this the model is told no and left with nowhere to
+      // go, and the run id and nonce it needs are in neither this answer nor
+      // anything it has been told to read.
+      "Use a new idempotencyKey for a deliberate new run, or call get_workflow to recover the run id and nonce of the existing binding.",
       answer.url ?? "",
     ]);
   }
@@ -361,14 +372,38 @@ function userCanClear(reason: EligibilityRefusal): boolean {
   return reason === "awaiting_approval" || reason === "incomplete";
 }
 
-/** Every question a list of problems carries, in order and without repeats. */
-export function questionsFrom(problems: readonly ExchangeProblem[]): string[] {
+/**
+ * Every question a list of problems carries, in order, each said once.
+ *
+ * "Once" used to mean once per sentence, which quietly turned a workflow with
+ * five unfinished steps into a single "What exactly should this step do?" —
+ * and the tool description tells the model to read the questions out, so the
+ * user was asked one question about five things and had no way to answer it.
+ * The problems knew which block each was about all along; only this function
+ * threw it away. So a repeat is now a repeat of the same question about the
+ * same block, and a question that belongs to a block is prefixed with the
+ * block's name, which the revision carries.
+ *
+ * The collapse is kept for problems with no block, because those genuinely are
+ * one question: a brief with no goal is not five problems however many steps
+ * read from it.
+ */
+export function questionsFrom(
+  problems: readonly ExchangeProblem[],
+  workflow?: Workflow,
+): string[] {
+  const names = new Map((workflow?.nodes ?? []).map((node) => [node.id, node.name.trim()]));
   const asked = new Set<string>();
   const questions: string[] = [];
   for (const problem of problems) {
-    if (!problem.ask || asked.has(problem.ask)) continue;
-    asked.add(problem.ask);
-    questions.push(problem.ask);
+    if (!problem.ask) continue;
+    const key = `${problem.nodeId ?? ""}\u0000${problem.ask}`;
+    if (asked.has(key)) continue;
+    asked.add(key);
+    // The id where the name is unknown or blank: it is worse to read out than
+    // a name, and it is still the one thing that tells two of these apart.
+    const named = problem.nodeId ? names.get(problem.nodeId) || problem.nodeId : undefined;
+    questions.push(named ? `${named}: ${problem.ask}` : problem.ask);
   }
   return questions;
 }

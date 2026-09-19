@@ -150,6 +150,15 @@ export type BindRun = {
 export type BindResult = {
   outcome: "bound" | "already_bound" | "not_eligible" | "no_such_workflow" | "conflict";
   reason?: EligibilityRefusal;
+  /**
+   * The revision a refusal is about, which is not always the one asked for.
+   *
+   * A bind names the revision the caller believes is current, and eligibility
+   * answers about the one that actually is — the head, or the one the user
+   * approved. When they differ, the problems describe the second, and a caller
+   * that read them against the first would go looking in the wrong snapshot.
+   */
+  revision?: number;
   /** The binding that holds the revision — the existing one, on a conflict. */
   binding?: Binding;
   problems?: ExchangeProblem[];
@@ -669,6 +678,7 @@ export class ExchangeStore {
         outcome: eligible.reason === "no_such_workflow" ? "no_such_workflow" : "not_eligible",
         problems: eligible.problems,
         reason: eligible.reason,
+        ...(eligible.revision !== undefined ? { revision: eligible.revision } : {}),
       };
     }
 

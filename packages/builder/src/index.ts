@@ -26,6 +26,8 @@ export type {
 export { NODE_TYPES } from "./contracts";
 
 /* Document: pure workflow edit operations. */
+export { withDisplayLayout } from "./display-layout";
+
 export {
   NODE_TYPE_LABELS,
   WorkflowDocumentError,

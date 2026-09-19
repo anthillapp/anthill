@@ -24,6 +24,7 @@ const anthillPackages = [
   "@anthill/engine",
   "@anthill/live",
   "@anthill/workflow",
+  "@anthill/workflow-exchange",
   "@anthill/run-store",
   "@anthill/runtimes",
   "@anthill/ui",

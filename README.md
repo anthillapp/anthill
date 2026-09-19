@@ -346,6 +346,7 @@ apps/
 packages/
   workflow-schema/  the graph model and its validation
   workflow/         actions, agents, harness profiles, validation, prompt and file compilation
+  workflow-exchange/ the contract a coding harness hands a workflow over on
   builder/          canvas, palette, document operations
   live/             run markers, pending-run state, bootstrap prompts, observation events
   ui/               shared UI primitives

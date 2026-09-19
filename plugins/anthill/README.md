@@ -10,8 +10,11 @@ Verified against **Claude Code 2.1.261** (desktop app 2.2553.1) and **Anthill
 
 ## What it gives you
 
-* `/anthill` — one skill, taking `design`, `review`, `status`, `resume` or
-  `doctor` plus a task or a workflow id.
+* `/anthill:workflow` — one skill, taking `design`, `review`, `status`, `resume`
+  or `doctor` plus a task or a workflow id. It is listed as `anthill:workflow`,
+  and a session with no other skill of that name also answers to the short
+  `/workflow` — the namespaced spelling is the one that cannot be taken by
+  somebody else's plugin.
 * Four MCP tools from Anthill's own server, which the skill calls for you.
 
 ## Installing
@@ -66,7 +69,7 @@ point the server at it explicitly by adding arguments in `.mcp.json`:
 ```
 
 Getting this wrong is quiet rather than loud: the server stores every handover
-happily while the app watches a directory nothing arrives in. `/anthill doctor`
+happily while the app watches a directory nothing arrives in. `/anthill:workflow doctor`
 prints the directory the server is actually serving.
 
 ## Scopes
@@ -82,11 +85,11 @@ to them and works the same under each.
 ## Using it
 
 ```
-/anthill design Add retry-once to the checkout flow and show the plan
-/anthill review Rework the importer, but let me approve the steps first
-/anthill status  workflow-checkout-rework
-/anthill resume  workflow-checkout-rework
-/anthill doctor
+/anthill:workflow design Add retry-once to the checkout flow and show the plan
+/anthill:workflow review Rework the importer, but let me approve the steps first
+/anthill:workflow status  workflow-checkout-rework
+/anthill:workflow resume  workflow-checkout-rework
+/anthill:workflow doctor
 ```
 
 `design` hands the work over and gets on with it. `review` waits for you to mark
@@ -128,8 +131,7 @@ once is not retried for fifteen minutes. Fix the cause, then start a new session
 `~/.claude/mcp-needs-auth-cache.json`.
 
 **`no_such_workflow` for an id you just made.** Almost always the data
-directory: the server is writing somewhere the app is not reading. `/anthill
-doctor`.
+directory: the server is writing somewhere the app is not reading. `/anthill:workflow doctor`.
 
 **Progress does not appear in Anthill.** The `anthill` CLI writes the reports;
 check it is on the path. Without it the work still happens, and the diagram just

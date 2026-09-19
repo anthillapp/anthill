@@ -1,6 +1,6 @@
 ---
-name: anthill
-description: Use when the user wants the work of this session laid out as a workflow in Anthill — "show this in Anthill", "plan this out in Anthill", "/anthill design …" — or wants to pick a handed-over workflow back up, check where one stands, or approve one before work starts. Covers handing a task over as a reviewable graph, asking the questions that make it complete, binding a run to the revision the user approved, and reporting progress against it. Not for work that is not going to be done in this session.
+name: workflow
+description: Use when the user wants the work of this session laid out as a workflow in Anthill — "show this in Anthill", "plan this out in Anthill", "/anthill:workflow design …" — or wants to pick a handed-over workflow back up, check where one stands, or approve one before work starts. Covers handing a task over as a reviewable graph, asking the questions that make it complete, binding a run to the revision the user approved, and reporting progress against it. Not for work that is not going to be done in this session.
 version: 0.7.0
 user-invocable: true
 argument-hint: "[design|review · status|resume · doctor] [task or workflow id]"
@@ -38,7 +38,7 @@ connected. Say so, say the work can go ahead without Anthill if they want, and d
 not pretend a workflow exists. Never build a workflow you cannot submit.
 
 A server that failed to start once is not retried for fifteen minutes, so a
-connection fixed a moment ago may still look broken. `/anthill doctor` says what
+connection fixed a moment ago may still look broken. `/anthill:workflow doctor` says what
 the host thinks, and `claude mcp list` says what is actually reachable.
 
 **Find out who you are.** Every handover records the session that made it, and

@@ -71,6 +71,7 @@ import { AgentLibraryStore } from "./agent-library.js";
 import { AssistantThreadStore } from "./assistant-threads.js";
 import { SettingsStore } from "./settings.js";
 import { PendingRunStore } from "./live/store.js";
+import { WorkflowStatusStore } from "./live/workflow-status.js";
 import {
   forgetRecent,
   listRecents,
@@ -216,6 +217,7 @@ let liveSetup: ObservationSetupService | undefined;
 let agents: AgentLibraryStore | undefined;
 let assistantThreads: AssistantThreadStore | undefined;
 let settingsStore: SettingsStore | undefined;
+let workflowStatusStore: WorkflowStatusStore | undefined;
 
 /**
  * `~` is a shell convenience, not a path. Agents write it constantly, and
@@ -224,6 +226,13 @@ let settingsStore: SettingsStore | undefined;
 function expandHome(path: string): string {
   if (path === "~") return app.getPath("home");
   return path.startsWith("~/") ? join(app.getPath("home"), path.slice(2)) : path;
+}
+
+function workflowStatus(): WorkflowStatusStore {
+  workflowStatusStore ??= new WorkflowStatusStore(
+    join(app.getPath("userData"), "workflow-status.json"),
+  );
+  return workflowStatusStore;
 }
 
 function settings(): SettingsStore {
@@ -297,6 +306,9 @@ function liveService(): LiveSessionService {
         })
         .catch(() => undefined);
     },
+    // How a run ended outlives the run itself, so the launch window can still
+    // colour its row a week later (ANT-84).
+    (run) => void workflowStatus().remember(run).catch(() => undefined),
   );
   return live;
 }
@@ -697,8 +709,31 @@ function registerIpcHandlers(): void {
   );
 
   // The launch window's list of what was open recently.
-  handle(IpcChannel.recentsList, async () => listRecents());
-  handle(IpcChannel.recentsForget, async (_event, path: string) => forgetRecent(path));
+  /*
+    The list, with each row's last known outcome attached.
+
+    Joined here rather than inside `listRecents` because the two answer
+    different questions from different places: that one is about files on disk,
+    this one is about what Anthill observed. A row whose workflow is being
+    watched right now is coloured from the live snapshot instead — the renderer
+    prefers the live run, so these two can never contradict each other.
+  */
+  handle(IpcChannel.recentsList, async () => {
+    const [rows, endings] = await Promise.all([listRecents(), workflowStatus().all()]);
+    return rows.map((row) => {
+      const ending = row.workflowId ? endings[row.workflowId] : undefined;
+      return ending ? { ...row, lastRun: { state: ending.state, at: ending.at } } : row;
+    });
+  });
+
+  handle(IpcChannel.recentsForget, async (_event, path: string) => {
+    // Taking a row off the list takes its dot with it: this record is only
+    // ever read through that list, so one left behind could never be asked
+    // about again.
+    const row = (await listRecents()).find((item) => item.path === path);
+    await forgetRecent(path);
+    if (row?.workflowId) await workflowStatus().forget(row.workflowId);
+  });
 
   /*
     Paths an agent wrote about, and showing one on disk.

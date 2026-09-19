@@ -31,6 +31,8 @@ type Harness = {
   published: LiveSessionSnapshot[];
   /** Every step transition the service judged worth interrupting someone for. */
   notices: { title: string; body: string; stepId: string }[];
+  /** Every run the service reported as having reached an ending. */
+  settled: { runId: string; workflowId?: string; state: string; at?: string }[];
   setNow: (iso: string) => void;
 };
 
@@ -43,6 +45,7 @@ async function harness(startAt = "2026-08-29T10:00:00.000Z"): Promise<Harness> {
   const store = new PendingRunStore(storePath);
   const published: LiveSessionSnapshot[] = [];
   const notices: { title: string; body: string; stepId: string }[] = [];
+  const settled: { runId: string; workflowId?: string; state: string; at?: string }[] = [];
   let now = startAt;
 
   const hookLogPath = join(dir, "hooks", "events.jsonl");
@@ -60,6 +63,13 @@ async function harness(startAt = "2026-08-29T10:00:00.000Z"): Promise<Harness> {
     },
     () => undefined,
     (notice) => notices.push({ title: notice.title, body: notice.body, stepId: notice.stepId }),
+    (run) =>
+      settled.push({
+        runId: run.anthillRunId,
+        workflowId: run.workflowId,
+        state: run.state,
+        at: run.lastObservedAt,
+      }),
   );
 
   return {
@@ -71,6 +81,7 @@ async function harness(startAt = "2026-08-29T10:00:00.000Z"): Promise<Harness> {
     storePath,
     published,
     notices,
+    settled,
     setNow: (iso) => (now = iso),
   };
 }
@@ -1136,5 +1147,74 @@ describe("what the service offers for notification", () => {
     // The event is still on the record; only the interruption is withheld.
     const events = await h.service.events(RUN_ID);
     expect(events.some((event) => event.kind === "step.marker")).toBe(true);
+  });
+});
+
+/**
+ * What survives the run being dropped.
+ *
+ * The live store is a working set: a settled run is gone a day after its last
+ * evidence, and the launch window's dot was read from it — so every row turned
+ * grey a day after it was last used, which is what ANT-84 was reported as. The
+ * service now says when a run reaches an ending, once, while it still knows
+ * which workflow that was.
+ */
+describe("endings worth writing down", () => {
+  const START = "2026-08-29T10:00:00.000Z";
+  const at = (ms: number) => new Date(Date.parse(START) + ms).toISOString();
+
+  it("reports a session that finished, with the workflow it belongs to", async () => {
+    const h = await harness(START);
+    await h.service.start();
+    await h.service.startObservation(observeRequest);
+    await writeTranscript(h.claudeRoot, "sess-1", { stopReason: "end_turn" });
+    await h.service.poll();
+
+    // Finished, then quiet long enough for the finish to be believed.
+    h.setNow(at(TIMING.activityTtlMs + 60_000));
+    await h.service.poll();
+
+    expect(h.settled).toHaveLength(1);
+    expect(h.settled[0]).toMatchObject({
+      runId: RUN_ID,
+      workflowId: "workflow-1",
+      state: "completed",
+    });
+  });
+
+  it("reports a run that was never claimed, once its window ran out", async () => {
+    const h = await harness(START);
+    await h.service.start();
+    await h.service.startObservation(observeRequest);
+    // Nothing ever carried the marker; the discovery deadline passes.
+    h.setNow(at(TIMING.pendingTtlMs + 60_000));
+    await h.service.poll();
+
+    expect(h.settled.map((item) => item.state)).toEqual(["failed"]);
+  });
+
+  it("says nothing while a run is still being watched", async () => {
+    const h = await harness(START);
+    await h.service.start();
+    await h.service.startObservation(observeRequest);
+    await writeTranscript(h.claudeRoot, "sess-1");
+    await h.service.poll();
+
+    expect(only(h.service.snapshot()).state).toBe("detected_live");
+    expect(h.settled).toEqual([]);
+  });
+
+  it("does not repeat itself while nothing about the ending changes", async () => {
+    const h = await harness(START);
+    await h.service.start();
+    await h.service.startObservation(observeRequest);
+    await writeTranscript(h.claudeRoot, "sess-1", { stopReason: "end_turn" });
+    await h.service.poll();
+    h.setNow(at(TIMING.activityTtlMs + 60_000));
+    await h.service.poll();
+    h.setNow(at(TIMING.activityTtlMs + 120_000));
+    await h.service.poll();
+
+    expect(h.settled).toHaveLength(1);
   });
 });

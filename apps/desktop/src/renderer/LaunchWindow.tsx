@@ -69,6 +69,25 @@ const CHIP: Record<LiveSessionState, { label: string; tone: string; pulse: boole
 /** A workflow, plus the observation Anthill has for it, if any. */
 type Row = RecentWorkflow & { run?: PendingRun };
 
+/**
+ * What a row that is not being watched can still say for itself.
+ *
+ * The live run wins wherever there is one: it is the present, and the present
+ * outranks a memory of it. This is only for the far commoner case of a
+ * workflow whose session ended — an hour ago or a fortnight ago — where the
+ * alternative is the grey dot that made a used machine look untouched.
+ *
+ * It is drawn quieter than a live chip and always with its date, because
+ * "Finished" on its own reads as *now*. The claim being made is narrower than
+ * the live one and has to look it (ANT-84).
+ */
+function past(row: Row): { tone: string; label: string; when: string } | undefined {
+  if (row.run || !row.lastRun) return undefined;
+  const chip = CHIP[row.lastRun.state];
+  if (!chip.label) return undefined;
+  return { tone: chip.tone, label: chip.label, when: when(row.lastRun.at) };
+}
+
 /** "Today 14:20", "Yesterday", "26 Aug" — near dates read faster as words. */
 function when(iso: string): string {
   const at = new Date(iso);
@@ -684,6 +703,8 @@ function RecentRow({
   step?: string;
 }) {
   const chip = row.run ? CHIP[row.run.state] : undefined;
+  // Only when nothing is live: one row never shows both.
+  const before = past(row);
 
   return (
     <button
@@ -699,7 +720,10 @@ function RecentRow({
         if (event.key === "Enter") onOpen();
       }}
     >
-      <i className={`recent-mark tone-${chip?.tone ?? "none"}`} aria-hidden="true" />
+      <i
+        className={`recent-mark tone-${chip?.tone ?? before?.tone ?? "none"}${before ? " is-past" : ""}`}
+        aria-hidden="true"
+      />
       <span className="recent-body">
         <span className="recent-name">{row.name}</span>
         <span className="recent-path">{row.displayPath}</span>
@@ -711,8 +735,11 @@ function RecentRow({
             {step ? `${chip.label} · ${step}` : chip.label}
           </span>
         ) : null}
+        {before ? (
+          <span className={`recent-chip tone-${before.tone} is-past`}>{before.label}</span>
+        ) : null}
         <span className="recent-when">
-          {row.run ? liveWhen(row.run) : when(row.modifiedAt)}
+          {row.run ? liveWhen(row.run) : (before?.when ?? when(row.modifiedAt))}
         </span>
       </span>
     </button>

@@ -70,7 +70,7 @@ import {
 import { dataDirectoryRefusal, desktopUserDataPath, desktopDataDirectory } from "./user-data.js";
 import { ExchangeInbox, type OpenOutcome, type OpenPermission } from "./exchange/inbox.js";
 import { writeWorkingCopy } from "./exchange/working-copy.js";
-import { exchangeDestination, saveExchangeCopy, readExchangeView, readyExchangeRevision, boundWorkflow } from "./exchange/documents.js";
+import { exchangeDestination, saveExchangeCopy, readExchangeView, readyExchangeRevision, revokeExchangeRevision, boundWorkflow } from "./exchange/documents.js";
 import { workflowIdFromLink, linksFromArgv, SerialDrain, WindowOperations, WorkflowDelivery } from "./exchange/deep-link.js";
 import { REPORT_LOG } from "./live/observers/cli-report.js";
 import { LiveSessionService, type LiveSessionSnapshot } from "./live/service.js";
@@ -943,6 +943,7 @@ function registerIpcHandlers(): void {
   handle(IpcChannel.workflowOpened, async (_event, path: string) => { workflowDelivery.acknowledge(path); });
   handle(IpcChannel.exchangeRead, async (_event, path: string, id: string) => readExchangeView(exchange(), path, id));
   handle(IpcChannel.exchangeReady, async (_event, request) => readyExchangeRevision(exchange(), request));
+  handle(IpcChannel.exchangeRevoke, async (_event, request) => revokeExchangeRevision(exchange(), request));
   handle(IpcChannel.liveWorkflow, async (_event, runId: string) => {
     await liveService().start();
     return boundWorkflow(exchange(), liveService().registered(runId));

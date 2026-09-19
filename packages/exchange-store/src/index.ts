@@ -45,6 +45,7 @@ export {
   type InboxDropInput,
   type InboxListing,
   type MarkReadyResult,
+  type RevokeReadyResult,
 } from "./store.js";
 
 export {
@@ -55,6 +56,7 @@ export {
   parseInboxDrop,
   parseReadiness,
   parseRevision,
+  parseRevocation,
   type Binding,
   type InboxDrop,
   type InboxKind,
@@ -63,6 +65,7 @@ export {
   type StoredIdentity,
   type StoredReadiness,
   type StoredRevision,
+  type StoredRevocation,
 } from "./records.js";
 
 export {
@@ -79,9 +82,11 @@ export {
   readyPath,
   revisionFromFileName,
   revisionFromReadyFileName,
+  revisionFromRevokedFileName,
   revisionPath,
   revisionStem,
   revisionsDir,
+  revokedPath,
   safeSegment,
   workflowDir,
   workflowSegment,

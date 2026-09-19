@@ -45,6 +45,10 @@ export const EXCHANGE_STORE_PROBLEM_CODES = {
   STORE_WORKFLOW_ID_MISMATCH: "STORE_WORKFLOW_ID_MISMATCH",
   /** The handover waits on the user, and the user has not said yes yet. */
   STORE_AWAITING_APPROVAL: "STORE_AWAITING_APPROVAL",
+  /** There is no approval of that revision to withdraw. */
+  STORE_REVISION_NOT_APPROVED: "STORE_REVISION_NOT_APPROVED",
+  /** The user withdrew their approval of that revision, and it cannot be given again. */
+  STORE_REVISION_REVOKED: "STORE_REVISION_REVOKED",
   /** The revision asked for is not the one the mode makes eligible. */
   STORE_REVISION_NOT_ELIGIBLE: "STORE_REVISION_NOT_ELIGIBLE",
 } as const;

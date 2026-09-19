@@ -6,7 +6,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { boundWorkflow, exchangeDestination, readExchangeView, readyExchangeRevision, saveExchangeCopy } from "./documents.js";
+import { boundWorkflow, exchangeDestination, readExchangeView, readyExchangeRevision, revokeExchangeRevision, saveExchangeCopy } from "./documents.js";
 import { writeWorkingCopy } from "./working-copy.js";
 
 const roots: string[] = [];
@@ -65,6 +65,41 @@ it("reports the approval an edit left behind, which is still what a bind takes",
     revision: 2, state: "draft", approved: { revision: 1 },
   });
   expect(await store.eligibleRevision(workflow.id)).toMatchObject({ eligible: true, revision: { revision: 1 } });
+});
+
+/*
+ * The other half of the gate. Showing the standing approval told the user
+ * revision 1 was still what an agent would be given; it left them no way to
+ * say otherwise short of approving something newer.
+ */
+it("withdraws a standing approval without disturbing the run that holds it", async () => {
+  const { store, path, workflow } = await fixture();
+  const first = (await readExchangeView(store, path, workflow.id))!;
+  await readyExchangeRevision(store, { path, ...first });
+  await store.bind(workflow.id, 1, { runId: "ANT-EARLY", nonce: "abc", digest: first.digest });
+  await saveExchangeCopy(store, path, { ...workflow, name: "Edited" });
+  expect(await readExchangeView(store, path, workflow.id)).toMatchObject({
+    approved: { revision: 1, withdrawable: true },
+  });
+
+  expect(await revokeExchangeRevision(store, { path, workflowId: workflow.id, revision: 1 })).toEqual({ ok: true });
+
+  expect((await readExchangeView(store, path, workflow.id))?.approved).toBeUndefined();
+  expect(await store.eligibleRevision(workflow.id)).toMatchObject({ eligible: false, reason: "awaiting_approval" });
+  // The decision is about what a new run may take. The one already bound to
+  // revision 1 is still bound to it and still reporting against it.
+  expect((await store.readBinding(workflow.id, "ANT-EARLY"))?.revision).toBe(1);
+});
+
+it("refuses to withdraw an approval the panel has not seen", async () => {
+  const { store, path, workflow } = await fixture();
+  const view = (await readExchangeView(store, path, workflow.id))!;
+  await readyExchangeRevision(store, { path, ...view });
+
+  // A panel that last read the exchange before the approval moved would
+  // otherwise withdraw one the user never looked at.
+  expect(await revokeExchangeRevision(store, { path, workflowId: workflow.id, revision: 2 })).toMatchObject({ ok: false });
+  expect(await store.readyRevision(workflow.id)).toBe(1);
 });
 
 it("refuses approval when the disk copy was edited outside Anthill", async () => {

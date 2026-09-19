@@ -4,7 +4,7 @@ import type { Workflow } from "@anthill/workflow-schema";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import type { ExchangeView, ExchangeReadyRequest, ExchangeReadyResult, BoundWorkflowResult } from "../../shared/ipc.js";
+import type { ExchangeView, ExchangeReadyRequest, ExchangeRevokeRequest, ExchangeReadyResult, BoundWorkflowResult } from "../../shared/ipc.js";
 import type { PendingRun } from "@anthill/live";
 import { captureSavedRevision } from "./working-copy.js";
 
@@ -58,7 +58,13 @@ export async function readExchangeView(store: ExchangeStore, path: string, workf
     // an approval of revision 1 stands after an edit makes revision 2 — the
     // head is a draft and the approval is still what a new run would be given.
     // Reporting only the head's state left that standing approval invisible.
-    ...(stored.ready ? { approved: { revision: stored.ready.revision, ...(stored.ready.at ? { at: stored.ready.at } : {}) } } : {}),
+    ...(stored.ready ? { approved: {
+      revision: stored.ready.revision,
+      ...(stored.ready.at ? { at: stored.ready.at } : {}),
+      // Only a gate makes an approval into permission, so only there is there
+      // permission to take back.
+      withdrawable: identity.mode === "approval-gate",
+    } } : {}),
     problems, bindings: stored.bindings.map(({ runId, revision }) => ({ runId, revision })),
   };
 }
@@ -76,6 +82,32 @@ export async function readyExchangeRevision(store: ExchangeStore, request: Excha
     const result = await store.markReady(request.workflowId, request.revision);
     if (result.outcome !== "ready" && result.outcome !== "already_ready") {
       throw new Error(result.problems?.map((item) => item.message).join(" ") || "This revision cannot be approved.");
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Take back the approval the panel was showing.
+ *
+ * Against the view rather than against the request: the revision named has to
+ * be the one an approval currently stands on, so a panel that last read the
+ * exchange before somebody else approved something cannot withdraw a decision
+ * the user never saw. There is no digest to check because the withdrawn
+ * revision is usually not the one the editor has open — that is the whole
+ * reason this exists — and the working copy has nothing to say about it.
+ */
+export async function revokeExchangeRevision(store: ExchangeStore, request: ExchangeRevokeRequest): Promise<ExchangeReadyResult> {
+  try {
+    const view = await readExchangeView(store, request.path, request.workflowId);
+    if (view?.approved?.revision !== request.revision || !view.approved.withdrawable) {
+      throw new Error("The approval on this handover has changed. Review what is approved before withdrawing it.");
+    }
+    const result = await store.revokeReady(request.workflowId, request.revision);
+    if (result.outcome !== "revoked" && result.outcome !== "already_revoked") {
+      throw new Error(result.problems?.map((item) => item.message).join(" ") || "This approval cannot be withdrawn.");
     }
     return { ok: true };
   } catch (error) {

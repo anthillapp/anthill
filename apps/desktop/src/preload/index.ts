@@ -48,6 +48,7 @@ const api: AnthillApi = {
   workflowOpened: (path) => ipcRenderer.invoke(IpcChannel.workflowOpened, path),
   exchangeRead: (path, id) => ipcRenderer.invoke(IpcChannel.exchangeRead, path, id),
   exchangeReady: (request) => ipcRenderer.invoke(IpcChannel.exchangeReady, request),
+  exchangeRevoke: (request) => ipcRenderer.invoke(IpcChannel.exchangeRevoke, request),
   liveWorkflow: (runId) => ipcRenderer.invoke(IpcChannel.liveWorkflow, runId),
   onOpenWorkflow: (listener: (path: string) => void) => {
     const handler = (_event: unknown, path: string) => listener(path);

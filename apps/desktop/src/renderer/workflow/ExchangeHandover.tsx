@@ -3,7 +3,7 @@ import { CLI_LABEL, type PendingRun } from "@anthill/live";
 import { describeState, revisionDigest } from "@anthill/workflow-exchange";
 import { stampWorkflowFormat } from "@anthill/workflow";
 import type { Workflow } from "@anthill/workflow-schema";
-import type { ExchangeView } from "../../shared/ipc.js";
+import type { ExchangeReadyResult, ExchangeView } from "../../shared/ipc.js";
 
 /** Provenance and a local handover decision. No command is sent to a harness. */
 export function ExchangeHandover({ workflow, path, dirty, runs }: {
@@ -46,15 +46,25 @@ export function ExchangeHandover({ workflow, path, dirty, runs }: {
    * read as "nothing is authorised" while something was.
    */
   const standing = view.approved && view.approved.revision !== view.revision ? view.approved : undefined;
-  const approve = async () => {
-    if (!path || dirty || !matches || busy) return;
+  // Both decisions are recorded the same way: ask main, show what it says, and
+  // read the exchange again so the panel describes what is now on disk rather
+  // than what was just asked for.
+  const record = async (decide: () => Promise<ExchangeReadyResult>) => {
     setBusy(true);
     try {
-      const result = await window.anthill.exchangeReady({ path, workflowId: workflow.id, revision: view.revision, digest: view.digest });
+      const result = await decide();
       if (!result.ok) setError(result.error);
       else { setError(undefined); setRefresh((value) => value + 1); }
     } catch (problem) { setError(String(problem)); }
     finally { setBusy(false); }
+  };
+  const approve = async () => {
+    if (!path || dirty || !matches || busy) return;
+    await record(() => window.anthill.exchangeReady({ path, workflowId: workflow.id, revision: view.revision, digest: view.digest }));
+  };
+  const withdraw = async () => {
+    if (!path || !standing || busy) return;
+    await record(() => window.anthill.exchangeRevoke({ path, workflowId: workflow.id, revision: standing.revision }));
   };
   return (
     <section className="exchange-handover" aria-label="External handover">
@@ -86,10 +96,32 @@ export function ExchangeHandover({ workflow, path, dirty, runs }: {
       */}
       <p>Ready for agent records your decision only. Anthill does not start or control the external session.</p>
       {standing ? (
-        <p>
-          Revision {standing.revision} is still approved{standing.at ? `, from ${new Date(standing.at).toLocaleString()}` : ""}, so
-          it — not revision {view.revision} — is the one an agent may take. Approving this revision replaces that approval.
-        </p>
+        <>
+          <p>
+            Revision {standing.revision} is still approved{standing.at ? `, from ${new Date(standing.at).toLocaleString()}` : ""}, so
+            it — not revision {view.revision} — is the one an agent may take. Approving this revision replaces that approval.
+          </p>
+          {/*
+            Withdrawing is a decision about what a new run may be given, and
+            nothing else. Somebody reaching for it has often just realised an
+            agent is working from the wrong revision, so the sentence that
+            tells them what it will not do belongs above the control and not
+            after they have pressed it.
+          */}
+          {standing.withdrawable ? (
+            <>
+              <p>
+                Withdrawing it leaves this handover with nothing approved, so no new run may be given
+                revision {standing.revision}. A run already bound to that revision keeps running and keeps
+                reporting; withdrawing does not stop it. Revision {standing.revision} cannot be approved
+                again afterwards — approve revision {view.revision} when that is what an agent should work from.
+              </p>
+              <button disabled={busy} onClick={() => void withdraw()}>
+                {busy ? "Withdrawing approval..." : `Withdraw approval of revision ${standing.revision}`}
+              </button>
+            </>
+          ) : null}
+        </>
       ) : null}
       {dirty || !matches ? <p>Unsaved or unrecorded changes are not approved. Save and review them first.</p> : null}
       {view.bindings.map((binding) => {

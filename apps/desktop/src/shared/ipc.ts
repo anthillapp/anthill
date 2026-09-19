@@ -31,6 +31,7 @@ export const IpcChannel = {
   workflowOpened: "workflow:opened",
   exchangeRead: "exchange:read",
   exchangeReady: "exchange:ready",
+  exchangeRevoke: "exchange:revoke",
   liveWorkflow: "live:workflow",
   workflowSave: "workflow:save",
   runtimesDetect: "runtimes:detect",
@@ -93,7 +94,7 @@ export const IpcChannel = {
  * quietly showed nothing. Bump this whenever a channel is added, and the
  * renderer can find out before it subscribes to something that will never fire.
  */
-export const IPC_CONTRACT = 17;
+export const IPC_CONTRACT = 18;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -312,11 +313,35 @@ export type ExchangeView = {
    * new run would be given. Saying only "draft" told the user nothing was
    * authorised while something was.
    */
-  approved?: { revision: number; at?: string };
+  approved?: {
+    revision: number;
+    at?: string;
+    /**
+     * Whether taking it back would change what an agent may be given.
+     *
+     * Only an approval gate turns an approval into permission, so only there
+     * does withdrawing one mean anything: under show-and-go the head revision
+     * is eligible however this reads, and a control offered there would
+     * promise an effect it does not have. Decided here rather than in the
+     * page, because the store is where the rule lives and a page that
+     * re-derived it would eventually derive it differently.
+     */
+    withdrawable: boolean;
+  };
   problems: ExchangeProblem[];
   bindings: { runId: string; revision: number }[];
 };
 export type ExchangeReadyRequest = { path: string; workflowId: string; revision: number; digest: string };
+/**
+ * Taking an approval back, named by the revision it stands on.
+ *
+ * No digest, unlike approving: the revision being withdrawn is usually not the
+ * one the editor has open — that is the whole situation this answers — so
+ * there is no head content to check the request against. What is checked is
+ * that the revision named is the approval the page was showing when the user
+ * decided, so a stale panel cannot withdraw one they never saw.
+ */
+export type ExchangeRevokeRequest = { path: string; workflowId: string; revision: number };
 export type ExchangeReadyResult = { ok: true } | { ok: false; error: string };
 export type BoundWorkflowResult =
   | { ok: true; workflow: Workflow; revision: number; digest: string }
@@ -729,6 +754,7 @@ export interface AnthillApi {
   workflowOpened(path: string): Promise<void>;
   exchangeRead(path: string, workflowId: string): Promise<ExchangeView | undefined>;
   exchangeReady(request: ExchangeReadyRequest): Promise<ExchangeReadyResult>;
+  exchangeRevoke(request: ExchangeRevokeRequest): Promise<ExchangeReadyResult>;
   liveWorkflow(runId: string): Promise<BoundWorkflowResult>;
   /**
    * A workflow a harness handed over while the page was up. Returns the

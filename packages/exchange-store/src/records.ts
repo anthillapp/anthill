@@ -124,6 +124,18 @@ export type StoredReadiness = {
 };
 
 /**
+ * The user taking an approval back.
+ *
+ * The same fields as the approval it undoes, in a file of its own beside it.
+ * Nothing here is ever deleted, so a withdrawal has to be a record in its own
+ * right: the pair of files is what the user decided about that revision, and
+ * either one alone would be half the story. Reading it needs no order between
+ * the two, because a revision that carries a withdrawal is out of the running
+ * however many approvals sit beside it.
+ */
+export type StoredRevocation = StoredReadiness;
+
+/**
  * A run holding a revision.
  *
  * `sessionId` is the harness's own, copied from the identity at the moment of
@@ -234,12 +246,29 @@ export function parseRevision(text: string, where: string): RecordRead<StoredRev
 }
 
 export function parseReadiness(text: string, where: string): RecordRead<StoredReadiness> {
+  return parseDecision(text, where, "approved");
+}
+
+/**
+ * Read back a withdrawal.
+ *
+ * Its own function rather than the reader above under a second name, because
+ * what it is called is how the two are told apart everywhere else and a
+ * caller that reached for the wrong one would be reading consent out of its
+ * cancellation. The shape is the approval's because a withdrawal is about
+ * exactly the same thing: one revision, at one moment.
+ */
+export function parseRevocation(text: string, where: string): RecordRead<StoredRevocation> {
+  return parseDecision(text, where, "withdrawn");
+}
+
+function parseDecision(text: string, where: string, verb: string): RecordRead<StoredReadiness> {
   const opened = openEnvelope(text, where);
   if (!opened.ok) return opened;
 
   const revision = count(opened.record.revision);
   const at = when(opened.record.at);
-  if (!revision || !at) return unreadable(where, "it does not say which revision was approved, or when");
+  if (!revision || !at) return unreadable(where, `it does not say which revision was ${verb}, or when`);
   if ((opened.record.workflowId !== undefined && !str(opened.record.workflowId)) ||
       (opened.record.digest !== undefined && (typeof opened.record.digest !== "string" || !/^[a-f0-9]{16}$/.test(opened.record.digest)))) {
     return unreadable(where, "its optional approval identity is malformed");

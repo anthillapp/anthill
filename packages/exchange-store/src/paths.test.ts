@@ -16,8 +16,10 @@ import {
   keyFromInboxFileName,
   revisionFromFileName,
   revisionFromReadyFileName,
+  revisionFromRevokedFileName,
   revisionPath,
   revisionStem,
+  revokedPath,
   safeSegment,
   workflowDir,
   workingCopyPath,
@@ -58,6 +60,7 @@ describe("path escape", () => {
         identityPath(ROOT, id),
         workingCopyPath(ROOT, id),
         revisionPath(ROOT, id, 1),
+        revokedPath(ROOT, id, 1),
       ]) {
         expect(path.startsWith(`${ROOT}/`), `${id} → ${path}`).toBe(true);
         expect(path.includes(".."), `${id} → ${path}`).toBe(false);
@@ -79,6 +82,7 @@ describe("revision file names", () => {
   it("reads back a number it wrote", () => {
     expect(revisionFromFileName("0042.json")).toBe(42);
     expect(revisionFromReadyFileName("0042.ready")).toBe(42);
+    expect(revisionFromRevokedFileName("0042.revoked")).toBe(42);
   });
 
   it("refuses anything that is not a revision", () => {
@@ -88,6 +92,19 @@ describe("revision file names", () => {
     expect(revisionFromFileName("0042.ready")).toBeUndefined();
     expect(revisionFromFileName("latest.json")).toBeUndefined();
     expect(revisionFromFileName("0000.json")).toBeUndefined();
+  });
+
+  // An approval and its withdrawal share a stem and differ only in extension,
+  // so each reader has to take its own and leave the other alone: one that
+  // answered for both would read a withdrawal as the approval it undoes.
+  it("tells an approval from its withdrawal", () => {
+    expect(revisionFromReadyFileName("0042.revoked")).toBeUndefined();
+    expect(revisionFromRevokedFileName("0042.ready")).toBeUndefined();
+    expect(revisionFromRevokedFileName("0042.revoked.4242.1.tmp")).toBeUndefined();
+    expect(revisionFromRevokedFileName("0000.revoked")).toBeUndefined();
+    expect(revokedPath(ROOT, "workflow-1", 42)).toBe(
+      `${ROOT}/workflows/workflow-1/revisions/0042.revoked`,
+    );
   });
 });
 

@@ -297,6 +297,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   // than claim a decision it has nowhere to persist.
   register(IpcChannel.exchangeRead, async () => undefined);
   register(IpcChannel.exchangeReady, async () => ({ ok: false, error: "Open this handover in Anthill desktop to approve it." }));
+  register(IpcChannel.exchangeRevoke, async () => ({ ok: false, error: "Open this handover in Anthill desktop to withdraw an approval." }));
   register(IpcChannel.liveWorkflow, async () => ({ ok: false, error: "Bound revisions are available in Anthill desktop." }));
 
   /**
@@ -737,6 +738,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     workflowOpened: (path) => handle(IpcChannel.workflowOpened, path),
     exchangeRead: (path, id) => handle(IpcChannel.exchangeRead, path, id),
     exchangeReady: (request) => handle(IpcChannel.exchangeReady, request),
+    exchangeRevoke: (request) => handle(IpcChannel.exchangeRevoke, request),
     liveWorkflow: (runId) => handle(IpcChannel.liveWorkflow, runId),
     onOpenWorkflow: (listener: (path: string) => void) =>
       on(OPEN_WORKFLOW_CHANNEL, (path) => listener(path as string)),

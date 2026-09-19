@@ -17,6 +17,7 @@
  *     workflow.json           the working copy the editor opens and saves
  *     revisions/0001.json     immutable snapshots, zero-padded so listing sorts
  *     revisions/0001.ready    readiness, created by the app when the user says so
+ *     revisions/0001.revoked  the user taking that readiness back, beside it
  *     bindings/<runId>.json   created by the server when a run binds
  * ```
  *
@@ -110,6 +111,20 @@ export function readyPath(root: string, workflowId: string, revision: number): s
   return join(revisionsDir(root, workflowId), `${revisionStem(revision)}.ready`);
 }
 
+/**
+ * Where the user's withdrawal of an approval goes.
+ *
+ * Beside the approval it undoes rather than in place of it, because nothing in
+ * this store is ever deleted: a withdrawal is a second record about the same
+ * revision, and the pair is the whole of what the user decided about it. A
+ * reader that found only the approval and inferred the rest would be inferring
+ * from an absence, which is precisely what an unlink in a tree three processes
+ * write into cannot be trusted to mean.
+ */
+export function revokedPath(root: string, workflowId: string, revision: number): string {
+  return join(revisionsDir(root, workflowId), `${revisionStem(revision)}.revoked`);
+}
+
 export function bindingsDir(root: string, workflowId: string): string {
   return join(workflowDir(root, workflowId), "bindings");
 }
@@ -168,6 +183,20 @@ export function revisionFromFileName(name: string): number | undefined {
 /** The revision number a `.ready` marker is about, or `undefined`. */
 export function revisionFromReadyFileName(name: string): number | undefined {
   const match = /^(\d{4,})\.ready$/.exec(name);
+  if (!match) return undefined;
+  const revision = Number(match[1]);
+  return Number.isSafeInteger(revision) && revision > 0 ? revision : undefined;
+}
+
+/**
+ * The revision number a `.revoked` marker is about, or `undefined`.
+ *
+ * An approval and its withdrawal share a stem, so this and the reader above
+ * are anchored at both ends: one listing pass asks both questions of every
+ * name, and a pattern loose at the tail would answer the other one's.
+ */
+export function revisionFromRevokedFileName(name: string): number | undefined {
+  const match = /^(\d{4,})\.revoked$/.exec(name);
   if (!match) return undefined;
   const revision = Number(match[1]);
   return Number.isSafeInteger(revision) && revision > 0 ? revision : undefined;

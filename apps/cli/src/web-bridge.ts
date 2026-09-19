@@ -180,6 +180,7 @@ export function installWebBridge(): Promise<AnthillApi> {
       workflowOpened: (path) => invoke(IpcChannel.workflowOpened, path),
       exchangeRead: (path, id) => invoke(IpcChannel.exchangeRead, path, id),
       exchangeReady: (request) => invoke(IpcChannel.exchangeReady, request),
+      exchangeRevoke: (request) => invoke(IpcChannel.exchangeRevoke, request),
       liveWorkflow: (runId) => invoke(IpcChannel.liveWorkflow, runId),
       onOpenWorkflow: (listener: (path: string) => void) =>
         onChannel(OPEN_WORKFLOW_CHANNEL, (payload) => listener(payload as string)),

@@ -4,7 +4,7 @@ import { describeState, revisionDigest } from "@anthill/workflow-exchange";
 import type { HandoverMode, RevisionState } from "@anthill/workflow-exchange";
 import { stampWorkflowFormat } from "@anthill/workflow";
 import type { Workflow } from "@anthill/workflow-schema";
-import type { ExchangeView } from "../../shared/ipc.js";
+import type { ExchangeReadyResult, ExchangeView } from "../../shared/ipc.js";
 import { ExchangeHandover } from "./ExchangeHandover.js";
 
 afterEach(cleanup);
@@ -14,7 +14,11 @@ const view: ExchangeView = {
   source: { harness: "claude-code", sessionId: "s1", taskText: "The user's original task" }, problems: [], bindings: [],
 };
 function api(over: Partial<ExchangeView> = {}) {
-  const methods = { exchangeRead: vi.fn(async () => ({ ...view, ...over })), exchangeReady: vi.fn(async () => ({ ok: true })) };
+  const methods = {
+    exchangeRead: vi.fn(async () => ({ ...view, ...over })),
+    exchangeReady: vi.fn(async (): Promise<ExchangeReadyResult> => ({ ok: true })),
+    exchangeRevoke: vi.fn(async (): Promise<ExchangeReadyResult> => ({ ok: true })),
+  };
   (window as unknown as { anthill: unknown }).anthill = methods;
   return methods;
 }
@@ -81,7 +85,7 @@ it("says Anthill starts nothing where the button is, not inside the provenance d
  * takes. The panel said "waiting for you" and stopped there.
  */
 it("says an approval left on an earlier revision is still the one an agent may take", async () => {
-  api({ revision: 2, state: "draft", approved: { revision: 1, at: "2026-09-18T09:00:00.000Z" } });
+  api({ revision: 2, state: "draft", approved: { revision: 1, at: "2026-09-18T09:00:00.000Z", withdrawable: true } });
   render(<ExchangeHandover workflow={workflow} path="/tmp/workflow.json" dirty={false} runs={[]} />);
   const standing = await screen.findByText(/Revision 1 is still approved/);
   expect(standing.textContent).toBe(
@@ -90,8 +94,46 @@ it("says an approval left on an earlier revision is still the one an agent may t
   );
 });
 
+/*
+ * Seeing the standing approval and being unable to take it back left the user
+ * one way out of a decision they had changed their mind about: approve
+ * something newer. The control says what it does — and, because withdrawing
+ * an approval is the sort of thing somebody presses expecting an agent to
+ * stop, what it does not.
+ */
+it("withdraws a standing approval, and says the bound run keeps going", async () => {
+  const methods = api({ revision: 2, state: "draft", approved: { revision: 1, withdrawable: true } });
+  render(<ExchangeHandover workflow={workflow} path="/tmp/workflow.json" dirty={false} runs={[]} />);
+
+  const button = await screen.findByRole("button", { name: "Withdraw approval of revision 1" });
+  expect(screen.getByText(/keeps running and keeps reporting; withdrawing does not stop it/)).toBeTruthy();
+  for (const name of [/stop/i, /cancel/i, /abort/i]) expect(screen.queryByRole("button", { name })).toBeNull();
+  await act(async () => { fireEvent.click(button); });
+
+  expect(methods.exchangeRevoke).toHaveBeenCalledWith({ path: "/tmp/workflow.json", workflowId: "w", revision: 1 });
+});
+
+it("offers no withdrawal where withdrawing would change nothing", async () => {
+  // Show-and-go hands over the head revision whatever is approved, so a
+  // control here would promise an effect it does not have.
+  api({ mode: "show-and-go", revision: 2, state: "ready_for_agent", approved: { revision: 1, withdrawable: false } });
+  render(<ExchangeHandover workflow={workflow} path="/tmp/workflow.json" dirty={false} runs={[]} />);
+  await screen.findByText(/Revision 1 is still approved/);
+  expect(screen.queryByRole("button", { name: /Withdraw/ })).toBeNull();
+});
+
+it("reports a refused withdrawal and leaves the approval standing", async () => {
+  const methods = api({ revision: 2, state: "draft", approved: { revision: 1, withdrawable: true } });
+  methods.exchangeRevoke.mockResolvedValueOnce({ ok: false, error: "The approval changed." });
+  render(<ExchangeHandover workflow={workflow} path="/tmp/workflow.json" dirty={false} runs={[]} />);
+  const button = await screen.findByRole("button", { name: "Withdraw approval of revision 1" });
+  await act(async () => { fireEvent.click(button); });
+  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "The approval changed.");
+  expect(screen.getByText(/Revision 1 is still approved/)).toBeTruthy();
+});
+
 it("does not repeat the approval on the revision that carries it", async () => {
-  api({ revision: 1, state: "ready_for_agent", approved: { revision: 1 } });
+  api({ revision: 1, state: "ready_for_agent", approved: { revision: 1, withdrawable: true } });
   render(<ExchangeHandover workflow={workflow} path="/tmp/workflow.json" dirty={false} runs={[]} />);
   await screen.findByText("Approved");
   expect(screen.queryByText(/still approved/)).toBeNull();

@@ -474,6 +474,139 @@ describe("markReady", () => {
   });
 });
 
+/*
+ * Taking an approval back.
+ *
+ * Readiness never carries to the next revision, which left an approved
+ * revision 1 standing — and bindable — after the user had edited well past it,
+ * with nothing they could do about it but approve something newer. The
+ * withdrawal is a second record rather than the deletion of the first, so what
+ * these pin down is mostly that nothing was removed: the approval is still on
+ * disk, the run that already holds the revision is still bound to it, and it
+ * is only what a *new* run may be given that changed.
+ */
+describe("revokeReady", () => {
+  it("puts the gate back to waiting, and leaves the approval on disk", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission({ mode: "approval-gate" }));
+    await store.markReady("workflow-1", 1);
+
+    const withdrawn = await store.revokeReady("workflow-1", 1);
+
+    expect(withdrawn.outcome).toBe("revoked");
+    expect(await store.readyRevision("workflow-1")).toBeUndefined();
+    expect(await store.eligibleRevision("workflow-1")).toMatchObject({
+      eligible: false,
+      reason: "awaiting_approval",
+    });
+    // Both records, because a withdrawal is a thing that happened rather than
+    // a thing that stopped having happened.
+    const listing = await readdir(join(store.root, "workflows/workflow-1/revisions"));
+    expect(listing).toContain("0001.ready");
+    expect(listing).toContain("0001.revoked");
+    expect((await store.readWorkflow("workflow-1"))?.revoked).toEqual([1]);
+  });
+
+  it("refuses a bind naming the revision the user withdrew", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission({ mode: "approval-gate" }));
+    await store.markReady("workflow-1", 1);
+    await store.revokeReady("workflow-1", 1);
+
+    const bound = await store.bind("workflow-1", 1, { runId: "ANT-LATE", nonce: "abc" });
+
+    expect(bound.outcome).toBe("not_eligible");
+    expect(bound.reason).toBe("awaiting_approval");
+    expect(await store.readBinding("workflow-1", "ANT-LATE")).toBeUndefined();
+  });
+
+  it("leaves a run that already holds the revision bound to it", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission({ mode: "approval-gate" }));
+    await store.markReady("workflow-1", 1);
+    await store.bind("workflow-1", 1, { runId: "ANT-EARLY", nonce: "abc" });
+
+    await store.revokeReady("workflow-1", 1);
+
+    // Withdrawing an approval decides what a new run may be given. The work
+    // already under way is not something this store could stop even if it
+    // wanted to, and a binding that quietly went missing would only cost the
+    // user the page that shows them what is running.
+    const binding = await store.readBinding("workflow-1", "ANT-EARLY");
+    expect(binding?.revision).toBe(1);
+    expect((await store.readWorkflow("workflow-1"))?.bindings).toHaveLength(1);
+    expect((await store.readRevision("workflow-1", 1))?.workflow.name).toBe("Ship the fix");
+  });
+
+  it("makes the revision the user approves next the eligible one", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission({ mode: "approval-gate" }));
+    await store.markReady("workflow-1", 1);
+    await store.addRevision("workflow-1", completeWorkflow({ name: "Edited" }), "user");
+    await store.revokeReady("workflow-1", 1);
+
+    expect((await store.markReady("workflow-1", 2)).outcome).toBe("ready");
+
+    expect(await store.readyRevision("workflow-1")).toBe(2);
+    expect(await store.eligibleRevision("workflow-1")).toMatchObject({
+      eligible: true,
+      revision: { revision: 2 },
+    });
+  });
+
+  it("will not withdraw an approval nobody made", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission({ mode: "approval-gate" }));
+    await store.addRevision("workflow-1", completeWorkflow({ name: "Edited" }), "user");
+
+    const unapproved = await store.revokeReady("workflow-1", 2);
+
+    expect(unapproved.outcome).toBe("conflict");
+    expect(codes(unapproved.problems)).toEqual([
+      EXCHANGE_STORE_PROBLEM_CODES.STORE_REVISION_NOT_APPROVED,
+    ]);
+    expect((await store.markReady("workflow-1", 2)).outcome).toBe("ready");
+    expect((await store.revokeReady("workflow-1", 4)).outcome).toBe("no_such_revision");
+    expect((await store.revokeReady("workflow-9", 1)).outcome).toBe("no_such_workflow");
+  });
+
+  it("will not approve a revision the user has withdrawn", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission({ mode: "approval-gate" }));
+    await store.markReady("workflow-1", 1);
+    await store.revokeReady("workflow-1", 1);
+
+    const again = await store.markReady("workflow-1", 1);
+
+    // Two records disagreeing about one revision is what a store that only
+    // ever creates files exists to prevent, and an approval that outranked a
+    // withdrawal would be one. The way forward is the next revision.
+    expect(again.outcome).toBe("conflict");
+    expect(codes(again.problems)).toEqual([EXCHANGE_STORE_PROBLEM_CODES.STORE_REVISION_REVOKED]);
+    expect(await store.readyRevision("workflow-1")).toBeUndefined();
+  });
+
+  it("tells a second writer the approval is already withdrawn, not that they disagree", async () => {
+    const root = await dataDir();
+    // Two clocks, because two writers have two, and the second one arriving is
+    // answered from the record the first wrote rather than from its own time.
+    const first = new ExchangeStore(root, ticking());
+    const second = new ExchangeStore(root, ticking(Date.parse("2026-10-01T09:00:00.000Z")));
+    await first.createWorkflow(submission({ mode: "approval-gate" }));
+    await first.markReady("workflow-1", 1);
+
+    const [a, b] = await Promise.all([
+      first.revokeReady("workflow-1", 1),
+      second.revokeReady("workflow-1", 1),
+    ]);
+
+    expect([a.outcome, b.outcome].sort()).toEqual(["already_revoked", "revoked"]);
+    expect(a.at).toBe(b.at);
+    expect(a.problems).toBeUndefined();
+    expect(b.problems).toBeUndefined();
+  });
+});
+
 describe("eligibleRevision", () => {
   it("makes the head revision eligible under show-and-go", async () => {
     const store = await openStore();

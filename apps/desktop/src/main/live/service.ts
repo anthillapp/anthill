@@ -188,6 +188,32 @@ export class LiveSessionService {
     return this.store.find(runId) !== undefined;
   }
 
+  registered(runId: string): PendingRun | undefined {
+    return this.store.find(runId);
+  }
+
+  /** Register an external binding without manufacturing match evidence. */
+  async registerBinding(input: StartObservationInput & { exchange: NonNullable<PendingRun["exchange"]>; boundAt: string }): Promise<boolean> {
+    await this.start();
+    const existing = this.store.find(input.anthillRunId);
+    if (existing) {
+      return existing.workflowId === input.workflowId && existing.correlationNonce === input.correlationNonce &&
+        existing.selectedCli === input.selectedCli && existing.exchange?.revision === input.exchange.revision &&
+        existing.exchange?.digest === input.exchange.digest && existing.exchange?.sessionId === input.exchange.sessionId;
+    }
+    const run: PendingRun = {
+      ...createPendingRun({ ...input, now: input.boundAt }),
+      exchange: input.exchange,
+      ...(input.exchange.sessionId ? { detectedSessionId: input.exchange.sessionId } : {}),
+      statusMessage: "Revision bound. Waiting for evidence from the external session.",
+    };
+    await this.store.put(run, true);
+    this.schedule();
+    await this.poll();
+    this.announce();
+    return true;
+  }
+
   /**
    * Begin observing a prompt the user is about to copy.
    *
@@ -415,6 +441,24 @@ export class LiveSessionService {
       // The CLI was never run, or the file is unreadable. Neither is an error.
     }
 
+    // A plugin binds an explicit session, unlike discovery from a pasted
+    // marker. A copied marker in a second transcript must not move that binding.
+    const sessionId = run.exchange?.sessionId;
+    if (sessionId) {
+      const conflicts = evidence.flatMap((item) => item.kind === "ambiguous" ? item.sessionIds :
+        "sessionId" in item && item.sessionId !== sessionId ? [item.sessionId] : []);
+      evidence = evidence.filter((item) => !("sessionId" in item) || item.sessionId === sessionId);
+      evidence = evidence.filter((item) => item.kind !== "ambiguous");
+      drafts = drafts.filter((item) => item.sessionId === sessionId);
+      if (conflicts.length) {
+        evidence.push({ kind: "ambiguous", sessionIds: [...new Set([sessionId, ...conflicts])], channel: "exchange:session-mismatch", at: now });
+      }
+    }
+    // Observers with no transcript support must not shorten the report window.
+    if (run.exchange) {
+      evidence = evidence.filter((item) => item.kind !== "unobservable" && Date.parse(item.at) >= Date.parse(run.createdAt));
+      drafts = drafts.filter((item) => Date.parse(item.at) >= Date.parse(run.createdAt));
+    }
     return { evidence, drafts };
   }
 

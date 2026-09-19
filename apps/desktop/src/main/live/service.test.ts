@@ -157,6 +157,66 @@ function only(snapshot: LiveSessionSnapshot): PendingRun {
   return snapshot.runs[0];
 }
 
+describe("external revision bindings", () => {
+  const input = {
+    ...observeRequest, boundAt: "2026-08-29T10:00:00.000Z",
+    exchange: { revision: 1, digest: "abcd1234", sessionId: "bound-session" },
+    steps: [{ id: "fix", name: "Fix" }],
+  };
+  it("persists the session and snapshot identity without claiming live activity", async () => {
+    const { service, storePath } = await harness();
+    expect(await service.registerBinding(input)).toBe(true);
+    expect(only(service.snapshot())).toMatchObject({ state: "pending_after_copy", detectedSessionId: "bound-session", exchange: input.exchange });
+    expect(only(service.snapshot()).lastObservedAt).toBeUndefined();
+    expect(JSON.parse(await readFile(storePath, "utf8"))[0].exchange).toEqual(input.exchange);
+    expect(await service.registerBinding({ ...input, correlationNonce: "wrong" })).toBe(false);
+    await service.dismiss(RUN_ID);
+    expect(await service.registerBinding(input)).toBe(true);
+    expect(service.snapshot().runs).toEqual([]);
+    service.stop();
+  });
+
+  it("uses existing CLI reports, rejecting the wrong nonce and stale reports", async () => {
+    const { service, reportLogPath, setNow } = await harness();
+    await service.registerBinding(input);
+    await mkdir(join(reportLogPath, ".."), { recursive: true });
+    await writeFile(reportLogPath, [
+      { version: 1, kind: "step", runId: RUN_ID, nonce: "wrong", stepId: "wrong", at: "2026-08-29T10:00:01.000Z" },
+      { version: 1, kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "stale", at: "2026-08-29T09:59:00.000Z" },
+      { version: 1, kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "fix", at: "2026-08-29T10:00:02.000Z" },
+    ].map((row) => JSON.stringify(row)).join("\n") + "\n");
+    setNow("2026-08-29T10:00:03.000Z");
+    await service.poll();
+    expect(only(service.snapshot()).state).toBe("detected_live");
+    expect((await service.events(RUN_ID)).map((event) => event.blockId)).toEqual(["fix"]);
+    service.stop();
+  });
+
+  it("does not adopt another transcript's session even after ambiguous evidence", async () => {
+    const { service, claudeRoot, setNow } = await harness();
+    await service.registerBinding(input);
+    await writeTranscript(claudeRoot, "other-session");
+    setNow("2026-08-29T10:00:08.000Z");
+    await service.poll();
+    await service.poll();
+    expect(only(service.snapshot()).detectedSessionId).toBe("bound-session");
+    expect(only(service.snapshot()).state).not.toBe("detected_live");
+    expect((await service.events(RUN_ID)).filter((event) => event.sessionId === "other-session")).toEqual([]);
+    service.stop();
+  });
+
+  it("times out as observation lost, not agent failure, and can read late evidence", async () => {
+    const { service, setNow } = await harness();
+    await service.registerBinding(input);
+    setNow("2026-08-29T10:31:00.000Z");
+    await service.poll();
+    expect(only(service.snapshot())).toMatchObject({ state: "observation_lost", closedAt: "2026-08-29T10:31:00.000Z" });
+    await service.lookAgain(RUN_ID);
+    expect(only(service.snapshot()).closedAt).toBeUndefined();
+    service.stop();
+  });
+});
+
 describe("registering an observation", () => {
   it("creates a waiting run and persists it before anything is detected", async () => {
     const { service, storePath } = await harness();

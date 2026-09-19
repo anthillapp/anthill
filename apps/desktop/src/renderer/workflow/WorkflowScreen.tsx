@@ -65,7 +65,6 @@ import {
   shouldAnnounce,
 } from "../live/SessionStartedDialog.js";
 import { LiveSessionPage } from "../live/LiveSessionPage.js";
-import { ObservationSetupCard } from "../live/ObservationSetupCard.js";
 
 export type WorkflowScreenProps = {
   onExit: () => void;
@@ -121,19 +120,7 @@ export function WorkflowScreen({ onExit, start }: WorkflowScreenProps) {
   const [custom, setCustom] = useState<CustomBlock[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<string | undefined>();
   const [firstMeaningfulEdit, setFirstMeaningfulEdit] = useState(false);
-  const [showLiveSetup, setShowLiveSetup] = useState(false);
 
-  // Settings is reached from the menu bar (⌘,), not from this page: managing
-  // observation is a job with no place in the handover flow that sets it up.
-  useEffect(() => {
-    try {
-      return window.anthill.onOpenSettings(() => setShowLiveSetup(true));
-    } catch {
-      // An older main process without the channel. The flow still sets
-      // observation up; only the management surface is out of reach.
-      return undefined;
-    }
-  }, []);
   /**
    * Whether the Prompt modal is open.
    *
@@ -784,17 +771,6 @@ export function WorkflowScreen({ onExit, start }: WorkflowScreenProps) {
           <button onClick={() => setNotice(null)}>Dismiss</button>
         </div>
       ) : null}
-
-      {/* Live Observation is step 2 of the Prompt flow now: it is offered where
-          it is needed, in the order it is needed, rather than beside Save
-          where a button gave no hint that hooks have a deadline. What is left
-          here is the management surface — inspect, repair, disable — reached
-          deliberately from Settings (⌘,) rather than shown unprompted. */}
-      <ObservationSetupCard
-        firstMeaningfulEdit={false}
-        forceOpen={showLiveSetup}
-        onClose={() => setShowLiveSetup(false)}
-      />
 
       <div className="body">
         <WorkflowLibraries

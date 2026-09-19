@@ -54,6 +54,9 @@ export const IpcChannel = {
   assistantThreadRead: "assistant:thread-read",
   assistantThreadWrite: "assistant:thread-write",
   assistantThreadClear: "assistant:thread-clear",
+  settingsRead: "settings:read",
+  settingsWrite: "settings:write",
+  notificationsProbe: "settings:notifications-probe",
   liveEvents: "live:events",
   liveSetupStatus: "live-setup:status",
   liveSetupDismiss: "live-setup:dismiss",
@@ -84,7 +87,7 @@ export const IpcChannel = {
  * quietly showed nothing. Bump this whenever a channel is added, and the
  * renderer can find out before it subscribes to something that will never fire.
  */
-export const IPC_CONTRACT = 14;
+export const IPC_CONTRACT = 15;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -473,6 +476,21 @@ export type PiModelCatalog = {
   models: PiModelOption[];
 };
 
+/** The preferences Anthill keeps for this machine. Documented in main/settings.ts. */
+export type AppSettings = {
+  /** Native notification on a confidently observed move to a new step. Off by default. */
+  stepNotifications: boolean;
+};
+
+/**
+ * What happened when a test notification was sent.
+ *
+ * "sent" means the app handed it to the system, which is everything it can
+ * know — whether it appeared is the thing the author is being asked to look
+ * for.
+ */
+export type NotificationProbe = { kind: "sent" } | { kind: "unsupported"; reason: string };
+
 export type PromptDraftRequest = {
   interpreterId: InterpreterId;
   /** The full drafting instruction, built in the renderer from the author's prompt. */
@@ -536,6 +554,14 @@ export type LiveObserveRequest = {
   bootstrapPromptHash: string;
   workflowId?: string;
   workflowName?: string;
+  /**
+   * The steps the marker named, as they were called when the prompt was copied.
+   *
+   * Sent because the workflow lives in the editor and a run outlives the screen
+   * that started it: without these a transition can only be reported as a block
+   * id, which is not something to put in a notification.
+   */
+  steps?: { id: string; name: string }[];
 };
 
 /* ------------------------------------------------------------------ */
@@ -754,6 +780,19 @@ export interface AnthillApi {
   assistantThreadWrite(workflowId: string, turns: unknown[]): Promise<void>;
   /** Forget one workflow's thread. Only ever called from an explicit ask. */
   assistantThreadClear(workflowId: string): Promise<void>;
+  /** The preferences this machine keeps, defaults filled in. */
+  settingsRead(): Promise<AppSettings>;
+  /** Change some of them; the rest are left alone. Returns what they now are. */
+  settingsWrite(patch: Partial<AppSettings>): Promise<AppSettings>;
+  /**
+   * Send one notification now, so the author can see for themselves whether
+   * they arrive.
+   *
+   * There is no API that answers whether macOS has been told to allow these:
+   * the permission is granted or refused outside the app, and can be revoked
+   * later without telling it. So the honest check is to send one and look.
+   */
+  notificationsProbe(): Promise<NotificationProbe>;
   /**
    * Everything Anthill observed for one run, oldest first.
    *

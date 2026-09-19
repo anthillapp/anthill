@@ -7,7 +7,7 @@
  * through the channels declared in `../shared/ipc.ts`.
  */
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
 import { dirname, join, resolve, sep } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -31,6 +31,7 @@ import {
   SAVE_WORKFLOW_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
   RUN_EVENT_CHANNEL,
+  type AppSettings,
   type ApprovalResponse,
   type IpcCapabilities,
   type LiveObserveRequest,
@@ -68,6 +69,7 @@ import { LiveSessionService, type LiveSessionSnapshot } from "./live/service.js"
 import { ObservationSetupService } from "./live/setup.js";
 import { AgentLibraryStore } from "./agent-library.js";
 import { AssistantThreadStore } from "./assistant-threads.js";
+import { SettingsStore } from "./settings.js";
 import { PendingRunStore } from "./live/store.js";
 import {
   forgetRecent,
@@ -213,6 +215,7 @@ let live: LiveSessionService | undefined;
 let liveSetup: ObservationSetupService | undefined;
 let agents: AgentLibraryStore | undefined;
 let assistantThreads: AssistantThreadStore | undefined;
+let settingsStore: SettingsStore | undefined;
 
 /**
  * `~` is a shell convenience, not a path. Agents write it constantly, and
@@ -221,6 +224,38 @@ let assistantThreads: AssistantThreadStore | undefined;
 function expandHome(path: string): string {
   if (path === "~") return app.getPath("home");
   return path.startsWith("~/") ? join(app.getPath("home"), path.slice(2)) : path;
+}
+
+function settings(): SettingsStore {
+  settingsStore ??= new SettingsStore(join(app.getPath("userData"), "settings.json"));
+  return settingsStore;
+}
+
+/**
+ * Show one native notification.
+ *
+ * The whole platform half of the feature, in one place. macOS decides whether
+ * it appears: there is no API that reports the permission, and it can be
+ * revoked later without the app being told, so nothing here pretends to know
+ * more than "this was handed over". A system that cannot show one at all says
+ * so, which is the one case Settings can state as fact.
+ */
+function showNotification(title: string, body: string): { kind: "sent" } | { kind: "unsupported"; reason: string } {
+  if (!Notification.isSupported()) {
+    return { kind: "unsupported", reason: "This system has no notification centre Anthill can use." };
+  }
+  try {
+    // Silent: a step changing is worth a glance, not a sound. The workflow's
+    // name is the title, so a notification is attributable at a glance to the
+    // thing it is about rather than to "Anthill" in general.
+    new Notification({ title, body, silent: true }).show();
+    return { kind: "sent" };
+  } catch (error) {
+    return {
+      kind: "unsupported",
+      reason: error instanceof Error ? error.message : "The notification could not be sent.",
+    };
+  }
 }
 
 function assistantThreadStore(): AssistantThreadStore {
@@ -249,6 +284,18 @@ function liveService(): LiveSessionService {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send(LIVE_EVENTS_CHANNEL, { runId, events });
       }
+    },
+    // The preference is read here rather than inside the service, and read at
+    // the moment of the transition rather than cached: turning the setting off
+    // has to stop the next notification, including one whose step was already
+    // being observed when the switch was flipped.
+    (notice) => {
+      void settings()
+        .read()
+        .then((current) => {
+          if (current.stepNotifications) showNotification(notice.title, notice.body);
+        })
+        .catch(() => undefined);
     },
   );
   return live;
@@ -813,6 +860,19 @@ function registerIpcHandlers(): void {
   );
   handle(IpcChannel.assistantThreadClear, async (_event, workflowId: string) =>
     assistantThreadStore().clear(workflowId),
+  );
+
+  handle(IpcChannel.settingsRead, async () => settings().read());
+  handle(IpcChannel.settingsWrite, async (_event, patch: Partial<AppSettings>) =>
+    settings().write(patch ?? {}),
+  );
+  // Sent on demand, because "are notifications allowed" has no answer to read:
+  // the author is being asked to look at their own screen.
+  handle(IpcChannel.notificationsProbe, async () =>
+    showNotification(
+      "Anthill notifications are on",
+      "This is what a step transition will look like.",
+    ),
   );
   handle(IpcChannel.liveEvents, async (_event, runId: string) =>
     liveService().events(runId),

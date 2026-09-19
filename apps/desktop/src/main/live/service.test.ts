@@ -29,6 +29,8 @@ type Harness = {
   reportLogPath: string;
   storePath: string;
   published: LiveSessionSnapshot[];
+  /** Every step transition the service judged worth interrupting someone for. */
+  notices: { title: string; body: string; stepId: string }[];
   setNow: (iso: string) => void;
 };
 
@@ -40,6 +42,7 @@ async function harness(startAt = "2026-08-29T10:00:00.000Z"): Promise<Harness> {
   const storePath = join(dir, "live-sessions.json");
   const store = new PendingRunStore(storePath);
   const published: LiveSessionSnapshot[] = [];
+  const notices: { title: string; body: string; stepId: string }[] = [];
   let now = startAt;
 
   const hookLogPath = join(dir, "hooks", "events.jsonl");
@@ -55,9 +58,21 @@ async function harness(startAt = "2026-08-29T10:00:00.000Z"): Promise<Harness> {
       hookLogPath,
       reportLogPath,
     },
+    () => undefined,
+    (notice) => notices.push({ title: notice.title, body: notice.body, stepId: notice.stepId }),
   );
 
-  return { service, store, claudeRoot, hookLogPath, reportLogPath, storePath, published, setNow: (iso) => (now = iso) };
+  return {
+    service,
+    store,
+    claudeRoot,
+    hookLogPath,
+    reportLogPath,
+    storePath,
+    published,
+    notices,
+    setNow: (iso) => (now = iso),
+  };
 }
 
 /** One line in the log the user's installed hooks write. */
@@ -1020,5 +1035,106 @@ describe("a session that delegated in the background and then finished", () => {
     h.setNow(at(70_000 + 12 * 60_000));
     await h.service.poll();
     expect(only(h.service.snapshot()).state).not.toBe("completed");
+  });
+});
+
+/**
+ * Step transitions, from a file on disk to something worth interrupting for.
+ *
+ * `step-notices.ts` holds the judgement; these are the wiring: that a real
+ * report travelling the real path produces exactly one notice, that the
+ * journal's own de-duplication is what stops a re-read replaying them, and
+ * that a run nobody has matched yet says nothing at all.
+ */
+describe("what the service offers for notification", () => {
+  const START = "2026-08-29T10:00:00.000Z";
+  const at = (ms: number) => new Date(Date.parse(START) + ms).toISOString();
+  const withSteps = {
+    ...observeRequest,
+    steps: [
+      { id: "implement", name: "Implement the change" },
+      { id: "review", name: "Review the change" },
+    ],
+  };
+
+  it("names the workflow and the step the session announced", async () => {
+    const h = await harness(START);
+    await h.service.start();
+    await h.service.startObservation(withSteps);
+
+    await reportLine(h.reportLogPath, {
+      kind: "step",
+      runId: RUN_ID,
+      nonce: NONCE,
+      stepId: "implement",
+      at: at(30_000),
+    });
+    h.setNow(at(30_000));
+    await h.service.poll();
+
+    expect(h.notices).toEqual([
+      { title: "Read the note", body: "Started: Implement the change", stepId: "implement" },
+    ]);
+  });
+
+  it("says nothing a second time for a report already read", async () => {
+    // The journal accepts a line once; the poll after it has nothing new, and
+    // a notice for an event that is not news would be the feature's worst bug.
+    const h = await harness(START);
+    await h.service.start();
+    await h.service.startObservation(withSteps);
+    await reportLine(h.reportLogPath, {
+      kind: "step",
+      runId: RUN_ID,
+      nonce: NONCE,
+      stepId: "implement",
+      at: at(30_000),
+    });
+    h.setNow(at(30_000));
+    await h.service.poll();
+    await h.service.poll();
+
+    expect(h.notices).toHaveLength(1);
+  });
+
+  it("follows the session from one step to the next", async () => {
+    const h = await harness(START);
+    await h.service.start();
+    await h.service.startObservation(withSteps);
+
+    for (const [stepId, ms] of [
+      ["implement", 30_000],
+      ["review", 60_000],
+    ] as const) {
+      await reportLine(h.reportLogPath, { kind: "step", runId: RUN_ID, nonce: NONCE, stepId, at: at(ms) });
+      h.setNow(at(ms));
+      await h.service.poll();
+    }
+
+    expect(h.notices.map((notice) => notice.body)).toEqual([
+      "Started: Implement the change",
+      "Started: Review the change",
+    ]);
+  });
+
+  it("says nothing for a step the run cannot name", async () => {
+    const h = await harness(START);
+    await h.service.start();
+    // No steps: a run started before the marker's list was carried with it.
+    await h.service.startObservation(observeRequest);
+    await reportLine(h.reportLogPath, {
+      kind: "step",
+      runId: RUN_ID,
+      nonce: NONCE,
+      stepId: "implement",
+      at: at(30_000),
+    });
+    h.setNow(at(30_000));
+    await h.service.poll();
+
+    expect(h.notices).toEqual([]);
+    // The event is still on the record; only the interruption is withheld.
+    const events = await h.service.events(RUN_ID);
+    expect(events.some((event) => event.kind === "step.marker")).toBe(true);
   });
 });

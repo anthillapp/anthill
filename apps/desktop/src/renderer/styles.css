@@ -7813,3 +7813,144 @@ button.presence-chip {
   color: var(--ink-dim);
   text-align: center;
 }
+
+/* ---------------- settings ---------------- */
+
+/*
+ * Settings opens over whatever screen is showing, because ⌘, is answered at
+ * the app's level rather than by a page. Same scrim and raised card as the
+ * handover, so the two read as the same kind of thing.
+ */
+.settings-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(24, 22, 21, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+}
+
+.settings-sheet {
+  width: min(620px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--canvas);
+  border-radius: var(--radius-slab);
+  box-shadow: var(--shadow-raised);
+}
+
+.settings-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 0 18px;
+  height: 48px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-top h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-body {
+  overflow-y: auto;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.settings-section {
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-section h3 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* The switch and what it means sit on one row, so the sentence explaining it
+   is attached to the control rather than floating under the section. */
+.settings-switch {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+
+/* The sheet-wide `input` rule gives every field a padded box at 100% width,
+   which for a checkbox means one that fills the row and pushes its own label
+   off the edge. Sized back to a checkbox, the way the recents footer does. */
+.settings-switch input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin: 1px 0 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+/* min-width: 0 is load-bearing: a flex item's floor is its content's
+   min-content width, so without it the longest line here sets the row's width
+   and the text lays itself out past the edge of the sheet. */
+.settings-switch > span {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-switch strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+.settings-note.quiet {
+  color: var(--ink-quiet);
+}
+
+.settings-note.is-warn {
+  color: var(--accent-700);
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* The observation card was written to stand alone on a page; inside a section
+   it keeps its own structure but drops the outer frame that would double up. */
+.settings-section .observation-setup {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}

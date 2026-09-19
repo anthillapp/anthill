@@ -182,8 +182,9 @@ export function BlockLibrary({ custom, onAddCustom, onAdd }: BlockLibraryProps) 
 
       <label className="search">
         <span aria-hidden="true">⌕</span>
+        {/* No `on-dark` here: the ring goes on the pill this sits inside,
+            or it hugs the field and crops the caret against its own edge. */}
         <input
-          className="on-dark"
           value={search}
           placeholder="Find a block in any category"
           onChange={(event) => setSearch(event.target.value)}

@@ -161,7 +161,15 @@ button {
   cursor: pointer;
 }
 
-button:hover:not(:disabled) {
+/*
+ * Wrapped in `:where()` so this stays as weak as `button:hover`.
+ *
+ * A bare `:not(:disabled)` counts towards specificity, which lifted this
+ * above every `.some-class:hover` in the sheet — including the rail rows on
+ * the dark chrome, which came back painted with the light row-hover and read
+ * as a white pill on a black panel.
+ */
+button:hover:not(:where(:disabled)) {
   background: var(--row-hover);
 }
 
@@ -8407,4 +8415,33 @@ button.presence-chip {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/*
+ * A search field's focus ring belongs on the pill, not on the field inside it.
+ *
+ * The input is transparent and sits within a rounded container, so an outline
+ * on the input drew a second, tighter rectangle inside the pill — a halo
+ * around nothing, with the placeholder pressed against it. The ring goes on
+ * the thing that looks like the control.
+ */
+.settings-search:focus-within,
+.library .search:focus-within,
+.harness-picker:focus-within {
+  outline: 2px solid rgba(255, 255, 255, 0.72);
+  outline-offset: 2px;
+}
+
+/* The field inside gives up both of its own focus marks: the outline, and the
+   pale accent halo `input:focus` paints as a box-shadow — which on dark chrome
+   was the inner of the two rings, not an outline at all. */
+.settings-search input:focus,
+.settings-search input:focus-visible,
+.library .search input:focus,
+.library .search input:focus-visible,
+.harness-picker select:focus,
+.harness-picker select:focus-visible {
+  outline: none;
+  box-shadow: none;
+  border-color: transparent;
 }

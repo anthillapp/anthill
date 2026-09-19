@@ -765,8 +765,8 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
             on the far side of the bar next to the workflow's name. */}
         <label className="harness harness-picker">
           <span>Harness</span>
+          {/* The picker is the control; the select inside it is not. */}
           <select
-            className="on-dark"
             value={workflow.target ?? ""}
             onChange={(event) =>
               editWorkflow((current) => ({

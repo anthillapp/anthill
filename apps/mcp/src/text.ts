@@ -143,6 +143,20 @@ export type BindAnswer = {
   questions?: string[];
 };
 
+/**
+ * What the three tools that address a workflow by id say when none was named.
+ *
+ * Shared, because the mistake is one mistake wherever it is made: the id is
+ * what each of those calls is *for*, and a handover cannot be looked up, worked
+ * from or bound to without one. It is the only answer here that carries neither
+ * a workflowId nor a link, and it cannot — a call that could not say which
+ * workflow it meant leaves nothing to name and nothing to open.
+ */
+export type CallAnswer = {
+  outcome: "invalid";
+  problems: ExchangeProblem[];
+};
+
 /* -------------------------------------------------------------------------- */
 /* The four results                                                           */
 /* -------------------------------------------------------------------------- */
@@ -327,6 +341,14 @@ export function bindText(answer: BindAnswer): string {
     "Run these as you work. They are the only thing that tells Anthill which step you are on, and they change nothing about the work itself — if one cannot be run, carry on without it.",
     answer.reportingCommands ?? "",
     answer.url ?? "",
+  ]);
+}
+
+export function callText(answer: CallAnswer): string {
+  return join([
+    "This call names no workflow to act on. Nothing was looked up and nothing was written:",
+    numbered(answer.problems.map(sentence)),
+    "Correct the call and try again. Nothing here is a question for the user.",
   ]);
 }
 

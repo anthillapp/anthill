@@ -24,6 +24,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   createHandlers,
+  MAX_BIND_KEY_LENGTH,
   MAX_SUBMISSION_BYTES,
   MCP_PROBLEM_CODES,
   type CreateDraftInput,
@@ -178,6 +179,11 @@ function textOf(result: { content?: unknown[]; structuredContent?: unknown }): s
 
 function problemCodes(answer: Record<string, unknown>): string[] {
   return ((answer.problems ?? []) as { code: string }[]).map((problem) => problem.code);
+}
+
+/** Which values a refusal says have to change, in the order it names them. */
+function problemFields(answer: Record<string, unknown>): (string | undefined)[] {
+  return ((answer.problems ?? []) as { field?: string }[]).map((problem) => problem.field);
 }
 
 async function inbox(store: ExchangeStore): Promise<InboxDrop[]> {
@@ -561,6 +567,54 @@ describe("bind_run", () => {
     expect((await store.readWorkflow("workflow-1"))?.bindings).toHaveLength(0);
   });
 
+  it("names the one value that has to change, and says whether it arrived", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+
+    // A refusal that listed all three preconditions whichever one was wrong
+    // was an explicit outcome and still unusable: the caller has to change
+    // exactly one value and was told nothing about which, so the two it had
+    // got right were as likely to be rewritten as the one it had got wrong.
+    for (const [field, wrong, absent] of [
+      ["revision", { revision: 0 }, false],
+      ["revision", { revision: undefined }, true],
+      ["digest", { digest: 42 }, false],
+      ["digest", { digest: undefined }, true],
+      ["idempotencyKey", { idempotencyKey: "k".repeat(MAX_BIND_KEY_LENGTH + 1) }, false],
+      ["idempotencyKey", { idempotencyKey: undefined }, true],
+    ] as const) {
+      const where = JSON.stringify(wrong);
+      const result = await handlers.bindRun({ ...bindInput(), ...wrong });
+      const answer = answerOf(result);
+
+      expect(answer.outcome, where).toBe("invalid");
+      expect(problemFields(answer), where).toEqual([field]);
+      expect(problemCodes(answer), where).toEqual([
+        absent ? "SUBMISSION_FIELD_MISSING" : "SUBMISSION_FIELD_INVALID",
+      ]);
+      expect(textOf(result), where).toContain(field);
+    }
+
+    expect((await store.readWorkflow("workflow-1"))?.bindings).toHaveLength(0);
+  });
+
+  it("names every value that has to change when more than one does", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+
+    const result = await handlers.bindRun({
+      workflowId: "workflow-1", revision: "1", digest: "", idempotencyKey: "  ", sessionId: 7,
+    });
+
+    // One pass over the arguments rather than one refusal per call: a caller
+    // told about `revision` alone would correct it, bind again, and be told
+    // about `digest`.
+    expect(problemFields(answerOf(result))).toEqual([
+      "sessionId", "revision", "digest", "idempotencyKey",
+    ]);
+    expect((await store.readWorkflow("workflow-1"))?.bindings).toHaveLength(0);
+  });
+
   it("answers for a field of the wrong kind rather than leaving it to the schema", async () => {
     const { handlers, store } = await openTools();
     await handlers.createWorkflowDraft(draftInput());
@@ -697,10 +751,7 @@ describe("bind_run", () => {
     const { handlers, store } = await openTools();
     await handlers.createWorkflowDraft(draftInput());
 
-    const result = await handlers.bindRun({
-      workflowId: "workflow-1",
-      sessionId: "../../etc/passwd",
-    });
+    const result = await handlers.bindRun(bindInput({ sessionId: "../../etc/passwd" }));
     const answer = answerOf(result);
 
     // The refusal reaches the sender, which is the only party that can send a
@@ -750,6 +801,46 @@ describe("bind_run", () => {
       "ANT-RUN1",
       "ANT-RUN2",
     ]);
+  });
+});
+
+describe("the three tools that address a workflow by id", () => {
+  it("answers for an id that did not arrive, and looks nothing up", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+
+    // Absence used to be the one mistake these three left to the input schema,
+    // which the SDK validates inside the try block that turns everything into
+    // `isError: true` — so the caller that forgot the id got the same shape as
+    // the caller whose server had fallen over.
+    const calls: [string, (input: { workflowId?: unknown }) => Promise<unknown>][] = [
+      ["get_workflow", (input) => handlers.getWorkflow(input)],
+      ["get_ready_revision", (input) => handlers.getReadyRevision(input)],
+      ["bind_run", (input) => handlers.bindRun({ ...bindInput(), workflowId: undefined, ...input })],
+    ];
+
+    for (const [tool, call] of calls) {
+      for (const unusable of [{}, { workflowId: 42 }, { workflowId: "   " }, { workflowId: null }]) {
+        const where = `${tool} ${JSON.stringify(unusable)}`;
+        const result = (await call(unusable)) as {
+          isError?: boolean;
+          content?: unknown[];
+          structuredContent?: Record<string, unknown>;
+        };
+        const answer = answerOf(result);
+
+        expect(result.isError, where).toBeUndefined();
+        expect(answer.outcome, where).toBe("invalid");
+        expect(problemFields(answer), where).toEqual(["workflowId"]);
+        expect(answer.url, where).toBeUndefined();
+        expect(textOf(result), where).toContain("workflowId");
+      }
+    }
+
+    // Nothing was looked up and nothing was bound: the workflow that is there
+    // is untouched, and the only inbox request is the one the draft made.
+    expect((await store.readWorkflow("workflow-1"))?.bindings).toEqual([]);
+    expect((await inbox(store)).map((drop) => drop.kind)).toEqual(["display"]);
   });
 });
 

@@ -184,7 +184,7 @@ describe("the built server over stdio", () => {
     ]);
   }, 20_000);
 
-  it("asks for the three things it refuses a handover without", async () => {
+  it("names the keys a call carries and asks the SDK for none of them", async () => {
     const session = await connect();
 
     const listed = await session.request("tools/list");
@@ -192,25 +192,79 @@ describe("the built server over stdio", () => {
       name: string;
       inputSchema: {
         required?: string[];
-        properties: Record<string, { type?: string; required?: string[] }>;
+        properties: Record<
+          string,
+          { type?: string; description?: string; required?: string[]; properties?: object }
+        >;
       };
     }[];
     const schema = tools.find((tool) => tool.name === "create_workflow_draft")?.inputSchema;
+    const bind = tools.find((tool) => tool.name === "bind_run")?.inputSchema;
 
-    // The schema a harness reads has to be the one the server enforces. These
-    // three were advertised as optional while a submission missing any of them
-    // was refused, which is a contract that teaches the caller the wrong thing
-    // and then punishes it for having learnt.
-    expect(schema?.properties.source.required).toEqual(["harness", "sessionId", "taskText"]);
-    expect(schema?.required).toEqual(
-      expect.arrayContaining(["idempotencyKey", "mode", "source", "workflow"]),
-    );
-
-    // And no declared types on the envelope, which is the other half of the
-    // same contract: what is in these fields is judged where an answer can
-    // carry the question to put to the user.
+    // Nothing is required and nothing on the envelope is typed, because the
+    // SDK validates this schema inside the try block that turns a failure into
+    // `isError: true`: whatever it refuses — a field of the wrong kind or a
+    // field that never arrived — reaches the model as an apparent crash, and
+    // the handler's answer for it becomes unreachable.
+    expect(schema?.required ?? []).toEqual([]);
+    expect(bind?.required ?? []).toEqual([]);
     expect(schema?.properties.idempotencyKey.type).toBeUndefined();
     expect(schema?.properties.mode.type).toBeUndefined();
+    expect(bind?.properties.revision.type).toBeUndefined();
+    expect(bind?.properties.workflowId.type).toBeUndefined();
+
+    // What a call is actually refused without is still advertised — in the
+    // descriptions, which reach the model, and in `source`'s shape, which is
+    // the only place its three fields are described at all.
+    expect(Object.keys(schema?.properties.source.properties ?? {})).toEqual([
+      "harness",
+      "sessionId",
+      "taskText",
+    ]);
+    expect(schema?.properties.source.description).toContain("harness, sessionId and taskText");
+    expect(bind?.properties.revision.description).toContain("every bind needs");
+  }, 20_000);
+
+  it("answers for a field that never arrived, rather than letting the SDK answer", async () => {
+    const session = await connect();
+
+    // Every one of these used to come back as `isError: true` with a zod
+    // sentence naming `nonoptional`, which is the shape a refusal must never
+    // take: the model cannot tell it from the server having fallen over, and
+    // the handler that knows how to say which field is missing never ran.
+    for (const [tool, args, field] of [
+      ["get_workflow", {}, "workflowId"],
+      ["get_ready_revision", {}, "workflowId"],
+      ["bind_run", { revision: 1, digest: "0123456789abcdef", idempotencyKey: "k" }, "workflowId"],
+      ["bind_run", { workflowId: "w", digest: "0123456789abcdef", idempotencyKey: "k" }, "revision"],
+      [
+        "create_workflow_draft",
+        { idempotencyKey: "k", mode: "show-and-go", workflow: {} },
+        "source",
+      ],
+      [
+        "create_workflow_draft",
+        {
+          idempotencyKey: "k", mode: "show-and-go", workflow: {},
+          source: { harness: "claude-code", sessionId: "session-abc" },
+        },
+        "source.taskText",
+      ],
+    ] as const) {
+      const called = await session.request("tools/call", { name: tool, arguments: args });
+      const result = called.result as {
+        content: { type: string; text: string }[];
+        structuredContent: { outcome: string; problems: { field?: string }[] };
+        isError?: boolean;
+      };
+      const where = `${tool} ${JSON.stringify(args)}`;
+
+      expect(called.error, where).toBeUndefined();
+      expect(result.isError, where).toBeUndefined();
+      expect(result.structuredContent.outcome, where).toBe("invalid");
+      expect(result.structuredContent.problems.map((problem) => problem.field), where).toContain(field);
+      expect(result.content[0].text, where).toContain(field);
+    }
   }, 20_000);
 
   it("answers a tool call with prose and an outcome, over the wire", async () => {

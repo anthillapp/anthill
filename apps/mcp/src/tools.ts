@@ -14,24 +14,28 @@
  * and it would bite in production rather than in a test. The shapes can be
  * declared once they have stopped moving.
  *
- * The input schemas declare which keys a call carries and say nothing about what
- * is in them, for a reason spelled out in `handlers.ts`: the SDK validates them
- * inside the try block that turns everything into `isError: true`, so a value
- * this schema rejects reaches the model as an apparent crash rather than as a
- * question it can put to the user. `readSubmission` is written to answer for
- * every one of these fields, in the vocabulary the design asks for, and a type
- * declared here would refuse them first and leave that answer unreachable.
+ * The input schemas name the keys a call may carry and judge none of them, for a
+ * reason spelled out in `handlers.ts`: the SDK validates them inside the try
+ * block that turns everything into `isError: true`, so a value this schema
+ * rejects reaches the model as an apparent crash rather than as a question it
+ * can put to the user. `readSubmission` and the handlers are written to answer
+ * for every one of these fields, in the vocabulary the design asks for, and a
+ * type declared here would refuse them first and leave that answer unreachable.
  *
- * The line that leaves is the envelope against its contents. Whether a key is
- * there at all, and whether `source` is an object rather than a number, the SDK
- * may still decide — zod cannot express "required, and I will judge it myself",
- * and a caller that omits a required field is better told which field than told
- * nothing. Everything inside is judged where a proper answer can be given.
+ * Nothing is marked required either, and that is the half most likely to be
+ * corrected back. A field that is absent is no more distinguishable from a
+ * crash than a field that is malformed — the SDK answers both with `isError`
+ * and a zod sentence — and absence is the commoner mistake of the two, so it is
+ * the one that least deserves the worse answer. A requirement stated in a
+ * `describe` reaches the model and costs nothing; the same requirement marked
+ * on the schema hands the answer to the SDK, which has no outcome to return and
+ * no question to ask. What a call is actually refused without is said in the
+ * descriptions below and answered by the handler, which knows how to say
+ * "this call does not carry `revision`" and which of a call's values to change.
  *
- * What is marked required here is what a submission is actually refused without,
- * which is not the same as what the sender may leave out of a *complete*
- * handover: `source.taskText` is required and may be empty, because an empty one
- * is a question for the user rather than a malformed call.
+ * The one line the SDK still draws is that a `source` that arrives at all is an
+ * object, because the shape is where its three fields are described and a
+ * schema is the only place a sender reads them.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -41,9 +45,11 @@ import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-exchange";
 import type { Handlers } from "./handlers.js";
 
 const WORKFLOW_ID = z
-  .string()
-  .min(1)
-  .describe("The workflow's own id: the `id` field of the document that was handed over.");
+  .unknown()
+  .optional()
+  .describe(
+    "The workflow's own id: the `id` field of the document that was handed over. Every call needs one, because it is the only thing that says which handover is being asked about.",
+  );
 
 export function registerExchangeTools(server: McpServer, handlers: Handlers): void {
   server.registerTool(
@@ -62,33 +68,47 @@ Returns an outcome of:
 
 The result also carries the workflow id and, where something was stored, the
 revision the content is now at and an anthill:// link the user can open. A
-refusal carries no link, because there would be nothing of yours behind it.`,
+refusal carries no link, because there would be nothing of yours behind it.
+
+Every handover carries idempotencyKey, mode, source — harness, sessionId and
+taskText — and workflow. A call that leaves one of them out is answered with
+which one, and nothing is stored.`,
       inputSchema: {
         idempotencyKey: z
           .unknown()
+          .optional()
           .describe(
             "Your own key for this handover, repeated verbatim if you retry it. It is not an address: a submission lands on the id its workflow document carries, and this key is your promise that a second submission under that id is the same call rather than different work. The same key under a different document id creates a second workflow rather than revising the first.",
           ),
         mode: z
           .unknown()
+          .optional()
           .describe(
             'How much say the user gets before work starts. "approval-gate": nothing may start until they mark a revision ready. "show-and-go": work may start as soon as the workflow is complete, and they can still edit it.',
           ),
         source: z
           .object({
-            harness: z.unknown().describe('Which tool you are: "claude-code", "codex" or "pi".'),
+            harness: z
+              .unknown()
+              .optional()
+              .describe('Which tool you are: "claude-code", "codex" or "pi".'),
             sessionId: z
               .unknown()
+              .optional()
               .describe(
                 "Your own identifier for this conversation: letters, digits, hyphens and underscores. Anthill does not read it, but it writes it down and matches it against your own session files, so a run started from this handover can be picked up again after it goes quiet.",
               ),
             taskText: z
               .unknown()
+              .optional()
               .describe(
                 "What the user asked for, in the user's own words rather than your summary of it. Anthill shows this back to them so they can check it understood the same job they did, and it is written down once at the handover: nothing said later replaces it, and it is not in the document they can edit. Quote them.",
               ),
           })
-          .describe("Who is handing this over, and what they were asked to do."),
+          .optional()
+          .describe(
+            "Who is handing this over, and what they were asked to do: all three of harness, sessionId and taskText.",
+          ),
         workflowId: z
           .unknown()
           .optional()
@@ -97,6 +117,7 @@ refusal carries no link, because there would be nothing of yours behind it.`,
           ),
         workflow: z
           .unknown()
+          .optional()
           .describe(
             `The complete workflow document as JSON: id, name, version, target, brief, nodes, edges and metadata.workflow.formatVersion: ${WORKFLOW_FORMAT_VERSION}. It must name a goal, say what done looks like, and target the submitting tool. Legacy or future workflow formats are refused, not migrated.`,
           ),
@@ -127,7 +148,9 @@ refusal carries no link, because there would be nothing of yours behind it.`,
 revision, which revision the user has approved, which runs are bound to it, and
 the handover mode it was stored under.
 
-A status read. It changes nothing and it never waits.`,
+A status read. It changes nothing and it never waits. It takes the workflowId
+and nothing else, and a call that does not name one answers "invalid" without
+looking anything up.`,
       inputSchema: { workflowId: WORKFLOW_ID },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
@@ -149,6 +172,8 @@ Returns an outcome of:
                     yet to happen.
   no_such_workflow  nothing of that id has been handed over to this Anthill.
                     Check the id; waiting will not change it.
+  invalid           nothing was looked up: the call named no workflow to look
+                    up, and the problems say what to send instead.
 
 This call answers immediately and never waits for anybody. Under approval-gate it
 stays "not_ready" until the user approves a revision, which takes as long as
@@ -182,19 +207,30 @@ step you are on — it is not driving your session and has no other way to know.
 
 Retry with the same idempotencyKey, revision, digest and session after a lost reply.
 Use a new key only for an intentional new run. Binding does not start the agent
-or confirm that the desktop has registered observation.`,
+or confirm that the desktop has registered observation.
+
+Every bind carries workflowId, revision, digest and idempotencyKey. A call that
+leaves one of them out, or sends one Anthill cannot use, is answered with which
+one, and nothing is bound.`,
       inputSchema: {
         workflowId: WORKFLOW_ID,
         revision: z
           .unknown()
+          .optional()
           .describe(
-            "The exact revision returned by get_ready_revision. A stale revision is refused.",
+            "The exact revision returned by get_ready_revision, which every bind needs. A stale revision is refused.",
           ),
-        digest: z.unknown().describe("The digest returned with that exact revision."),
+        digest: z
+          .unknown()
+          .optional()
+          .describe(
+            "The digest returned with that exact revision, which every bind needs alongside the number: together they say this run is against the content that was read.",
+          ),
         idempotencyKey: z
           .unknown()
+          .optional()
           .describe(
-            "A stable key for this binding request, of at most 256 characters; keep it unchanged on retries.",
+            "A stable key for this binding request, of at most 256 characters; keep it unchanged on retries. Every bind needs one.",
           ),
         sessionId: z
           .unknown()

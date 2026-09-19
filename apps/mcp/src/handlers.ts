@@ -9,8 +9,14 @@
  * copy of any of those living here would be a second answer the app could
  * disagree with, in front of the same user, about the same workflow — which is
  * also why `bind_run` asks `checkSessionId` the same question a handover is
- * asked, rather than a laxer one of its own. The only judgement made in this
- * file is a size ceiling, which is the server's own because the transport is.
+ * asked, rather than a laxer one of its own.
+ *
+ * What is judged here is the call rather than the handover: a size ceiling,
+ * which is the server's own because the transport is, and whether the
+ * arguments a tool was handed are values Anthill can use at all. Both belong
+ * to this file for the same reason the rule below gives — they are refusals
+ * that have to be answered rather than thrown, and the tool's input schema
+ * cannot answer anything.
  *
  * The one rule that shapes every function below comes from the SDK rather than
  * from the domain: a handler that throws is turned into
@@ -35,6 +41,7 @@ import {
 } from "@anthill/exchange-store";
 import { MARKER_VERSION, cliInstruction, newNonce, newRunId, workflowSteps } from "@anthill/live";
 import {
+  EXCHANGE_PROBLEM_CODES,
   EXCHANGE_VERSION,
   checkSessionId,
   isSessionId,
@@ -47,11 +54,13 @@ import { createHash } from "node:crypto";
 
 import {
   bindText,
+  callText,
   draftText,
   questionsFrom,
   readyText,
   workflowText,
   type BindAnswer,
+  type CallAnswer,
   type DraftAnswer,
   type ReadyAnswer,
   type WorkflowAnswer,
@@ -105,32 +114,33 @@ export type HandlerDependencies = {
 /**
  * What `create_workflow_draft` is given: the six fields, none of them judged.
  *
- * `unknown` rather than the types they are supposed to have, and the looseness
- * is the point rather than an oversight. The SDK validates a tool's declared
- * input schema *inside* the try block that turns every failure into
- * `isError: true`, so anything the schema refuses comes back looking like a
- * crash, with a zod message and no question for the user. The design asks
- * instead for an `invalid` outcome carrying every problem with its dotted path
- * and its `ask` — and `readSubmission` is written to produce exactly that, for
- * every one of these fields. A schema that declared their types would refuse
- * them first and leave that work unreachable.
+ * `unknown` rather than the types they are supposed to have, and optional
+ * rather than required, and both are the point rather than an oversight. The
+ * SDK validates a tool's declared input schema *inside* the try block that
+ * turns every failure into `isError: true`, so anything the schema refuses
+ * comes back looking like a crash, with a zod message and no question for the
+ * user. The design asks instead for an `invalid` outcome carrying every problem
+ * with its dotted path and its `ask` — and `readSubmission` is written to
+ * produce exactly that, for every one of these fields.
  *
- * What the schema still decides is which keys have to be there at all, because
- * zod has no way to say "required, and I will judge it myself": a missing
- * required field is the one mistake the SDK answers on its own. The schema is
- * where that requirement is advertised, so the answer at least names the field
- * the caller left out.
+ * Absence is one of the things it answers for. `fieldProblem` tells "this
+ * handover does not carry `mode`" apart from "`mode` has to be one of these
+ * three" in so many words, and reporting every field at once is the whole
+ * reason a sender gets one list rather than one zod sentence. A schema that
+ * marked these required would take the first of those answers back and leave
+ * the harness with the shape a refusal must never have.
  */
 export type CreateDraftInput = {
-  idempotencyKey: unknown;
-  mode: unknown;
-  source: unknown;
-  workflow: unknown;
+  idempotencyKey?: unknown;
+  mode?: unknown;
+  source?: unknown;
+  workflow?: unknown;
   workflowId?: unknown;
   exchangeVersion?: unknown;
 };
 
-export type WorkflowInput = { workflowId: string };
+/** The id the two read-only tools address, unjudged until `readWorkflowId`. */
+export type WorkflowInput = { workflowId?: unknown };
 
 /**
  * What `bind_run` is given, judged here for the same reason a draft is.
@@ -139,12 +149,12 @@ export type WorkflowInput = { workflowId: string };
  * stdio: five of six malformed binds came back as `isError: true` with a zod
  * sentence and no `outcome`, which is the one shape the comment at the top of
  * this file says a refusal must never take. The precondition refusal below had
- * been written and could not be reached. So the schema now says only that the
- * keys are there, and the answering is done where an answer can carry a
+ * been written and could not be reached. So the schema now names the keys and
+ * asks for none of them, and the answering is done where an answer can carry a
  * sentence the model can act on.
  */
 export type BindRunInput = {
-  workflowId: string;
+  workflowId?: unknown;
   revision?: unknown;
   digest?: unknown;
   idempotencyKey?: unknown;
@@ -259,7 +269,11 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       });
     },
 
-    async getWorkflow({ workflowId }): Promise<CallToolResult> {
+    async getWorkflow(input): Promise<CallToolResult> {
+      const addressed = readWorkflowId(input.workflowId);
+      if ("problem" in addressed) return result(callText, invalidCall([addressed.problem]));
+      const workflowId = addressed.workflowId;
+
       const stored = await store.readWorkflow(workflowId);
       if (!stored) return result(workflowText, { outcome: "not_found", workflowId });
 
@@ -299,7 +313,11 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       });
     },
 
-    async getReadyRevision({ workflowId }): Promise<CallToolResult> {
+    async getReadyRevision(input): Promise<CallToolResult> {
+      const addressed = readWorkflowId(input.workflowId);
+      if ("problem" in addressed) return result(callText, invalidCall([addressed.problem]));
+      const workflowId = addressed.workflowId;
+
       const eligibility = await store.eligibleRevision(workflowId);
 
       if (!eligibility.eligible) {
@@ -339,28 +357,32 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       });
     },
 
-    async bindRun({ workflowId, revision, digest, idempotencyKey, sessionId }): Promise<CallToolResult> {
-      // Before anything is read or written: the one id in this call that
-      // Anthill did not mint. It is copied onto the binding and registered as
-      // the run's session, where it is compared against the ids in the
-      // harness's own files — so an id that cannot survive being written down
-      // is refused here, with something to read, rather than quietly failing
-      // to match anything a layer or two further on.
+    async bindRun(input): Promise<CallToolResult> {
+      const { revision, digest, idempotencyKey, sessionId } = input;
+      const addressed = readWorkflowId(input.workflowId);
+      if ("problem" in addressed) return result(callText, invalidCall([addressed.problem]));
+      const workflowId = addressed.workflowId;
+
+      // Every remaining argument is judged before anything is read or written,
+      // and every one that fails is named. Two of them are copied from
+      // `get_ready_revision` and two are the caller's own, so a refusal that
+      // said only that one of the four was wrong left it guessing which — and
+      // the three it had sent correctly were as likely to be rewritten as the
+      // one it had not.
+      const problems: ExchangeProblem[] = [];
+
+      // The one id in this call that Anthill did not mint. It is copied onto
+      // the binding and registered as the run's session, where it is compared
+      // against the ids in the harness's own files — so an id that cannot
+      // survive being written down is refused here, with something to read,
+      // rather than quietly failing to match anything a layer or two on.
       //
       // An explicit `null` counts as not sending one, the way `readSubmission`
       // reads a null `workflowId`: senders do write it, and reading it as an
       // unusable session id would refuse a call that asked for the default.
       const given = sessionId === undefined || sessionId === null ? undefined : sessionId;
       const badSession = given === undefined ? undefined : checkSessionId(given, "sessionId");
-      if (badSession) {
-        // No link: this is refused before Anthill has looked at the workflow,
-        // so nothing here knows whether there is one to open.
-        return result(bindText, {
-          outcome: "invalid",
-          workflowId,
-          ...problemFields([badSession]),
-        });
-      }
+      if (badSession) problems.push(badSession);
 
       // Asked again rather than cast: passing `checkSessionId` is exactly
       // `isSessionId` holding, and a cast would say so without checking.
@@ -368,18 +390,33 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
 
       const exactRevision = typeof revision === "number" && Number.isSafeInteger(revision) && revision >= 1
         ? revision : undefined;
+      if (exactRevision === undefined) {
+        problems.push(callProblem(revision, "revision", "the revision number get_ready_revision returned",
+          "A whole number of 1 or more, and that exact one: a run is bound to the content the user approved rather than to whatever is newest."));
+      }
+
       const exactDigest = typeof digest === "string" && digest.trim() ? digest : undefined;
+      if (exactDigest === undefined) {
+        problems.push(callProblem(digest, "digest", "the digest get_ready_revision returned beside that revision",
+          "It is what says the revision being bound is still the content that was read."));
+      }
+
       // The length is judged here too, now that the schema no longer does it:
       // a key of any size would otherwise be written into a binding that is
       // never rewritten.
       const bindingKey = typeof idempotencyKey === "string" && idempotencyKey.trim() &&
         idempotencyKey.length <= MAX_BIND_KEY_LENGTH ? idempotencyKey : undefined;
-      if (exactRevision === undefined || exactDigest === undefined || bindingKey === undefined) {
-        return result(bindText, {
-          outcome: "invalid", workflowId,
-          problems: [{ code: "BIND_PRECONDITION_REQUIRED", message:
-            `Provide the revision and digest returned by get_ready_revision and a stable idempotencyKey of at most ${MAX_BIND_KEY_LENGTH} characters. Retry with the same key and payload; use a new key only for an intentional new run.` }],
-        });
+      if (bindingKey === undefined) {
+        problems.push(callProblem(idempotencyKey, "idempotencyKey",
+          `a key of your own: a string of at most ${MAX_BIND_KEY_LENGTH} characters, and not a blank one`,
+          "Repeat the same key and payload after a lost reply; use a new key only for an intentional new run."));
+      }
+
+      if (badSession || exactRevision === undefined || exactDigest === undefined ||
+        bindingKey === undefined) {
+        // No link: this is refused before Anthill has looked at the workflow,
+        // so nothing here knows whether there is one to open.
+        return result(bindText, { outcome: "invalid", workflowId, ...problemFields(problems) });
       }
       const url = workflowUrl(workflowId);
       const bound = await store.bindRequest(workflowId, exactRevision, exactDigest, bindingKey, session,
@@ -479,6 +516,71 @@ function result<Answer extends Record<string, unknown>>(
   return {
     content: [{ type: "text", text: render(answer) }],
     structuredContent: answer,
+  };
+}
+
+/**
+ * The workflow this call is about, or the reason it named none.
+ *
+ * Asked before anything is read or written, by all three tools that take an
+ * id, because none of them has anything to do without one. It is judged here
+ * rather than declared on the input schema for the reason the rest of this
+ * file gives: a call that left the id out, or sent a number, would otherwise
+ * be answered by the SDK with `isError` and a zod sentence — the one shape a
+ * model cannot tell apart from the server having fallen over.
+ *
+ * Blank is refused along with absent. A whitespace id is not a workflow this
+ * machine has never seen; it is a caller that has lost track of what it was
+ * addressing, and looking it up would answer `no_such_workflow` and send it
+ * away to check an id it never sent.
+ */
+function readWorkflowId(
+  value: unknown,
+): { workflowId: string } | { problem: ExchangeProblem } {
+  if (typeof value === "string" && value.trim().length > 0) return { workflowId: value };
+  return {
+    problem: callProblem(
+      value,
+      "workflowId",
+      "a string, and not a blank one",
+      "It is the workflow's own id: the `id` field of the document that was handed over, which create_workflow_draft and get_workflow both return.",
+    ),
+  };
+}
+
+function invalidCall(problems: readonly ExchangeProblem[]): CallAnswer {
+  return { outcome: "invalid", problems: [...problems] };
+}
+
+/**
+ * One argument that did not arrive, or did not arrive as the kind of thing it
+ * has to be.
+ *
+ * Told apart the way `readSubmission` tells a missing envelope field apart
+ * from a malformed one, and said in the same vocabulary: `checkSessionId`
+ * already answers for one of `bind_run`'s arguments with a `SUBMISSION_FIELD_*`
+ * code, and a second set of codes for the arguments beside it would make one
+ * kind of mistake look like two depending on which door it came through.
+ *
+ * No `ask` on any of these. That field carries a question for the user, and
+ * the user did not write this call.
+ */
+function callProblem(
+  value: unknown,
+  field: string,
+  expected: string,
+  why: string,
+): ExchangeProblem {
+  const absent = value === undefined || value === null;
+  const head = absent
+    ? `This call does not carry ${field}, which has to be ${expected}.`
+    : `${field} has to be ${expected}.`;
+  return {
+    code: absent
+      ? EXCHANGE_PROBLEM_CODES.SUBMISSION_FIELD_MISSING
+      : EXCHANGE_PROBLEM_CODES.SUBMISSION_FIELD_INVALID,
+    message: `${head} ${why}`,
+    field,
   };
 }
 

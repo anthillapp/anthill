@@ -43,9 +43,11 @@ export {
 export {
   checkExchangeVersion,
   checkSessionId,
+  readStoredWorkflowDocument,
   readSubmission,
   readWorkflowDocument,
   type ReadSubmissionResult,
+  type ReadWorkflowResult,
 } from "./submission.js";
 
 export { checkCompleteness } from "./completeness.js";

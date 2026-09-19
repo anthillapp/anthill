@@ -9,19 +9,32 @@
  *
  * A record from a newer Anthill is refused rather than opened, the way
  * `checkWorkflowCompatibility` refuses a workflow from the future. There is no
- * migration chain because there is nothing yet to migrate from; version 1 with
- * an honest refusal is a smaller lie than an upgrade path nobody has exercised.
+ * migration chain for the envelope because there is nothing yet to migrate
+ * from; version 1 with an honest refusal is a smaller lie than an upgrade path
+ * nobody has exercised.
  *
- * One thing these parsers deliberately do not do is migrate the workflow inside
- * a revision. A revision is the document exactly as it was submitted, on the
- * pre-migration side, and `migrateWorkflow` runs where the document is opened —
- * in the editor, on the working copy. Mixing the two has already cost this
- * repository one regression, so the side each reader is on is worth saying out
- * loud: this one is on the raw side.
+ * The workflow *inside* a revision is a different matter, and it was got wrong
+ * here once. These parsers used to read it through the door a submission comes
+ * in by, which refuses any format but this build's — including every format
+ * before it. So the first bump of `WORKFLOW_FORMAT_VERSION` destroyed every
+ * handover already on disk: the head revision unreadable, the approval
+ * unreadable with it, no bindings, and `get_ready_revision` answering
+ * `not_ready` for ever with nothing the user or the harness could do about it.
+ * The user's own document came through unharmed, because the editor migrates
+ * when it opens one, which made the loss invisible until somebody went looking
+ * for the run.
+ *
+ * So a revision is upgraded on the way out and never on the way in. The stored
+ * bytes are what was submitted and stay that way; the digest recorded beside
+ * them is checked against those bytes, so it goes on being the revision's
+ * identity across an upgrade and every approval and binding that pins it still
+ * matches. What the caller is handed is a copy at this build's format, which is
+ * the only version of it anything downstream — the validator, the compiler, the
+ * working copy — knows how to read.
  */
 
 import type { ExchangeProblem, ExchangeSource, HandoverMode } from "@anthill/workflow-exchange";
-import { checkExchangeVersion, isHandoverMode, isSourceHarness, readWorkflowDocument, revisionDigest } from "@anthill/workflow-exchange";
+import { checkExchangeVersion, isHandoverMode, isSourceHarness, readStoredWorkflowDocument, revisionDigest } from "@anthill/workflow-exchange";
 import type { Workflow } from "@anthill/workflow-schema";
 
 import { EXCHANGE_STORE_PROBLEM_CODES, storeProblem } from "./problems.js";
@@ -77,14 +90,23 @@ export type StoredIdentity = {
 /**
  * One immutable snapshot of a workflow's content.
  *
- * The persisted digest is recomputed on read. Changing canonicalization or the
- * digest algorithm requires a format migration, not silently trusting old data.
+ * The persisted digest is recomputed on read, from the stored document rather
+ * than from `workflow` below. Changing canonicalization or the digest algorithm
+ * requires a format migration, not silently trusting old data.
  */
 export type StoredRevision = {
   revision: number;
   createdAt: string;
   by: RevisionAuthor;
   digest: string;
+  /**
+   * The content, at this build's workflow format.
+   *
+   * Upgraded on read where the snapshot was written by an older format, so the
+   * document handed onward is one the validator and the compiler understand.
+   * It is a copy: the file it came from is not rewritten, and `digest` is still
+   * the digest of what that file says.
+   */
   workflow: Workflow;
 };
 
@@ -191,14 +213,17 @@ export function parseRevision(text: string, where: string): RecordRead<StoredRev
   // By shape, not by completeness. A revision was judged complete on the way
   // in; asking again on the way out would mean a validator that gained a rule
   // could make yesterday's approved revision unreadable.
-  // Reuse the wire parser's workflow compatibility check, without migration.
-  const workflow = readWorkflowDocument(value.workflow);
+  const workflow = readStoredWorkflowDocument(value.workflow);
 
   if (!revision || !createdAt || !by || !digest || !workflow.ok) {
     return unreadable(where, "it is not a revision this build can read");
   }
 
-  if (revisionDigest(workflow.workflow) !== digest) {
+  // Against the document as it lies in the file, rather than against the copy
+  // that has just been upgraded. The digest was taken from what was written,
+  // and taking it from the upgrade instead would report every revision an
+  // older Anthill stored as having been tampered with.
+  if (revisionDigest(value.workflow) !== digest) {
     return unreadable(where, "its content does not match its recorded digest");
   }
 

@@ -117,6 +117,12 @@ function codes(problems?: { code: string }[]): string[] {
   return (problems ?? []).map((problem) => problem.code);
 }
 
+/** The workflow format a document was written with, read where it is stored. */
+function formatOf(workflow: unknown): number | undefined {
+  const metadata = (workflow as Workflow | undefined)?.metadata?.workflow;
+  return (metadata as { formatVersion?: number } | undefined)?.formatVersion;
+}
+
 describe("createWorkflow", () => {
   it("stores a handover as revision 1, under the document's own id", async () => {
     const store = await openStore();
@@ -945,6 +951,48 @@ describe("ANT-86 integrity and recovery regressions", () => {
       expect((await store.eligibleRevision("workflow-1")).eligible).toBe(false);
       expect(await store.readRevision("workflow-1", 1)).toBeUndefined();
     }
+  });
+
+  it("keeps a revision, an approval and a binding written by the previous workflow format", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission({ mode: "approval-gate" }));
+    await store.markReady("workflow-1", 1);
+    await store.bind("workflow-1", 1, { runId: "ANT-OLD", nonce: "abc" });
+
+    // Age every record to the format before this one, which is what an
+    // upgraded Anthill finds on disk: the bytes were written by the build that
+    // came before it, and the first format bump used to make all three
+    // unreadable at once — the handover, the user's approval of it, and the
+    // run that was already working from it.
+    const snapshot = join(store.root, "workflows/workflow-1/revisions/0001.json");
+    const aged = JSON.parse(await readFile(snapshot, "utf8"));
+    aged.workflow.metadata.workflow.formatVersion = WORKFLOW_FORMAT_VERSION - 1;
+    aged.digest = revisionDigest(aged.workflow);
+    await writeFile(snapshot, JSON.stringify(aged));
+    for (const name of ["revisions/0001.ready", "bindings/ANT-OLD.json"]) {
+      const path = join(store.root, "workflows/workflow-1", name);
+      const record = JSON.parse(await readFile(path, "utf8"));
+      await writeFile(path, JSON.stringify({ ...record, digest: aged.digest }));
+    }
+
+    const stored = await store.readWorkflow("workflow-1");
+    expect(stored?.problems).toEqual([]);
+    expect(stored?.head?.revision).toBe(1);
+    expect(stored?.head?.digest).toBe(aged.digest);
+    expect(stored?.ready?.revision).toBe(1);
+    expect(stored?.bindings.map((binding) => binding.runId)).toEqual(["ANT-OLD"]);
+    expect(await store.readyRevision("workflow-1")).toBe(1);
+    expect(await store.readBinding("workflow-1", "ANT-OLD")).toBeDefined();
+    expect(await store.eligibleRevision("workflow-1")).toMatchObject({
+      eligible: true, revision: { revision: 1, digest: aged.digest },
+    });
+
+    // The copy handed onward is at this build's format, because that is the
+    // only one the validator and the compiler read. The file is not.
+    expect(formatOf(stored?.head?.workflow)).toBe(WORKFLOW_FORMAT_VERSION);
+    expect(formatOf(JSON.parse(await readFile(snapshot, "utf8")).workflow)).toBe(
+      WORKFLOW_FORMAT_VERSION - 1,
+    );
   });
 
   it("rejects changed semantic envelopes without changing the original mode", async () => {

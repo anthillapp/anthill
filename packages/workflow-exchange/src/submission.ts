@@ -22,7 +22,7 @@
  */
 
 import { HARNESS_TARGETS, WorkflowSchema, type Workflow } from "@anthill/workflow-schema";
-import { checkWorkflowCompatibility } from "@anthill/workflow";
+import { checkWorkflowCompatibility, migrateWorkflow } from "@anthill/workflow";
 
 import {
   EXCHANGE_PROBLEM_CODES,
@@ -264,11 +264,48 @@ function readSource(value: unknown, problems: ExchangeProblem[]): ExchangeSource
   return { harness, sessionId, taskText };
 }
 
-export function readWorkflowDocument(value: unknown):
+export type ReadWorkflowResult =
   | { ok: true; workflow: Workflow }
-  | { ok: false; problems: ExchangeProblem[] } {
+  | { ok: false; problems: ExchangeProblem[] };
+
+/**
+ * A workflow document arriving from a sender, at exactly this build's format.
+ *
+ * Strict about the format version in both directions, and that is the right
+ * posture for this door alone: whoever sent this is still on the other end of
+ * the pipe, so an older format is a refusal they can read and answer by
+ * emitting the current one.
+ */
+export function readWorkflowDocument(value: unknown): ReadWorkflowResult {
   const problems: ExchangeProblem[] = [];
   const workflow = readWorkflow(value, problems);
+  return workflow ? { ok: true, workflow } : { ok: false, problems };
+}
+
+/**
+ * A workflow document Anthill wrote down earlier, brought up to this format.
+ *
+ * The other door, and the difference between them is who is left to answer
+ * for what is being read. A submission has a sender; a file does not. An
+ * upgraded Anthill reading its own store finds documents written at the format
+ * before this one, and refusing those the way a stale submission is refused
+ * cost the user everything the store was for: the handover unreadable, the
+ * approval gone with it, the run association missing, and `get_ready_revision`
+ * answering `not_ready` for ever with nobody able to change the answer. The
+ * document the user edits survived, because the editor migrates on open —
+ * which is precisely the asymmetry this function removes.
+ *
+ * Only a document from the *future* is still refused, because that refusal is
+ * the honest one: this build cannot know what it would be dropping.
+ *
+ * Nothing here writes. The caller is handed an upgraded copy and the bytes on
+ * disk stay as they were, so the digest recorded beside them — which is the
+ * revision's identity, and what every approval and binding pins — still
+ * describes what is actually stored.
+ */
+export function readStoredWorkflowDocument(value: unknown): ReadWorkflowResult {
+  const problems: ExchangeProblem[] = [];
+  const workflow = readWorkflow(migrateWorkflow(value).workflow, problems);
   return workflow ? { ok: true, workflow } : { ok: false, problems };
 }
 

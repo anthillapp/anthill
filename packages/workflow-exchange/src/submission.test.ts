@@ -13,7 +13,13 @@ import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow";
 import { describe, expect, it } from "vitest";
 
 import { EXCHANGE_PROBLEM_CODES, EXCHANGE_VERSION, SESSION_ID_MAX_LENGTH } from "./contracts.js";
-import { checkExchangeVersion, checkSessionId, readSubmission } from "./submission.js";
+import {
+  checkExchangeVersion,
+  checkSessionId,
+  readStoredWorkflowDocument,
+  readSubmission,
+  readWorkflowDocument,
+} from "./submission.js";
 
 /** The smallest thing `WorkflowSchema` accepts. Completeness is not in question here. */
 function workflow(): Record<string, unknown> {
@@ -330,5 +336,48 @@ describe("readSubmission", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(fields(result.problems)).toEqual(["idempotencyKey", "workflow"]);
+  });
+});
+
+describe("readStoredWorkflowDocument", () => {
+  /** The same document as an older Anthill would have written it down. */
+  function olderFormat(): Record<string, unknown> {
+    return {
+      ...workflow(),
+      metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION - 1 } },
+    };
+  }
+
+  it("brings a document written by the previous format up to this one", () => {
+    const result = readStoredWorkflowDocument(olderFormat());
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect((result.workflow.metadata?.workflow as { formatVersion: number }).formatVersion).toBe(
+      WORKFLOW_FORMAT_VERSION,
+    );
+  });
+
+  it("leaves the document it was given alone", () => {
+    const stored = olderFormat();
+    readStoredWorkflowDocument(stored);
+    expect(stored).toEqual(olderFormat());
+  });
+
+  it("still refuses a document from a format this build does not know", () => {
+    const result = readStoredWorkflowDocument({
+      ...workflow(),
+      metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION + 1 } },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(fields(result.problems)).toEqual(["workflow.metadata.workflow.formatVersion"]);
+  });
+
+  // The door a sender knocks on stays shut on an old format, because a sender
+  // is still there to be told to emit the current one.
+  it("is the only door an older format comes through", () => {
+    expect(readWorkflowDocument(olderFormat()).ok).toBe(false);
   });
 });

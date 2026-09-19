@@ -233,3 +233,151 @@ describe("checkCompleteness", () => {
     expect(reported[0]).toBe(EXCHANGE_PROBLEM_CODES.HANDOVER_NO_TASK_TEXT);
   });
 });
+
+/**
+ * Acceptance: one graph, two hosts, the same answer.
+ *
+ * ANT-86 promises that a workflow with branches, controlled loops and agents
+ * assigned by reference is judged the same whichever coding tool hands it
+ * over. Everything in `checkCompleteness` is about the diagram and the
+ * handover rather than about the tool — except the two rules that name one:
+ * a workflow must target the tool submitting it, and an agent must have an
+ * answer for that tool. So the graph is submitted twice, once as each host,
+ * differing only in those two answers, and the problems are compared whole.
+ */
+describe("the same graph, handed over by either host", () => {
+  /** Triage, then implement and review round a bounded loop, then ship. */
+  function representative(target: "claude-code" | "codex"): Workflow {
+    return {
+      id: "workflow-2",
+      name: "Land the fix",
+      version: "0.1.0",
+      target,
+      brief: {
+        goal: "The reported crash is fixed, reviewed and released.",
+        doneCriteria: ["The reviewer approves.", "The suite passes."],
+      },
+      nodes: [
+        { id: "start", type: "start", name: "Start", config: {} },
+        {
+          id: "triage",
+          type: "agent",
+          name: "Triage",
+          config: {
+            actionKind: "research",
+            task: "Work out what is actually broken and whether it is worth fixing.",
+            agentId: "agent-lead",
+            expectedOutput: "A cause, and a decision to fix or to close.",
+            successCriteria: ["The cause names a file and a line."],
+          },
+        },
+        {
+          id: "implement",
+          type: "agent",
+          name: "Implement",
+          config: {
+            actionKind: "implement",
+            task: "Fix the cause triage found, with a test that fails without the fix.",
+            agentId: "agent-dev",
+            expectedOutput: "A patch, and a failing-first test.",
+            successCriteria: ["The new test fails on the old code."],
+            maxIterations: 3,
+          },
+        },
+        {
+          id: "review",
+          type: "agent",
+          name: "Review",
+          config: {
+            actionKind: "llm-review",
+            task: 'Read the diff. Answer "approved" or "changes_requested".',
+            agentId: "agent-rev",
+            expectedOutput: "A decision, and the reasons for it.",
+            successCriteria: ["Every reason points at a line of the diff."],
+            maxIterations: 3,
+          },
+        },
+        { id: "closed", type: "end", name: "Closed without a fix", config: {} },
+        { id: "shipped", type: "end", name: "Shipped", config: {} },
+      ],
+      edges: [
+        { id: "edge-1", source: "start", target: "triage" },
+        // A branch, with the unconditional way out that every branch needs.
+        {
+          id: "edge-2",
+          source: "triage",
+          target: "closed",
+          condition: 'lead.decision == "not_worth_fixing"',
+          label: "not worth fixing",
+        },
+        { id: "edge-3", source: "triage", target: "implement", label: "worth fixing" },
+        { id: "edge-4", source: "implement", target: "review" },
+        // The loop, bounded by the maxIterations on both of its blocks.
+        {
+          id: "edge-5",
+          source: "review",
+          target: "implement",
+          condition: 'reviewer.decision == "changes_requested"',
+          label: "changes requested",
+        },
+        { id: "edge-6", source: "review", target: "shipped", label: "approved" },
+      ],
+      metadata: {
+        workflow: {
+          agents: [
+            {
+              id: "agent-lead",
+              name: "Lead",
+              models: { "claude-code": { id: "opus" }, codex: { id: "gpt-5-codex" } },
+            },
+            {
+              id: "agent-dev",
+              name: "Developer",
+              models: {
+                "claude-code": { id: "sonnet" },
+                codex: { id: "gpt-5-codex", reasoningEffort: "medium" },
+              },
+            },
+            {
+              id: "agent-rev",
+              name: "Reviewer",
+              models: { "claude-code": { id: "opus" }, codex: { id: "gpt-5-codex" } },
+            },
+          ],
+        },
+      },
+    };
+  }
+
+  function asHost(harness: "claude-code" | "codex"): ExchangeSource {
+    return { ...SOURCE, harness };
+  }
+
+  it("finds nothing to ask either host about", () => {
+    expect(checkCompleteness(representative("claude-code"), asHost("claude-code"))).toEqual([]);
+    expect(checkCompleteness(representative("codex"), asHost("codex"))).toEqual([]);
+  });
+
+  it("asks both hosts the same questions about the same damage", () => {
+    const damage = (workflow: Workflow): Workflow => {
+      // One of each kind the graph is representative of: a step with no task,
+      // a loop nobody bounded, and a branch that reads a result from an agent
+      // this workflow does not have.
+      const [, , implement, review] = workflow.nodes;
+      implement.config = { ...implement.config, task: "  " };
+      review.config = { ...review.config, maxIterations: undefined };
+      workflow.edges[1].condition = 'nobody.decision == "not_worth_fixing"';
+      return workflow;
+    };
+
+    const claude = checkCompleteness(damage(representative("claude-code")), asHost("claude-code"));
+    const codex = checkCompleteness(damage(representative("codex")), asHost("codex"));
+
+    expect(claude.map((problem) => problem.code)).toEqual([
+      WORKFLOWNER_VALIDATION_CODES.CONDITION_UNKNOWN_AGENT,
+      WORKFLOWNER_VALIDATION_CODES.STEP_MISSING_TASK,
+      WORKFLOWNER_VALIDATION_CODES.UNBOUNDED_LOOP,
+    ]);
+    expect(codex).toEqual(claude);
+  });
+});

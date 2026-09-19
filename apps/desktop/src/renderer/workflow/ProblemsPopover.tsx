@@ -100,8 +100,17 @@ export function ProblemsPopover({
         </strong>
       </header>
 
+      {/*
+        Not "ready to generate": "Ready" now means "the work may begin" on a
+        handover a few centimetres away, and this pill is about the graph. It
+        also says what it does not know, because an empty problems list is the
+        moment somebody is most likely to read it as approval.
+      */}
       {issues.length === 0 ? (
-        <p className="empty">This workflow is ready to generate.</p>
+        <p className="empty">
+          Nothing to fix. Anthill checks that the graph compiles into a prompt — it says nothing
+          about whether the work is right.
+        </p>
       ) : null}
 
       <ol>

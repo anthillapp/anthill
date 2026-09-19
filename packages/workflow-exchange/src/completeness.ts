@@ -57,6 +57,9 @@ import {
  * gap here is a question the user never gets asked.
  */
 const ASKS: Record<string, string> = {
+  [WORKFLOWNER_VALIDATION_CODES.DUPLICATE_BLOCK_ID]: "Which distinct id should each block use?",
+  [WORKFLOWNER_VALIDATION_CODES.DUPLICATE_EDGE_ID]: "Which distinct id should each connection use?",
+  [WORKFLOWNER_VALIDATION_CODES.DUPLICATE_AGENT_ID]: "Which distinct id should each agent use?",
   // Workflow-level
   [WORKFLOWNER_VALIDATION_CODES.NO_TARGET]:
     "Which coding tool should carry this out — Claude Code, Codex, or pi?",

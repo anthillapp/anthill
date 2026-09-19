@@ -2,13 +2,9 @@
  * Every filesystem call this store makes, in one place.
  *
  * The invariant the exchange is built on is that no file it owns is ever
- * mutated. Three processes write into this tree — the app, the CLI's bridge and
- * the MCP server — and no lock covers all three: Electron's single-instance
- * lock and the CLI's `instance.lock` do not know about each other, and the
- * server is covered by neither. Rather than invent a fourth lock for them to
- * not know about either, every write claims its name in one operation the
- * kernel performs, which is atomic on every platform Anthill ships and can only
- * ever succeed for one writer.
+ * mutated. The store's lease serializes multi-record mutations; this primitive
+ * separately publishes whole immutable records without replacing an existing
+ * file, including during recovery from an interrupted transaction.
  *
  * That is why this module exists rather than the store reaching for
  * `node:fs/promises` directly: the invariant is checkable by reading one small
@@ -85,14 +81,14 @@ const MAX_ATTEMPTS = 5;
  */
 export async function createExclusive(path: string, text: string): Promise<ExclusiveWrite> {
   const directory = dirname(path);
-  await mkdir(directory, { recursive: true });
+  await mkdir(directory, { recursive: true, mode: 0o700 });
 
   // In the same directory, so the link below cannot cross a filesystem, and
   // named so that every listing in this package ignores it: the readers take
   // `*.json` and `*.ready` and nothing beginning with a dot.
   const temp = join(directory, `.${process.pid}-${nextTemp()}.tmp`);
   try {
-    const handle = await open(temp, "wx");
+    const handle = await open(temp, "wx", 0o600);
     try {
       await handle.writeFile(text, "utf8");
       await handle.sync();

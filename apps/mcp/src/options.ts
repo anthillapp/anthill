@@ -18,7 +18,7 @@
  */
 
 import { defaultDataDir } from "@anthill/exchange-store";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 
 export type ServerOptions = {
   /** Anthill's user-data directory. The exchange is a directory inside it. */
@@ -34,7 +34,7 @@ const DATA_DIR_FLAG = "--data-dir";
 
 export const USAGE = `anthill-mcp [${DATA_DIR_FLAG} <path>]
 
-  ${DATA_DIR_FLAG} <path>  Anthill's user-data directory, holding the exchange this
+  ${DATA_DIR_FLAG} <path>  Absolute Anthill user-data directory, holding the exchange this
                     server writes into. Defaults to the installed desktop app's,
                     which is ${defaultDataDir()} on this machine.`;
 
@@ -55,6 +55,7 @@ export function readOptions(
     const argument = argv[index];
 
     if (argument === DATA_DIR_FLAG) {
+      if (dataDir !== undefined) return { ok: false, message: `${DATA_DIR_FLAG} must be supplied only once.` };
       const value = argv[index + 1];
       if (value === undefined || value.startsWith("-")) {
         return { ok: false, message: `${DATA_DIR_FLAG} needs a path.\n\n${USAGE}` };
@@ -65,6 +66,7 @@ export function readOptions(
     }
 
     if (argument.startsWith(`${DATA_DIR_FLAG}=`)) {
+      if (dataDir !== undefined) return { ok: false, message: `${DATA_DIR_FLAG} must be supplied only once.` };
       const value = argument.slice(`${DATA_DIR_FLAG}=`.length);
       if (value.length === 0) {
         return { ok: false, message: `${DATA_DIR_FLAG} needs a path.\n\n${USAGE}` };
@@ -76,8 +78,9 @@ export function readOptions(
     return { ok: false, message: `Unrecognised argument ${argument}.\n\n${USAGE}` };
   }
 
-  // Resolved against the working directory, because Codex spawns plugin servers
-  // with a `cwd` of its own choosing and a relative path would mean a different
-  // directory every time the harness moved. An absolute path resolves to itself.
-  return { ok: true, options: { dataDir: resolve(dataDir ?? fallbackDataDir) } };
+  const selected = dataDir ?? fallbackDataDir;
+  if (!selected.trim() || !isAbsolute(selected)) {
+    return { ok: false, message: `${DATA_DIR_FLAG} needs an absolute path; harness working directories can change.` };
+  }
+  return { ok: true, options: { dataDir: resolve(selected) } };
 }

@@ -4,16 +4,11 @@
  * A coding harness hands a workflow over; this is where it lands and stays. The
  * shape of the problem is unusual enough to be worth stating before the code.
  *
- * **Three writers, no shared lock.** The app writes here when the user approves
- * a revision or saves an edit; the MCP server writes here when a harness submits
- * a draft or binds a run. Electron's single-instance lock and the CLI's
- * `instance.lock` do not know about each other and the server is covered by
- * neither, so there is no moment at which this process can believe it is alone.
- * Every write is therefore an exclusive create, which the kernel makes atomic,
- * and `EEXIST` is the one form of contention there is. It is detected rather
- * than assumed: the file that got there first is read back, and whether it was
- * the same claim or a different one decides between a retry and a conflict.
- * Nothing is ever repaired by overwriting.
+ * Mutations share a per-workflow interprocess lease. Eligibility and binding
+ * publication are one transaction relative to edits and approvals. Immutable
+ * records are still published exclusively, so recovery never overwrites an
+ * existing claim. Readers diagnose partial/corrupt state instead of authorizing
+ * a recovered older snapshot.
  *
  * **No index.** Head revision, readiness and bindings are all folds over a
  * directory listing. An index file would be the one thing two processes
@@ -34,7 +29,8 @@
  * it and never touches it.
  */
 
-import { checkCompleteness, revisionDigest } from "@anthill/workflow-exchange";
+import { canonicalJson, checkCompleteness, readSubmission, readWorkflowDocument, revisionDigest } from "@anthill/workflow-exchange";
+import { createHash } from "node:crypto";
 import type {
   DraftSubmission,
   ExchangeProblem,
@@ -44,6 +40,7 @@ import type {
 import type { Workflow } from "@anthill/workflow-schema";
 
 import { createExclusive, listDirectory, readTextIfPresent, removeFile } from "./disk.js";
+import { withWorkflowLock } from "./lock.js";
 import {
   encodeRecord,
   parseBinding,
@@ -110,18 +107,7 @@ export type CreateResult = {
   workflowId: string;
   /** The revision this submission's content is at, when it is at one. */
   revision?: number;
-  /**
-   * What is still missing before this may be handed to a user.
-   *
-   * An incomplete submission is stored rather than refused: the questions are
-   * for the user, the user answers them by reading the workflow, and a draft
-   * nobody can open is a draft nobody can fix. Eligibility is where
-   * incompleteness stops something happening.
-   *
-   * The exception is anything the identity carries, which is written once and
-   * is not in the document the user would edit. There the question has to be
-   * answered before the workflow exists at all, and the outcome is `refused`.
-   */
+  /** Incomplete submissions are refused before identity is reserved. */
   problems?: ExchangeProblem[];
 };
 
@@ -134,7 +120,7 @@ export type AddRevisionResult = {
 };
 
 export type MarkReadyResult = {
-  outcome: "ready" | "already_ready" | "no_such_revision" | "no_such_workflow";
+  outcome: "ready" | "already_ready" | "no_such_revision" | "no_such_workflow" | "conflict";
   /** When the approval was recorded — the first time, on a repeat. */
   at?: string;
   problems?: ExchangeProblem[];
@@ -144,6 +130,8 @@ export type MarkReadyResult = {
 export type BindRun = {
   runId: string;
   nonce: string;
+  requestKey?: string;
+  digest?: string;
   /**
    * The harness session the run belongs to.
    *
@@ -157,6 +145,7 @@ export type BindRun = {
 
 export type BindResult = {
   outcome: "bound" | "already_bound" | "not_eligible" | "no_such_workflow" | "conflict";
+  reason?: EligibilityRefusal;
   /** The binding that holds the revision — the existing one, on a conflict. */
   binding?: Binding;
   problems?: ExchangeProblem[];
@@ -242,7 +231,7 @@ export type DropInboxResult = {
   problems?: ExchangeProblem[];
 };
 
-export type ConsumeInboxResult = { outcome: "consumed" | "not_found" };
+export type ConsumeInboxResult = { outcome: "consumed" | "not_found" | "conflict" };
 
 /**
  * Drops waiting for the app, and drops it will never be able to read.
@@ -320,23 +309,19 @@ export class ExchangeStore {
    * question to put to the user attached.
    */
   async createWorkflow(submission: DraftSubmission): Promise<CreateResult> {
+    const parsed = readSubmission(submission);
+    if (!parsed.ok) return { outcome: "refused", workflowId: submission.workflow.id, problems: parsed.problems };
+    const problems = checkCompleteness(parsed.submission.workflow, parsed.submission.source);
+    if (problems.length) return { outcome: "refused", workflowId: submission.workflow.id, problems };
+    return withWorkflowLock(identityPath(this.root, submission.workflow.id), () =>
+      this.createWorkflowLocked(parsed.submission));
+  }
+
+  private async createWorkflowLocked(submission: DraftSubmission): Promise<CreateResult> {
     const workflowId = submission.workflow.id;
 
     const misaddressed = addressingProblem(submission.workflowId, workflowId);
     if (misaddressed) return { outcome: "conflict", workflowId, problems: [misaddressed] };
-
-    const problems = checkCompleteness(submission.workflow, submission.source);
-
-    // `taskText` goes into the identity, and the identity is written once. A
-    // blank one stored here would make this workflow ineligible for as long as
-    // it exists: completeness would refuse every revision of it for ever, and
-    // the user could not fix it by editing, because the text they would have to
-    // change is not in the document. Worse, the retry that carried the missing
-    // text would be told `already_exists` with nothing wrong. It is the sender's
-    // to correct, so it goes back with the question rather than onto the disk.
-    if (!submission.source.taskText.trim()) {
-      return { outcome: "refused", workflowId, problems };
-    }
 
     const identity: StoredIdentity = {
       workflowId,
@@ -345,6 +330,7 @@ export class ExchangeStore {
       mode: submission.mode,
       exchangeVersion: submission.exchangeVersion,
       source: submission.source,
+      submissionDigest: submissionFingerprint(submission),
     };
 
     const claim = await createExclusive(identityPath(this.root, workflowId), encodeRecord(identity));
@@ -373,7 +359,6 @@ export class ExchangeStore {
       outcome: "created",
       workflowId,
       revision: written.revision,
-      ...(problems.length > 0 ? { problems } : {}),
     };
   }
 
@@ -398,6 +383,13 @@ export class ExchangeStore {
     workflow: Workflow,
     by: RevisionAuthor,
   ): Promise<AddRevisionResult> {
+    const parsed = readWorkflowDocument(workflow);
+    if (!parsed.ok) return { outcome: "conflict", problems: parsed.problems };
+    return withWorkflowLock(identityPath(this.root, workflowId), () =>
+      this.addRevisionLocked(workflowId, parsed.workflow, by));
+  }
+
+  private async addRevisionLocked(workflowId: string, workflow: Workflow, by: RevisionAuthor): Promise<AddRevisionResult> {
     const misaddressed = addressingProblem(workflowId, workflow.id);
     if (misaddressed) return { outcome: "conflict", problems: [misaddressed] };
 
@@ -488,10 +480,12 @@ export class ExchangeStore {
    * differently.
    */
   async readRevision(workflowId: string, revision: number): Promise<StoredRevision | undefined> {
+    if ((await this.identityOf(workflowId)).outcome !== "read") return undefined;
     const text = await readTextIfPresent(revisionPath(this.root, workflowId, revision));
     if (text === undefined) return undefined;
     const record = parseRevision(text, revisionName(workflowId, revision));
-    return record.ok ? record.record : undefined;
+    return record.ok && record.record.workflow.id === workflowId && record.record.revision === revision
+      ? record.record : undefined;
   }
 
   /**
@@ -501,40 +495,45 @@ export class ExchangeStore {
    * revision N+1 by being forgotten about: approving revision 1 and then
    * editing leaves revision 2 with no marker and nothing to argue with.
    *
-   * The marker's existence is the claim and its contents are only the date, so
-   * a second approval of the same revision is not a conflict. It is the same
-   * answer given twice, and the first date is the one that is kept.
+   * A repeated approval must match the supported record and exact snapshot.
+   * Its original date is kept; unreadable approval never means consent.
    */
   async markReady(workflowId: string, revision: number): Promise<MarkReadyResult> {
-    // Presence, not readability: approving a revision is a decision about that
-    // revision, and it does not need the handover's own record to be legible.
-    // Whose revision it is, though, is not something to be lenient about — a
-    // readable identity naming another id means this approval would land on
-    // somebody else's workflow.
+    return withWorkflowLock(identityPath(this.root, workflowId), () => this.markReadyLocked(workflowId, revision));
+  }
+
+  private async markReadyLocked(workflowId: string, revision: number): Promise<MarkReadyResult> {
+    // Approval requires a readable identity and a verified, complete revision.
     const identity = await this.identityOf(workflowId);
     if (identity.outcome === "missing") return { outcome: "no_such_workflow" };
     if (identity.outcome === "elsewhere") {
       return { outcome: "no_such_workflow", problems: [identity.problem] };
     }
+    if (identity.outcome === "unreadable") return { outcome: "conflict", problems: [identity.problem] };
 
     const stored = await this.readRevision(workflowId, revision);
     if (!stored) return { outcome: "no_such_revision" };
+    const problems = checkCompleteness(stored.workflow, identity.record.source);
+    if (problems.length) return { outcome: "conflict", problems };
 
     const at = this.now();
     const claim = await createExclusive(
       readyPath(this.root, workflowId, revision),
-      encodeRecord({ revision, at }),
+      encodeRecord({ revision, at, workflowId, digest: stored.digest }),
     );
     if (claim.outcome === "created") return { outcome: "ready", at };
 
     const held = parseReadiness(claim.text, readyName(workflowId, revision));
-    return held.ok
+    return held.ok && held.record.revision === revision &&
+      (!held.record.workflowId || held.record.workflowId === workflowId) &&
+      (!held.record.digest || held.record.digest === stored.digest)
       ? { outcome: "already_ready", ...(held.record.at ? { at: held.record.at } : {}) }
-      : { outcome: "already_ready", problems: [held.problem] };
+      : { outcome: "conflict", problems: [held.ok ? corruptRecord("Approval does not match this revision.") : held.problem] };
   }
 
   /** The highest revision the user has approved, if any. */
   async readyRevision(workflowId: string): Promise<number | undefined> {
+    if ((await this.identityOf(workflowId)).outcome !== "read") return undefined;
     return (await this.readReadiness(workflowId)).record?.revision;
   }
 
@@ -563,7 +562,7 @@ export class ExchangeStore {
     }
 
     const identity = workflow.identity;
-    if (!identity) return { eligible: false, reason: "unreadable", problems: workflow.problems };
+    if (!identity || workflow.problems.length) return { eligible: false, reason: "unreadable", problems: workflow.problems };
 
     const mode = identity.mode;
     const chosen =
@@ -604,6 +603,32 @@ export class ExchangeStore {
    * existing binding returned rather than replaced.
    */
   async bind(workflowId: string, revision: number, run: BindRun): Promise<BindResult> {
+    const snapshot = { ...run };
+    return withWorkflowLock(identityPath(this.root, workflowId), () => this.bindLocked(workflowId, revision, snapshot));
+  }
+
+  /** Idempotency is scoped to this workflow and the external caller's request key. */
+  async bindRequest(workflowId: string, revision: number, digest: string, requestKey: string,
+    sessionId: string | undefined, mint: () => BindRun): Promise<BindResult> {
+    return withWorkflowLock(identityPath(this.root, workflowId), async () => {
+      const workflow = await this.readWorkflow(workflowId);
+      if (!workflow) return { outcome: "no_such_workflow", problems: [unknownWorkflow(workflowId)] };
+      if (!workflow.identity || workflow.problems.length) return { outcome: "not_eligible", problems: workflow.problems };
+      const session = sessionId ?? workflow.identity.source.sessionId;
+      const previous = workflow.bindings.find((binding) => binding.requestKey === requestKey);
+      if (previous) {
+        if (previous.revision === revision && previous.digest === digest && previous.sessionId === session) {
+          return { outcome: "already_bound", binding: previous };
+        }
+        return { outcome: "conflict", binding: previous,
+          problems: [storeProblem(EXCHANGE_STORE_PROBLEM_CODES.STORE_BINDING_CONFLICT,
+            "This binding request key was already used for different content or a different session.")] };
+      }
+      return this.bindLocked(workflowId, revision, { ...mint(), sessionId: session, digest, requestKey });
+    });
+  }
+
+  private async bindLocked(workflowId: string, revision: number, run: BindRun): Promise<BindResult> {
     // Before anything else: whose workflow this is. The binding is written from
     // the identity, so an identity that cannot be read or that belongs to
     // another id is the end of it rather than something to work around.
@@ -621,15 +646,29 @@ export class ExchangeStore {
       return { outcome: "not_eligible", problems: [identity.problem] };
     }
 
+    const sessionId = run.sessionId ?? identity.record.source.sessionId;
+    const existingText = await readTextIfPresent(bindingPath(this.root, workflowId, run.runId));
+    if (existingText !== undefined) {
+      const existing = await this.readBinding(workflowId, run.runId);
+      if (existing && existing.revision === revision && existing.nonce === run.nonce &&
+          existing.sessionId === sessionId && existing.requestKey === run.requestKey &&
+          (run.digest === undefined || existing.digest === run.digest)) {
+        return { outcome: "already_bound", binding: existing };
+      }
+      return { outcome: "conflict", ...(existing ? { binding: existing } : {}),
+        problems: [storeProblem(EXCHANGE_STORE_PROBLEM_CODES.STORE_BINDING_CONFLICT,
+          `Run ${run.runId} already has a different or unreadable binding. Nothing was overwritten.`)] };
+    }
     const eligible = await this.eligibleRevision(workflowId);
     if (!eligible.eligible) {
       return {
         outcome: eligible.reason === "no_such_workflow" ? "no_such_workflow" : "not_eligible",
         problems: eligible.problems,
+        reason: eligible.reason,
       };
     }
 
-    if (eligible.revision.revision !== revision) {
+    if (eligible.revision.revision !== revision || (run.digest !== undefined && run.digest !== eligible.revision.digest)) {
       return {
         outcome: "not_eligible",
         problems: [
@@ -641,7 +680,6 @@ export class ExchangeStore {
       };
     }
 
-    const sessionId = run.sessionId ?? identity.record.source.sessionId;
     const binding: Binding = {
       runId: run.runId,
       // The id the identity records, not the string the caller addressed this
@@ -653,6 +691,8 @@ export class ExchangeStore {
       revision,
       nonce: run.nonce,
       at: this.now(),
+      digest: eligible.revision.digest,
+      ...(run.requestKey ? { requestKey: run.requestKey } : {}),
       ...(sessionId ? { sessionId } : {}),
     };
 
@@ -683,32 +723,34 @@ export class ExchangeStore {
       };
     }
 
-    if (held.record.revision === revision && held.record.nonce === run.nonce) {
+    if (held.record.workflowId === workflowId && held.record.revision === revision &&
+        held.record.nonce === run.nonce && held.record.sessionId === sessionId &&
+        held.record.requestKey === run.requestKey && held.record.digest === binding.digest) {
       return { outcome: "already_bound", binding: held.record };
     }
 
     // The holder is the binding on disk, not the caller: naming the asking run
     // as the one already bound reads as though it were arguing with itself.
-    // The nonce is named as well as the revision, because a bind that differs
-    // only in nonce is a second run wearing the first one's id, and a message
-    // about revisions alone would say the two sides agree.
     return {
       outcome: "conflict",
       binding: held.record,
       problems: [
         storeProblem(
           EXCHANGE_STORE_PROBLEM_CODES.STORE_BINDING_CONFLICT,
-          `Run ${held.record.runId} is already bound to revision ${held.record.revision} of ${held.record.workflowId} under nonce ${held.record.nonce}; this bind asked for revision ${revision} under nonce ${run.nonce}. The existing binding is unchanged.`,
+          `Run ${held.record.runId} already has a different binding. Nothing was overwritten.`,
         ),
       ],
     };
   }
 
   async readBinding(workflowId: string, runId: string): Promise<Binding | undefined> {
+    if ((await this.identityOf(workflowId)).outcome !== "read") return undefined;
     const text = await readTextIfPresent(bindingPath(this.root, workflowId, runId));
     if (text === undefined) return undefined;
     const record = parseBinding(text, bindingName(workflowId, runId));
-    return record.ok ? record.record : undefined;
+    if (!record.ok || record.record.workflowId !== workflowId || record.record.runId !== runId) return undefined;
+    const revision = await this.readRevision(workflowId, record.record.revision);
+    return revision && (!record.record.digest || revision.digest === record.record.digest) ? record.record : undefined;
   }
 
   /**
@@ -735,12 +777,22 @@ export class ExchangeStore {
     for (const name of await listDirectory(inboxDir(this.root))) {
       const key = keyFromInboxFileName(name);
       if (key === undefined) continue;
-      if (settled.has(name)) continue;
       const text = await readTextIfPresent(inboxPath(this.root, key));
       if (text === undefined) continue;
 
       const drop = parseInboxDrop(text, `inbox/${name}`);
+      if (settled.has(name)) {
+        const doneText = await readTextIfPresent(inboxDonePath(this.root, key));
+        const done = doneText === undefined ? undefined : parseInboxDrop(doneText, `inbox/done/${name}`);
+        if (doneText === text || (done?.ok && drop.ok && sameDrop(done.record, drop.record))) continue;
+        damaged.push({ key, problem: corruptRecord(`Pending and consumed inbox records disagree for ${key}.`) });
+        continue;
+      }
       if (drop.ok) {
+        if (inboxPath(this.root, drop.record.key) !== inboxPath(this.root, key)) {
+          damaged.push({ key, problem: corruptRecord(`Inbox ${name} does not match its request key.`) });
+          continue;
+        }
         drops.push(drop.record);
         continue;
       }
@@ -770,7 +822,8 @@ export class ExchangeStore {
     const settled = await readTextIfPresent(inboxDonePath(this.root, input.key));
     if (settled !== undefined) {
       const done = parseInboxDrop(settled, `inbox/done/${input.key}.json`);
-      return { outcome: "already_dropped", ...(done.ok ? { drop: done.record } : {}) };
+      if (done.ok && sameDrop(done.record, input)) return { outcome: "already_dropped", drop: done.record };
+      return { outcome: "conflict", problems: [done.ok ? corruptRecord("The consumed inbox key belongs to another request.") : done.problem] };
     }
 
     const drop: InboxDrop = {
@@ -788,11 +841,7 @@ export class ExchangeStore {
     const held = parseInboxDrop(claim.text, `inbox/${input.key}.json`);
     if (!held.ok) return { outcome: "conflict", problems: [held.problem] };
 
-    const sameRequest =
-      held.record.kind === drop.kind &&
-      held.record.workflowId === drop.workflowId &&
-      held.record.revision === drop.revision &&
-      held.record.runId === drop.runId;
+    const sameRequest = sameDrop(held.record, drop);
     if (sameRequest) return { outcome: "already_dropped", drop: held.record };
 
     return {
@@ -812,8 +861,8 @@ export class ExchangeStore {
    *
    * A create followed by an unlink rather than a rename: a rename would replace
    * whatever `done/` already held under that key, and this store does not
-   * replace files. `done/` is a record of what has been seen rather than a
-   * second source of truth, so an entry already there is accepted as it stands.
+   * replace files. An existing `done/` record must describe the same request
+   * before a pending copy can be removed.
    */
   async consumeInbox(key: string): Promise<ConsumeInboxResult> {
     const text = await readTextIfPresent(inboxPath(this.root, key));
@@ -822,7 +871,12 @@ export class ExchangeStore {
       return settled === undefined ? { outcome: "not_found" } : { outcome: "consumed" };
     }
 
-    await createExclusive(inboxDonePath(this.root, key), text);
+    const claim = await createExclusive(inboxDonePath(this.root, key), text);
+    if (claim.outcome === "existed" && claim.text !== text) {
+      const old = parseInboxDrop(claim.text, key);
+      const next = parseInboxDrop(text, key);
+      if (!old.ok || !next.ok || !sameDrop(old.record, next.record)) return { outcome: "conflict" };
+    }
     await removeFile(inboxPath(this.root, key));
     return { outcome: "consumed" };
   }
@@ -912,22 +966,23 @@ export class ExchangeStore {
     }
     numbers.sort((left, right) => left - right);
 
-    // Head is the highest that can be *read*, which is not always the highest
-    // that exists. Walking down from the top means a damaged snapshot costs
-    // that snapshot and leaves the workflow with the last good one rather than
-    // with nothing. Revisions below the head are not opened at all: this runs
-    // on every poll, and a history is read on request, not on sight.
+    // Never promote older instructions when the latest snapshot is unreadable.
+    // Older revisions remain individually retrievable for explicit recovery.
     const problems: ExchangeProblem[] = [];
     let head: StoredRevision | undefined;
     for (const revision of [...numbers].reverse()) {
       const text = await readTextIfPresent(revisionPath(this.root, workflowId, revision));
-      if (text === undefined) continue;
+      if (text === undefined) {
+        problems.push(corruptRecord(`${revisionName(workflowId, revision)} disappeared during the read.`));
+        break;
+      }
       const record = parseRevision(text, revisionName(workflowId, revision));
-      if (record.ok) {
+      if (record.ok && record.record.workflow.id === workflowId && record.record.revision === revision) {
         head = record.record;
         break;
       }
-      problems.push(record.problem);
+      problems.push(record.ok ? corruptRecord(`${revisionName(workflowId, revision)} has a mismatched identity.`) : record.problem);
+      break;
     }
 
     return { numbers, ...(head ? { head } : {}), problems };
@@ -954,12 +1009,16 @@ export class ExchangeStore {
     const problems: ExchangeProblem[] = [];
     for (const revision of numbers) {
       const text = await readTextIfPresent(readyPath(this.root, workflowId, revision));
-      if (text === undefined) continue;
+      if (text === undefined) return { problems: [corruptRecord(`${readyName(workflowId, revision)} disappeared during the read.`)] };
       const record = parseReadiness(text, readyName(workflowId, revision));
-      if (record.ok) return { record: record.record, problems };
-      // The marker's name is the approval; only its date is lost.
-      problems.push(record.problem);
-      return { record: { revision }, problems };
+      if (!record.ok) return { problems: [record.problem] };
+      const snapshot = await this.readRevision(workflowId, revision);
+      if (!snapshot || record.record.revision !== revision ||
+          (record.record.workflowId !== undefined && record.record.workflowId !== workflowId) ||
+          (record.record.digest !== undefined && record.record.digest !== snapshot.digest)) {
+        return { problems: [corruptRecord(`${readyName(workflowId, revision)} does not match its revision.`)] };
+      }
+      return { record: record.record, problems };
     }
 
     return { problems };
@@ -979,8 +1038,10 @@ export class ExchangeStore {
       const text = await readTextIfPresent(bindingPath(this.root, workflowId, runId));
       if (text === undefined) continue;
       const record = parseBinding(text, bindingName(workflowId, runId));
-      if (record.ok) records.push(record.record);
-      else problems.push(record.problem);
+      if (!record.ok) { problems.push(record.problem); continue; }
+      const verified = await this.readBinding(workflowId, record.record.runId);
+      if (verified && bindingPath(this.root, workflowId, verified.runId) === bindingPath(this.root, workflowId, runId)) records.push(verified);
+      else problems.push(corruptRecord(`${bindingName(workflowId, runId)} does not match its address or revision.`));
     }
     records.sort(
       (left, right) => left.at.localeCompare(right.at) || left.runId.localeCompare(right.runId),
@@ -1023,7 +1084,9 @@ export class ExchangeStore {
     if (!held.ok) return { outcome: "retry" };
     // Another writer put the same content at this number first. That is the
     // revision this caller wanted; nothing was added and nothing was lost.
-    if (held.record.digest === digest) return { outcome: "unchanged", revision, digest };
+    if (held.record.workflow.id === workflowId && held.record.revision === revision && held.record.digest === digest) {
+      return { outcome: "unchanged", revision, digest };
+    }
     return { outcome: "retry" };
   }
 
@@ -1068,6 +1131,14 @@ export class ExchangeStore {
       };
     }
 
+    if (held.record.mode !== submission.mode || held.record.exchangeVersion !== submission.exchangeVersion ||
+        canonicalJson(held.record.source) !== canonicalJson(submission.source) ||
+        (held.record.submissionDigest && held.record.submissionDigest !== submissionFingerprint(submission))) {
+      return { outcome: "conflict", workflowId,
+        problems: [storeProblem(EXCHANGE_STORE_PROBLEM_CODES.STORE_IDENTITY_CONFLICT,
+          `Request key ${submission.idempotencyKey} belongs to a different submission payload. Its original mode, source and content remain unchanged.`)] };
+    }
+
     // What is missing is asked of the handover that is *stored*, not of the one
     // that has just arrived. `taskText` lives in the identity and the identity
     // is written once, so this submission's copy of it describes a handover
@@ -1082,6 +1153,10 @@ export class ExchangeStore {
     const digest = revisionDigest(submission.workflow);
     const first = await this.readRevision(workflowId, 1);
     if (!first) {
+      if (!held.record.submissionDigest || await readTextIfPresent(revisionPath(this.root, workflowId, 1)) !== undefined) {
+        return { outcome: "conflict", workflowId,
+          problems: [corruptRecord("The original revision cannot be verified. Restore it before retrying this handover.")] };
+      }
       // The identity was written and the first revision was not — a process
       // that died between two creates. Finishing it is creating a file that
       // does not exist, not repairing one that does.
@@ -1222,4 +1297,20 @@ function readyName(workflowId: string, revision: number): string {
 
 function bindingName(workflowId: string, runId: string): string {
   return `${workflowId}/bindings/${runId}.json`;
+}
+
+function corruptRecord(message: string): ExchangeProblem {
+  return storeProblem(EXCHANGE_STORE_PROBLEM_CODES.STORE_RECORD_UNREADABLE, message);
+}
+
+function submissionFingerprint(submission: DraftSubmission): string {
+  return createHash("sha256").update(canonicalJson({
+    exchangeVersion: submission.exchangeVersion, source: submission.source,
+    mode: submission.mode, workflow: submission.workflow,
+  })).digest("hex");
+}
+
+function sameDrop(left: InboxDropInput, right: InboxDropInput): boolean {
+  return left.key === right.key && left.kind === right.kind && left.workflowId === right.workflowId &&
+    left.revision === right.revision && left.runId === right.runId;
 }

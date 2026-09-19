@@ -1,5 +1,5 @@
 /**
- * The exclusive create, which is the whole of the store's concurrency story.
+ * Whole-file immutable publication, underneath the store's transaction lease.
  *
  * Worth testing directly rather than only through the store, because every
  * other guarantee in this package is a consequence of this one: if two callers
@@ -9,7 +9,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,6 +34,13 @@ afterEach(async () => {
 });
 
 describe("createExclusive", () => {
+  it.skipIf(process.platform === "win32")("creates private records and directories", async () => {
+    const dir = await root();
+    const path = join(dir, "private", "record.json");
+    await createExclusive(path, "private task");
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect((await stat(dirname(path))).mode & 0o777).toBe(0o700);
+  });
   it("creates the file and the directories on the way to it", async () => {
     const dir = await root();
     const path = join(dir, "deep", "deeper", "record.json");

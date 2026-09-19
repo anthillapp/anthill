@@ -46,14 +46,9 @@ export type DraftAnswer = {
   url?: string;
   revision?: number;
   mode?: HandoverMode;
-  /**
-   * Whether Anthill has been asked to open it.
-   *
-   * Storing the handover and asking the app to show it are two writes, and the
-   * second can fail on its own. A caller told only that the draft was stored
-   * would wait for a window that is never going to open.
-   */
+  /** True only after desktop acknowledgement, not when a request is queued. */
   displayed?: boolean;
+  displayRequested?: boolean;
   problems?: ExchangeProblem[];
   /** The `ask` of every problem that has one, in the order they came back. */
   questions?: string[];
@@ -103,7 +98,7 @@ export type ReadyAnswer = {
 };
 
 export type BindAnswer = {
-  outcome: "bound" | "already_bound" | "not_ready" | "no_such_workflow" | "conflict";
+  outcome: "bound" | "already_bound" | "not_ready" | "no_such_workflow" | "conflict" | "invalid";
   workflowId: string;
   url: string;
   mode?: HandoverMode;
@@ -112,8 +107,9 @@ export type BindAnswer = {
   runId?: string;
   nonce?: string;
   sessionId?: string;
-  /** Whether Anthill has been asked to register the run, which is a second write. */
+  /** True only after desktop acknowledgement, not when a request is queued. */
   registered?: boolean;
+  registrationRequested?: boolean;
   /** The commands the harness runs to report progress, ready to be followed. */
   reportingCommands?: string;
   steps?: RunStep[];
@@ -128,29 +124,24 @@ export type BindAnswer = {
 
 export function draftText(answer: DraftAnswer): string {
   if (answer.outcome === "invalid") return refusedDraftText(answer);
+  if (answer.outcome === "incomplete") return join([
+    "This handover was not stored or displayed. No work may start from it.",
+    ...detail(answer.questions, answer.problems),
+    "Clarify these requirements with the user, correct the workflow, and submit it again using the same intended workflow id and request key.",
+  ]);
 
   const where = answer.workflowId ?? "the workflow";
   const stored =
     answer.outcome === "already_exists"
       ? `This handover has been submitted before. It is already stored as revision ${answer.revision} of ${where}`
       : `Stored as revision ${answer.revision} of ${where}`;
-  const shown = answer.displayed
-    ? " and Anthill has been asked to open it."
-    : ", but Anthill could not be asked to open it — the user can open it with the link below.";
+  const shown = answer.displayRequested
+    ? ". A display request is queued; the desktop has not acknowledged opening it."
+    : ". No display request was queued. Desktop display is not confirmed.";
 
   const parts = [`${stored}${shown}`];
 
-  if (answer.outcome === "incomplete") {
-    parts.push(
-      `No work may start on it yet. Put ${count(answer.questions?.length ?? 0, "question")} to the user, in their own words:`,
-      numbered(answer.questions ?? []),
-      // Where the answers have to end up, and why the obvious move is not
-      // available: the id is the document's own and it is now taken, so a
-      // corrected re-submission under the same id is refused rather than merged.
-      "Their answers belong in the workflow itself. It is open in Anthill for them to edit, and every save there makes a new revision. Submitting a corrected workflow under this id is refused, because this draft already holds it.",
-      "Call get_ready_revision once they say they are done.",
-    );
-  } else if (answer.mode) {
+  if (answer.mode) {
     parts.push(
       stateText(answer.mode === "approval-gate" ? "draft" : "ready_for_agent", answer.mode),
       answer.mode === "approval-gate"
@@ -159,7 +150,7 @@ export function draftText(answer: DraftAnswer): string {
     );
   }
 
-  if (answer.outcome !== "incomplete" && answer.problems && answer.problems.length > 0) {
+  if (answer.problems && answer.problems.length > 0) {
     parts.push("Also worth knowing:", numbered(answer.problems.map(sentence)));
   }
 
@@ -233,15 +224,17 @@ export function readyText(answer: ReadyAnswer): string {
     `Revision ${answer.revision} of ${answer.workflowId} is the one to work from. Digest ${answer.digest}.`,
   ];
   if (answer.state && answer.mode) parts.push(stateText(answer.state, answer.mode));
-  if (answer.workflow) parts.push(workflowSummary(answer.workflow, answer.steps ?? []));
+  if (answer.workflow) parts.push(workflowSummary(answer.workflow, answer.steps ?? []),
+    "Authoritative workflow JSON for this exact revision:\n" + JSON.stringify(answer.workflow));
   parts.push(
-    "Call bind_run before you start, and run the commands it gives you.",
+    "Call bind_run with this revision, digest and a stable idempotencyKey before you start. Repeat that same key and payload after a lost reply, not a new request.",
     answer.url,
   );
   return join(parts);
 }
 
 export function bindText(answer: BindAnswer): string {
+  if (answer.outcome === "invalid") return join(["Nothing was bound. Correct the request:", ...detail(answer.questions, answer.problems)]);
   if (answer.outcome === "no_such_workflow") {
     return join([unknownWorkflowText(answer.workflowId), answer.url]);
   }
@@ -265,9 +258,9 @@ export function bindText(answer: BindAnswer): string {
     ]);
   }
 
-  const registered = answer.registered
-    ? "Anthill has been asked to register it."
-    : "Anthill could not be asked to register it, so the run will not appear on the Live Session page; the reporting commands below still work once it does.";
+  const registered = answer.registrationRequested
+    ? "Observation registration is queued, not acknowledged. This does not mean the session is running or visible in Anthill."
+    : "Observation registration was not queued. This does not start, stop or control the external session.";
 
   return join([
     `Run ${answer.runId} is bound to revision ${answer.revision} of ${answer.workflowId}. ${registered}`,

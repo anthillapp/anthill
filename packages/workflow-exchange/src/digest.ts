@@ -40,7 +40,7 @@ function canonicalise(value: unknown): unknown {
   if (value === null || typeof value !== "object") return value;
 
   const source = value as Record<string, unknown>;
-  const sorted: Record<string, unknown> = {};
+  const sorted: Record<string, unknown> = Object.create(null);
   for (const key of Object.keys(source).sort()) {
     const member = source[key];
     // A key carrying `undefined` is not a key: `JSON.stringify` omits it, so

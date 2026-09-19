@@ -57,6 +57,12 @@ describe("sha256Hex", () => {
 });
 
 describe("canonicalJson", () => {
+  it("preserves prototype-named JSON properties without collisions", () => {
+    const value = JSON.parse('{"__proto__":{"task":"different"},"constructor":1}');
+    expect(canonicalJson(value)).toBe('{"__proto__":{"task":"different"},"constructor":1}');
+    expect(revisionDigest(value)).not.toBe(revisionDigest({ constructor: 1 }));
+    expect(({} as Record<string, unknown>).task).toBeUndefined();
+  });
   it("sorts object keys at every depth", () => {
     expect(canonicalJson({ b: 1, a: { d: 2, c: 3 } })).toBe('{"a":{"c":3,"d":2},"b":1}');
   });

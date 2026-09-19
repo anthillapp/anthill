@@ -33,11 +33,18 @@ describe("readOptions", () => {
     expect(read).toEqual({ ok: true, options: { dataDir: "/var/anthill" } });
   });
 
-  it("resolves a relative path, because a harness chooses the working directory", () => {
+  it("rejects a relative path rather than choosing an exchange based on harness CWD", () => {
     const read = readOptions(["--data-dir", "./data"], FALLBACK);
 
-    expect(read).toEqual({ ok: true, options: { dataDir: `${process.cwd()}/data` } });
+    expect(read.ok).toBe(false);
   });
+
+  it.each([ ["--data-dir", "  "], ["--data-dir="],
+    ["--data-dir=/one", "--data-dir=/two"], ["--data-dir", "/one", "--data-dir", "/one"] ])(
+    "rejects empty or repeated data-directory configuration: %j", (...args) => {
+      expect(readOptions(args, FALLBACK).ok).toBe(false);
+    },
+  );
 
   it("refuses a flag with nothing after it rather than falling back", () => {
     const read = readOptions(["--data-dir"], FALLBACK);

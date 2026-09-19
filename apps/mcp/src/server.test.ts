@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-exchange";
 
 /** The compiled server, which is what a harness is configured to run. */
 const SERVER = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "server.js");
@@ -98,6 +99,52 @@ async function connect(): Promise<Session> {
 }
 
 describe("the built server over stdio", () => {
+  it("creates, retrieves and idempotently binds the exact draft over JSON-RPC", async () => {
+    const session = await connect();
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const response = await session.request("tools/call", { name, arguments: args });
+      expect(response.error).toBeUndefined();
+      const result = response.result as {
+        isError?: boolean;
+        structuredContent: Record<string, unknown>;
+        content: { type: string; text: string }[];
+      };
+      expect(result.isError).toBeUndefined();
+      return result;
+    };
+    const workflow = {
+      id: "stdio-workflow", name: "Verify handover", version: "1", target: "claude-code",
+      brief: { goal: "Read the sample file", doneCriteria: ["Report the exact text"] },
+      metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION,
+        agents: [{ id: "reader", name: "Reader", models: { "claude-code": { id: "sonnet" } } }] } },
+      nodes: [
+        { id: "start", type: "start", name: "Start", config: {} },
+        { id: "read", type: "agent", name: "Read", config: {
+          agentId: "reader", actionKind: "agent-step", task: "Read sample.txt without changing it.",
+          expectedOutput: "The file text", successCriteria: ["No writes"] } },
+        { id: "end", type: "end", name: "End", config: {} },
+      ],
+      edges: [{ id: "a", source: "start", target: "read" }, { id: "b", source: "read", target: "end" }],
+    };
+    const draft = await call("create_workflow_draft", {
+      idempotencyKey: "draft", mode: "show-and-go", workflow,
+      source: { harness: "claude-code", sessionId: "local-session", taskText: "Read sample.txt" },
+    });
+    expect(draft.structuredContent).toMatchObject({ outcome: "created", displayed: false, displayRequested: true });
+    const ready = await call("get_ready_revision", { workflowId: workflow.id });
+    expect(ready.structuredContent.outcome).toBe("ready");
+    const workflowText = ready.content[0].text.split("\n").find((line) => line.startsWith("{"));
+    expect(JSON.parse(workflowText!)).toEqual(workflow);
+    const request = { workflowId: workflow.id, revision: ready.structuredContent.revision,
+      digest: ready.structuredContent.digest, idempotencyKey: "binding" };
+    const first = await call("bind_run", request);
+    const retry = await call("bind_run", request);
+    expect(first.structuredContent).toMatchObject({ outcome: "bound", registered: false, registrationRequested: true });
+    expect(retry.structuredContent).toMatchObject({ outcome: "already_bound",
+      runId: first.structuredContent.runId, nonce: first.structuredContent.nonce, revision: 1 });
+    const status = await call("get_workflow", { workflowId: workflow.id });
+    expect(status.structuredContent.bindings).toHaveLength(1);
+  }, 20_000);
   it("announces the four tools and the handover sequence", async () => {
     const session = await connect();
 

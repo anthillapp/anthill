@@ -99,6 +99,23 @@ describe("slugify", () => {
 });
 
 describe("nodesOnCycles", () => {
+  it("handles a large directed chain and a cycle without recursive traversal", () => {
+    const nodes = Array.from({ length: 1000 }, (_, i) => step(`n${i}`, `Step ${i}`));
+    const edges = nodes.slice(1).map((n, i) => edge(`e${i}`, nodes[i].id, n.id));
+    const workflow = makeWorkflow(nodes, edges);
+    expect(nodesOnCycles(workflow).size).toBe(0);
+    workflow.edges.push(edge("back", "n999", "n500"));
+    expect(nodesOnCycles(workflow)).toEqual(new Set(nodes.slice(500).map((n) => n.id)));
+  });
+
+  it("keeps disconnected cycles and self-loops separate from one-way paths", () => {
+    const workflow = makeWorkflow(
+      ["a", "b", "c", "d", "e"].map((id) => step(id, id)),
+      [edge("ab", "a", "b"), edge("ba", "b", "a"), edge("bc", "b", "c"),
+        edge("cc", "c", "c"), edge("de", "d", "e")],
+    );
+    expect(nodesOnCycles(workflow)).toEqual(new Set(["a", "b", "c"]));
+  });
   it("finds nodes on a feedback loop", () => {
     const workflow = makeWorkflow(
       [
@@ -127,6 +144,19 @@ describe("nodesOnCycles", () => {
 });
 
 describe("validateWorkflow", () => {
+  it("rejects duplicate block, edge and agent profile identities", () => {
+    const workflow = minimalWorkflow();
+    workflow.nodes.push({ ...workflow.nodes[1], name: "Another task with the same ID" });
+    workflow.edges.push({ ...workflow.edges[0] });
+    workflow.metadata = { workflow: { agents: [
+      { id: "agent-dev", name: "Developer" }, { id: "agent-dev", name: "Different role" },
+    ] } };
+    expect(codesIn(workflow)).toEqual(expect.arrayContaining([
+      WORKFLOWNER_VALIDATION_CODES.DUPLICATE_BLOCK_ID,
+      WORKFLOWNER_VALIDATION_CODES.DUPLICATE_EDGE_ID,
+      WORKFLOWNER_VALIDATION_CODES.DUPLICATE_AGENT_ID,
+    ]));
+  });
   it("accepts a minimal diagram", () => {
     const result = validateWorkflow(minimalWorkflow());
     expect(result.errors).toEqual([]);

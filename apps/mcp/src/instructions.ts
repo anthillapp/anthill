@@ -14,21 +14,18 @@
  * is what that tool takes and returns.
  */
 
-export const SERVER_INSTRUCTIONS = `Anthill is a workflow app running on this machine. These tools hand a workflow
-you have designed to it, so the user can read it, edit it and approve it before
-any work starts — and so the work you then do shows up on Anthill's Live Session
-page while you do it.
+export const SERVER_INSTRUCTIONS = `These tools store a workflow locally for Anthill and queue desktop display or
+observation requests. Queueing is not acknowledgement: this server cannot confirm
+that the desktop opened the workflow or that Live Session observation is active.
 
-Anthill starts nothing and drives nothing. You keep doing the work; it watches.
+Anthill starts nothing and drives nothing. You keep doing the work; Anthill can only observe it.
 
 The sequence, once per handover:
 
-1. create_workflow_draft — submit the workflow. Settle with the user anything
-   the workflow does not yet answer BEFORE calling this: a draft is filed under
-   the id the document carries, and a corrected workflow cannot be submitted
-   under that id afterwards. If the result comes back "incomplete", its text is
-   the list of questions to put to the user; their answers belong in the
-   workflow, which is open in Anthill for them to edit.
+1. create_workflow_draft — submit the workflow. An incomplete handover is refused
+   without reserving its identity. Ask the returned questions, correct the
+   document, and resubmit it. A queued display request does not confirm that
+   the desktop has opened it.
 
 2. get_ready_revision — ask whether there is a revision you may work from. Under
    approval-gate there is not one until the user has approved it, which takes as
@@ -37,10 +34,11 @@ The sequence, once per handover:
    what Anthill is waiting for, finish your turn, and ask again when they say
    they are done.
 
-3. bind_run — call this once, at the moment work starts. It creates a run, ties
-   it to the revision you are about to work from, and returns the shell commands
-   that report progress. Run them: they are the only thing that tells Anthill
-   which step you are on. Calling bind_run again creates a second run.
+3. bind_run — pass the exact revision and digest you retrieved, plus a stable
+   idempotencyKey for this request. Retry the same payload/key after a lost
+   answer; a new key means an intentional new run. A stale revision is refused.
+   The returned commands report progress; Anthill does not start your session.
+   A binding and a queued registration are not evidence of live activity.
 
 get_workflow answers where a handover stands, at any point.
 

@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { revisionDigest, WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-exchange";
 
 import { EXCHANGE_STORE_PROBLEM_CODES } from "./problems.js";
 import {
@@ -22,6 +23,7 @@ import {
 
 const WORKFLOW = {
   id: "workflow-1",
+  metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION } },
   name: "Ship the fix",
   version: "0.1.0",
   nodes: [{ id: "start", type: "start", name: "Start", config: {} }],
@@ -115,7 +117,7 @@ describe("a revision", () => {
       revision: 1,
       createdAt: "2026-09-01T09:00:00.000Z",
       by: "harness",
-      digest: "0123456789abcdef",
+      digest: revisionDigest(WORKFLOW),
       workflow: WORKFLOW,
       ...overrides,
     });

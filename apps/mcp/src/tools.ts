@@ -24,6 +24,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-exchange";
 
 import type { Handlers } from "./handlers.js";
 
@@ -42,7 +43,7 @@ export function registerExchangeTools(server: McpServer, handlers: Handlers): vo
 Returns an outcome of:
   created         stored, and nothing is missing from it.
   already_exists  this same handover was stored before, under this idempotency key.
-  incomplete      stored, but questions have to be answered before any work may
+  incomplete      not stored; questions have to be answered before any work may
                   start. The text of the result is the list of questions; put them
                   to the user in their own words.
   invalid         nothing was stored, and the problems say why.
@@ -89,7 +90,7 @@ an anthill:// link the user can open.`,
         workflow: z
           .unknown()
           .describe(
-            "The workflow document itself, as JSON: id, name, version, target, brief, nodes and edges. It must name a goal, say what done looks like, and target the same tool that is handing it over.",
+            `The complete workflow document as JSON: id, name, version, target, brief, nodes, edges and metadata.workflow.formatVersion: ${WORKFLOW_FORMAT_VERSION}. It must name a goal, say what done looks like, and target the submitting tool. Legacy or future workflow formats are refused, not migrated.`,
           ),
         exchangeVersion: z
           .number()
@@ -149,24 +150,27 @@ when they say they are done. Do not poll this in a loop.`,
   server.registerTool(
     "bind_run",
     {
-      title: "Start a run against a revision",
+      title: "Bind an external session to a revision",
       description: `Create a run against the revision that may be worked on, and tell Anthill about it.
 
 Returns a run id, a nonce, and the exact shell commands to run as you work. Those
 commands are the only thing that tells Anthill which step you are on — it is not
 driving your session and has no other way to know.
 
-Call this once, at the moment work starts. Each call creates a new run.`,
+Retry with the same idempotencyKey, revision, digest and session after a lost reply.
+Use a new key only for an intentional new run. Binding does not start the agent
+or confirm that the desktop has registered observation.`,
       inputSchema: {
         workflowId: WORKFLOW_ID,
         revision: z
           .number()
           .int()
           .positive()
-          .optional()
           .describe(
-            "The revision you believe you are binding to. Leave it out to bind whatever is eligible now; give it to be told, rather than to find out later, that the user has edited past it.",
+            "The exact revision returned by get_ready_revision. A stale revision is refused.",
           ),
+        digest: z.string().min(1).describe("The digest returned with that exact revision."),
+        idempotencyKey: z.string().min(1).max(256).describe("A stable key for this binding request; keep it unchanged on retries."),
         sessionId: z
           .string()
           .optional()
@@ -177,9 +181,8 @@ Call this once, at the moment work starts. Each call creates a new run.`,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
-        // Each call mints its own run id, so a second call is a second run
-        // rather than the same one arriving twice.
-        idempotentHint: false,
+        // The same key and payload return the original committed binding.
+        idempotentHint: true,
         openWorldHint: false,
       },
     },

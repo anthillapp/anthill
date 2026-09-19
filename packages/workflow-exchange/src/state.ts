@@ -38,14 +38,14 @@ export type StateDescription = {
 export function describeState(state: RevisionState, mode: HandoverMode): StateDescription {
   if (state === "bound") {
     return {
-      label: "Running",
+      label: "Bound to run",
       detail:
-        "A run is working from this revision, and its progress appears on the Live Session page.",
+        "A run has pinned this revision. Binding alone is not evidence that the external session is running.",
       // Why the revision is frozen rather than merely discouraged from
       // changing: the prompt the agent is working from was made from this
       // content, and changing it underneath would make the two disagree
       // without either of them noticing.
-      next: "This revision cannot change now. Editing the workflow makes a new one, and the run in flight keeps the one it started from.",
+      next: "This revision cannot change. Editing the workflow makes a new one; the binding keeps its original snapshot.",
     };
   }
 
@@ -67,7 +67,7 @@ export function describeState(state: RevisionState, mode: HandoverMode): StateDe
     ? {
         label: "Waiting for you",
         detail:
-          "The workflow has been handed over and nothing is running. It waits here until you approve this revision.",
+          "This revision is waiting for your approval. Anthill has not authorized a new binding to it; external session activity is separate.",
         next: "Read it through, change whatever is not right, then mark it ready.",
       }
     : {

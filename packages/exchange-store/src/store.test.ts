@@ -16,6 +16,7 @@
 
 import {
   EXCHANGE_PROBLEM_CODES,
+  WORKFLOW_FORMAT_VERSION,
   revisionDigest,
   type DraftSubmission,
 } from "@anthill/workflow-exchange";
@@ -23,7 +24,10 @@ import type { Workflow } from "@anthill/workflow-schema";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { promisify } from "node:util";
+import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import { EXCHANGE_STORE_PROBLEM_CODES } from "./problems.js";
 import { ExchangeStore } from "./store.js";
@@ -86,6 +90,7 @@ function completeWorkflow(overrides: Partial<Workflow> = {}): Workflow {
     ],
     metadata: {
       workflow: {
+        formatVersion: WORKFLOW_FORMAT_VERSION,
         agents: [{ id: "agent-1", name: "Developer", models: { "claude-code": { id: "sonnet" } } }],
       },
     },
@@ -192,19 +197,18 @@ describe("createWorkflow", () => {
     expect(await store.readWorkflow("workflow-1")).toBeUndefined();
   });
 
-  it("stores an incomplete handover and says what is missing", async () => {
+  it("refuses an incomplete handover and preserves the id for correction", async () => {
     const store = await openStore();
     const vague = completeWorkflow();
     delete vague.brief;
 
     const created = await store.createWorkflow(submission({ workflow: vague }));
 
-    expect(created.outcome).toBe("created");
-    // Stored, because the user answers these by reading the workflow, and a
-    // draft nobody can open is a draft nobody can fix.
+    expect(created.outcome).toBe("refused");
     expect(created.problems?.length).toBeGreaterThan(0);
     for (const problem of created.problems ?? []) expect(problem.ask).toBeTruthy();
-    expect((await store.readWorkflow("workflow-1"))?.head?.revision).toBe(1);
+    expect(await store.readWorkflow("workflow-1")).toBeUndefined();
+    expect((await store.createWorkflow(submission())).outcome).toBe("created");
   });
 
   it("keeps a workflow id that looks like a path inside the root", async () => {
@@ -274,8 +278,8 @@ describe("createWorkflow", () => {
 
     const again = await store.createWorkflow(submission());
 
-    expect(again.outcome).toBe("already_exists");
-    expect(codes(again.problems)).toContain(EXCHANGE_PROBLEM_CODES.HANDOVER_NO_TASK_TEXT);
+    expect(again.outcome).toBe("conflict");
+    expect(codes(again.problems)).toContain(EXCHANGE_STORE_PROBLEM_CODES.STORE_IDENTITY_CONFLICT);
   });
 });
 
@@ -483,7 +487,8 @@ describe("eligibleRevision", () => {
     const store = await openStore();
     const vague = completeWorkflow();
     delete vague.brief;
-    await store.createWorkflow(submission({ workflow: vague }));
+    await store.createWorkflow(submission());
+    await store.addRevision("workflow-1", vague, "user");
 
     const eligible = await store.eligibleRevision("workflow-1");
 
@@ -581,10 +586,7 @@ describe("bind", () => {
     const impostor = await store.bind("workflow-1", 1, { runId: "ANT-11111111", nonce: "zzz999" });
 
     expect(impostor.outcome).toBe("conflict");
-    // Both nonces, or the message says the two sides agree about the revision
-    // and leaves the reader to wonder what the argument is about.
-    expect(impostor.problems?.[0]?.message).toContain("abc123");
-    expect(impostor.problems?.[0]?.message).toContain("zzz999");
+    expect(impostor.problems?.[0]?.message).toContain("different");
     expect((await store.readBinding("workflow-1", "ANT-11111111"))?.nonce).toBe("abc123");
   });
 
@@ -599,9 +601,8 @@ describe("bind", () => {
     // The run that holds the binding is named as the holder. Saying the asking
     // run is already bound would send its caller looking for a binding it does
     // not have, under a revision it never asked for.
-    expect(collision.problems?.[0]?.message).toContain("ANT-1/a");
     expect(collision.problems?.[0]?.message).toContain("ANT-1:a");
-    expect(collision.binding?.runId).toBe("ANT-1/a");
+    expect(collision.binding).toBeUndefined();
   });
 
   it("refuses a revision the mode does not make eligible", async () => {
@@ -852,7 +853,9 @@ describe("damage", () => {
     const stored = await store.readWorkflow("workflow-1");
 
     expect(stored?.revisions).toEqual([1, 2]);
-    expect(stored?.head?.revision).toBe(1);
+    expect(stored?.head).toBeUndefined();
+    expect((await store.readRevision("workflow-1", 1))?.revision).toBe(1);
+    expect(await store.eligibleRevision("workflow-1")).toMatchObject({ eligible: false, reason: "unreadable" });
     expect(codes(stored?.problems)).toEqual([
       EXCHANGE_STORE_PROBLEM_CODES.STORE_RECORD_UNREADABLE,
     ]);
@@ -900,5 +903,147 @@ describe("the digest", () => {
     expect((await store.readRevision("workflow-1", 1))?.digest).toBe(
       revisionDigest(completeWorkflow()),
     );
+  });
+});
+
+describe("ANT-86 integrity and recovery regressions", () => {
+  it.each(["{bad", JSON.stringify({ version: 999, revision: 1, approved: false })])(
+    "never treats an unreadable approval as consent: %s", async (text) => {
+      const store = await openStore();
+      await store.createWorkflow(submission({ mode: "approval-gate" }));
+      await writeFile(join(store.root, "workflows/workflow-1/revisions/0001.ready"), text);
+      expect(await store.eligibleRevision("workflow-1")).toMatchObject({ eligible: false, reason: "unreadable" });
+      expect((await store.markReady("workflow-1", 1)).outcome).toBe("conflict");
+    });
+
+  it("rejects approval body/address mismatch and malformed optional digest", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission({ mode: "approval-gate" }));
+    await store.addRevision("workflow-1", completeWorkflow({ name: "Unapproved" }), "user");
+    await store.markReady("workflow-1", 1);
+    const path = join(store.root, "workflows/workflow-1/revisions/0001.ready");
+    const approval = JSON.parse(await readFile(path, "utf8"));
+    for (const change of [{ revision: 2 }, { workflowId: "other" }, { digest: 42 }, { digest: "0".repeat(16) }]) {
+      await writeFile(path, JSON.stringify({ ...approval, ...change }));
+      expect((await store.eligibleRevision("workflow-1")).eligible).toBe(false);
+    }
+  });
+
+  it("rejects altered content, record identity and future workflow format", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission());
+    const path = join(store.root, "workflows/workflow-1/revisions/0001.json");
+    const original = JSON.parse(await readFile(path, "utf8"));
+    const changed = structuredClone(original);
+    changed.workflow.nodes[1].config.task = "Changed without approval";
+    const future = structuredClone(original);
+    future.workflow.metadata.workflow.formatVersion = 999;
+    future.digest = revisionDigest(future.workflow);
+    for (const value of [changed, { ...original, revision: 9 }, future,
+      { ...original, workflow: { ...original.workflow, id: "other" }, digest: revisionDigest({ ...original.workflow, id: "other" }) }]) {
+      await writeFile(path, JSON.stringify(value));
+      expect((await store.eligibleRevision("workflow-1")).eligible).toBe(false);
+      expect(await store.readRevision("workflow-1", 1)).toBeUndefined();
+    }
+  });
+
+  it("rejects changed semantic envelopes without changing the original mode", async () => {
+    const store = await openStore();
+    const original = submission();
+    await store.createWorkflow(original);
+    for (const change of [{ mode: "approval-gate" as const },
+      { source: { ...original.source, sessionId: "different-session" } },
+      { source: { ...original.source, taskText: "Different request" } }]) {
+      expect((await store.createWorkflow({ ...original, ...change })).outcome).toBe("conflict");
+    }
+    expect((await store.readWorkflow("workflow-1"))?.identity?.mode).toBe("show-and-go");
+  });
+
+  it("only completes an identity-only crash with its original payload", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission());
+    await rm(join(store.root, "workflows/workflow-1/revisions/0001.json"));
+    expect((await store.createWorkflow(submission({ workflow: completeWorkflow({ name: "Different" }) }))).outcome).toBe("conflict");
+    expect((await store.createWorkflow(submission())).outcome).toBe("already_exists");
+    expect((await store.readRevision("workflow-1", 1))?.workflow.name).toBe("Ship the fix");
+  });
+
+  it("does not read revision or binding records through another workflow's path alias", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission({ workflow: completeWorkflow({ id: "a/b" }) }));
+    await store.bind("a/b", 1, { runId: "ANT-A", nonce: "abc" });
+    expect(await store.readRevision("a:b", 1)).toBeUndefined();
+    expect(await store.readBinding("a:b", "ANT-A")).toBeUndefined();
+    expect(await store.readyRevision("a:b")).toBeUndefined();
+  });
+
+  it("keeps bind retries stable after an edit and rejects a changed session", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission());
+    const mint = vi.fn(() => ({ runId: "ANT-ONCE", nonce: "abc" }));
+    const digest = revisionDigest(completeWorkflow());
+    const first = await store.bindRequest("workflow-1", 1, digest, "request", "session-a", mint);
+    await store.addRevision("workflow-1", completeWorkflow({ name: "Edited" }), "user");
+    const repeat = await store.bindRequest("workflow-1", 1, digest, "request", "session-a", mint);
+    expect(repeat.outcome).toBe("already_bound");
+    expect(repeat.binding).toEqual(first.binding);
+    expect(mint).toHaveBeenCalledTimes(1);
+    expect((await store.bindRequest("workflow-1", 1, digest, "request", "session-b", mint)).outcome).toBe("conflict");
+    expect((await store.bind("workflow-1", 1, { runId: "ANT-ONCE", nonce: "abc", sessionId: "session-a", requestKey: "request", digest })).outcome).toBe("already_bound");
+  });
+
+  it("serializes eligibility and binding publication against edits", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission());
+    const check = store.eligibleRevision.bind(store);
+    let signal!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => { signal = resolve; });
+    const resume = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(store, "eligibleRevision").mockImplementationOnce(async (id) => {
+      const value = await check(id);
+      signal();
+      await resume;
+      return value;
+    });
+    const binding = store.bind("workflow-1", 1, { runId: "ANT-RACE", nonce: "abc" });
+    await entered;
+    let editFinished = false;
+    const edit = store.addRevision("workflow-1", completeWorkflow({ name: "Edited" }), "user").then((value) => {
+      editFinished = true;
+      return value;
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(editFinished).toBe(false);
+    } finally { release(); }
+    expect((await binding).outcome).toBe("bound");
+    expect((await edit).revision).toBe(2);
+    expect((await store.readBinding("workflow-1", "ANT-RACE"))?.revision).toBe(1);
+  });
+
+  it("returns one binding to two independent MCP-store processes", async () => {
+    const root = await dataDir();
+    const store = new ExchangeStore(root);
+    await store.createWorkflow(submission());
+    const child = fileURLToPath(new URL("./bind-request-child.mjs", import.meta.url));
+    const start = String(Date.now() + 300);
+    const launch = (run: string) => promisify(execFile)(process.execPath,
+      [child, root, revisionDigest(completeWorkflow()), run, start]);
+    const [a, b] = await Promise.all([launch("ANT-A"), launch("ANT-B")]);
+    expect(JSON.parse(a.stdout).binding.runId).toBe(JSON.parse(b.stdout).binding.runId);
+    expect((await store.readWorkflow("workflow-1"))?.bindings).toHaveLength(1);
+  });
+
+  it("does not consume or suppress a different request under an already-used inbox key", async () => {
+    const store = await openStore();
+    const first = { kind: "display" as const, key: "key", workflowId: "one", revision: 1 };
+    await store.dropInbox(first);
+    await store.consumeInbox("key");
+    expect((await store.dropInbox({ ...first, workflowId: "two" })).outcome).toBe("conflict");
+    await writeFile(join(store.root, "inbox/key.json"), JSON.stringify({ version: 1, ...first, workflowId: "two", at: new Date().toISOString() }));
+    expect((await store.listInbox()).damaged).toHaveLength(1);
+    expect((await store.consumeInbox("key")).outcome).toBe("conflict");
+    expect(await readFile(join(store.root, "inbox/key.json"), "utf8")).toContain("two");
   });
 });

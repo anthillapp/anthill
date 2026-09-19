@@ -28,7 +28,8 @@ describe("describeState", () => {
   });
 
   it("says a draft under a gate is waiting on the user, and one without a gate is not", () => {
-    expect(describeState("draft", "approval-gate").detail).toContain("nothing is running");
+    expect(describeState("draft", "approval-gate").detail).toContain("waiting for your approval");
+    expect(describeState("draft", "approval-gate").detail).toContain("external session activity is separate");
     expect(describeState("draft", "approval-gate").next).toContain("mark it ready");
 
     expect(describeState("draft", "show-and-go").detail).toContain("may begin");
@@ -43,7 +44,8 @@ describe("describeState", () => {
   it("says a bound revision is frozen, whichever mode it arrived under", () => {
     for (const mode of HANDOVER_MODES) {
       const described = describeState("bound", mode);
-      expect(described.label).toBe("Running");
+      expect(described.label).toBe("Bound to run");
+      expect(described.detail).toContain("not evidence");
       expect(described.next).toContain("cannot change");
       expect(described.next).toContain("new one");
     }

@@ -9,6 +9,7 @@
  */
 
 import { HARNESS_TARGETS } from "@anthill/workflow-schema";
+import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow";
 import { describe, expect, it } from "vitest";
 
 import { EXCHANGE_PROBLEM_CODES, EXCHANGE_VERSION } from "./contracts.js";
@@ -22,6 +23,7 @@ function workflow(): Record<string, unknown> {
     version: "0.1.0",
     nodes: [{ id: "start", type: "start", name: "Start", config: {} }],
     edges: [],
+    metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION } },
   };
 }
 
@@ -78,6 +80,34 @@ describe("checkExchangeVersion", () => {
 });
 
 describe("readSubmission", () => {
+  it.each([undefined, 0, WORKFLOW_FORMAT_VERSION - 1, WORKFLOW_FORMAT_VERSION + 1, "5"])(
+    "refuses unsupported or missing workflow format %s without migrating it",
+    (formatVersion) => {
+      const result = readSubmission(handover({ workflow: {
+        ...workflow(), metadata: { workflow: { formatVersion } },
+      } }));
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(fields(result.problems)).toContain("workflow.metadata.workflow.formatVersion");
+    },
+  );
+
+  it("refuses unknown top-level intent instead of silently stripping it", () => {
+    const result = readSubmission(handover({ workflow: { ...workflow(), futureConstraint: "must not run" } }));
+    expect(result.ok).toBe(false);
+  });
+
+  it("bounds depth and graph size before recursive validation", () => {
+    let deep: unknown = "leaf";
+    for (let i = 0; i < 70; i++) deep = { nested: deep };
+    for (const extra of [
+      { metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION }, deep } },
+      { nodes: Array.from({ length: 1001 }, (_, i) => ({ id: `n${i}`, type: "start", name: "Start", config: {} })) },
+      { edges: Array.from({ length: 5001 }, (_, i) => ({ id: `e${i}`, source: "start", target: "start" })) },
+    ]) {
+      const result = readSubmission(handover({ workflow: { ...workflow(), ...extra } }));
+      expect(result.ok).toBe(false);
+    }
+  });
   it("reads a well-formed handover back unchanged", () => {
     const result = readSubmission(handover());
     expect(result.ok).toBe(true);
@@ -210,6 +240,7 @@ describe("readSubmission", () => {
     const result = readSubmission(
       handover({
         workflow: {
+          metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION } },
           id: "",
           name: "Ship the fix",
           version: "0.1.0",

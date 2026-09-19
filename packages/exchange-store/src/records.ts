@@ -3,13 +3,9 @@
  *
  * Five kinds of record, each in its own file and each carrying a `{version, …}`
  * envelope with the constant below. They are read one at a time and judged one
- * at a time: a revision this build cannot make sense of costs that revision, not
- * the workflow it belongs to. Settings and assistant threads throw the whole
- * file away when anything in it looks wrong, which is the right answer for a
- * cache of preferences and the wrong one here — the history of what a person
- * approved is not something to discard because the entry after it is damaged.
- * The model is the workflow-status store, which skips the entry and keeps
- * going.
+ * at a time. Unreadable records produce diagnostics; they are never treated as
+ * approval or silently replaced with older content. Readable history remains
+ * available for explicit recovery.
  *
  * A record from a newer Anthill is refused rather than opened, the way
  * `checkWorkflowCompatibility` refuses a workflow from the future. There is no
@@ -25,8 +21,8 @@
  */
 
 import type { ExchangeProblem, ExchangeSource, HandoverMode } from "@anthill/workflow-exchange";
-import { isHandoverMode, isSourceHarness } from "@anthill/workflow-exchange";
-import { WorkflowSchema, type Workflow } from "@anthill/workflow-schema";
+import { checkExchangeVersion, isHandoverMode, isSourceHarness, readWorkflowDocument, revisionDigest } from "@anthill/workflow-exchange";
+import type { Workflow } from "@anthill/workflow-schema";
 
 import { EXCHANGE_STORE_PROBLEM_CODES, storeProblem } from "./problems.js";
 
@@ -59,6 +55,8 @@ const INBOX_KINDS: readonly InboxKind[] = ["display", "bind"];
  * bind, so a harness cannot decide later that it would rather not wait.
  */
 export type StoredIdentity = {
+  /** Fingerprint of the complete original request, including its workflow. */
+  submissionDigest?: string;
   /** The id as it was submitted, before it became a directory name. */
   workflowId: string;
   createdAt: string;
@@ -79,9 +77,8 @@ export type StoredIdentity = {
 /**
  * One immutable snapshot of a workflow's content.
  *
- * The digest is stored rather than recomputed on read because it is what
- * decides whether two writes are the same revision, and a stored answer cannot
- * start disagreeing with a canonicalisation rule that changed underneath it.
+ * The persisted digest is recomputed on read. Changing canonicalization or the
+ * digest algorithm requires a format migration, not silently trusting old data.
  */
 export type StoredRevision = {
   revision: number;
@@ -94,13 +91,14 @@ export type StoredRevision = {
 /**
  * The user's approval of one exact revision.
  *
- * The marker's *name* is the approval; its contents are only the date. So `at`
- * is absent where the marker exists and its record could not be read: the user
- * still said yes to that revision, and the only thing lost is when.
+ * The body must be supported and agree with its path. New records also pin the
+ * workflow and digest; older version-1 records are checked against the revision.
  */
 export type StoredReadiness = {
   revision: number;
   at?: string;
+  workflowId?: string;
+  digest?: string;
 };
 
 /**
@@ -112,6 +110,8 @@ export type StoredReadiness = {
  * — so it is written down here, where there is still something that knows it.
  */
 export type Binding = {
+  requestKey?: string;
+  digest?: string;
   runId: string;
   workflowId: string;
   revision: number;
@@ -160,13 +160,15 @@ export function parseIdentity(text: string, where: string): RecordRead<StoredIde
       : undefined;
   const source = readSource(value.source);
 
-  if (!workflowId || !createdAt || !idempotencyKey || !mode || !exchangeVersion || !source) {
+  if (!workflowId || !createdAt || !idempotencyKey || !mode || !exchangeVersion || checkExchangeVersion(exchangeVersion) || !source ||
+      (value.submissionDigest !== undefined && (typeof value.submissionDigest !== "string" || !/^[a-f0-9]{64}$/.test(value.submissionDigest)))) {
     return unreadable(where, "it does not carry the identity of a handover");
   }
 
   return {
     ok: true,
-    record: { workflowId, createdAt, idempotencyKey, mode, exchangeVersion, source },
+    record: { workflowId, createdAt, idempotencyKey, mode, exchangeVersion, source,
+      ...(str(value.submissionDigest) ? { submissionDigest: str(value.submissionDigest) } : {}) },
   };
 }
 
@@ -184,15 +186,20 @@ export function parseRevision(text: string, where: string): RecordRead<StoredRev
   // By shape, not by completeness. A revision was judged complete on the way
   // in; asking again on the way out would mean a validator that gained a rule
   // could make yesterday's approved revision unreadable.
-  const workflow = WorkflowSchema.safeParse(value.workflow);
+  // Reuse the wire parser's workflow compatibility check, without migration.
+  const workflow = readWorkflowDocument(value.workflow);
 
-  if (!revision || !createdAt || !by || !digest || !workflow.success) {
+  if (!revision || !createdAt || !by || !digest || !workflow.ok) {
     return unreadable(where, "it is not a revision this build can read");
+  }
+
+  if (revisionDigest(workflow.workflow) !== digest) {
+    return unreadable(where, "its content does not match its recorded digest");
   }
 
   return {
     ok: true,
-    record: { revision, createdAt, by, digest, workflow: workflow.data as Workflow },
+    record: { revision, createdAt, by, digest, workflow: workflow.workflow },
   };
 }
 
@@ -203,8 +210,14 @@ export function parseReadiness(text: string, where: string): RecordRead<StoredRe
   const revision = count(opened.record.revision);
   const at = when(opened.record.at);
   if (!revision || !at) return unreadable(where, "it does not say which revision was approved, or when");
+  if ((opened.record.workflowId !== undefined && !str(opened.record.workflowId)) ||
+      (opened.record.digest !== undefined && (typeof opened.record.digest !== "string" || !/^[a-f0-9]{16}$/.test(opened.record.digest)))) {
+    return unreadable(where, "its optional approval identity is malformed");
+  }
 
-  return { ok: true, record: { revision, at } };
+  return { ok: true, record: { revision, at,
+    ...(str(opened.record.workflowId) ? { workflowId: str(opened.record.workflowId) } : {}),
+    ...(str(opened.record.digest) ? { digest: str(opened.record.digest) } : {}) } };
 }
 
 export function parseBinding(text: string, where: string): RecordRead<Binding> {
@@ -222,10 +235,16 @@ export function parseBinding(text: string, where: string): RecordRead<Binding> {
   if (!runId || !workflowId || !revision || !nonce || !at) {
     return unreadable(where, "it does not describe a run holding a revision");
   }
+  if ((value.requestKey !== undefined && !str(value.requestKey)) ||
+      (value.digest !== undefined && (typeof value.digest !== "string" || !/^[a-f0-9]{16}$/.test(value.digest)))) {
+    return unreadable(where, "its binding request or digest is malformed");
+  }
 
   return {
     ok: true,
-    record: { runId, workflowId, revision, nonce, at, ...(sessionId ? { sessionId } : {}) },
+    record: { runId, workflowId, revision, nonce, at, ...(sessionId ? { sessionId } : {}),
+      ...(str(value.requestKey) ? { requestKey: str(value.requestKey) } : {}),
+      ...(str(value.digest) ? { digest: str(value.digest) } : {}) },
   };
 }
 

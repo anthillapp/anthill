@@ -7,16 +7,19 @@
   "types": "dist/index.d.ts",
   "dependencies": {
     "@anthill/workflow-exchange": "*",
-    "@anthill/workflow-schema": "*"
+    "@anthill/workflow-schema": "*",
+    "proper-lockfile": "4.1.2"
   },
   "devDependencies": {
     "@types/node": "^20.19.4",
+    "@types/proper-lockfile": "~4.1.4",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   },
   "scripts": {
     "build": "tsc -b tsconfig.build.json",
     "typecheck": "tsc --noEmit",
+    "pretest": "npm run build",
     "test": "vitest run"
   }
 }

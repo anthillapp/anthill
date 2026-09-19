@@ -22,6 +22,7 @@
  */
 
 import { HARNESS_TARGETS, WorkflowSchema, type Workflow } from "@anthill/workflow-schema";
+import { checkWorkflowCompatibility } from "@anthill/workflow";
 
 import {
   EXCHANGE_PROBLEM_CODES,
@@ -233,8 +234,41 @@ function readSource(value: unknown, problems: ExchangeProblem[]): ExchangeSource
   return { harness, sessionId, taskText };
 }
 
+export function readWorkflowDocument(value: unknown):
+  | { ok: true; workflow: Workflow }
+  | { ok: false; problems: ExchangeProblem[] } {
+  const problems: ExchangeProblem[] = [];
+  const workflow = readWorkflow(value, problems);
+  return workflow ? { ok: true, workflow } : { ok: false, problems };
+}
+
 function readWorkflow(value: unknown, problems: ExchangeProblem[]): Workflow | undefined {
-  const parsed = WorkflowSchema.safeParse(value);
+  const pending = [{ value, depth: 0 }];
+  let entries = 0;
+  while (pending.length) {
+    const item = pending.pop()!;
+    if (++entries > 100_000 || item.depth > 64) {
+      problems.push({ code: EXCHANGE_PROBLEM_CODES.WORKFLOW_MALFORMED,
+        message: "Workflow JSON exceeds the supported depth or complexity limit.", field: "workflow" });
+      return undefined;
+    }
+    if (item.value !== null && typeof item.value === "object") {
+      for (const child of Object.values(item.value)) pending.push({ value: child, depth: item.depth + 1 });
+    }
+  }
+  if (isRecord(value) && ((Array.isArray(value.nodes) && value.nodes.length > 1000) ||
+      (Array.isArray(value.edges) && value.edges.length > 5000))) {
+    problems.push({ code: EXCHANGE_PROBLEM_CODES.WORKFLOW_MALFORMED,
+      message: "A handover supports at most 1000 blocks and 5000 connections.", field: "workflow" });
+    return undefined;
+  }
+  const compatibility = checkWorkflowCompatibility(value);
+  if (isRecord(value) && !compatibility.ok) {
+    problems.push({ code: EXCHANGE_PROBLEM_CODES.WORKFLOW_MALFORMED,
+      message: compatibility.message, field: "workflow.metadata.workflow.formatVersion" });
+    return undefined;
+  }
+  const parsed = WorkflowSchema.strict().safeParse(value);
   if (parsed.success) return parsed.data as Workflow;
 
   for (const issue of parsed.error.issues) {

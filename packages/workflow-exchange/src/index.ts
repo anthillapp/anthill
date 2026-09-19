@@ -41,6 +41,7 @@ export {
 export {
   checkExchangeVersion,
   readSubmission,
+  readWorkflowDocument,
   type ReadSubmissionResult,
 } from "./submission.js";
 
@@ -49,3 +50,4 @@ export { checkCompleteness } from "./completeness.js";
 export { canonicalJson, revisionDigest } from "./digest.js";
 
 export { describeState, type StateDescription } from "./state.js";
+export { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow";

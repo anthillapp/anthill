@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow";
 
 import {
   EXCHANGE_VERSION,
@@ -57,6 +58,7 @@ const HANDOVER = {
     ],
     metadata: {
       workflow: {
+        formatVersion: WORKFLOW_FORMAT_VERSION,
         agents: [{ id: "agent-1", name: "Developer", models: { "claude-code": { id: "sonnet" } } }],
       },
     },

@@ -37,6 +37,7 @@ import {
   type ExchangeProblem,
 } from "@anthill/workflow-exchange";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { createHash } from "node:crypto";
 
 import {
   bindText,
@@ -111,6 +112,8 @@ export type WorkflowInput = { workflowId: string };
 export type BindRunInput = {
   workflowId: string;
   revision?: number;
+  digest?: string;
+  idempotencyKey?: string;
   sessionId?: string;
 };
 
@@ -159,8 +162,8 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       if (created.outcome !== "created" && created.outcome !== "already_exists") {
         return result(draftText, {
           ...invalidDraft(problems),
+          outcome: created.outcome === "refused" ? "incomplete" : "invalid",
           workflowId: created.workflowId,
-          url,
         });
       }
 
@@ -181,7 +184,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       // the app open the same workflow twice.
       const drop = await store.dropInbox({
         kind: "display",
-        key: displayKey(submission.idempotencyKey),
+        key: displayKey(created.workflowId, submission.idempotencyKey),
         workflowId: created.workflowId,
         revision,
       });
@@ -193,7 +196,8 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         url,
         revision,
         ...(stored?.identity ? { mode: stored.identity.mode } : {}),
-        displayed: drop.outcome !== "conflict",
+        displayed: false,
+        displayRequested: drop.outcome !== "conflict",
         ...(all.length > 0 ? { problems: all, questions: questionsFrom(all) } : {}),
       });
     },
@@ -264,30 +268,18 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       });
     },
 
-    async bindRun({ workflowId, revision, sessionId }): Promise<CallToolResult> {
+    async bindRun({ workflowId, revision, digest, idempotencyKey, sessionId }): Promise<CallToolResult> {
       const url = workflowUrl(workflowId);
-      const eligibility = await store.eligibleRevision(workflowId);
-
-      if (!eligibility.eligible) {
+      if (!Number.isSafeInteger(revision) || revision! < 1 || !digest?.trim() || !idempotencyKey?.trim() ||
+          (sessionId !== undefined && (!sessionId.trim() || sessionId.length > 120 || !/^[A-Za-z0-9_-]+$/.test(sessionId)))) {
         return result(bindText, {
-          outcome: eligibility.reason === "no_such_workflow" ? "no_such_workflow" : "not_ready",
-          workflowId,
-          url,
-          ...notReadyFields(eligibility),
+          outcome: "invalid", workflowId, url,
+          problems: [{ code: "BIND_PRECONDITION_REQUIRED", message:
+            "Provide the revision and digest returned by get_ready_revision, a stable idempotencyKey, and a valid optional sessionId. Retry with the same key and payload; use a new key only for an intentional new run." }],
         });
       }
-
-      // A caller may name the revision it believes it is binding. When it does
-      // and the user has edited past it, the store refuses with both numbers
-      // said out loud — which is the whole value of letting it be named at all.
-      const target = revision ?? eligibility.revision.revision;
-      const runId = mintRunId();
-      const nonce = mintNonce();
-      const bound = await store.bind(workflowId, target, {
-        runId,
-        nonce,
-        ...(sessionId ? { sessionId } : {}),
-      });
+      const bound = await store.bindRequest(workflowId, revision!, digest!, idempotencyKey!, sessionId,
+        () => ({ runId: mintRunId(), nonce: mintNonce() }));
 
       if (bound.outcome !== "bound" && bound.outcome !== "already_bound") {
         return result(bindText, {
@@ -299,8 +291,8 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
                 : "conflict",
           workflowId,
           url,
-          revision: target,
-          mode: eligibility.mode,
+          revision,
+          ...(bound.reason ? { reason: bound.reason } : {}),
           ...problemFields(bound.problems),
         });
       }
@@ -310,7 +302,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         // The store returns the binding on both successful outcomes. Reaching
         // here would mean it stopped doing so, which is a fault rather than an
         // answer, and it is reported as one.
-        throw new Error(`Run ${runId} was bound to ${workflowId} but no binding came back.`);
+        throw new Error(`A run was bound to ${workflowId} but no binding came back.`);
       }
 
       // The app registers the run from this drop; nothing else tells it a run
@@ -327,7 +319,11 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       });
 
       const stored = await store.readWorkflow(workflowId);
-      const steps = workflowSteps(eligibility.revision.workflow);
+      const snapshot = await store.readRevision(workflowId, binding.revision);
+      if (!snapshot || !stored?.identity || snapshot.digest !== binding.digest) {
+        throw new Error("The bound snapshot cannot be verified. No running state is implied.");
+      }
+      const steps = workflowSteps(snapshot.workflow);
       const reportingCommands = cliInstruction(
         {
           runId: binding.runId,
@@ -344,13 +340,14 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         outcome: bound.outcome,
         workflowId,
         url,
-        mode: eligibility.mode,
+        mode: stored.identity.mode,
         revision: binding.revision,
-        digest: eligibility.revision.digest,
+        digest: snapshot.digest,
         runId: binding.runId,
         nonce: binding.nonce,
         ...(binding.sessionId ? { sessionId: binding.sessionId } : {}),
-        registered: drop.outcome !== "conflict",
+        registered: false,
+        registrationRequested: drop.outcome !== "conflict",
         reportingCommands,
         steps,
         ...problemFields(drop.problems),
@@ -367,8 +364,8 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
  * One answer, rendered for both of its readers.
  *
  * `structuredContent` is the answer itself and `content` is the same answer in
- * prose. The model never sees `structuredContent`, so a tool that populated only
- * that would land in the conversation looking as though it had returned nothing.
+ * prose. Hosts differ in whether they expose structured output to the model,
+ * so the text path must also include the complete authoritative instructions.
  */
 function result<Answer extends Record<string, unknown>>(
   render: (answer: Answer) => string,
@@ -458,8 +455,8 @@ function checkSize(submitted: unknown): ExchangeProblem | undefined {
  * twice under one idempotency key does not open the workflow twice, and a run
  * id belongs to exactly one bind.
  */
-function displayKey(idempotencyKey: string): string {
-  return `display-${idempotencyKey}`;
+function displayKey(workflowId: string, idempotencyKey: string): string {
+  return `display-${createHash("sha256").update(JSON.stringify([workflowId, idempotencyKey])).digest("hex")}`;
 }
 
 function bindKey(runId: string): string {

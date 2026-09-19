@@ -15,6 +15,7 @@
  */
 
 import { ExchangeStore, type InboxDrop } from "@anthill/exchange-store";
+import { revisionDigest, WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-exchange";
 import type { Workflow } from "@anthill/workflow-schema";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -27,6 +28,7 @@ import {
   MCP_PROBLEM_CODES,
   type CreateDraftInput,
   type Handlers,
+  type BindRunInput,
 } from "./handlers.js";
 
 const roots: string[] = [];
@@ -95,6 +97,7 @@ function completeWorkflow(overrides: Partial<Workflow> = {}): Workflow {
     ],
     metadata: {
       workflow: {
+        formatVersion: WORKFLOW_FORMAT_VERSION,
         agents: [{ id: "agent-1", name: "Developer", models: { "claude-code": { id: "sonnet" } } }],
       },
     },
@@ -114,6 +117,11 @@ function draftInput(overrides: Partial<CreateDraftInput> = {}): CreateDraftInput
     workflow: completeWorkflow(),
     ...overrides,
   };
+}
+
+function bindInput(overrides: Partial<BindRunInput> = {}): BindRunInput {
+  return { workflowId: "workflow-1", revision: 1, digest: revisionDigest(completeWorkflow()),
+    idempotencyKey: "bind-1", ...overrides };
 }
 
 /** The `structuredContent` a handler answered with, which is its whole answer. */
@@ -139,6 +147,17 @@ async function inbox(store: ExchangeStore): Promise<InboxDrop[]> {
 }
 
 describe("create_workflow_draft", () => {
+  it("keeps long workflow IDs and shared sender keys in separate inbox requests", async () => {
+    const { handlers, store } = await openTools();
+    for (const suffix of ["a", "b"]) {
+      const result = await handlers.createWorkflowDraft(draftInput({
+        workflow: completeWorkflow({ id: `${"w".repeat(110)}${suffix}` }),
+      }));
+      expect(answerOf(result).outcome).toBe("created");
+      expect(answerOf(result).displayRequested).toBe(true);
+    }
+    expect(await inbox(store)).toHaveLength(2);
+  });
   it("stores a complete handover and asks the app to open it", async () => {
     const { handlers, store } = await openTools();
 
@@ -150,7 +169,9 @@ describe("create_workflow_draft", () => {
     expect(answer.workflowId).toBe("workflow-1");
     expect(answer.revision).toBe(1);
     expect(answer.url).toBe("anthill://workflow/workflow-1");
-    expect(answer.displayed).toBe(true);
+    expect(answer.displayed).toBe(false);
+    expect(answer.displayRequested).toBe(true);
+    expect(textOf(result)).toContain("not acknowledged");
 
     const drops = await inbox(store);
     expect(drops).toHaveLength(1);
@@ -176,7 +197,7 @@ describe("create_workflow_draft", () => {
     expect(stored?.revisions).toEqual([1]);
   });
 
-  it("stores an incomplete draft and returns the questions to put to the user", async () => {
+  it("refuses an incomplete draft without reserving its id and accepts the correction", async () => {
     const { handlers, store } = await openTools();
 
     const incomplete = completeWorkflow({ brief: { goal: "Make it better." } });
@@ -185,17 +206,16 @@ describe("create_workflow_draft", () => {
 
     expect(result.isError).toBeUndefined();
     expect(answer.outcome).toBe("incomplete");
-    expect(answer.revision).toBe(1);
+    expect(answer.revision).toBeUndefined();
     expect(problemCodes(answer)).toContain("HANDOVER_NO_DONE_CRITERIA");
 
     const questions = answer.questions as string[];
     expect(questions.length).toBeGreaterThan(0);
     for (const question of questions) expect(textOf(result)).toContain(question);
 
-    // Stored, not refused: the user answers the questions by reading the thing,
-    // and a draft nobody can open is a draft nobody can fix.
-    expect(await store.readRevision("workflow-1", 1)).toBeDefined();
-    expect(await inbox(store)).toHaveLength(1);
+    expect(await store.readRevision("workflow-1", 1)).toBeUndefined();
+    expect(await inbox(store)).toHaveLength(0);
+    expect(answerOf(await handlers.createWorkflowDraft(draftInput())).outcome).toBe("created");
   });
 
   it("refuses a handover that cannot be read, and stores nothing", async () => {
@@ -277,7 +297,7 @@ describe("get_workflow", () => {
     const { handlers, store } = await openTools();
     await handlers.createWorkflowDraft(draftInput({ mode: "approval-gate" }));
     await store.markReady("workflow-1", 1);
-    await handlers.bindRun({ workflowId: "workflow-1" });
+    await handlers.bindRun(bindInput());
 
     const answer = answerOf(await handlers.getWorkflow({ workflowId: "workflow-1" }));
 
@@ -294,6 +314,17 @@ describe("get_workflow", () => {
 });
 
 describe("get_ready_revision", () => {
+  it("puts the exact edited workflow, not only labels, in model-visible text", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    const edited = completeWorkflow();
+    edited.nodes[1].config.task = "Read the new task from this exact edited revision.";
+    edited.brief = { ...edited.brief, constraints: ["Do not publish anything."] };
+    await store.addRevision("workflow-1", edited, "user");
+    const result = await handlers.getReadyRevision({ workflowId: "workflow-1" });
+    expect(answerOf(result).workflow).toEqual(edited);
+    expect(textOf(result)).toContain(JSON.stringify(edited));
+  });
   it("returns the head revision and its content under show-and-go", async () => {
     const { handlers } = await openTools();
     await handlers.createWorkflowDraft(draftInput());
@@ -339,10 +370,9 @@ describe("get_ready_revision", () => {
   });
 
   it("carries the questions when the revision is not fit to be handed over", async () => {
-    const { handlers } = await openTools();
-    await handlers.createWorkflowDraft(
-      draftInput({ workflow: completeWorkflow({ brief: { goal: "Make it better." } }) }),
-    );
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    await store.addRevision("workflow-1", completeWorkflow({ brief: { goal: "Make it better." } }), "user");
 
     const result = await handlers.getReadyRevision({ workflowId: "workflow-1" });
     const answer = answerOf(result);
@@ -356,11 +386,36 @@ describe("get_ready_revision", () => {
 });
 
 describe("bind_run", () => {
+  it("requires exact revision, digest and a stable binding key", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    for (const omit of ["revision", "digest", "idempotencyKey"] as const) {
+      const result = await handlers.bindRun({ ...bindInput(), [omit]: undefined });
+      expect(answerOf(result).outcome).toBe("invalid");
+    }
+    expect((await store.readWorkflow("workflow-1"))?.bindings).toHaveLength(0);
+  });
+
+  it("returns the committed binding after restart and a later edit, refusing key reuse", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    const first = answerOf(await handlers.bindRun(bindInput()));
+    await store.addRevision("workflow-1", completeWorkflow({ name: "Edited afterward" }), "user");
+    const restarted = createHandlers({ store, mintRunId: () => { throw new Error("retry minted a run"); } });
+    const retried = answerOf(await restarted.bindRun(bindInput()));
+    expect(retried.outcome).toBe("already_bound");
+    expect(retried.runId).toBe(first.runId);
+    expect(retried.nonce).toBe(first.nonce);
+    expect(retried.revision).toBe(1);
+    expect(retried.digest).toBe(first.digest);
+    expect(answerOf(await restarted.bindRun(bindInput({ sessionId: "other" }))).outcome).toBe("conflict");
+    expect(answerOf(await handlers.bindRun(bindInput({ idempotencyKey: "new-stale" }))).outcome).toBe("not_ready");
+  });
   it("mints a run, binds it, asks the app to register it, and returns the commands", async () => {
     const { handlers, store } = await openTools();
     await handlers.createWorkflowDraft(draftInput());
 
-    const result = await handlers.bindRun({ workflowId: "workflow-1" });
+    const result = await handlers.bindRun(bindInput());
     const answer = answerOf(result);
 
     expect(result.isError).toBeUndefined();
@@ -368,7 +423,8 @@ describe("bind_run", () => {
     expect(answer.runId).toBe("ANT-RUN1");
     expect(answer.nonce).toBe("n1");
     expect(answer.revision).toBe(1);
-    expect(answer.registered).toBe(true);
+    expect(answer.registered).toBe(false);
+    expect(answer.registrationRequested).toBe(true);
 
     // The session the handover came from, so a run that goes quiet can still be
     // picked back up — the report channel never supplies one.
@@ -395,7 +451,7 @@ describe("bind_run", () => {
     const { handlers, store } = await openTools();
     await handlers.createWorkflowDraft(draftInput({ mode: "approval-gate" }));
 
-    const answer = answerOf(await handlers.bindRun({ workflowId: "workflow-1" }));
+    const answer = answerOf(await handlers.bindRun(bindInput()));
 
     expect(answer.outcome).toBe("not_ready");
     expect(answer.reason).toBe("awaiting_approval");
@@ -411,7 +467,7 @@ describe("bind_run", () => {
     await handlers.createWorkflowDraft(draftInput());
     await store.addRevision("workflow-1", completeWorkflow({ name: "Renamed" }), "user");
 
-    const result = await handlers.bindRun({ workflowId: "workflow-1", revision: 1 });
+    const result = await handlers.bindRun(bindInput());
     const answer = answerOf(result);
 
     expect(answer.outcome).toBe("not_ready");
@@ -422,18 +478,21 @@ describe("bind_run", () => {
   it("says so, rather than throwing, when the workflow is not there at all", async () => {
     const { handlers } = await openTools();
 
-    const result = await handlers.bindRun({ workflowId: "never-handed-over" });
+    const result = await handlers.bindRun(bindInput({ workflowId: "never-handed-over" }));
 
     expect(result.isError).toBeUndefined();
     expect(answerOf(result).outcome).toBe("no_such_workflow");
   });
 
-  it("mints a second run rather than handing back the first", async () => {
+  it("returns the same run on a retry and permits an explicit new run", async () => {
     const { handlers, store } = await openTools();
     await handlers.createWorkflowDraft(draftInput());
 
-    const first = answerOf(await handlers.bindRun({ workflowId: "workflow-1" }));
-    const second = answerOf(await handlers.bindRun({ workflowId: "workflow-1" }));
+    const first = answerOf(await handlers.bindRun(bindInput()));
+    const repeated = answerOf(await handlers.bindRun(bindInput()));
+    expect(repeated.outcome).toBe("already_bound");
+    expect(repeated.runId).toBe(first.runId);
+    const second = answerOf(await handlers.bindRun(bindInput({ idempotencyKey: "bind-2" })));
 
     expect(first.runId).toBe("ANT-RUN1");
     expect(second.runId).toBe("ANT-RUN2");

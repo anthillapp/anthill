@@ -109,6 +109,23 @@ function stub(events: ObservationEvent[], over: Record<string, unknown> = {}) {
   return api;
 }
 
+it("draws the bound revision, not later editor changes with the same workflow id", async () => {
+  stub([], { liveWorkflow: vi.fn(async () => ({ ok: true, workflow, revision: 1, digest: "abc" })) });
+  const edited = { ...workflow, nodes: workflow.nodes.map((node) => ({ ...node, name: "NEW EDIT" })) };
+  render(<LiveSessionPage workflow={edited} run={run({ exchange: { revision: 1, digest: "abc" } })} onBack={() => undefined} onStopObserving={() => undefined} />);
+  await screen.findByText("Bound revision");
+  expect(document.body.textContent).toContain("Make the change");
+  expect(document.body.textContent).not.toContain("NEW EDIT");
+});
+
+it("never substitutes an edited graph when the immutable revision cannot be read", async () => {
+  stub([], { liveWorkflow: vi.fn(async () => ({ ok: false, error: "Snapshot corrupt" })) });
+  render(<LiveSessionPage workflow={workflow} run={run({ exchange: { revision: 1, digest: "abc" } })} onBack={() => undefined} onStopObserving={() => undefined} />);
+  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Snapshot corrupt");
+  expect(document.querySelector(".live-graph")).toBeNull();
+  expect(screen.queryByText("Make the change")).toBeNull();
+});
+
 async function show(
   events: ObservationEvent[],
   pending: PendingRun = run(),

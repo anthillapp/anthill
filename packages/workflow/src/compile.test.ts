@@ -72,6 +72,45 @@ function reviewLoop(target: Workflow["target"] = "claude-code"): Workflow {
   };
 }
 
+/**
+ * Implement, review, verify, and back round — drawn out of the order it runs.
+ *
+ * The blocks are declared implement, verify, review while the work goes
+ * implement, review, verify, which is the case a two-block loop cannot tell
+ * apart: with two members every order is the loop's order.
+ */
+function verifyLoop(): Workflow {
+  const workflow = reviewLoop();
+  const agents = (workflow.metadata!.workflow as { agents: Record<string, unknown>[] }).agents;
+  agents.push({ id: "agent-qa", name: "Verifier", model: "sonnet" });
+  workflow.nodes.splice(2, 0, {
+    id: "qa",
+    type: "agent",
+    name: "Verify",
+    config: {
+      actionKind: "run-tests",
+      agentId: "agent-qa",
+      purpose: "Checks the change against the done criteria",
+      task: "Run the suite and say whether the done criteria are met.",
+      maxIterations: 3,
+    },
+  });
+  workflow.edges = [
+    { id: "e1", source: "s", target: "dev" },
+    { id: "e2", source: "dev", target: "rev" },
+    { id: "e3", source: "rev", target: "qa" },
+    {
+      id: "e4",
+      source: "qa",
+      target: "dev",
+      condition: 'verifier.decision == "changes_requested"',
+      label: "changes requested",
+    },
+    { id: "e5", source: "qa", target: "e", label: "approved" },
+  ];
+  return workflow;
+}
+
 describe("compile — agent files", () => {
   it("writes one file per role for Claude Code", () => {
     const { files } = compile(reviewLoop());
@@ -431,6 +470,16 @@ describe("compile — loops", () => {
     expect(prompt).toContain("Make the smallest reasonable fix.");
     expect(prompt).toContain("Verify it independently");
     expect(prompt).toContain("Evaluate against the done criteria above.");
+  });
+
+  it("names a loop's steps in the order the work goes round them", () => {
+    const { prompt } = compile(verifyLoop());
+
+    // The blocks are drawn implement, verify, review. A heading in that order
+    // describes a loop nobody built.
+    expect(prompt).toContain(
+      "### Implement (Developer) ⇄ Review (Reviewer) ⇄ Verify (Verifier)",
+    );
   });
 
   it("omits the loop section entirely for a linear diagram", () => {

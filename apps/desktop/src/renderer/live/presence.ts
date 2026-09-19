@@ -186,6 +186,7 @@ export function presenceStyle(key: PresenceKey): PresenceStyle {
  * something. The CLI is only appended once a session is actually being read.
  */
 export function presenceLabel(run: PendingRun, key: PresenceKey): string {
+  if (key === "pending" && run.exchange) return "Waiting for external progress";
   const style = PRESENCE[key];
   const named = key === "receiving" || key === "quiet" || key === "completed" || key === "failed";
   // `not_found` deliberately never names a CLI: there was no session to name.
@@ -259,4 +260,3 @@ export function mostRelevant(runs: PendingRun[]): PendingRun | undefined {
     return byState !== 0 ? byState : Date.parse(b.createdAt) - Date.parse(a.createdAt);
   })[0];
 }
-

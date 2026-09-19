@@ -5,6 +5,7 @@ import {
   LIVE_EVENTS_CHANNEL,
   LIVE_SNAPSHOT_CHANNEL,
   OPEN_SETTINGS_CHANNEL,
+  OPEN_WORKFLOW_CHANNEL,
   SAVE_WORKFLOW_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
   RUN_EVENT_CHANNEL,
@@ -175,6 +176,16 @@ export function installWebBridge(): Promise<AnthillApi> {
       workspaceStatus: (rootPath: string) =>
         invoke(IpcChannel.workspaceStatus, rootPath),
       openWorkflow: (path?: string) => invoke(IpcChannel.workflowOpen, path),
+      pendingWorkflowOpen: () => invoke(IpcChannel.workflowPendingOpen),
+      workflowOpened: (path) => invoke(IpcChannel.workflowOpened, path),
+      exchangeRead: (path, id) => invoke(IpcChannel.exchangeRead, path, id),
+      exchangeReady: (request) => invoke(IpcChannel.exchangeReady, request),
+      exchangeRevoke: (request) => invoke(IpcChannel.exchangeRevoke, request),
+      liveWorkflow: (runId) => invoke(IpcChannel.liveWorkflow, runId),
+      // One payload per push, and no delivery id to carry: see the note beside
+      // the same method in the Electron-side bridge.
+      onOpenWorkflow: (listener: (path: string, deliveryId?: number) => void) =>
+        onChannel(OPEN_WORKFLOW_CHANNEL, (payload) => listener(payload as string)),
       saveWorkflow: (request: SaveWorkflowRequest) =>
         invoke(IpcChannel.workflowSave, request),
       onSaveWorkflow: (listener: () => void) =>

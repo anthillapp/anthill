@@ -85,8 +85,9 @@ export function SessionStartedDialog({
 
         <h2 id="session-started-title">A session started running this workflow</h2>
         <p className="session-started-how">
-          {CLI_LABEL[run.selectedCli]} began a session on this machine,
-          and its records carry the run marker Anthill copied with the prompt.
+          {run.evidenceChannel === "anthill:report"
+            ? `${CLI_LABEL[run.selectedCli]} reported progress through the Anthill CLI with this run's ID and nonce.`
+            : `${CLI_LABEL[run.selectedCli]} wrote matching local session evidence for this workflow.`}
         </p>
 
         <dl className="session-started-facts">
@@ -97,7 +98,7 @@ export function SessionStartedDialog({
             <code>{run.detectedSessionId ?? "—"}</code>
           </dd>
           <dt>Evidence</dt>
-          <dd>run marker in the session record · confirmed</dd>
+          <dd>{run.evidenceChannel === "anthill:report" ? "run ID and nonce in a CLI report" : "run marker in the session record · confirmed"}</dd>
         </dl>
 
         <p className="session-started-boundary">

@@ -65,6 +65,7 @@ import {
   shouldAnnounce,
 } from "../live/SessionStartedDialog.js";
 import { LiveSessionPage } from "../live/LiveSessionPage.js";
+import { ExchangeHandover } from "./ExchangeHandover.js";
 
 export type WorkflowScreenProps = {
   onExit: () => void;
@@ -77,7 +78,7 @@ export type WorkflowScreenProps = {
   start?:
     | { kind: "templates" }
     | { kind: "prompt" }
-    | { kind: "open"; path?: string; live?: PendingRun };
+    | { kind: "open"; path?: string; live?: PendingRun; deliveryId?: number };
 };
 
 /**
@@ -162,6 +163,16 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   const [linking, setLinking] = useState<LinkingState>(null);
   const [path, setPath] = useState<string | undefined>();
   const [dirty, setDirty] = useState(false);
+  const currentWorkflow = useRef(workflow);
+  currentWorkflow.current = workflow;
+  const handover = useRef(start?.kind === "open" ? start : undefined);
+  useEffect(() => {
+    if (!workflow) return;
+    const deliveryId = handover.current?.path === path ? handover.current?.deliveryId : undefined;
+    handover.current = undefined;
+    void window.anthill.workflowOpened(path ?? "", deliveryId);
+  }, [path, workflow?.id]);
+  useEffect(() => () => { void window.anthill.workflowOpened(""); }, []);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: "idle" });
   /** Held in a ref, not state: it gates the next call, it does not draw. */
   const saving = useRef(false);
@@ -490,7 +501,8 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
       });
       if (result.kind === "saved") {
         setPath(result.path);
-        markDirty(false);
+        // Edits made while the save was awaiting IPC are still unsaved.
+        if (currentWorkflow.current === workflow) markDirty(false);
         setNotice(null);
         setSaveStatus({ kind: "saved" });
         return;
@@ -820,6 +832,8 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         </button>
       </header>
 
+      <ExchangeHandover workflow={workflow} {...(path ? { path } : {})} dirty={dirty} runs={liveRuns} />
+
       {showProblems ? (
         <ProblemsPopover
           workflow={workflow}
@@ -904,7 +918,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
               the chip claims. Both sit outside the layer that pans and zooms,
               so neither drifts with the diagram. */}
           <div className="canvas-presence">
-            {watched ? <PresencePlaque presence={presenceKey(watched)} /> : null}
+            {watched ? <PresencePlaque presence={presenceKey(watched)} {...(watched.exchange && watched.state === "pending_after_copy" ? { note: "revision bound; no progress evidence yet" } : {})} /> : null}
             <LiveIndicator
               {...(workflow.id ? { workflowId: workflow.id } : {})}
               onOpenSession={(run, capability) => {

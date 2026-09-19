@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import type { PendingRun } from "@anthill/live";
 
 import { HowItWorksScreen } from "./explain/HowItWorksScreen.js";
@@ -18,7 +19,7 @@ import { WorkflowScreen } from "./workflow/WorkflowScreen.js";
 type Start =
   | { kind: "templates" }
   | { kind: "prompt" }
-  | { kind: "open"; path?: string; live?: PendingRun };
+  | { kind: "open"; path?: string; live?: PendingRun; deliveryId?: number };
 
 export function Root() {
   const [start, setStart] = useState<Start | null>(null);
@@ -48,6 +49,60 @@ export function Root() {
   }, [start]);
   useEffect(() => window.anthill.onOpenSettings(openSettings), [openSettings]);
 
+  /**
+   * How many workflows have been handed to this window from outside it.
+   *
+   * A coding harness puts a workflow in front of the author without anybody
+   * here clicking anything, and the workflow screen opens the file it was
+   * given once, on arrival. Routing a second one at a screen that has already
+   * done that would change the route and show the old document, so the count
+   * is the screen's key and a handover mounts a new one. Consent is checked
+   * here, against the document present when the message actually arrives.
+   */
+  const [handedOver, setHandedOver] = useState(0);
+  const openHandedOver = useCallback((path: string, deliveryId?: number) => {
+    const dirty = (window as unknown as Record<string, unknown>).__anthillWorkflowDirty === true;
+    if (dirty) {
+      // The acknowledgement timeout measures a page opening, not the time a
+      // person needs to decide. Neither phase reports the document as shown.
+      void window.anthill.workflowOpened(path, deliveryId, "confirming");
+      if (!window.confirm("This workflow has unsaved changes.\n\nOpening the handed-over workflow discards everything since the last save.")) {
+        void window.anthill.workflowOpened(path, deliveryId, "declined");
+        return;
+      }
+      void window.anthill.workflowOpened(path, deliveryId, "opening");
+    }
+    // No await or deferred render between permission and replacement: a new
+    // edit must not sneak into the document the user just agreed to discard.
+    flushSync(() => {
+      setStart({ kind: "open", path, deliveryId });
+      setHandedOver((count) => count + 1);
+      setSettingsFrom(null);
+      setExplaining(false);
+    });
+  }, []);
+
+  useEffect(() => window.anthill.onOpenWorkflow(openHandedOver), [openHandedOver]);
+
+  /*
+    A handover that arrived before this page existed is collected rather than
+    pushed, because a message sent to a page that has not mounted reaches
+    nobody — and a link followed from a cold start is exactly that case. Main
+    hands it over once, so StrictMode's second run of this effect gets nothing.
+
+    A main process older than this page has never heard of the channel and
+    rejects, which is the one thing there is to do about it: there is no
+    handover to collect from a process that cannot receive one.
+  */
+  useEffect(() => {
+    void window.anthill
+      .pendingWorkflowOpen()
+      .then((path) => {
+        if (path) openHandedOver(path);
+      })
+      .catch(() => undefined);
+  }, [openHandedOver]);
+
   const leaveExplainer = () => {
     markExplainerSeen();
     setExplaining(false);
@@ -62,7 +117,12 @@ export function Root() {
       }}
     />
   ) : start ? (
-    <WorkflowScreen start={start} onExit={() => setStart(null)} onSettings={openSettings} />
+    <WorkflowScreen
+      key={handedOver}
+      start={start}
+      onExit={() => setStart(null)}
+      onSettings={openSettings}
+    />
   ) : (
     <LaunchWindow
       onNewWorkflow={() => setStart({ kind: "templates" })}

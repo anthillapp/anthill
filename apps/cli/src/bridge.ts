@@ -24,6 +24,7 @@ import {
   LIVE_SNAPSHOT_CHANNEL,
   LIVE_EVENTS_CHANNEL,
   OPEN_SETTINGS_CHANNEL,
+  OPEN_WORKFLOW_CHANNEL,
   SAVE_WORKFLOW_CHANNEL,
   type IpcCapabilities,
   type AnthillApi,
@@ -278,6 +279,26 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
       ? { ok: false as const, cancelled: true as const, candidates }
       : { ok: false as const, cancelled: true as const };
   });
+
+  /*
+    Nothing hands a workflow to the CLI shell.
+
+    The exchange is read by the desktop's main process, and an `anthill://`
+    link is delivered by an operating system to an application it registered —
+    neither reaches a page served over HTTP. The channel is answered all the
+    same, because the renderer is one bundle in two shells and a method only
+    one of them offers is the shape of bug `web-bridge-launch.test.ts` exists
+    for. `undefined` is the honest answer: nothing is waiting, and nothing ever
+    will be here.
+  */
+  register(IpcChannel.workflowPendingOpen, async () => undefined);
+  register(IpcChannel.workflowOpened, async () => undefined);
+  // Desktop owns exchange handover. The web shell must refuse approval rather
+  // than claim a decision it has nowhere to persist.
+  register(IpcChannel.exchangeRead, async () => undefined);
+  register(IpcChannel.exchangeReady, async () => ({ ok: false, error: "Open this handover in Anthill desktop to approve it." }));
+  register(IpcChannel.exchangeRevoke, async () => ({ ok: false, error: "Open this handover in Anthill desktop to withdraw an approval." }));
+  register(IpcChannel.liveWorkflow, async () => ({ ok: false, error: "Bound revisions are available in Anthill desktop." }));
 
   /**
    * The workflow files the CLI can name: the recents (most recent first), then
@@ -713,6 +734,18 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     workspaceStatus: (rootPath: string) =>
       handle(IpcChannel.workspaceStatus, rootPath),
     openWorkflow: (path?: string) => handle(IpcChannel.workflowOpen, path),
+    pendingWorkflowOpen: () => handle(IpcChannel.workflowPendingOpen),
+    workflowOpened: (path, id, outcome) => handle(IpcChannel.workflowOpened, path, id, outcome),
+    exchangeRead: (path, id) => handle(IpcChannel.exchangeRead, path, id),
+    exchangeReady: (request) => handle(IpcChannel.exchangeReady, request),
+    exchangeRevoke: (request) => handle(IpcChannel.exchangeRevoke, request),
+    liveWorkflow: (runId) => handle(IpcChannel.liveWorkflow, runId),
+    // No delivery id: this shell's pushes carry one payload, and nothing here
+    // waits to be told a page opened a document. The desktop's acknowledgement
+    // handshake exists for the exchange, which this shell refuses outright, so
+    // a page that answers without an id is answering about nothing.
+    onOpenWorkflow: (listener: (path: string, deliveryId?: number) => void) =>
+      on(OPEN_WORKFLOW_CHANNEL, (path) => listener(path as string)),
     saveWorkflow: (request: SaveWorkflowRequest) =>
       handle(IpcChannel.workflowSave, request),
     onSaveWorkflow: (listener: () => void) =>

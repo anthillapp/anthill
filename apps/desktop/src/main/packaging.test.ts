@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 
 const manifest = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as {
   version: string;
+  dependencies: Record<string, string>;
   build: {
     files: string[];
     asarUnpack: string[];
@@ -28,6 +29,16 @@ const manifest = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as {
   };
 };
 const main = readFileSync(resolve("src/main/index.ts"), "utf8");
+
+it("registers the workflow protocol without changing entitlements", () => {
+  expect((manifest.build as unknown as { protocols: unknown[] }).protocols).toEqual([
+    { name: "Anthill workflow", schemes: ["anthill"], role: "Viewer" },
+  ]);
+  expect(main).toContain('app.on("open-url"');
+  expect(main).toContain('app.on("second-instance"');
+  expect(main).toContain('linksFromArgv(process.argv)');
+  expect(main).toContain('app.setAsDefaultProtocolClient("anthill", process.execPath, [resolve(process.argv[1])])');
+});
 
 describe("the native binding survives packaging", () => {
   it("ships the Electron-ABI binary", () => {
@@ -49,6 +60,32 @@ describe("the native binding survives packaging", () => {
   /* Kept as a second candidate so an `extraResources` layout still works. */
   it("still tries the extraResources location as well", () => {
     expect(main).toContain('join(process.resourcesPath, "native/better_sqlite3.node")');
+  });
+});
+
+/**
+ * The workspace packages the build bundles, and the ones this app depends on.
+ *
+ * Two lists that have to hold the same names, in two files, maintained by hand.
+ * `anthillPackages` is what `externalizeDepsPlugin` is told to bundle rather
+ * than leave external, because the `@anthill/*` packages are ESM and the main
+ * bundle is CJS. A name missing from it is `require`d at runtime and Electron
+ * 33 on Node 20 dies with ERR_REQUIRE_ESM; a name missing from `dependencies`
+ * is a package electron-builder has no reason to install. Either way the app
+ * starts perfectly in development and fails in the packaged build only — which
+ * is the same shape of bug the rest of this file exists for, so the two lists
+ * are read as data and compared.
+ */
+describe("the workspace packages the main bundle needs", () => {
+  const config = readFileSync(resolve("electron.vite.config.ts"), "utf8");
+  const declared = [...config.matchAll(/"(@anthill\/[a-z-]+)"/g)].map((match) => match[1]);
+  const depended = Object.keys(manifest.dependencies).filter((name) =>
+    name.startsWith("@anthill/"),
+  );
+
+  it("bundles every one of them rather than leaving it to be required", () => {
+    expect(declared.length).toBeGreaterThan(0);
+    expect([...declared].sort()).toEqual([...depended].sort());
   });
 });
 

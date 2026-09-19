@@ -22,8 +22,10 @@ const { version } = createRequire(import.meta.url)("./package.json") as { versio
 const anthillPackages = [
   "@anthill/builder",
   "@anthill/engine",
+  "@anthill/exchange-store",
   "@anthill/live",
   "@anthill/workflow",
+  "@anthill/workflow-exchange",
   "@anthill/run-store",
   "@anthill/runtimes",
   "@anthill/ui",

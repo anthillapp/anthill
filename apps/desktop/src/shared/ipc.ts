@@ -13,6 +13,7 @@
 import type { Workflow, WorkflowRun, NodeRun } from "@anthill/workflow-schema";
 import type { AgentModels, InterpreterId } from "@anthill/workflow";
 import type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun } from "@anthill/live";
+import type { ExchangeSource, ExchangeProblem, HandoverMode, RevisionState } from "@anthill/workflow-exchange";
 
 export type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun };
 
@@ -26,6 +27,12 @@ export const IpcChannel = {
   workspaceSelect: "workspace:select",
   workspaceStatus: "workspace:status",
   workflowOpen: "workflow:open",
+  workflowPendingOpen: "workflow:pending-open",
+  workflowOpened: "workflow:opened",
+  exchangeRead: "exchange:read",
+  exchangeReady: "exchange:ready",
+  exchangeRevoke: "exchange:revoke",
+  liveWorkflow: "live:workflow",
   workflowSave: "workflow:save",
   runtimesDetect: "runtimes:detect",
   runStart: "run:start",
@@ -86,8 +93,13 @@ export const IpcChannel = {
  * channel rejects, a rejection nobody awaited is swallowed, and a feature just
  * quietly showed nothing. Bump this whenever a channel is added, and the
  * renderer can find out before it subscribes to something that will never fire.
+ *
+ * A channel whose shape or meaning changes counts as much as a new one. The
+ * hazard is the same — a renderer talking to a main process that answers a
+ * different question — and it is harder to see, because both sides still have
+ * the channel and nothing rejects.
  */
-export const IPC_CONTRACT = 15;
+export const IPC_CONTRACT = 19;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -150,6 +162,23 @@ export const OPEN_SETTINGS_CHANNEL = "app:open-settings";
  * which also settles ⌘S never reaching the browser's own Save Page (ANT-59).
  */
 export const SAVE_WORKFLOW_CHANNEL = "app:save-workflow";
+
+/**
+ * A workflow a harness handed over, ready for the page to show.
+ *
+ * Nobody in the renderer asked for this one: it arrives because a coding tool
+ * put a workflow in the exchange, or because the user followed an `anthill://`
+ * link. The payload is the path of the working copy, so the page opens it
+ * through the ordinary Open route and nothing about loading a document has to
+ * know where it came from.
+ *
+ * A push alone would not do, because a page that has not mounted yet cannot be
+ * sent anything and a link is at its most likely on a cold start. So main holds
+ * what it could not deliver and the page collects it with
+ * `IpcChannel.workflowPendingOpen` when it is ready; this channel carries
+ * everything that arrives afterwards, while the page is up and listening.
+ */
+export const OPEN_WORKFLOW_CHANNEL = "app:open-workflow";
 
 /* ------------------------------------------------------------------ */
 /* Payload shapes                                                      */
@@ -270,6 +299,69 @@ export type SaveWorkflowRequest = {
    */
   path?: string;
 };
+
+export type ExchangeView = {
+  workflowId: string;
+  source: ExchangeSource;
+  mode: HandoverMode;
+  /** What is true of the head revision — the one the editor has open. */
+  state: RevisionState;
+  revision: number;
+  digest: string;
+  /**
+   * The revision an approval still stands on, when one does.
+   *
+   * Reported separately from `state`, and not only when the two agree. Under
+   * an approval gate, approving revision 1 and then editing leaves the head at
+   * revision 2 with nothing approving it — which `state` correctly calls a
+   * draft — while the approval of revision 1 is untouched and is still what a
+   * new run would be given. Saying only "draft" told the user nothing was
+   * authorised while something was.
+   */
+  approved?: {
+    revision: number;
+    at?: string;
+    /**
+     * Whether taking it back would change what an agent may be given.
+     *
+     * Only an approval gate turns an approval into permission, so only there
+     * does withdrawing one mean anything: under show-and-go the head revision
+     * is eligible however this reads, and a control offered there would
+     * promise an effect it does not have. Decided here rather than in the
+     * page, because the store is where the rule lives and a page that
+     * re-derived it would eventually derive it differently.
+     */
+    withdrawable: boolean;
+    /**
+     * The revision an approval would fall back to if this one were withdrawn.
+     *
+     * Absent when withdrawing this one leaves nothing approved, which is the
+     * case the page used to describe as if it were the only one. Approving
+     * twice with an edit between them leaves two approvals standing, and the
+     * older one becomes what an agent may take the moment the newer is taken
+     * back. Carried here rather than worked out in the page, because the store
+     * is what will act on it.
+     */
+    below?: number;
+  };
+  problems: ExchangeProblem[];
+  bindings: { runId: string; revision: number }[];
+};
+export type ExchangeReadyRequest = { path: string; workflowId: string; revision: number; digest: string };
+/**
+ * Taking an approval back, named by the revision it stands on.
+ *
+ * No digest, unlike approving: the revision being withdrawn is usually not the
+ * one the editor has open — that is the whole situation this answers — so
+ * there is no head content to check the request against. What is checked is
+ * that the revision named is the approval the page was showing when the user
+ * decided, so a stale panel cannot withdraw one they never saw.
+ */
+export type ExchangeRevokeRequest = { path: string; workflowId: string; revision: number };
+export type ExchangeReadyResult = { ok: true } | { ok: false; error: string };
+export type BoundWorkflowResult =
+  | { ok: true; workflow: Workflow; revision: number; digest: string }
+  | { ok: false; error: string };
 
 /**
  * How a save ended, in the three ways an author can be told apart.
@@ -665,6 +757,28 @@ export interface AnthillApi {
   workspaceStatus(rootPath: string): Promise<WorkspaceStatus>;
   /** With a path, opens that workflow; without one, asks the author to pick. */
   openWorkflow(path?: string): Promise<OpenWorkflowResult>;
+  /**
+   * The workflow Anthill was asked to show before this page could show one.
+   *
+   * Also announces that the page is listening. Current desktop builds retain
+   * requests in their source queues and push them with delivery IDs after this
+   * handshake; an older host may instead return a pending path once.
+   */
+  pendingWorkflowOpen(): Promise<string | undefined>;
+  workflowOpened(path: string, deliveryId?: number, outcome?: "shown" | "declined" | "confirming" | "opening"): Promise<void>;
+  exchangeRead(path: string, workflowId: string): Promise<ExchangeView | undefined>;
+  exchangeReady(request: ExchangeReadyRequest): Promise<ExchangeReadyResult>;
+  exchangeRevoke(request: ExchangeRevokeRequest): Promise<ExchangeReadyResult>;
+  liveWorkflow(runId: string): Promise<BoundWorkflowResult>;
+  /**
+   * A workflow a harness handed over while the page was up. Returns the
+   * unsubscribe.
+   *
+   * The path of a working copy, to be opened through `openWorkflow`. Whether
+   * the user wants this interruption is checked by the renderer immediately
+   * before navigation, not against a stale document in main.
+   */
+  onOpenWorkflow(listener: (path: string, deliveryId?: number) => void): () => void;
   saveWorkflow(request: SaveWorkflowRequest): Promise<SaveWorkflowResult>;
   /** File ▸ Save, or ⌘S. Returns the unsubscribe. */
   onSaveWorkflow(listener: () => void): () => void;

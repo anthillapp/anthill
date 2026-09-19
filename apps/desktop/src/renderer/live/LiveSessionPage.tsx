@@ -34,6 +34,7 @@ import {
 import { agentProfiles } from "@anthill/workflow";
 
 import { LIVE_SESSION_CHANNELS } from "../../shared/ipc.js";
+import type { BoundWorkflowResult } from "../../shared/ipc.js";
 import { useIpcHealth } from "../ipc-health.js";
 import { relative, spanned, useNow } from "./elapsed.js";
 import {
@@ -88,7 +89,38 @@ function clock(at: string): string {
   return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-export function LiveSessionPage({
+export function LiveSessionPage(props: LiveSessionPageProps) {
+  const [snapshot, setSnapshot] = useState<{ runId: string; result: BoundWorkflowResult }>();
+  const [retry, setRetry] = useState(0);
+  const { run } = props;
+  useEffect(() => {
+    if (!run.exchange) return;
+    let current = true;
+    setSnapshot(undefined);
+    const read = async () => {
+      try {
+        const result = await window.anthill.liveWorkflow(run.anthillRunId);
+        if (current) setSnapshot({ runId: run.anthillRunId, result });
+      } catch (error) {
+        if (current) setSnapshot({ runId: run.anthillRunId, result: { ok: false, error: String(error) } });
+      }
+    };
+    void read();
+    return () => { current = false; };
+  }, [run.anthillRunId, run.exchange?.revision, retry]);
+  if (!run.exchange) return <LiveSessionContent {...props} />;
+  const result = snapshot?.runId === run.anthillRunId ? snapshot.result : undefined;
+  if (!result?.ok) return (
+    <div className="app live-page">
+      <header className="topbar"><button onClick={props.onBack}>Back to workflow</button><span>Live session</span></header>
+      <p role={result ? "alert" : "status"}>{result ? result.error : "Reading the bound workflow revision..."}</p>
+      {result ? <button onClick={() => setRetry((value) => value + 1)}>Retry reading revision</button> : null}
+    </div>
+  );
+  return <LiveSessionContent {...props} workflow={result.workflow} />;
+}
+
+function LiveSessionContent({
   workflow,
   run,
   onBack,
@@ -417,6 +449,7 @@ export function LiveSessionPage({
           <dl className="live-rail-facts">
             <dt>Workflow</dt>
             <dd>{run.workflowName ?? workflow.name}</dd>
+            {run.exchange ? <><dt>Bound revision</dt><dd>{run.exchange.revision}</dd></> : null}
             <dt>Anthill run</dt>
             <dd>
               <code>{run.anthillRunId}</code>

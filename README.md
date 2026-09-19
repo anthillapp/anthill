@@ -341,20 +341,23 @@ both copies — untried here rather than known to work.
 
 ```text
 apps/
-  desktop/          Electron app: the launcher, canvas, handover and Live Session
+  desktop/           Electron app: the launcher, canvas, handover and Live Session
+  mcp/               the local stdio MCP server a coding harness hands a workflow over through
 
 packages/
-  workflow-schema/  the graph model and its validation
-  workflow/         actions, agents, harness profiles, validation, prompt and file compilation
-  builder/          canvas, palette, document operations
-  live/             run markers, pending-run state, bootstrap prompts, observation events
-  ui/               shared UI primitives
+  workflow-schema/   the graph model and its validation
+  workflow/          actions, agents, harness profiles, validation, prompt and file compilation
+  workflow-exchange/ the contract a coding harness hands a workflow over on
+  exchange-store/    handed-over workflows on disk: identity, revisions, readiness, bindings
+  builder/           canvas, palette, document operations
+  live/              run markers, pending-run state, bootstrap prompts, observation events
+  ui/                shared UI primitives
 
   # Future Runner / Orchestrator — not part of the product today
-  engine/           workflow execution
-  runtimes/         Codex CLI and Claude Code adapters
-  workspace/        repository and isolation management
-  run-store/        run persistence
+  engine/            workflow execution
+  runtimes/          Codex CLI and Claude Code adapters
+  workspace/         repository and isolation management
+  run-store/         run persistence
 ```
 
 ## Documentation and issues

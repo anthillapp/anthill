@@ -17,7 +17,7 @@ import {
   type WorkflowNode,
 } from "@anthill/workflow-schema";
 
-import { agentProfiles, agentSlug, assignedAgents } from "./agents.js";
+import { agentProfiles, agentSlug, assignedAgents, duplicateAgentProfileIds } from "./agents.js";
 import { configuredHarnesses, isConfiguredFor } from "./agent-models.js";
 import { DEFAULT_TARGET, harnessProfile } from "./harness.js";
 import {
@@ -55,6 +55,9 @@ export const WORKFLOWNER_VALIDATION_CODES = {
   UNSUPPORTED_BLOCK_TYPE: "UNSUPPORTED_BLOCK_TYPE",
   UNREACHABLE_BLOCK: "UNREACHABLE_BLOCK",
   DEAD_END_BLOCK: "DEAD_END_BLOCK",
+  DUPLICATE_BLOCK_ID: "DUPLICATE_BLOCK_ID",
+  DUPLICATE_EDGE_ID: "DUPLICATE_EDGE_ID",
+  DUPLICATE_AGENT_ID: "DUPLICATE_AGENT_ID",
 
   // Steps
   STEP_MISSING_ACTION: "STEP_MISSING_ACTION",
@@ -118,8 +121,8 @@ function reachableFrom(workflow: Workflow, startId: string): Set<string> {
 
   const seen = new Set<string>();
   const queue = [startId];
-  while (queue.length > 0) {
-    const current = queue.shift() as string;
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index];
     if (seen.has(current)) continue;
     seen.add(current);
     for (const next of outgoing.get(current) ?? []) queue.push(next);
@@ -128,7 +131,7 @@ function reachableFrom(workflow: Workflow, startId: string): Set<string> {
 }
 
 /**
- * Groups of blocks that loop among themselves, in diagram order.
+ * Groups of blocks that loop among themselves, each in the order it runs.
  *
  * Each group is a set of blocks mutually reachable from one another — a
  * developer/reviewer feedback loop comes back as one group of two. Reported as
@@ -136,33 +139,93 @@ function reachableFrom(workflow: Workflow, startId: string): Set<string> {
  * each loop once instead of repeating itself per block.
  */
 export function findCycles(workflow: Workflow): string[][] {
-  const byId = new Map(workflow.nodes.map((node) => [node.id, node]));
-  const groups: string[][] = [];
-  const assigned = new Set<string>();
+  const ids = [...new Set(workflow.nodes.map((node) => node.id))];
+  const forward = new Map(ids.map((id) => [id, [] as string[]]));
+  const reverse = new Map(ids.map((id) => [id, [] as string[]]));
+  const selfLoops = new Set<string>();
+  for (const edge of workflow.edges) {
+    if (!forward.has(edge.source) || !forward.has(edge.target)) continue;
+    forward.get(edge.source)!.push(edge.target);
+    reverse.get(edge.target)!.push(edge.source);
+    if (edge.source === edge.target) selfLoops.add(edge.source);
+  }
 
-  for (const node of workflow.nodes) {
-    if (assigned.has(node.id)) continue;
-
-    // Mutual reachability: everything reachable from here that can also get
-    // back here forms one loop with it.
-    const forward = reachableFrom(workflow, node.id);
-    forward.delete(node.id);
-
-    const group = [node.id];
-    for (const candidate of forward) {
-      if (!byId.has(candidate)) continue;
-      if (reachableFrom(workflow, candidate).has(node.id)) group.push(candidate);
-    }
-
-    const selfLoop = workflow.edges.some(
-      (edge) => edge.source === node.id && edge.target === node.id,
-    );
-    if (group.length > 1 || selfLoop) {
-      for (const id of group) assigned.add(id);
-      groups.push(group);
+  // Iterative Kosaraju: bounded stack usage and one visit per node/edge.
+  const seen = new Set<string>();
+  const finished: string[] = [];
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const stack = [{ id, next: 0 }];
+    while (stack.length) {
+      const top = stack[stack.length - 1];
+      const edges = forward.get(top.id)!;
+      if (top.next === edges.length) {
+        finished.push(top.id);
+        stack.pop();
+      } else {
+        const next = edges[top.next++];
+        if (!seen.has(next)) {
+          seen.add(next);
+          stack.push({ id: next, next: 0 });
+        }
+      }
     }
   }
-  return groups;
+  const component = new Map<string, number>();
+  let count = 0;
+  for (const id of finished.reverse()) {
+    if (component.has(id)) continue;
+    component.set(id, count);
+    const stack = [id];
+    while (stack.length) {
+      for (const next of reverse.get(stack.pop()!)!) {
+        if (!component.has(next)) {
+          component.set(next, count);
+          stack.push(next);
+        }
+      }
+    }
+    count += 1;
+  }
+  const groups = new Map<number, string[]>();
+  for (const id of ids) {
+    const group = component.get(id)!;
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group)!.push(id);
+  }
+  return [...groups.values()]
+    .filter((group) => group.length > 1 || selfLoops.has(group[0]))
+    .map((group) => aroundTheLoop(group, forward));
+}
+
+/**
+ * One loop's blocks, in the order the work goes round them.
+ *
+ * Kosaraju hands back a component as a set, and the blocks in it are listed
+ * here in the order they were drawn. That is not the order they run in, and
+ * the difference is visible: the compiled prompt names a loop by joining its
+ * members — `### Implement ⇄ Review ⇄ Verify` — so a user whose three blocks
+ * were not drawn in the order they happen read a heading describing a loop
+ * that does not exist.
+ *
+ * Breadth-first from the member drawn first, following only the edges that
+ * stay inside the loop. Every block in a strongly connected component is
+ * reachable from every other, so this reaches all of them, and it reaches them
+ * the way the work does.
+ */
+function aroundTheLoop(group: readonly string[], forward: Map<string, string[]>): string[] {
+  const inside = new Set(group);
+  const order = [group[0]];
+  const seen = new Set(order);
+  for (let index = 0; index < order.length; index += 1) {
+    for (const next of forward.get(order[index]) ?? []) {
+      if (!inside.has(next) || seen.has(next)) continue;
+      seen.add(next);
+      order.push(next);
+    }
+  }
+  return order;
 }
 
 /** Node ids that sit on at least one cycle. */
@@ -205,6 +268,19 @@ export function validateWorkflow(workflow: Workflow): ValidationResult {
 
   const profiles = agentProfiles(workflow);
   const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
+  for (const [items, code, label] of [
+    [workflow.nodes, WORKFLOWNER_VALIDATION_CODES.DUPLICATE_BLOCK_ID, "Block"],
+    [workflow.edges, WORKFLOWNER_VALIDATION_CODES.DUPLICATE_EDGE_ID, "Connection"],
+  ] as const) {
+    const seen = new Set<string>();
+    for (const item of items) {
+      if (seen.has(item.id)) push(code, `${label} id ${item.id} is used more than once.`);
+      seen.add(item.id);
+    }
+  }
+  for (const id of duplicateAgentProfileIds(workflow)) {
+    push(WORKFLOWNER_VALIDATION_CODES.DUPLICATE_AGENT_ID, `Agent id ${id} is used more than once.`);
+  }
 
   // Slugs of every agent, for checking what branch conditions read from. Taken
   // from the library rather than from what is assigned, so a condition written

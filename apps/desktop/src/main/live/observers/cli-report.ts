@@ -36,9 +36,9 @@ import { newCursor, readNewLines, type TailCursor } from "./tail.js";
 /**
  * The report file, in the CLI's default data directory.
  *
- * The desktop shell has no `--data-dir` of its own: it reads the default
- * location, where a CLI started without one writes. A `stat` per poll on a
- * possibly-missing file is the price of that, and it is intentional.
+ * This channel stays at the CLI's default location even when Desktop uses an
+ * isolated --data-dir: report commands from a harness use the CLI default too.
+ * A custom CLI data directory must be paired with an explicit observer path.
  */
 export const REPORT_LOG = join(homedir(), ".anthill", "cli", "harness-reports.jsonl");
 

@@ -56,6 +56,8 @@ export type PendingRun = {
    * treat an unknown id as unknown rather than guess.
    */
   steps?: RunStep[];
+  /** Pinned handover identity. A binding is not evidence of live activity. */
+  exchange?: { revision: number; digest: string; sessionId?: string };
   promptVersion: string;
   selectedCli: MarkerCli;
   createdAt: string;
@@ -257,6 +259,7 @@ function windowFrom(run: PendingRun, at: string): string {
  * state the run is in.
  */
 export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
+  if (run.exchange?.sessionId && "sessionId" in evidence && evidence.sessionId !== run.exchange.sessionId) return run;
   // A recorded failure is the tool's own word and stands. "Completed" is
   // Anthill's inference from a quiet turn, and a session that writes again has
   // just disproved it — so activity, and only activity, can take it back.
@@ -383,6 +386,7 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
       const viaReport = evidence.channel === "anthill:report";
       return {
         ...run,
+        ...(viaReport ? { evidenceChannel: run.evidenceChannel ?? evidence.channel, confidence: run.confidence ?? "strong" as const } : {}),
         state: "detected_live",
         expiresAt: windowFrom(run, evidence.at),
         lastObservedAt: evidence.at,
@@ -455,6 +459,13 @@ export function expireIfStale(run: PendingRun, now: string): PendingRun {
   // A session that finished stays finished when its window runs out; only one
   // that was still being followed becomes "lost".
   if (run.state === "completed") return { ...run, closedAt: now };
+
+  if (run.exchange && run.state === "pending_after_copy") {
+    return {
+      ...run, state: "observation_lost", closedAt: now,
+      statusMessage: "No progress evidence arrived for the bound revision. The external session may still be running; Anthill can look again.",
+    };
+  }
 
   if (run.state === "detected_live" || run.state === "observation_lost") {
     return {
@@ -635,7 +646,7 @@ export const CLI_LABEL: Record<MarkerCli, string> = {
 export function statusLabel(run: PendingRun): string {
   switch (run.state) {
     case "pending_after_copy":
-      return "Waiting for a session";
+      return run.exchange ? "Waiting for external progress" : "Waiting for a session";
     case "detected_live":
       return "Live session";
     case "completed":

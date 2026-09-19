@@ -7,7 +7,7 @@
  * is precisely when a copied prompt registers its run.
  */
 
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -129,6 +129,27 @@ describe("loading what was left behind", () => {
  * the file is only ever a complete snapshot, never a truncated one.
  */
 describe("writes racing each other", () => {
+  it("refuses an undurable registration, rolls it back, and allows a later retry", async () => {
+    const { path, store } = await storeAt();
+    await store.load(NOW);
+    await rm(path);
+    await mkdir(path);
+    await expect(store.put(run("ANT-NEW"), true)).rejects.toThrow();
+    expect(store.find("ANT-NEW")).toBeUndefined();
+    expect((await readdir(join(path, ".."))).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    await rm(path, { recursive: true });
+    await store.put(run("ANT-NEW"), true);
+    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject([{ anthillRunId: "ANT-NEW" }]);
+  });
+
+  it("waits for a durable write when registration overlaps initial loading", async () => {
+    const { path, store } = await storeAt([run("ANT-DISK")]);
+    const loading = store.load(NOW);
+    await store.put(run("ANT-NEW"), true);
+    expect(JSON.parse(await readFile(path, "utf8"))).toHaveLength(2);
+    await loading;
+  });
+
   it("lets the last state win however the writes interleave", async () => {
     const { path, store } = await storeAt();
     await store.load(NOW);

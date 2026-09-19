@@ -17,11 +17,13 @@
   "dependencies": {
     "@anthill/builder": "*",
     "@anthill/engine": "*",
+    "@anthill/exchange-store": "*",
     "@anthill/live": "*",
     "@anthill/run-store": "*",
     "@anthill/runtimes": "*",
     "@anthill/ui": "*",
     "@anthill/workflow": "*",
+    "@anthill/workflow-exchange": "*",
     "@anthill/workflow-schema": "*",
     "@anthill/workspace": "*",
     "better-sqlite3": "^11.5.0"
@@ -45,6 +47,7 @@
   "build": {
     "appId": "com.anthill.desktop",
     "productName": "Anthill",
+    "protocols": [{ "name": "Anthill workflow", "schemes": ["anthill"], "role": "Viewer" }],
     "directories": {
       "buildResources": "build",
       "output": "release"

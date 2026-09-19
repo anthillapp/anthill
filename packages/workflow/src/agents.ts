@@ -114,7 +114,23 @@ function readProfile(value: unknown): AgentProfile | undefined {
   };
 }
 
-/** Every profile in a workflow, in the order they were added. */
+/** Inspect stored identities before the rendering reader deduplicates them. */
+export function duplicateAgentProfileIds(workflow: Workflow): string[] {
+  const bag = workflow.metadata?.[NAMESPACE];
+  const raw = isRecord(bag) ? bag[KEY] : undefined;
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const item of raw) {
+    const id = isRecord(item) ? readString(item.id) : undefined;
+    if (!id) continue;
+    if (seen.has(id)) duplicates.add(id);
+    seen.add(id);
+  }
+  return [...duplicates];
+}
+
+/** Every usable profile, with duplicate IDs collapsed for rendering. */
 export function agentProfiles(workflow: Workflow): AgentProfile[] {
   const metadata = workflow.metadata;
   if (!isRecord(metadata)) return [];

@@ -10,7 +10,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
 import { dirname, join, resolve, sep } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 
 import {
   captureGitStatus,
@@ -19,6 +19,8 @@ import {
 } from "@anthill/workspace";
 import { parseWorkflow } from "@anthill/workflow-schema";
 import { checkWorkflowCompatibility, migrateWorkflow } from "@anthill/workflow";
+import { ExchangeStore } from "@anthill/exchange-store";
+import { MARKER_VERSION, workflowSteps } from "@anthill/live";
 import type { Workflow } from "@anthill/workflow-schema";
 
 import type { GlobalAgentInput } from "../shared/ipc.js";
@@ -28,6 +30,7 @@ import {
   LIVE_EVENTS_CHANNEL,
   LIVE_SNAPSHOT_CHANNEL,
   OPEN_SETTINGS_CHANNEL,
+  OPEN_WORKFLOW_CHANNEL,
   SAVE_WORKFLOW_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
   RUN_EVENT_CHANNEL,
@@ -64,7 +67,12 @@ import {
   saveDestination,
   type SavedRecord,
 } from "./save-destination.js";
-import { desktopUserDataPath } from "./user-data.js";
+import { dataDirectoryRefusal, desktopUserDataPath, desktopDataDirectory } from "./user-data.js";
+import { ExchangeInbox, type OpenOutcome, type OpenPermission } from "./exchange/inbox.js";
+import { writeWorkingCopy } from "./exchange/working-copy.js";
+import { exchangeDestination, saveExchangeCopy, readExchangeView, readyExchangeRevision, revokeExchangeRevision, boundWorkflow } from "./exchange/documents.js";
+import { workflowIdFromLink, linksFromArgv, SerialDrain, WindowOperations, WorkflowDelivery } from "./exchange/deep-link.js";
+import { REPORT_LOG } from "./live/observers/cli-report.js";
 import { LiveSessionService, type LiveSessionSnapshot } from "./live/service.js";
 import { ObservationSetupService } from "./live/setup.js";
 import { AgentLibraryStore } from "./agent-library.js";
@@ -78,6 +86,21 @@ import {
   rememberRecent,
   setRecentsPaths,
 } from "./recents.js";
+
+// Startup failures in the main process are otherwise invisible — the app just
+// sits there with no window and no message. Surface them loudly.
+//
+// Installed above everything, including the choice of data directory below,
+// because that choice is itself the earliest thing that can refuse to happen:
+// a `--data-dir` this build will not accept, or one the filesystem will not
+// create, threw out of module evaluation with these handlers six lines beneath
+// it and no window anywhere, and the app died without printing a word.
+process.on("uncaughtException", (error) => {
+  console.error("[anthill] uncaught exception:", error);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[anthill] unhandled rejection:", reason);
+});
 
 /**
  * The name the operating system shows: the dock, the menu bar, the About item.
@@ -104,21 +127,47 @@ import {
  * builds use desktop-dev so QA cannot share stores or the instance lock with
  * the installed app. Select this before taking the lock or creating stores.
  */
-const USER_DATA_DIR = desktopUserDataPath(app.getPath("appData"), app.isPackaged);
+const USER_DATA_DIR = chooseDataDirectory();
 app.setName("Anthill");
 app.setPath("userData", USER_DATA_DIR);
 
-// Startup failures in the main process are otherwise invisible — the app just
-// sits there with no window and no message. Surface them loudly.
-process.on("uncaughtException", (error) => {
-  console.error("[anthill] uncaught exception:", error);
-});
-process.on("unhandledRejection", (reason) => {
-  console.error("[anthill] unhandled rejection:", reason);
-});
+/**
+ * The data directory, or a box saying why there is not going to be one.
+ *
+ * `dialog.showErrorBox` is the one dialog Electron allows before `ready`,
+ * which is exactly where this is — long before a window exists and before any
+ * store has been opened. Nothing else in the app could carry this message: a
+ * refusal here means there is nowhere to write, so there will be no window and
+ * no page to put a notice in.
+ */
+function chooseDataDirectory(): string {
+  const fallback = desktopUserDataPath(app.getPath("appData"), app.isPackaged);
+  try {
+    const directory = desktopDataDirectory(process.argv, fallback);
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    return directory;
+  } catch (error) {
+    dialog.showErrorBox("Anthill cannot start", dataDirectoryRefusal(error, fallback));
+    app.exit(1);
+    // `app.exit` ends the process, which the type checker has no way to know.
+    throw error;
+  }
+}
 
 let mainWindow: BrowserWindow | null = null;
 let services: RunServices | null = null;
+
+/**
+ * Whether the page has asked for its pending workflow yet.
+ *
+ * Until then requests stay in their source queue (inbox or pendingLinks),
+ * rather than competing for a single pending path that could overwrite one.
+ */
+let rendererListening = false;
+const windowOperations = new WindowOperations();
+const workflowDelivery = new WorkflowDelivery();
+const pendingLinks = new Set<string>();
+let closePending = false;
 
 /**
  * Whether the open workflow has unsaved edits, as last reported over IPC.
@@ -149,6 +198,34 @@ async function isWorkflowDirty(window: BrowserWindow): Promise<boolean> {
 }
 /** Set once the user has confirmed discarding, so the retried close goes through. */
 let allowCloseWithUnsavedWorkflow = false;
+
+/**
+ * Ask before something throws the open workflow's unsaved edits away.
+ *
+ * Three things in this process can: closing the window, restarting, and opening
+ * another workflow over the top of this one. They ask the same question in the
+ * same words, and each says in its own what is about to be lost — a restart
+ * offered as a fix that silently discarded somebody's work would be a worse
+ * fault than whatever they were restarting to cure.
+ *
+ * `true` means go ahead, including when there was nothing to lose.
+ */
+async function mayDiscardWorkflow(
+  window: BrowserWindow,
+  button: string,
+  detail: string,
+): Promise<boolean> {
+  if (!(await isWorkflowDirty(window))) return true;
+  const { response } = await dialog.showMessageBox(window, {
+    type: "warning",
+    buttons: ["Cancel", button],
+    defaultId: 0,
+    cancelId: 0,
+    message: "This workflow has unsaved changes.",
+    detail,
+  });
+  return response === 1;
+}
 
 /**
  * Locate the Electron-ABI build of better-sqlite3.
@@ -214,6 +291,8 @@ const userPath = adoptUserPath().catch(() => false);
  */
 let live: LiveSessionService | undefined;
 let liveSetup: ObservationSetupService | undefined;
+let exchangeStore: ExchangeStore | undefined;
+let inbox: ExchangeInbox | undefined;
 let agents: AgentLibraryStore | undefined;
 let assistantThreads: AssistantThreadStore | undefined;
 let settingsStore: SettingsStore | undefined;
@@ -279,6 +358,20 @@ function agentLibrary(): AgentLibraryStore {
   return agents;
 }
 
+/**
+ * Where workflows handed over by a coding harness are kept.
+ *
+ * The MCP server writes into the same tree from a separate process, which is
+ * why nothing in it is ever rewritten and why this side needs no lock to read
+ * it. The directory is asked for at call time like every other store's, because
+ * `userData` is pinned during module evaluation and re-deriving it anywhere
+ * else is how a rename once moved every store out from under the app (ANT-13).
+ */
+function exchange(): ExchangeStore {
+  exchangeStore ??= new ExchangeStore(app.getPath("userData"));
+  return exchangeStore;
+}
+
 function liveService(): LiveSessionService {
   live ??= new LiveSessionService(
     new PendingRunStore(join(app.getPath("userData"), "live-sessions.json")),
@@ -288,7 +381,7 @@ function liveService(): LiveSessionService {
       }
     },
     () => new Date().toISOString(),
-    { journalDir: join(app.getPath("userData"), "live-observations") },
+    { journalDir: join(app.getPath("userData"), "live-observations"), reportLogPath: REPORT_LOG },
     (runId, events) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send(LIVE_EVENTS_CHANNEL, { runId, events });
@@ -360,6 +453,9 @@ function applyAppIcon(): void {
 }
 
 function createWindow(): void {
+  allowCloseWithUnsavedWorkflow = false;
+  workflowDirty = false;
+  closePending = false;
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -429,33 +525,270 @@ function createWindow(): void {
     if (!window) return;
 
     event.preventDefault();
-
-    void (async () => {
-      if (!(await isWorkflowDirty(window))) {
-        allowCloseWithUnsavedWorkflow = true;
-        window.close();
-        return;
-      }
-
-      const { response } = await dialog.showMessageBox(window, {
-        type: "warning",
-        buttons: ["Cancel", "Discard changes"],
-        defaultId: 0,
-        cancelId: 0,
-        message: "This workflow has unsaved changes.",
-        detail: "Closing now discards everything since the last save.",
-      });
-      if (response !== 1) return;
+    if (closePending) return;
+    closePending = true;
+    void windowOperations.run(async () => {
+      if (window.isDestroyed()) return;
+      const mayClose = await mayDiscardWorkflow(
+        window,
+        "Discard changes",
+        "Closing now discards everything since the last save.",
+      );
+      if (!mayClose) return;
 
       allowCloseWithUnsavedWorkflow = true;
       workflowDirty = false;
       window.close();
-    })();
+    }).finally(() => {
+      closePending = false;
+      // A link queued behind a cancelled close still needs delivery.
+      void drainLinks();
+    });
+  });
+
+  // Every load starts a page that has not asked for its pending workflow yet,
+  // so anything handed over before it does has to wait in main rather than be
+  // sent to nobody. A reload counts: the page that was listening is gone.
+  mainWindow.webContents.on("did-start-loading", () => {
+    rendererListening = false;
+    workflowDelivery.reset();
   });
 
   mainWindow.on("closed", () => {
     mainWindow = null;
+    rendererListening = false;
+    workflowDelivery.reset();
   });
+}
+
+/**
+ * Open one workflow file, whoever asked for it.
+ *
+ * At module scope rather than inside `registerIpcHandlers`, because IPC is no
+ * longer the only way a workflow gets opened: a harness can hand one over
+ * through the exchange inbox, and an `anthill://` link can name one. All three
+ * go through here, so a handed-over workflow is migrated, compatibility-checked
+ * and reported on in exactly the words the Open command uses.
+ *
+ * It remembers the file in the recent list even when nobody clicked anything,
+ * and that is deliberate. The recent list is how a person finds a workflow
+ * again after closing it, and a workflow that arrived while they were looking
+ * elsewhere is the one they are most likely to go hunting for. Nothing depends
+ * on it — a link resolves through the store, which knows every handover rather
+ * than the last twelve files — so this is a convenience, not a route.
+ */
+async function openWorkflowAt(path: string): Promise<OpenWorkflowResult> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+
+    // Compatibility is checked before schema parsing on purpose. A workflow from
+    // a newer build may not satisfy this build's schema at all, and
+    // "Invalid workflow: nodes.0.type ..." would hide the real reason.
+    const original = checkWorkflowCompatibility(parsed);
+    if (!original.ok && original.reason === "too-new") {
+      return { ok: false, error: original.message };
+    }
+
+    // Upgrade what this build knows how to upgrade, so an older workflow opens
+    // as a current one rather than opening with a warning the author has to
+    // work through by hand. The file on disk is untouched until they save.
+    const migration = migrateWorkflow(parsed);
+
+    // Compatibility is re-checked on the upgraded workflow: a workflow the migration
+    // brought current is current, and telling the author to go and fix it by
+    // hand as well would contradict the note saying it was upgraded.
+    const compatibility = checkWorkflowCompatibility(migration.workflow);
+    const notice = [
+      ...migration.notes,
+      ...(compatibility.ok ? [] : [compatibility.message]),
+    ];
+
+    const workflow = parseWorkflow(migration.workflow);
+    await rememberRecent(path);
+    return {
+      ok: true,
+      opened: {
+        path,
+        workflow,
+        notice: notice.length > 0 ? notice.join(" ") : undefined,
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Workflows handed over from outside                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The window a handed-over workflow goes to, opening one if there is none.
+ *
+ * macOS keeps the app running after the last window closes, and a workflow
+ * handed over then has nowhere to appear. Opening a window is the one thing in
+ * this whole feature that Anthill does rather than observes, and it is what the
+ * person asked their coding tool for — every other arrow points inward.
+ *
+ * `opened` says the window is new, which is how the caller knows there is
+ * nothing in it to ask about.
+ */
+function workflowWindow(): { window: BrowserWindow; opened: boolean } | undefined {
+  if (mainWindow && !mainWindow.isDestroyed()) return { window: mainWindow, opened: false };
+  // Before `whenReady` a BrowserWindow cannot be constructed at all, and the
+  // caller's answer is "not yet" rather than "never".
+  if (!app.isReady()) return undefined;
+  createWindow();
+  return mainWindow ? { window: mainWindow, opened: true } : undefined;
+}
+
+/** Whether a workflow nobody asked for may take the screen. */
+async function mayShowWorkflow(): Promise<OpenPermission> {
+  const target = workflowWindow();
+  if (!target) return "no_window";
+  if (!rendererListening || closePending) return "no_window";
+  // The renderer asks at navigation commit, after all asynchronous preparation.
+  // Consent here could refer to a document that is no longer on screen then.
+  return "yes";
+}
+
+/**
+ * Hand a request to the current page. If it went away during preparation,
+ * leave the request in its source queue for the next ready page.
+ */
+function handOverToRenderer(path: string, deliveryId: number): boolean {
+  if (rendererListening && !closePending && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(OPEN_WORKFLOW_CHANNEL, path, deliveryId);
+    return true;
+  }
+  return false;
+}
+
+/** Open a workflow the user did not pick, and put it on screen. */
+async function showWorkflow(path: string): Promise<OpenOutcome> {
+  const result = await openWorkflowAt(path);
+  if (!result.ok) {
+    return { kind: "refused", error: "error" in result ? result.error : "It could not be opened." };
+  }
+  const delivery = await workflowDelivery.deliver(path, (id) => handOverToRenderer(path, id));
+  if (delivery === "declined") return { kind: "declined" };
+  if (delivery === "shown") {
+    mainWindow?.show();
+    mainWindow?.focus();
+    return { kind: "shown" };
+  }
+  return delivery === "parked"
+    ? { kind: "parked" }
+    : { kind: "unconfirmed", error: "The page did not confirm opening the workflow. The handover remains pending; reopen it from its link." };
+}
+
+function receiveLink(url: string): void {
+  if (!workflowIdFromLink(url)) {
+    void refuseHandover("This is not a supported anthill://workflow/<id> link. Nothing was opened.");
+    return;
+  }
+  pendingLinks.add(url);
+  if (app.isReady()) {
+    workflowWindow();
+    void drainLinks();
+  }
+}
+
+const linkDrain = new SerialDrain(() => drainOnce());
+
+/**
+ * Deliver every link that is waiting, one at a time and once each.
+ *
+ * Three things call this — a link arriving, a close the user cancelled, and
+ * the page asking for its pending workflow — and a pass stops in the middle
+ * for a dialog, so two of them used to walk the same set at once.
+ */
+function drainLinks(): Promise<void> {
+  return linkDrain.run();
+}
+
+async function drainOnce(): Promise<void> {
+  if (!rendererListening) return;
+  for (const url of [...pendingLinks]) {
+    pendingLinks.delete(url);
+    // Coordinate window availability and preparation with closing, but never
+    // hold the close queue while the renderer asks for consent or opens a file.
+    const prepared = await windowOperations
+      .run(async (): Promise<string | undefined> => {
+        const id = workflowIdFromLink(url)!;
+        const stored = await exchange().readWorkflow(id);
+        if (!stored?.head || stored.problems.length) {
+          await refuseHandover(`Workflow ${id} is missing or unreadable in this Anthill data directory.`);
+          return undefined;
+        }
+        const path = exchange().workingCopyPath(id);
+        const permission = await mayShowWorkflow();
+        if (permission === "no_window") { pendingLinks.add(url); return undefined; }
+        if (permission === "declined") return undefined;
+        await writeWorkingCopy(path, stored.head.workflow);
+        return path;
+      })
+      .catch(async (error) => { await refuseHandover(String(error)); return undefined; });
+    if (!prepared) continue;
+    const result = await showWorkflow(prepared).catch((error): OpenOutcome => ({ kind: "refused", error: String(error) }));
+    if (result.kind === "parked") pendingLinks.add(url);
+    // A parked handover is on its way to the next page that asks for one, so
+    // saying it failed would be untrue and the user would be shown it twice.
+    // Anything else the person clicked a link for is worth a sentence.
+    if (result.kind === "refused" || result.kind === "unconfirmed") await refuseHandover(result.error);
+  }
+}
+
+/**
+ * Say that something arrived which cannot be acted on.
+ *
+ * A native box rather than a notice in the page, because most of what reaches
+ * here is a file on disk this build cannot read — the same class of thing the
+ * run store's startup failure reports this way, and the one case where there
+ * may be no page to put a notice in.
+ */
+async function refuseHandover(message: string): Promise<void> {
+  dialog.showErrorBox("Anthill could not carry out a handover", message);
+}
+
+function exchangeInbox(): ExchangeInbox {
+  inbox ??= new ExchangeInbox(exchange(), {
+    serialize: (work) => windowOperations.run(work),
+    mayOpen: mayShowWorkflow,
+    open: showWorkflow,
+    refuse: refuseHandover,
+    register: async (run): Promise<boolean> => {
+      try {
+        const service = liveService();
+        // A run already registered is not registered again. The stored record
+        // carries everything the observers have learned since, and putting a
+        // fresh one over the top would forget that the session was ever found
+        // and start waiting for it a second time.
+        return await service.registerBinding({
+          boundAt: run.boundAt,
+          exchange: { revision: run.revision.revision, digest: run.revision.digest, ...(run.sessionId ? { sessionId: run.sessionId } : {}) },
+          anthillRunId: run.runId,
+          correlationNonce: run.nonce,
+          selectedCli: run.harness,
+          promptVersion: MARKER_VERSION,
+          // The revision's digest stands in for the prompt hash. Nothing reads
+          // it for its provenance; it identifies the content a run started
+          // from, which is exactly what a revision digest is.
+          bootstrapPromptHash: run.revision.digest,
+          workflowId: run.workflowId,
+          ...(run.revision.workflow.name ? { workflowName: run.revision.workflow.name } : {}),
+          steps: workflowSteps(run.revision.workflow),
+        });
+      } catch (error) {
+        console.error("[anthill] could not register a bound run:", error);
+        return false;
+      }
+    },
+  });
+  return inbox;
 }
 
 /**
@@ -498,16 +831,13 @@ function registerIpcHandlers(): void {
    */
   handle(IpcChannel.appRelaunch, async (): Promise<boolean> => {
     const window = mainWindow;
-    if (window && !window.isDestroyed() && (await isWorkflowDirty(window))) {
-      const { response } = await dialog.showMessageBox(window, {
-        type: "warning",
-        buttons: ["Cancel", "Restart and discard changes"],
-        defaultId: 0,
-        cancelId: 0,
-        message: "This workflow has unsaved changes.",
-        detail: "Restarting now discards everything since the last save.",
-      });
-      if (response !== 1) return false;
+    if (window && !window.isDestroyed()) {
+      const mayRestart = await mayDiscardWorkflow(
+        window,
+        "Restart and discard changes",
+        "Restarting now discards everything since the last save.",
+      );
+      if (!mayRestart) return false;
     }
     app.relaunch();
     // Give the reply a chance to reach the renderer before the process ends.
@@ -564,49 +894,23 @@ function registerIpcHandlers(): void {
     },
   );
 
-  async function openWorkflowAt(path: string): Promise<OpenWorkflowResult> {
-    try {
-      const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
-
-      // Compatibility is checked before schema parsing on purpose. A workflow from
-      // a newer build may not satisfy this build's schema at all, and
-      // "Invalid workflow: nodes.0.type ..." would hide the real reason.
-      const original = checkWorkflowCompatibility(parsed);
-      if (!original.ok && original.reason === "too-new") {
-        return { ok: false, error: original.message };
-      }
-
-      // Upgrade what this build knows how to upgrade, so an older workflow opens
-      // as a current one rather than opening with a warning the author has to
-      // work through by hand. The file on disk is untouched until they save.
-      const migration = migrateWorkflow(parsed);
-
-      // Compatibility is re-checked on the upgraded workflow: a workflow the migration
-      // brought current is current, and telling the author to go and fix it by
-      // hand as well would contradict the note saying it was upgraded.
-      const compatibility = checkWorkflowCompatibility(migration.workflow);
-      const notice = [
-        ...migration.notes,
-        ...(compatibility.ok ? [] : [compatibility.message]),
-      ];
-
-      const workflow = parseWorkflow(migration.workflow);
-      await rememberRecent(path);
-      return {
-        ok: true,
-        opened: {
-          path,
-          workflow,
-          notice: notice.length > 0 ? notice.join(" ") : undefined,
-        },
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
+  // Keep the readiness handshake, but deliver every request through the same
+  // acknowledged channel, including requests that arrived before this page.
+  handle(IpcChannel.workflowPendingOpen, async (): Promise<string | undefined> => {
+    rendererListening = true;
+    void drainLinks();
+    return undefined;
+  });
+  handle(IpcChannel.workflowOpened, async (event, path: string, id?: number, outcome?: "shown" | "declined" | "confirming" | "opening") => {
+    if (rendererListening && event.sender === mainWindow?.webContents) workflowDelivery.acknowledge(path, id, outcome);
+  });
+  handle(IpcChannel.exchangeRead, async (_event, path: string, id: string) => readExchangeView(exchange(), path, id));
+  handle(IpcChannel.exchangeReady, async (_event, request) => readyExchangeRevision(exchange(), request));
+  handle(IpcChannel.exchangeRevoke, async (_event, request) => revokeExchangeRevision(exchange(), request));
+  handle(IpcChannel.liveWorkflow, async (_event, runId: string) => {
+    await liveService().start();
+    return boundWorkflow(exchange(), liveService().registered(runId));
+  });
 
   handle(
     IpcChannel.workflowSave,
@@ -631,7 +935,15 @@ function registerIpcHandlers(): void {
           )
         : ({ kind: "missing" } as const);
 
-      const destination = saveDestination(request.workflow.name ?? "", request.path, saved);
+      let exchangeCopy = false;
+      try {
+        exchangeCopy = Boolean(request.path && await exchangeDestination(exchange(), request.path, request.workflow.id));
+      } catch (error) {
+        return { kind: "failed", error: String(error) };
+      }
+      const destination = exchangeCopy && request.path
+        ? { kind: "write" as const, path: request.path }
+        : saveDestination(request.workflow.name ?? "", request.path, saved);
       let path = request.path;
       if (destination.kind === "ask") {
         const result = await dialog.showSaveDialog({
@@ -648,7 +960,11 @@ function registerIpcHandlers(): void {
         path = destination.path;
       }
       try {
-        await writeFile(path, `${JSON.stringify(request.workflow, null, 2)}\n`, "utf8");
+        if (await exchangeDestination(exchange(), path, request.workflow.id)) {
+          await saveExchangeCopy(exchange(), path, request.workflow);
+        } else {
+          await writeFile(path, `${JSON.stringify(request.workflow, null, 2)}\n`, "utf8");
+        }
       } catch (error) {
         // Reported rather than thrown, so the editor can say what went wrong
         // and keep the unsaved work rather than losing the answer in a
@@ -661,6 +977,7 @@ function registerIpcHandlers(): void {
       // Saving is how a workflow gets into the launch window's list in the first
       // place: a workflow drafted from a prompt has never been opened from a file.
       await rememberRecent(path);
+
       return { kind: "saved", path };
     },
   );
@@ -999,13 +1316,19 @@ function registerIpcHandlers(): void {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("second-instance", (_event, argv) => {
+    for (const link of linksFromArgv(argv)) receiveLink(link);
+    workflowWindow();
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
   });
 }
+
+// macOS can deliver this before ready; only the window work is deferred.
+app.on("open-url", (event, url) => { event.preventDefault(); receiveLink(url); });
+for (const url of linksFromArgv(process.argv)) receiveLink(url);
 
 /**
  * The menu bar, for the one item that has to live there.
@@ -1073,6 +1396,8 @@ function applyMenu(): void {
 }
 
 void app.whenReady().then(async () => {
+  if (app.isPackaged) app.setAsDefaultProtocolClient("anthill");
+  else if (process.argv[1]) app.setAsDefaultProtocolClient("anthill", process.execPath, [resolve(process.argv[1])]);
   // Register handlers and show the window BEFORE opening the run store, so a
   // storage failure surfaces as a visible error instead of an app that starts
   // with no window and no message.
@@ -1081,6 +1406,10 @@ void app.whenReady().then(async () => {
   setRecentsPaths({ userData: app.getPath("userData"), home: app.getPath("home") });
   registerIpcHandlers();
   createWindow();
+
+  // Reading what a coding harness left in the exchange, from here on. Started
+  // after the window so the first workflow it finds has somewhere to go.
+  exchangeInbox().start();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -1108,7 +1437,9 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
+// before-quit can still be cancelled by the unsaved-workflow dialog.
+app.on("will-quit", () => {
+  inbox?.stop();
   live?.stop();
   services?.approvals.abandonAll("The application is shutting down.");
   void services?.store.close?.();

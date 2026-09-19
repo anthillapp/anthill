@@ -12,7 +12,7 @@
  * keeping the text.
  */
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { expireIfStale, isExpired, isOpen, type PendingRun } from "@anthill/live";
@@ -110,11 +110,21 @@ export class PendingRunStore {
     return this.runs.find((run) => run.anthillRunId === runId);
   }
 
-  async put(run: PendingRun): Promise<void> {
+  async put(run: PendingRun, requireDurable = false): Promise<void> {
     const index = this.runs.findIndex((item) => item.anthillRunId === run.anthillRunId);
+    const previous = index >= 0 ? this.runs[index] : undefined;
     if (index >= 0) this.runs[index] = run;
     else this.runs.unshift(run);
-    await this.save();
+    try {
+      await this.save(requireDurable);
+    } catch (error) {
+      const held = this.runs.indexOf(run);
+      if (held >= 0) {
+        if (previous) this.runs[held] = previous;
+        else this.runs.splice(held, 1);
+      }
+      throw error;
+    }
   }
 
   async remove(runId: string): Promise<void> {
@@ -132,18 +142,23 @@ export class PendingRunStore {
    * which of the two won a race on the disk. The read merges and flushes when
    * it lands, so skipping the write here loses nothing.
    */
-  private async save(): Promise<void> {
-    if (this.loading) return;
-    await this.flush();
+  private async save(requireDurable = false): Promise<void> {
+    if (this.loading) {
+      if (!requireDurable) return;
+      await this.loading;
+    }
+    await this.flush(requireDurable);
   }
 
-  async flush(): Promise<void> {
+  async flush(requireDurable = false): Promise<void> {
     // The snapshot is taken now, not when the chain gets round to it — the
     // chain orders writes, and each write carries the state its caller saw.
     // In practice later state is a superset, so last-writer-wins is right.
     const snapshot = JSON.stringify(this.runs, null, 2);
-    this.writing = this.writing.then(() => this.persist(snapshot));
-    await this.writing;
+    const written = this.writing.then(() => this.persist(snapshot));
+    this.writing = written.catch(() => undefined);
+    if (requireDurable) await written;
+    else await this.writing;
   }
 
   /**
@@ -153,14 +168,13 @@ export class PendingRunStore {
    * complete snapshot or a new complete snapshot, never a truncated one.
    */
   private async persist(snapshot: string): Promise<void> {
+    const temp = `${this.path}.${process.pid}.${++this.writeSeq}.tmp`;
     try {
       await mkdir(dirname(this.path), { recursive: true });
-      this.writeSeq += 1;
-      const temp = `${this.path}.${process.pid}.${this.writeSeq}.tmp`;
-      await writeFile(temp, snapshot, "utf8");
+      await writeFile(temp, snapshot, { encoding: "utf8", flag: "wx", mode: 0o600 });
       await rename(temp, this.path);
-    } catch {
-      // Losing the record is better than taking the app down.
+    } finally {
+      await rm(temp, { force: true });
     }
   }
 }

@@ -172,6 +172,23 @@ export class LiveSessionService {
   }
 
   /**
+   * Whether this run has already been registered.
+   *
+   * Asked by anything that may be told about the same run twice — a request
+   * from outside the app that was delivered once and recorded once, but whose
+   * two writes a crash can fall between. `startObservation` replaces a record
+   * of the same id, so a second registration would forget every transition the
+   * observers had seen and leave the run waiting for a session it already
+   * found. The snapshot does not answer this: it hides a dismissed run, and a
+   * dismissed run is one that must stay dismissed.
+   *
+   * Only true of what has been loaded, so `start()` comes first.
+   */
+  knows(runId: string): boolean {
+    return this.store.find(runId) !== undefined;
+  }
+
+  /**
    * Begin observing a prompt the user is about to copy.
    *
    * Called before the text reaches the clipboard, so the record exists whatever

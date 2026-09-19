@@ -48,6 +48,47 @@ export function Root() {
   }, [start]);
   useEffect(() => window.anthill.onOpenSettings(openSettings), [openSettings]);
 
+  /**
+   * How many workflows have been handed to this window from outside it.
+   *
+   * A coding harness puts a workflow in front of the author without anybody
+   * here clicking anything, and the workflow screen opens the file it was
+   * given once, on arrival. Routing a second one at a screen that has already
+   * done that would change the route and show the old document, so the count
+   * is the screen's key and a handover mounts a new one. Whether there were
+   * unsaved edits to lose was settled before the route arrived: main asked.
+   */
+  const [handedOver, setHandedOver] = useState(0);
+  const openHandedOver = useCallback((path: string) => {
+    setStart({ kind: "open", path });
+    setHandedOver((count) => count + 1);
+    // Settings takes the window, and a workflow opened underneath it would be
+    // an answer of "yes, show me" that nothing visibly happened about. The
+    // question of whether to interrupt was already put and already answered.
+    setSettingsFrom(null);
+  }, []);
+
+  useEffect(() => window.anthill.onOpenWorkflow(openHandedOver), [openHandedOver]);
+
+  /*
+    A handover that arrived before this page existed is collected rather than
+    pushed, because a message sent to a page that has not mounted reaches
+    nobody — and a link followed from a cold start is exactly that case. Main
+    hands it over once, so StrictMode's second run of this effect gets nothing.
+
+    A main process older than this page has never heard of the channel and
+    rejects, which is the one thing there is to do about it: there is no
+    handover to collect from a process that cannot receive one.
+  */
+  useEffect(() => {
+    void window.anthill
+      .pendingWorkflowOpen()
+      .then((path) => {
+        if (path) openHandedOver(path);
+      })
+      .catch(() => undefined);
+  }, [openHandedOver]);
+
   const leaveExplainer = () => {
     markExplainerSeen();
     setExplaining(false);
@@ -62,7 +103,12 @@ export function Root() {
       }}
     />
   ) : start ? (
-    <WorkflowScreen start={start} onExit={() => setStart(null)} onSettings={openSettings} />
+    <WorkflowScreen
+      key={handedOver}
+      start={start}
+      onExit={() => setStart(null)}
+      onSettings={openSettings}
+    />
   ) : (
     <LaunchWindow
       onNewWorkflow={() => setStart({ kind: "templates" })}

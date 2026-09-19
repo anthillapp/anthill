@@ -15,6 +15,7 @@ import {
   LIVE_EVENTS_CHANNEL,
   LIVE_SNAPSHOT_CHANNEL,
   OPEN_SETTINGS_CHANNEL,
+  OPEN_WORKFLOW_CHANNEL,
   SAVE_WORKFLOW_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
   RUN_EVENT_CHANNEL,
@@ -43,6 +44,12 @@ const api: AnthillApi = {
   workspaceStatus: (rootPath: string) =>
     ipcRenderer.invoke(IpcChannel.workspaceStatus, rootPath),
   openWorkflow: (path?: string) => ipcRenderer.invoke(IpcChannel.workflowOpen, path),
+  pendingWorkflowOpen: () => ipcRenderer.invoke(IpcChannel.workflowPendingOpen),
+  onOpenWorkflow: (listener: (path: string) => void) => {
+    const handler = (_event: unknown, path: string) => listener(path);
+    ipcRenderer.on(OPEN_WORKFLOW_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(OPEN_WORKFLOW_CHANNEL, handler);
+  },
   saveWorkflow: (request: SaveWorkflowRequest) =>
     ipcRenderer.invoke(IpcChannel.workflowSave, request),
   detectRuntimes: () => ipcRenderer.invoke(IpcChannel.runtimesDetect),

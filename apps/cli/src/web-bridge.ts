@@ -5,6 +5,7 @@ import {
   LIVE_EVENTS_CHANNEL,
   LIVE_SNAPSHOT_CHANNEL,
   OPEN_SETTINGS_CHANNEL,
+  OPEN_WORKFLOW_CHANNEL,
   SAVE_WORKFLOW_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
   RUN_EVENT_CHANNEL,
@@ -175,6 +176,9 @@ export function installWebBridge(): Promise<AnthillApi> {
       workspaceStatus: (rootPath: string) =>
         invoke(IpcChannel.workspaceStatus, rootPath),
       openWorkflow: (path?: string) => invoke(IpcChannel.workflowOpen, path),
+      pendingWorkflowOpen: () => invoke(IpcChannel.workflowPendingOpen),
+      onOpenWorkflow: (listener: (path: string) => void) =>
+        onChannel(OPEN_WORKFLOW_CHANNEL, (payload) => listener(payload as string)),
       saveWorkflow: (request: SaveWorkflowRequest) =>
         invoke(IpcChannel.workflowSave, request),
       onSaveWorkflow: (listener: () => void) =>

@@ -26,6 +26,7 @@ export const IpcChannel = {
   workspaceSelect: "workspace:select",
   workspaceStatus: "workspace:status",
   workflowOpen: "workflow:open",
+  workflowPendingOpen: "workflow:pending-open",
   workflowSave: "workflow:save",
   runtimesDetect: "runtimes:detect",
   runStart: "run:start",
@@ -87,7 +88,7 @@ export const IpcChannel = {
  * quietly showed nothing. Bump this whenever a channel is added, and the
  * renderer can find out before it subscribes to something that will never fire.
  */
-export const IPC_CONTRACT = 15;
+export const IPC_CONTRACT = 16;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -150,6 +151,23 @@ export const OPEN_SETTINGS_CHANNEL = "app:open-settings";
  * which also settles ⌘S never reaching the browser's own Save Page (ANT-59).
  */
 export const SAVE_WORKFLOW_CHANNEL = "app:save-workflow";
+
+/**
+ * A workflow a harness handed over, ready for the page to show.
+ *
+ * Nobody in the renderer asked for this one: it arrives because a coding tool
+ * put a workflow in the exchange, or because the user followed an `anthill://`
+ * link. The payload is the path of the working copy, so the page opens it
+ * through the ordinary Open route and nothing about loading a document has to
+ * know where it came from.
+ *
+ * A push alone would not do, because a page that has not mounted yet cannot be
+ * sent anything and a link is at its most likely on a cold start. So main holds
+ * what it could not deliver and the page collects it with
+ * `IpcChannel.workflowPendingOpen` when it is ready; this channel carries
+ * everything that arrives afterwards, while the page is up and listening.
+ */
+export const OPEN_WORKFLOW_CHANNEL = "app:open-workflow";
 
 /* ------------------------------------------------------------------ */
 /* Payload shapes                                                      */
@@ -665,6 +683,25 @@ export interface AnthillApi {
   workspaceStatus(rootPath: string): Promise<WorkspaceStatus>;
   /** With a path, opens that workflow; without one, asks the author to pick. */
   openWorkflow(path?: string): Promise<OpenWorkflowResult>;
+  /**
+   * The workflow Anthill was asked to show before this page could show one.
+   *
+   * A handover or an `anthill://` link can arrive while the window is still
+   * loading, and a message sent to a page that is not listening is a message
+   * nobody receives. So main keeps the path and the page asks for it once it is
+   * up. Taken rather than read: a second call answers `undefined`, so the same
+   * workflow is never opened twice by two callers or by one mounting twice.
+   */
+  pendingWorkflowOpen(): Promise<string | undefined>;
+  /**
+   * A workflow a harness handed over while the page was up. Returns the
+   * unsubscribe.
+   *
+   * The path of a working copy, to be opened through `openWorkflow`. Whether
+   * the user wanted this interruption was settled in main, which asked before
+   * sending it.
+   */
+  onOpenWorkflow(listener: (path: string) => void): () => void;
   saveWorkflow(request: SaveWorkflowRequest): Promise<SaveWorkflowResult>;
   /** File ▸ Save, or ⌘S. Returns the unsubscribe. */
   onSaveWorkflow(listener: () => void): () => void;

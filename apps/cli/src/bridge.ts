@@ -24,6 +24,7 @@ import {
   LIVE_SNAPSHOT_CHANNEL,
   LIVE_EVENTS_CHANNEL,
   OPEN_SETTINGS_CHANNEL,
+  OPEN_WORKFLOW_CHANNEL,
   SAVE_WORKFLOW_CHANNEL,
   type IpcCapabilities,
   type AnthillApi,
@@ -278,6 +279,19 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
       ? { ok: false as const, cancelled: true as const, candidates }
       : { ok: false as const, cancelled: true as const };
   });
+
+  /*
+    Nothing hands a workflow to the CLI shell.
+
+    The exchange is read by the desktop's main process, and an `anthill://`
+    link is delivered by an operating system to an application it registered —
+    neither reaches a page served over HTTP. The channel is answered all the
+    same, because the renderer is one bundle in two shells and a method only
+    one of them offers is the shape of bug `web-bridge-launch.test.ts` exists
+    for. `undefined` is the honest answer: nothing is waiting, and nothing ever
+    will be here.
+  */
+  register(IpcChannel.workflowPendingOpen, async () => undefined);
 
   /**
    * The workflow files the CLI can name: the recents (most recent first), then
@@ -713,6 +727,9 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     workspaceStatus: (rootPath: string) =>
       handle(IpcChannel.workspaceStatus, rootPath),
     openWorkflow: (path?: string) => handle(IpcChannel.workflowOpen, path),
+    pendingWorkflowOpen: () => handle(IpcChannel.workflowPendingOpen),
+    onOpenWorkflow: (listener: (path: string) => void) =>
+      on(OPEN_WORKFLOW_CHANNEL, (path) => listener(path as string)),
     saveWorkflow: (request: SaveWorkflowRequest) =>
       handle(IpcChannel.workflowSave, request),
     onSaveWorkflow: (listener: () => void) =>

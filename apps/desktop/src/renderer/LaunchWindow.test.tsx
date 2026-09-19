@@ -540,3 +540,51 @@ describe("the dev build badge", () => {
     expect(screen.getByText("dev build").closest(".launch-version")).toBeTruthy();
   });
 });
+
+/**
+ * A row whose session ended days ago (ANT-84).
+ *
+ * The dot was read from the live run store, which drops a settled run a day
+ * after its last evidence — so a machine used last week looked like a machine
+ * never used. The remembered ending fills that in, and the whole risk is that
+ * it fills it in *too* confidently: a fortnight-old "Finished" must not be
+ * readable as "finished just now".
+ */
+describe("a workflow whose run is no longer being watched", () => {
+  const ended = (state: LiveSessionState, at = "2026-09-08T14:30:00.000Z") =>
+    workflow({ path: "/w/one.json", name: "One", workflowId: "w-1", lastRun: { state, at } });
+
+  it("keeps its colour after the run itself is gone", async () => {
+    await show([ended("failed")]);
+    const mark = document.querySelector(".recent-mark") as HTMLElement;
+    expect([...mark.classList]).toContain("tone-bad");
+    expect(screen.getByText("Session failed")).toBeTruthy();
+  });
+
+  it("says so in the past tense, not as something happening now", async () => {
+    await show([ended("completed")]);
+    // Quieter than a live chip, and never pulsing.
+    expect(document.querySelector(".recent-chip.is-past")).toBeTruthy();
+    expect(document.querySelector(".recent-chip.is-pulsing")).toBeNull();
+    expect(document.querySelector(".recent-mark.is-past")).toBeTruthy();
+  });
+
+  it("shows when it ended, because the state alone would read as now", async () => {
+    await show([ended("completed")]);
+    expect(screen.getByText("Sep 8")).toBeTruthy();
+  });
+
+  it("yields to a live run, so one row never claims two things", async () => {
+    // The present outranks a memory of it.
+    await show([ended("failed")], [run("detected_live", "w-1")]);
+    expect(screen.getByText(/^Live/)).toBeTruthy();
+    expect(screen.queryByText("Session failed")).toBeNull();
+    expect(document.querySelector(".recent-chip.is-past")).toBeNull();
+  });
+
+  it("is grey again when nothing was ever observed", async () => {
+    await show([workflow({ path: "/w/two.json", name: "Two", workflowId: "w-2" })]);
+    const mark = document.querySelector(".recent-mark") as HTMLElement;
+    expect([...mark.classList]).toContain("tone-none");
+  });
+});

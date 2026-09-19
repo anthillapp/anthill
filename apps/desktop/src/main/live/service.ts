@@ -40,6 +40,7 @@ import {
 import { ClaudeCodeObserver } from "./observers/claude-code.js";
 import { CliReportObserver } from "./observers/cli-report.js";
 import { forgetAnnounced, noticesFor, type AnnouncedSteps, type StepNotice } from "./step-notices.js";
+import { isEnding } from "./workflow-status.js";
 import { CodexObserver } from "./observers/codex.js";
 import { PiObserver } from "./observers/pi.js";
 import { HookLogObserver } from "./observers/hooks.js";
@@ -119,6 +120,15 @@ export class LiveSessionService {
      * delivering one is a platform's business rather than an observer's.
      */
     private readonly onStepNotice: (notice: StepNotice) => void = () => undefined,
+    /**
+     * Told when a run reaches an ending, so it can be written down somewhere
+     * that outlives the run.
+     *
+     * The live store is a working set and drops a settled run a day later; a
+     * workflow's last known outcome has to survive that, or every row on the
+     * launch window turns grey a day after it was last used (ANT-84).
+     */
+    private readonly onSettled: (run: PendingRun) => void = () => undefined,
   ) {
     this.observers = {
       "claude-code": roots.claudeRoot
@@ -269,6 +279,7 @@ export class LiveSessionService {
         const next = await this.advance(run, now);
         if (next !== run) {
           await this.store.put(next);
+          this.rememberEnding(run, next);
           changed = true;
           // A run closed as lost keeps the observers' places in its records:
           // it is looked at again below, and re-reading the whole record on
@@ -289,6 +300,7 @@ export class LiveSessionService {
           const next = await this.recover(run, now);
           if (next !== run) {
             await this.store.put(next);
+            this.rememberEnding(run, next);
             changed = true;
           }
         }
@@ -298,6 +310,20 @@ export class LiveSessionService {
     } finally {
       this.polling = false;
     }
+  }
+
+  /**
+   * Write down an ending the moment a run arrives at one.
+   *
+   * On the change rather than on every poll, so a settled run is recorded once
+   * — and from the run itself, which is the only place that still knows which
+   * workflow this was. The journals do not: their events carry a run id and no
+   * workflow id.
+   */
+  private rememberEnding(before: PendingRun, after: PendingRun): void {
+    if (!isEnding(after.state)) return;
+    if (before.state === after.state && before.lastObservedAt === after.lastObservedAt) return;
+    this.onSettled(after);
   }
 
   private async advance(run: PendingRun, now: string): Promise<PendingRun> {

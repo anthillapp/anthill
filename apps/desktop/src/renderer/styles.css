@@ -7954,3 +7954,21 @@ button.presence-chip {
   padding: 0;
   background: transparent;
 }
+
+/*
+ * A row whose session has ended, remembered after the live record was dropped.
+ *
+ * The same colours as the live states, deliberately — the meaning has not
+ * changed, only its tense — and deliberately quieter, because "Finished" in a
+ * live chip's weight reads as *now*. The date beside it is the other half of
+ * saying so, and is why this treatment never appears without one (ANT-84).
+ */
+.recent-mark.is-past {
+  opacity: 0.45;
+}
+
+.recent-chip.is-past {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--ink-dim);
+}

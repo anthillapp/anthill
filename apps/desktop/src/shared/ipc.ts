@@ -12,9 +12,9 @@
 
 import type { Workflow, WorkflowRun, NodeRun } from "@anthill/workflow-schema";
 import type { AgentModels, InterpreterId } from "@anthill/workflow";
-import type { MarkerCli, ObservationEvent, PendingRun } from "@anthill/live";
+import type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun } from "@anthill/live";
 
-export type { MarkerCli, ObservationEvent, PendingRun };
+export type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun };
 
 /* ------------------------------------------------------------------ */
 /* Request/response channels (renderer -> main, via ipcRenderer.invoke) */
@@ -369,6 +369,19 @@ export type RecentWorkflow = {
   path: string;
   /** The workflow's own id, so a live observation can be matched to its file. */
   workflowId?: string;
+  /**
+   * How this workflow's last observed run ended, when one did and Anthill
+   * still remembers it.
+   *
+   * Only ever an ending — finished, failed, or observation lost. Anything
+   * being watched right now comes from the live snapshot instead, so the two
+   * never argue: this answers only for a workflow with no live run left.
+   *
+   * It exists because the live store is a working set that drops a settled run
+   * a day later, which turned every row grey a day after it was last used
+   * (ANT-84).
+   */
+  lastRun?: { state: LiveSessionState; at: string };
   /**
    * Step id → step name, for the workflows in this list.
    *

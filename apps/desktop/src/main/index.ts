@@ -68,10 +68,10 @@ import {
   type SavedRecord,
 } from "./save-destination.js";
 import { dataDirectoryRefusal, desktopUserDataPath, desktopDataDirectory } from "./user-data.js";
-import { ExchangeInbox, type OpenPermission } from "./exchange/inbox.js";
+import { ExchangeInbox, type OpenOutcome, type OpenPermission } from "./exchange/inbox.js";
 import { writeWorkingCopy } from "./exchange/working-copy.js";
 import { exchangeDestination, saveExchangeCopy, readExchangeView, readyExchangeRevision, boundWorkflow } from "./exchange/documents.js";
-import { workflowIdFromLink, linksFromArgv, WindowOperations, WorkflowDelivery } from "./exchange/deep-link.js";
+import { workflowIdFromLink, linksFromArgv, SerialDrain, WindowOperations, WorkflowDelivery } from "./exchange/deep-link.js";
 import { REPORT_LOG } from "./live/observers/cli-report.js";
 import { LiveSessionService, type LiveSessionSnapshot } from "./live/service.js";
 import { ObservationSetupService } from "./live/setup.js";
@@ -680,28 +680,36 @@ async function mayShowWorkflow(path?: string): Promise<OpenPermission> {
  * workflow. A push into a page that is still loading is silently lost, and
  * silently losing this one means a user who followed a link watching an app
  * that opened and did nothing.
+ *
+ * `false` says the path was parked rather than sent, so the caller can stop
+ * waiting for an acknowledgement that nobody is in a position to give: a
+ * parked handover is answered by the next page to ask for its pending
+ * workflow, minutes later if that is how long the user takes.
  */
-function handOverToRenderer(path: string): void {
+function handOverToRenderer(path: string): boolean {
   if (rendererListening && mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(OPEN_WORKFLOW_CHANNEL, path);
-    return;
+    return true;
   }
   pendingOpenPath = path;
+  return false;
 }
 
 /** Open a workflow the user did not pick, and put it on screen. */
-async function showWorkflow(path: string): Promise<{ ok: true } | { ok: false; error: string }> {
+async function showWorkflow(path: string): Promise<OpenOutcome> {
   const result = await openWorkflowAt(path);
   if (!result.ok) {
-    return { ok: false, error: "error" in result ? result.error : "It could not be opened." };
+    return { kind: "refused", error: "error" in result ? result.error : "It could not be opened." };
   }
-  const shown = await workflowDelivery.deliver(path, () => handOverToRenderer(path));
-  if (shown) {
+  const delivery = await workflowDelivery.deliver(path, () => handOverToRenderer(path));
+  if (delivery === "shown") {
     mainWindow?.show();
     mainWindow?.focus();
-    return { ok: true };
+    return { kind: "shown" };
   }
-  return { ok: false, error: "The page did not confirm opening the workflow. The handover remains pending; reopen it from its link." };
+  return delivery === "parked"
+    ? { kind: "parked" }
+    : { kind: "unconfirmed", error: "The page did not confirm opening the workflow. The handover remains pending; reopen it from its link." };
 }
 
 function receiveLink(url: string): void {
@@ -716,25 +724,50 @@ function receiveLink(url: string): void {
   }
 }
 
-async function drainLinks(): Promise<void> {
+const linkDrain = new SerialDrain(() => drainOnce());
+
+/**
+ * Deliver every link that is waiting, one at a time and once each.
+ *
+ * Three things call this — a link arriving, a close the user cancelled, and
+ * the page asking for its pending workflow — and a pass stops in the middle
+ * for a dialog, so two of them used to walk the same set at once.
+ */
+function drainLinks(): Promise<void> {
+  return linkDrain.run();
+}
+
+async function drainOnce(): Promise<void> {
   if (!rendererListening) return;
   for (const url of [...pendingLinks]) {
     pendingLinks.delete(url);
-    await windowOperations.run(async () => {
-      const id = workflowIdFromLink(url)!;
-      const stored = await exchange().readWorkflow(id);
-      if (!stored?.head || stored.problems.length) {
-        await refuseHandover(`Workflow ${id} is missing or unreadable in this Anthill data directory.`);
-        return;
-      }
-      const path = exchange().workingCopyPath(id);
-      const permission = await mayShowWorkflow(path);
-      if (permission === "no_window") { pendingLinks.add(url); return; }
-      if (permission === "declined") return;
-      await writeWorkingCopy(path, stored.head.workflow);
-      const result = await showWorkflow(path);
-      if (!result.ok) await refuseHandover(result.error);
-    }).catch((error) => refuseHandover(String(error)));
+    // The queue covers the question and the write, and is let go before the
+    // renderer is waited on. It is shared with the window's close handler, and
+    // ten seconds of waiting for an acknowledgement inside it is ten seconds
+    // in which every close click is swallowed and every other handover is told
+    // there is no window.
+    const prepared = await windowOperations
+      .run(async (): Promise<string | undefined> => {
+        const id = workflowIdFromLink(url)!;
+        const stored = await exchange().readWorkflow(id);
+        if (!stored?.head || stored.problems.length) {
+          await refuseHandover(`Workflow ${id} is missing or unreadable in this Anthill data directory.`);
+          return undefined;
+        }
+        const path = exchange().workingCopyPath(id);
+        const permission = await mayShowWorkflow(path);
+        if (permission === "no_window") { pendingLinks.add(url); return undefined; }
+        if (permission === "declined") return undefined;
+        await writeWorkingCopy(path, stored.head.workflow);
+        return path;
+      })
+      .catch(async (error) => { await refuseHandover(String(error)); return undefined; });
+    if (!prepared) continue;
+    const result = await showWorkflow(prepared).catch((error): OpenOutcome => ({ kind: "refused", error: String(error) }));
+    // A parked handover is on its way to the next page that asks for one, so
+    // saying it failed would be untrue and the user would be shown it twice.
+    // Anything else the person clicked a link for is worth a sentence.
+    if (result.kind === "refused" || result.kind === "unconfirmed") await refuseHandover(result.error);
   }
 }
 

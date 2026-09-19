@@ -20,7 +20,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ExchangeInbox, type BoundRun, type InboxEffects, type OpenPermission } from "./inbox.js";
+import { WindowOperations } from "./deep-link.js";
+import { ExchangeInbox, type BoundRun, type InboxEffects, type OpenOutcome, type OpenPermission } from "./inbox.js";
 
 const roots: string[] = [];
 
@@ -39,14 +40,14 @@ function watcher(permission: OpenPermission = "yes") {
   const opened: string[] = [];
   const refused: string[] = [];
   const registered: BoundRun[] = [];
-  let openFails: string | undefined;
+  let outcome: OpenOutcome = { kind: "shown" };
   let registerFails = false;
 
   const effects: InboxEffects = {
     mayOpen: async () => permission,
     open: async (path) => {
       opened.push(path);
-      return openFails ? { ok: false, error: openFails } : { ok: true };
+      return outcome;
     },
     refuse: async (message) => {
       refused.push(message);
@@ -62,8 +63,11 @@ function watcher(permission: OpenPermission = "yes") {
     opened,
     refused,
     registered,
+    answerOpenWith(next: OpenOutcome) {
+      outcome = next;
+    },
     failToOpen(error: string) {
-      openFails = error;
+      outcome = { kind: "refused", error };
     },
     failToRegister() {
       registerFails = true;
@@ -283,6 +287,70 @@ describe("a request that cannot be carried out", () => {
     expect(await settled(store)).toEqual(["display-1.json"]);
   });
 
+  /*
+   * Being kept waiting is not being told no. The likeliest way an open does
+   * not confirm is the ten seconds the page has to acknowledge it, which the
+   * very next pass would get right — and treating that as a refusal filed the
+   * handover as declined for the rest of the session, so the workflow never
+   * appeared and nothing ever said why.
+   */
+  it("keeps asking while the page has not confirmed, and says nothing about it", async () => {
+    const store = await openStore();
+    await handOver(store);
+    const window = watcher();
+    const inbox = new ExchangeInbox(store, window.effects);
+
+    for (const outcome of [{ kind: "unconfirmed", error: "no acknowledgement" }, { kind: "parked" }] as const) {
+      window.answerOpenWith(outcome);
+      await inbox.read();
+      expect(window.refused).toEqual([]);
+      expect(await waiting(store)).toEqual(["display-1.json"]);
+      expect(await settled(store)).toEqual([]);
+    }
+
+    window.answerOpenWith({ kind: "shown" });
+    await inbox.read();
+    expect(window.opened).toHaveLength(3);
+    expect(await settled(store)).toEqual(["display-1.json"]);
+  });
+
+  /*
+   * The queue the window's close dialog shares. An acknowledgement takes as
+   * long as the renderer takes to mount a document, and holding the queue for
+   * that long swallowed every close click for ten seconds and answered every
+   * other handover with "there is no window".
+   */
+  it("lets go of the window's queue before it waits on the page", async () => {
+    const store = await openStore();
+    await handOver(store);
+    const window = watcher();
+    const queue = new WindowOperations();
+    let opening!: () => void;
+    const reached = new Promise<void>((done) => { opening = done; });
+    let finish!: () => void;
+    const held = new Promise<void>((done) => { finish = done; });
+
+    const pass = new ExchangeInbox(store, {
+      ...window.effects,
+      serialize: (work) => queue.run(work),
+      open: async (path) => {
+        window.opened.push(path);
+        opening();
+        await held;
+        return { kind: "shown" };
+      },
+    }).read();
+
+    await reached;
+    const other = await Promise.race([
+      queue.run(async () => "the window is free"),
+      new Promise((done) => setTimeout(() => done("the window is held"), 50)),
+    ]);
+    expect(other).toBe("the window is free");
+    finish();
+    await pass;
+  });
+
   /* Nothing is repaired: the request is answered with an error, and the file
      that could not be read is exactly as it was. */
   it("says so when the workflow on disk will not open", async () => {
@@ -400,6 +468,33 @@ describe("a run the server bound", () => {
     await new ExchangeInbox(store, window.effects).read();
 
     expect(window.registered).toHaveLength(1);
+    expect(await waiting(store)).toEqual(["bind-run-1.json"]);
+  });
+
+  /*
+   * Retrying in silence for ever is the same outcome as not retrying at all:
+   * the Live Session page stays empty while the harness works through the
+   * revision, and nothing anywhere says why.
+   */
+  it("says what a registration that never takes means, once, and keeps trying", async () => {
+    const store = await openStore();
+    await bind(store);
+    const window = watcher();
+    window.failToRegister();
+    const inbox = new ExchangeInbox(store, window.effects);
+
+    await inbox.read();
+    await inbox.read();
+    expect(window.refused).toEqual([]);
+
+    await inbox.read();
+    expect(window.refused).toHaveLength(1);
+    expect(window.refused[0]).toContain("run-1");
+    expect(window.refused[0]).toContain("Live Session");
+
+    await inbox.read();
+    expect(window.refused).toHaveLength(1);
+    expect(window.registered).toHaveLength(4);
     expect(await waiting(store)).toEqual(["bind-run-1.json"]);
   });
 

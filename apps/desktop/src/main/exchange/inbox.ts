@@ -41,6 +41,16 @@ import { writeWorkingCopy } from "./working-copy.js";
  */
 const INBOX_POLL_MS = 2_000;
 
+/**
+ * How many registrations in a row may fail before the user is told.
+ *
+ * A few seconds of quiet retrying, rather than a box for a hiccup the next
+ * pass would have cured. Said once, when the count is reached: the retries go
+ * on, and repeating the message every two seconds would be the nagging the
+ * declined set exists to avoid.
+ */
+const REGISTRATION_ATTEMPTS = 3;
+
 /** Whether there is anywhere to put a workflow in front of the user. */
 export type OpenPermission =
   /** Go ahead. */
@@ -49,6 +59,29 @@ export type OpenPermission =
   | "no_window"
   /** The user would rather keep what they have open. */
   | "declined";
+
+/**
+ * What became of one attempt to put a workflow on screen.
+ *
+ * Four answers, because "it did not open" covers three situations that want
+ * opposite treatment and a boolean forces the reader to pick one of them for
+ * all three. Only `refused` is a document this build cannot open, which is a
+ * fact about the file and does not change by being tried again. The other two
+ * are about the window: a parked handover is on its way to the next page that
+ * asks for one, and an unconfirmed one was sent to a page that has not
+ * answered yet — the ten-second wait for an acknowledgement is the likeliest
+ * of the three to be seen, and treating it as a refusal was what made one slow
+ * page silence a handover for the rest of the session.
+ */
+export type OpenOutcome =
+  /** The page confirmed it is showing this document. */
+  | { kind: "shown" }
+  /** There was no page to send to; the path waits for the next one. */
+  | { kind: "parked" }
+  /** Sent, and the page did not say it opened it. Worth asking again. */
+  | { kind: "unconfirmed"; error: string }
+  /** The document itself cannot be opened. Asking again would not help. */
+  | { kind: "refused"; error: string };
 
 /** A run the server bound, and everything needed to start following it. */
 export type BoundRun = {
@@ -72,6 +105,14 @@ export type BoundRun = {
  * live service, none of which exists outside Electron.
  */
 export type InboxEffects = {
+  /**
+   * Whatever keeps window work from overlapping, where there is a window.
+   *
+   * It covers asking the question and writing the working copy, and nothing
+   * after them. The queue is shared with the window's own close handler, and
+   * waiting inside it for the page to acknowledge a document is waiting for as
+   * long as the page takes.
+   */
   serialize?<T>(work: () => Promise<T>): Promise<T>;
   /**
    * May a workflow replace what the user is looking at?
@@ -83,7 +124,7 @@ export type InboxEffects = {
    */
   mayOpen(path?: string): Promise<OpenPermission>;
   /** Open the workflow at this path, as the Open command would. */
-  open(path: string): Promise<{ ok: true } | { ok: false; error: string }>;
+  open(path: string): Promise<OpenOutcome>;
   /** Tell the user about something that arrived and cannot be acted on. */
   refuse(message: string): Promise<void>;
   /** Give a bound run somewhere for its progress to appear. */
@@ -116,6 +157,18 @@ export class ExchangeInbox {
    * every two seconds for as long as the app is open.
    */
   private readonly reported = new Set<string>();
+
+  /**
+   * How many passes in a row each bind request has failed to register.
+   *
+   * A registration that fails is retried on the next pass and says nothing,
+   * which is right for the first few — the live service may be starting, or
+   * its store may be briefly unwritable — and wrong for ever. A run whose
+   * registration never takes is a run whose progress reports land in the CLI's
+   * log with nothing watching for them, and the only sign of it is a Live
+   * Session page that stays empty while the harness works.
+   */
+  private readonly registrationFailures = new Map<string, number>();
 
   constructor(
     private readonly store: ExchangeStore,
@@ -198,10 +251,7 @@ export class ExchangeInbox {
     // discard the work the first just put on screen — is one the user has had
     // no chance to answer yet.
     const next = drops.find((drop) => drop.kind === "display" && !this.declined.has(drop.key));
-    if (next) {
-      if (this.effects.serialize) await this.effects.serialize(() => this.display(next));
-      else await this.display(next);
-    }
+    if (next) await this.display(next);
   }
 
   /**
@@ -210,6 +260,13 @@ export class ExchangeInbox {
    * The order is the whole of it: read what is being asked for, ask whether it
    * may be shown, write the working copy, open it, and only then record the
    * request as carried out.
+   *
+   * The window's queue is held for the question and the write and let go
+   * before the page is waited on. Those two are what must not race the
+   * window's own dialogs; an acknowledgement takes as long as the renderer
+   * takes to mount a document, and holding a queue that the close handler
+   * shares for that long swallowed every close click for ten seconds and
+   * answered every other request with "there is no window".
    */
   private async display(drop: InboxDrop): Promise<void> {
     const revision = await this.store.readRevision(drop.workflowId, drop.revision);
@@ -222,35 +279,58 @@ export class ExchangeInbox {
     }
 
     const path = this.store.workingCopyPath(drop.workflowId);
+    const prepared = await this.serialized(() => this.prepare(drop, path, revision.workflow));
+    if (!prepared) return;
+
+    const opened = await this.effects.open(path);
+    if (opened.kind === "shown") {
+      // Only a confirmed display acknowledges the handover.
+      await this.store.consumeInbox(drop.key);
+      return;
+    }
+    if (opened.kind === "refused") {
+      await this.effects.refuse(
+        `Anthill could not open ${drop.workflowId}, which was handed over to it: ${opened.error}`,
+      );
+      this.declined.add(drop.key);
+    }
+    // `parked` and `unconfirmed` are neither. Nothing was said no to, so the
+    // request stays where it is and the next pass asks again — the same answer
+    // `no_window` already gets, and for the same reason: the user has not
+    // refused anything, the window simply was not ready to be told.
+  }
+
+  /**
+   * Ask whether this workflow may take the screen, and lay it down if it may.
+   *
+   * `false` means the pass is over for this drop, and whichever of the three
+   * reasons applies has already recorded itself.
+   */
+  private async prepare(drop: InboxDrop, path: string, workflow: StoredRevision["workflow"]): Promise<boolean> {
     const permission = await this.effects.mayOpen(path);
     // Left exactly where it is, both times. The workflow is stored and the
     // request still stands; what has not happened is the user seeing it.
-    if (permission === "no_window") return;
+    if (permission === "no_window") return false;
     if (permission === "declined") {
       this.declined.add(drop.key);
-      return;
+      return false;
     }
 
     try {
-      await writeWorkingCopy(path, revision.workflow);
+      await writeWorkingCopy(path, workflow);
     } catch (error) {
       this.declined.add(drop.key);
       await this.effects.refuse(
         `Anthill could not prepare ${drop.workflowId}: ${error instanceof Error ? error.message : String(error)} The handover remains pending. Fix the file or storage problem, then reopen its link or restart Anthill.`,
       );
-      return;
+      return false;
     }
+    return true;
+  }
 
-    const opened = await this.effects.open(path);
-    if (!opened.ok) {
-      await this.effects.refuse(
-        `Anthill could not open ${drop.workflowId}, which was handed over to it: ${opened.error}`,
-      );
-      this.declined.add(drop.key);
-      return;
-    }
-    // Only a confirmed display acknowledges the handover.
-    await this.store.consumeInbox(drop.key);
+  /** Whatever the host uses to keep window work from overlapping, if it has one. */
+  private serialized<T>(work: () => Promise<T>): Promise<T> {
+    return this.effects.serialize ? this.effects.serialize(work) : work();
   }
 
   /** Start following a run the server bound to a revision. */
@@ -290,6 +370,21 @@ export class ExchangeInbox {
     // next pass tries again. The alternative is a run reporting progress that
     // nothing is listening for, which looks to the user like a harness that
     // never started.
-    if (registered) await this.store.consumeInbox(drop.key);
+    if (registered) {
+      this.registrationFailures.delete(drop.key);
+      await this.store.consumeInbox(drop.key);
+      return;
+    }
+
+    const failures = (this.registrationFailures.get(drop.key) ?? 0) + 1;
+    this.registrationFailures.set(drop.key, failures);
+    // Said once, on the pass that reaches the count. Retrying in silence for
+    // ever is how a bound run stays invisible while the harness works through
+    // it, and the same failure on the display path has always raised a box.
+    if (failures === REGISTRATION_ATTEMPTS) {
+      await this.effects.refuse(
+        `Anthill has failed ${failures} times to start following run ${binding.runId} of ${drop.workflowId}. The run is bound to revision ${binding.revision} and the harness may already be working on it, but its progress reports have nothing watching for them, so the run will not appear on the Live Session page. Anthill keeps trying; restarting it is the other way out. Nothing was changed.`,
+      );
+    }
   }
 }

@@ -13,6 +13,7 @@
 import type { Workflow, WorkflowRun, NodeRun } from "@anthill/workflow-schema";
 import type { AgentModels, InterpreterId } from "@anthill/workflow";
 import type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun } from "@anthill/live";
+import type { ExchangeSource, ExchangeProblem, HandoverMode, RevisionState } from "@anthill/workflow-exchange";
 
 export type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun };
 
@@ -27,6 +28,10 @@ export const IpcChannel = {
   workspaceStatus: "workspace:status",
   workflowOpen: "workflow:open",
   workflowPendingOpen: "workflow:pending-open",
+  workflowOpened: "workflow:opened",
+  exchangeRead: "exchange:read",
+  exchangeReady: "exchange:ready",
+  liveWorkflow: "live:workflow",
   workflowSave: "workflow:save",
   runtimesDetect: "runtimes:detect",
   runStart: "run:start",
@@ -88,7 +93,7 @@ export const IpcChannel = {
  * quietly showed nothing. Bump this whenever a channel is added, and the
  * renderer can find out before it subscribes to something that will never fire.
  */
-export const IPC_CONTRACT = 16;
+export const IPC_CONTRACT = 17;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -288,6 +293,22 @@ export type SaveWorkflowRequest = {
    */
   path?: string;
 };
+
+export type ExchangeView = {
+  workflowId: string;
+  source: ExchangeSource;
+  mode: HandoverMode;
+  state: RevisionState;
+  revision: number;
+  digest: string;
+  problems: ExchangeProblem[];
+  bindings: { runId: string; revision: number }[];
+};
+export type ExchangeReadyRequest = { path: string; workflowId: string; revision: number; digest: string };
+export type ExchangeReadyResult = { ok: true } | { ok: false; error: string };
+export type BoundWorkflowResult =
+  | { ok: true; workflow: Workflow; revision: number; digest: string }
+  | { ok: false; error: string };
 
 /**
  * How a save ended, in the three ways an author can be told apart.
@@ -693,6 +714,10 @@ export interface AnthillApi {
    * workflow is never opened twice by two callers or by one mounting twice.
    */
   pendingWorkflowOpen(): Promise<string | undefined>;
+  workflowOpened(path: string): Promise<void>;
+  exchangeRead(path: string, workflowId: string): Promise<ExchangeView | undefined>;
+  exchangeReady(request: ExchangeReadyRequest): Promise<ExchangeReadyResult>;
+  liveWorkflow(runId: string): Promise<BoundWorkflowResult>;
   /**
    * A workflow a harness handed over while the page was up. Returns the
    * unsubscribe.

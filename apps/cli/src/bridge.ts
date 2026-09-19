@@ -292,6 +292,12 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     will be here.
   */
   register(IpcChannel.workflowPendingOpen, async () => undefined);
+  register(IpcChannel.workflowOpened, async () => undefined);
+  // Desktop owns exchange handover. The web shell must refuse approval rather
+  // than claim a decision it has nowhere to persist.
+  register(IpcChannel.exchangeRead, async () => undefined);
+  register(IpcChannel.exchangeReady, async () => ({ ok: false, error: "Open this handover in Anthill desktop to approve it." }));
+  register(IpcChannel.liveWorkflow, async () => ({ ok: false, error: "Bound revisions are available in Anthill desktop." }));
 
   /**
    * The workflow files the CLI can name: the recents (most recent first), then
@@ -728,6 +734,10 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
       handle(IpcChannel.workspaceStatus, rootPath),
     openWorkflow: (path?: string) => handle(IpcChannel.workflowOpen, path),
     pendingWorkflowOpen: () => handle(IpcChannel.workflowPendingOpen),
+    workflowOpened: (path) => handle(IpcChannel.workflowOpened, path),
+    exchangeRead: (path, id) => handle(IpcChannel.exchangeRead, path, id),
+    exchangeReady: (request) => handle(IpcChannel.exchangeReady, request),
+    liveWorkflow: (runId) => handle(IpcChannel.liveWorkflow, runId),
     onOpenWorkflow: (listener: (path: string) => void) =>
       on(OPEN_WORKFLOW_CHANNEL, (path) => listener(path as string)),
     saveWorkflow: (request: SaveWorkflowRequest) =>

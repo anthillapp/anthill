@@ -8293,14 +8293,21 @@ button.presence-chip {
 /* Bottom of the rail, where Claude Code and Codex keep theirs. Same rounded
    row as every other rail item — a square, full-bleed row read as a footer
    bar bolted on. */
+/*
+ * Inset from the rail's edges, like everything else in it.
+ *
+ * This row is a direct child of the rail rather than of the block list, so it
+ * inherits none of that list's side padding — at full width its hover ran
+ * flush into both edges and read as a bar bolted across the bottom rather
+ * than as one more row. The margin is the list's own 10px, borrowed.
+ */
 .rail-settings {
   display: flex;
   align-items: center;
   gap: 9px;
-  width: 100%;
   flex: none;
   padding: 8px;
-  margin-top: 8px;
+  margin: 8px 10px 10px;
   border: 0;
   border-radius: 7px;
   background: transparent;
@@ -8460,4 +8467,23 @@ button.presence-chip {
 .settings-search input,
 .library .search input {
   padding-left: 2px;
+}
+
+/*
+ * A field on the dark chrome keeps its focus ring and drops the light one.
+ *
+ * `input:focus` / `select:focus` paint a 3px `--accent-100` halo and an
+ * `--accent-300` border — tuned for the light canvas, where they are a soft
+ * pink. Against the dark rail the same two read as a thick pale border
+ * swallowing the control, and they sit under the white ring rather than
+ * instead of it, so the control gains two rings of different colours.
+ *
+ * The halo goes; `.on-dark:focus-visible` is the ring on this chrome.
+ */
+.library select:focus,
+.library select:focus-visible,
+.settings-nav button:focus-visible,
+.rail-settings:focus-visible {
+  box-shadow: none;
+  border-color: var(--dark-border);
 }

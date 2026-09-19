@@ -114,15 +114,29 @@ export type ReadyAnswer = {
   questions?: string[];
 };
 
-export type BindAnswer = {
-  /** `invalid` is the call itself being wrong, before any workflow was consulted. */
+/**
+ * The call itself being wrong, before any workflow was consulted.
+ *
+ * Its own member of the union because it is the one outcome that can arrive
+ * with no workflow to name: the id is one of the five values a bind carries and
+ * is judged with the other four, so a call that did not send a usable one
+ * leaves nothing to address and nothing to link to. Everything else about it is
+ * the ordinary bind answer — one shape, one set of words, every value that has
+ * to change named at once, whichever of them it is.
+ */
+export type InvalidBindAnswer = {
+  outcome: "invalid";
+  workflowId?: string;
+  problems?: ExchangeProblem[];
+};
+
+export type BindAnswer = InvalidBindAnswer | {
   outcome:
     | "bound"
     | "already_bound"
     | "not_ready"
     | "no_such_workflow"
-    | "conflict"
-    | "invalid";
+    | "conflict";
   workflowId: string;
   /** Absent on `no_such_workflow`, for the reason `DraftAnswer.url` gives. */
   url?: string;
@@ -144,13 +158,16 @@ export type BindAnswer = {
 };
 
 /**
- * What the three tools that address a workflow by id say when none was named.
+ * What the two read-only tools say when no workflow was named.
  *
- * Shared, because the mistake is one mistake wherever it is made: the id is
- * what each of those calls is *for*, and a handover cannot be looked up, worked
- * from or bound to without one. It is the only answer here that carries neither
- * a workflowId nor a link, and it cannot — a call that could not say which
- * workflow it meant leaves nothing to name and nothing to open.
+ * Shared between them because the mistake is one mistake either way, and it is
+ * the whole of what those two calls can get wrong: the id is what each of them
+ * is *for*, and there is nothing else in either call to judge. `bind_run`
+ * carries four more values and answers for the id among them, in `bindText`,
+ * so that a call wrong in two places is corrected once.
+ *
+ * It carries neither a workflowId nor a link, and it cannot — a call that could
+ * not say which workflow it meant leaves nothing to name and nothing to open.
  */
 export type CallAnswer = {
   outcome: "invalid";
@@ -293,13 +310,14 @@ export function bindText(answer: BindAnswer): string {
 
   // The caller's own mistake, so it is the caller that is addressed. Nothing
   // here is a question for the user, and telling the model to go and ask one
-  // would send it to somebody who cannot answer.
+  // would send it to somebody who cannot answer. No link either: this is
+  // refused before Anthill has looked at the workflow, so nothing here knows
+  // whether there is one to open.
   if (answer.outcome === "invalid") {
     return join([
       "Nothing was bound and no run was created. This call cannot be accepted:",
       numbered((answer.problems ?? []).map(sentence)),
       "Correct the call and bind again.",
-      answer.url ?? "",
     ]);
   }
 

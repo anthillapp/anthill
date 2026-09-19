@@ -615,6 +615,32 @@ describe("bind_run", () => {
     expect((await store.readWorkflow("workflow-1"))?.bindings).toHaveLength(0);
   });
 
+  it("names a bad id beside the values sent with it, in one answer", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+
+    // The id used to be answered first and on its own, in the shape the two
+    // read-only tools share, before the other four were looked at: a call
+    // wrong in the id and in the digest was corrected over two round trips and
+    // two shapes of prose, which is exactly what the one-pass check exists to
+    // stop.
+    const result = await handlers.bindRun({ ...bindInput(), workflowId: "   ", digest: "" });
+    const answer = answerOf(result);
+
+    expect(result.isError).toBeUndefined();
+    expect(answer.outcome).toBe("invalid");
+    expect(problemFields(answer)).toEqual(["workflowId", "digest"]);
+    expect(textOf(result)).toContain("Nothing was bound and no run was created");
+    // Nothing to name and nothing to open when the id is what was wrong; named
+    // when there is one, so a caller correcting four values can see which
+    // handover they were correcting them for.
+    expect(answer.workflowId).toBeUndefined();
+    expect(answer.url).toBeUndefined();
+    expect(answerOf(await handlers.bindRun({ ...bindInput(), digest: "" })).workflowId).toBe("workflow-1");
+
+    expect((await store.readWorkflow("workflow-1"))?.bindings).toEqual([]);
+  });
+
   it("answers for a field of the wrong kind rather than leaving it to the schema", async () => {
     const { handlers, store } = await openTools();
     await handlers.createWorkflowDraft(draftInput());

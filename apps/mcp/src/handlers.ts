@@ -359,17 +359,26 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
 
     async bindRun(input): Promise<CallToolResult> {
       const { revision, digest, idempotencyKey, sessionId } = input;
-      const addressed = readWorkflowId(input.workflowId);
-      if ("problem" in addressed) return result(callText, invalidCall([addressed.problem]));
-      const workflowId = addressed.workflowId;
 
-      // Every remaining argument is judged before anything is read or written,
-      // and every one that fails is named. Two of them are copied from
-      // `get_ready_revision` and two are the caller's own, so a refusal that
-      // said only that one of the four was wrong left it guessing which — and
-      // the three it had sent correctly were as likely to be rewritten as the
+      // Every argument is judged before anything is read or written, and every
+      // one that fails is named. Two of them are copied from
+      // `get_ready_revision` and three are the caller's own, so a refusal that
+      // said only that one of the five was wrong left it guessing which — and
+      // the four it had sent correctly were as likely to be rewritten as the
       // one it had not.
+      //
+      // The workflow id is judged here with the rest rather than answered first
+      // and separately, which is what it used to be: a call wrong in the id and
+      // in the digest was refused for the id, corrected, sent again and refused
+      // for the digest — two round trips, in two different shapes of prose, for
+      // one wrong call. It is the same sentence either way, because the two
+      // read-only tools have nothing beside the id to judge and answer for it
+      // on their own.
       const problems: ExchangeProblem[] = [];
+
+      const addressed = readWorkflowId(input.workflowId);
+      const workflowId = "problem" in addressed ? undefined : addressed.workflowId;
+      if ("problem" in addressed) problems.push(addressed.problem);
 
       // The one id in this call that Anthill did not mint. It is copied onto
       // the binding and registered as the run's session, where it is compared
@@ -412,11 +421,19 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
           "Repeat the same key and payload after a lost reply; use a new key only for an intentional new run."));
       }
 
-      if (badSession || exactRevision === undefined || exactDigest === undefined ||
-        bindingKey === undefined) {
-        // No link: this is refused before Anthill has looked at the workflow,
-        // so nothing here knows whether there is one to open.
-        return result(bindText, { outcome: "invalid", workflowId, ...problemFields(problems) });
+      // Each value again by name rather than `problems.length`, because these
+      // are what the calls below are given and a count does not narrow them.
+      if (workflowId === undefined || badSession || exactRevision === undefined ||
+        exactDigest === undefined || bindingKey === undefined) {
+        return result(bindText, {
+          outcome: "invalid",
+          // Named when there is one, because a caller correcting four values
+          // should be able to see which handover they were correcting them
+          // for. Absent when the id is what was wrong, which is the only way
+          // a bind answer can carry no workflow at all.
+          ...(workflowId === undefined ? {} : { workflowId }),
+          ...problemFields(problems),
+        });
       }
       const url = workflowUrl(workflowId);
       const bound = await store.bindRequest(workflowId, exactRevision, exactDigest, bindingKey, session,
@@ -533,6 +550,10 @@ function result<Answer extends Record<string, unknown>>(
  * machine has never seen; it is a caller that has lost track of what it was
  * addressing, and looking it up would answer `no_such_workflow` and send it
  * away to check an id it never sent.
+ *
+ * The same problem, reported in two places: it is the whole of what the two
+ * read-only calls can get wrong, so they answer with it alone, while `bind_run`
+ * collects it with the four values beside it and refuses once.
  */
 function readWorkflowId(
   value: unknown,

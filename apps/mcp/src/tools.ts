@@ -14,12 +14,24 @@
  * and it would bite in production rather than in a test. The shapes can be
  * declared once they have stopped moving.
  *
- * The input schemas are looser than they look like they should be, for a reason
- * spelled out in `handlers.ts`: the SDK validates them inside the try block that
- * turns everything into `isError: true`, so a field this schema rejects reaches
- * the model as an apparent crash rather than as a question it can put to the
- * user. Presence is asked for here; meaning is judged where a proper answer can
- * be given.
+ * The input schemas declare which keys a call carries and say nothing about what
+ * is in them, for a reason spelled out in `handlers.ts`: the SDK validates them
+ * inside the try block that turns everything into `isError: true`, so a value
+ * this schema rejects reaches the model as an apparent crash rather than as a
+ * question it can put to the user. `readSubmission` is written to answer for
+ * every one of these fields, in the vocabulary the design asks for, and a type
+ * declared here would refuse them first and leave that answer unreachable.
+ *
+ * The line that leaves is the envelope against its contents. Whether a key is
+ * there at all, and whether `source` is an object rather than a number, the SDK
+ * may still decide — zod cannot express "required, and I will judge it myself",
+ * and a caller that omits a required field is better told which field than told
+ * nothing. Everything inside is judged where a proper answer can be given.
+ *
+ * What is marked required here is what a submission is actually refused without,
+ * which is not the same as what the sender may leave out of a *complete*
+ * handover: `source.taskText` is required and may be empty, because an empty one
+ * is a question for the user rather than a malformed call.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -48,41 +60,37 @@ Returns an outcome of:
                   to the user in their own words.
   invalid         nothing was stored, and the problems say why.
 
-The result also carries the workflow id, the revision the content is now at, and
-an anthill:// link the user can open.`,
+The result also carries the workflow id and, where something was stored, the
+revision the content is now at and an anthill:// link the user can open. A
+refusal carries no link, because there would be nothing of yours behind it.`,
       inputSchema: {
         idempotencyKey: z
-          .string()
+          .unknown()
           .describe(
-            "Your own key for this handover, repeated verbatim if you retry it. A retry under the same key lands on the workflow it already created rather than on a second one.",
+            "Your own key for this handover, repeated verbatim if you retry it. It is not an address: a submission lands on the id its workflow document carries, and this key is your promise that a second submission under that id is the same call rather than different work. The same key under a different document id creates a second workflow rather than revising the first.",
           ),
         mode: z
-          .string()
+          .unknown()
           .describe(
             'How much say the user gets before work starts. "approval-gate": nothing may start until they mark a revision ready. "show-and-go": work may start as soon as the workflow is complete, and they can still edit it.',
           ),
         source: z
           .object({
-            harness: z
-              .string()
-              .optional()
-              .describe('Which tool you are: "claude-code", "codex" or "pi".'),
+            harness: z.unknown().describe('Which tool you are: "claude-code", "codex" or "pi".'),
             sessionId: z
-              .string()
-              .optional()
+              .unknown()
               .describe(
-                "Your own identifier for this conversation. Anthill does not parse it; it is kept so a run started from this handover can be picked up again after it goes quiet.",
+                "Your own identifier for this conversation: letters, digits, hyphens and underscores. Anthill does not read it, but it writes it down and matches it against your own session files, so a run started from this handover can be picked up again after it goes quiet.",
               ),
             taskText: z
-              .string()
-              .optional()
+              .unknown()
               .describe(
-                "What the user asked for, in the user's own words rather than your summary of it. Anthill shows this back to them so they can check it understood the same job they did.",
+                "What the user asked for, in the user's own words rather than your summary of it. Anthill shows this back to them so they can check it understood the same job they did, and it is written down once at the handover: nothing said later replaces it, and it is not in the document they can edit. Quote them.",
               ),
           })
           .describe("Who is handing this over, and what they were asked to do."),
         workflowId: z
-          .string()
+          .unknown()
           .optional()
           .describe(
             "The workflow you believe you are addressing. Leave it out on a first submission. When given it must equal the document's own id, so a submission whose address and document disagree is refused rather than filed under one of the two.",
@@ -93,7 +101,7 @@ an anthill:// link the user can open.`,
             `The complete workflow document as JSON: id, name, version, target, brief, nodes, edges and metadata.workflow.formatVersion: ${WORKFLOW_FORMAT_VERSION}. It must name a goal, say what done looks like, and target the submitting tool. Legacy or future workflow formats are refused, not migrated.`,
           ),
         exchangeVersion: z
-          .number()
+          .unknown()
           .optional()
           .describe(
             "The exchange version you speak. Leave it out unless you know you speak a later one than this server, which is refused by number rather than half-understood.",
@@ -134,8 +142,13 @@ A status read. It changes nothing and it never waits.`,
 together with its content — which may not be what you submitted, because the user
 can edit it.
 
-Returns "ready" with the revision and the workflow, or "not_ready" with the reason
-and, where there are any, the questions still to put to the user.
+Returns an outcome of:
+  ready             the revision and the workflow to work from.
+  not_ready         the reason, and where there are any, the questions still to
+                    put to the user. The workflow exists; something about it has
+                    yet to happen.
+  no_such_workflow  nothing of that id has been handed over to this Anthill.
+                    Check the id; waiting will not change it.
 
 This call answers immediately and never waits for anybody. Under approval-gate it
 stays "not_ready" until the user approves a revision, which takes as long as
@@ -153,9 +166,19 @@ when they say they are done. Do not poll this in a loop.`,
       title: "Bind an external session to a revision",
       description: `Create a run against the revision that may be worked on, and tell Anthill about it.
 
-Returns a run id, a nonce, and the exact shell commands to run as you work. Those
-commands are the only thing that tells Anthill which step you are on — it is not
-driving your session and has no other way to know.
+Returns an outcome of:
+  bound             the run was created against the revision named in the result.
+  already_bound     this run id was already bound to that same revision.
+  not_ready         nothing was bound: the revision cannot be worked on yet, and
+                    the reason says why.
+  no_such_workflow  nothing of that id has been handed over to this Anthill.
+  conflict          nothing was bound, and something else already holds what this
+                    call asked for.
+  invalid           nothing was bound, and the call itself is what has to change.
+
+On success the result also carries a run id, a nonce, and the exact shell commands
+to run as you work. Those commands are the only thing that tells Anthill which
+step you are on — it is not driving your session and has no other way to know.
 
 Retry with the same idempotencyKey, revision, digest and session after a lost reply.
 Use a new key only for an intentional new run. Binding does not start the agent
@@ -175,7 +198,7 @@ or confirm that the desktop has registered observation.`,
           .string()
           .optional()
           .describe(
-            "The harness session that will do the work, when it is not the one that handed the workflow over. Defaults to the submitting session.",
+            "The harness session that will do the work, when it is not the one that handed the workflow over. Letters, digits, hyphens and underscores, as in the handover. Defaults to the submitting session.",
           ),
       },
       annotations: {

@@ -108,6 +108,11 @@ export type StoredReadiness = {
  * binding. A run whose only evidence is the report channel never learns one,
  * and a run with no session id can never be picked back up after it goes quiet
  * — so it is written down here, where there is still something that knows it.
+ *
+ * Read back as it stands, rather than re-checked against the shape rule the
+ * door applies. A record written by an older build is history, and refusing to
+ * read one would cost the workflow it belongs to for ever to correct an id
+ * nothing can now go back and resend.
  */
 export type Binding = {
   requestKey?: string;

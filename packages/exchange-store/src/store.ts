@@ -139,6 +139,10 @@ export type BindRun = {
    * because a run whose only evidence is the report channel never learns one,
    * and a run with no session id can never be picked up again after it goes
    * quiet — every recovery path requires one.
+   *
+   * Its shape is `checkSessionId`'s business and is settled before it gets
+   * here, at whichever door it came in by. This store writes down what it is
+   * given; the refusal belongs where the sender can still hear it.
    */
   sessionId?: string;
 };

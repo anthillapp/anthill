@@ -43,6 +43,15 @@ export type DraftAnswer = {
   outcome: "created" | "already_exists" | "incomplete" | "invalid";
   /** Absent only when the submission was too malformed to say which workflow it was about. */
   workflowId?: string;
+  /**
+   * The link that opens this workflow, when there is one to open.
+   *
+   * Absent from every refusal, and that is the rule every answer in this file
+   * follows: a link is offered only where the thing it addresses is stored.
+   * Handing the user an `anthill://` URL that opens nothing — or, after an id
+   * clash, that opens somebody else's workflow — is worse than saying nothing,
+   * because it looks like the one part of the answer they can act on.
+   */
   url?: string;
   revision?: number;
   mode?: HandoverMode;
@@ -57,7 +66,8 @@ export type DraftAnswer = {
 export type WorkflowAnswer = {
   outcome: "found" | "not_found";
   workflowId: string;
-  url: string;
+  /** Absent on `not_found`: there is nothing of that id here for a link to open. */
+  url?: string;
   mode?: HandoverMode;
   source?: ExchangeSource;
   createdAt?: string;
@@ -76,9 +86,16 @@ export type WorkflowAnswer = {
 };
 
 export type ReadyAnswer = {
-  outcome: "ready" | "not_ready";
+  /**
+   * `no_such_workflow` is its own outcome rather than a flavour of `not_ready`.
+   * The difference is the whole answer a caller acts on: one is a workflow
+   * waiting for its user, the other is an id this machine has never seen, and a
+   * caller told to wait for the second waits for ever.
+   */
+  outcome: "ready" | "not_ready" | "no_such_workflow";
   workflowId: string;
-  url: string;
+  /** Absent on `no_such_workflow`, for the reason `DraftAnswer.url` gives. */
+  url?: string;
   mode?: HandoverMode;
   revision?: number;
   digest?: string;
@@ -98,9 +115,17 @@ export type ReadyAnswer = {
 };
 
 export type BindAnswer = {
-  outcome: "bound" | "already_bound" | "not_ready" | "no_such_workflow" | "conflict" | "invalid";
+  /** `invalid` is the call itself being wrong, before any workflow was consulted. */
+  outcome:
+    | "bound"
+    | "already_bound"
+    | "not_ready"
+    | "no_such_workflow"
+    | "conflict"
+    | "invalid";
   workflowId: string;
-  url: string;
+  /** Absent on `no_such_workflow`, for the reason `DraftAnswer.url` gives. */
+  url?: string;
   mode?: HandoverMode;
   revision?: number;
   digest?: string;
@@ -200,11 +225,15 @@ export function workflowText(answer: WorkflowAnswer): string {
     parts.push("Problems:", numbered(answer.problems.map(sentence)));
   }
 
-  parts.push(answer.url);
+  parts.push(answer.url ?? "");
   return join(parts);
 }
 
 export function readyText(answer: ReadyAnswer): string {
+  if (answer.outcome === "no_such_workflow") {
+    return join([unknownWorkflowText(answer.workflowId)]);
+  }
+
   if (answer.outcome === "not_ready") {
     return join([
       answer.reason
@@ -215,8 +244,14 @@ export function readyText(answer: ReadyAnswer): string {
       // that returned "not ready" and was then called in a tight loop, or waited
       // on inside the user's turn, would burn a session on somebody else's
       // reading speed.
-      "This call does not wait, and neither should you. Tell the user what Anthill is waiting for, finish your turn, and call get_ready_revision again when they say they are done.",
-      answer.url,
+      //
+      // Said only where the user is the one who can change the answer. Under
+      // the rest — a damaged record, a workflow with no revision — waiting for
+      // them is waiting for somebody who cannot help.
+      answer.reason && userCanClear(answer.reason)
+        ? "This call does not wait, and neither should you. Tell the user what Anthill is waiting for, finish your turn, and call get_ready_revision again when they say they are done."
+        : "",
+      answer.url ?? "",
     ]);
   }
 
@@ -228,15 +263,26 @@ export function readyText(answer: ReadyAnswer): string {
     "Authoritative workflow JSON for this exact revision:\n" + JSON.stringify(answer.workflow));
   parts.push(
     "Call bind_run with this revision, digest and a stable idempotencyKey before you start. Repeat that same key and payload after a lost reply, not a new request.",
-    answer.url,
+    answer.url ?? "",
   );
   return join(parts);
 }
 
 export function bindText(answer: BindAnswer): string {
-  if (answer.outcome === "invalid") return join(["Nothing was bound. Correct the request:", ...detail(answer.questions, answer.problems)]);
   if (answer.outcome === "no_such_workflow") {
-    return join([unknownWorkflowText(answer.workflowId), answer.url]);
+    return join([unknownWorkflowText(answer.workflowId)]);
+  }
+
+  // The caller's own mistake, so it is the caller that is addressed. Nothing
+  // here is a question for the user, and telling the model to go and ask one
+  // would send it to somebody who cannot answer.
+  if (answer.outcome === "invalid") {
+    return join([
+      "Nothing was bound and no run was created. This call cannot be accepted:",
+      numbered((answer.problems ?? []).map(sentence)),
+      "Correct the call and bind again.",
+      answer.url ?? "",
+    ]);
   }
 
   if (answer.outcome === "not_ready") {
@@ -246,7 +292,7 @@ export function bindText(answer: BindAnswer): string {
         : `Revision ${answer.revision} of ${answer.workflowId} cannot be worked on.`,
       ...detail(answer.questions, answer.problems),
       "Nothing was bound and no run was created.",
-      answer.url,
+      answer.url ?? "",
     ]);
   }
 
@@ -254,7 +300,7 @@ export function bindText(answer: BindAnswer): string {
     return join([
       `Nothing was bound to ${answer.workflowId}.`,
       ...detail(answer.questions, answer.problems),
-      answer.url,
+      answer.url ?? "",
     ]);
   }
 
@@ -269,7 +315,7 @@ export function bindText(answer: BindAnswer): string {
     // session and has no other way to learn which step the work is on.
     "Run these as you work. They are the only thing that tells Anthill which step you are on, and they change nothing about the work itself — if one cannot be run, carry on without it.",
     answer.reportingCommands ?? "",
-    answer.url,
+    answer.url ?? "",
   ]);
 }
 
@@ -299,6 +345,20 @@ function detail(
   ];
   const rest = (problems ?? []).filter((problem) => !echoes.includes(problem.code));
   return rest.length > 0 ? [numbered(rest.map(sentence))] : [];
+}
+
+/**
+ * Whether the user is the one who can change this answer.
+ *
+ * Two of the five refusals are theirs: an approval they have not given yet,
+ * and questions they have not answered. The other three — an id nothing was
+ * ever stored under, a record this build cannot read, a workflow with no
+ * revision at all — are not things a person can settle by reading and coming
+ * back, and asking them to would leave them waiting for a change that is never
+ * going to arrive.
+ */
+function userCanClear(reason: EligibilityRefusal): boolean {
+  return reason === "awaiting_approval" || reason === "incomplete";
 }
 
 /** Every question a list of problems carries, in order and without repeats. */

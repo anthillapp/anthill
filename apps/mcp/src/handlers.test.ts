@@ -265,6 +265,57 @@ describe("create_workflow_draft", () => {
     expect(await store.readWorkflow("workflow-1")).toBeUndefined();
   });
 
+  it("queues the second workflow when one key is reused under a different id", async () => {
+    const { handlers, store } = await openTools();
+
+    // Nothing refuses this: a submission is filed under the id its document
+    // carries, and the key is only compared when two of them land on one id.
+    // So both are stored, and both have to be shown — a display request keyed
+    // on the idempotency key alone would have collided with the first and been
+    // dropped as a conflict, leaving a workflow nobody was ever shown.
+    await handlers.createWorkflowDraft(draftInput());
+    const second = answerOf(
+      await handlers.createWorkflowDraft(
+        draftInput({ workflow: completeWorkflow({ id: "workflow-2" }) }),
+      ),
+    );
+
+    expect(second.outcome).toBe("created");
+    expect(second.workflowId).toBe("workflow-2");
+    expect(second.displayed).toBe(false);
+    expect(second.displayRequested).toBe(true);
+
+    const drops = await inbox(store);
+    expect(drops.map((drop) => drop.workflowId)).toEqual(["workflow-1", "workflow-2"]);
+  });
+
+  it("keeps two display requests apart when the ids are longer than a file name", async () => {
+    const { handlers, store } = await openTools();
+
+    // Distinct workflows, distinct directories, and one inbox file between
+    // them until the key is hashed: `safeSegment` cuts a name to 120
+    // characters, and everything that tells these two apart lives past it.
+    const first = `${"x".repeat(112)}a`;
+    const second = `${"x".repeat(112)}b`;
+
+    await handlers.createWorkflowDraft(
+      draftInput({ workflow: completeWorkflow({ id: first }) }),
+    );
+    // Consumed, which is the case that used to answer `already_dropped`: a
+    // drop in `done/` is read as this same request having been carried out.
+    await store.consumeInbox((await inbox(store))[0].key);
+
+    const answer = answerOf(
+      await handlers.createWorkflowDraft(
+        draftInput({ workflow: completeWorkflow({ id: second }) }),
+      ),
+    );
+
+    expect(answer.displayed).toBe(false);
+    expect(answer.displayRequested).toBe(true);
+    expect((await inbox(store)).map((drop) => drop.workflowId)).toEqual([second]);
+  });
+
   it("refuses a second, unrelated workflow that claims an id already taken", async () => {
     const { handlers } = await openTools();
 
@@ -279,6 +330,10 @@ describe("create_workflow_draft", () => {
     expect(problemCodes(answer)).toEqual(["STORE_WORKFLOW_ID_TAKEN"]);
     // The one refusal here a person can answer, so it arrives as a question.
     expect((answer.questions as string[]).length).toBe(1);
+
+    // And no link. The id resolves to the workflow that already holds the
+    // name, so offering one would open somebody else's work.
+    expect(answer.url).toBeUndefined();
   });
 });
 
@@ -291,6 +346,10 @@ describe("get_workflow", () => {
     expect(result.isError).toBeUndefined();
     expect(answerOf(result).outcome).toBe("not_found");
     expect(textOf(result)).toContain("create_workflow_draft");
+
+    // Nothing of that id is stored, so there is nothing for a link to open.
+    expect(answerOf(result).url).toBeUndefined();
+    expect(textOf(result)).not.toContain("anthill://");
   });
 
   it("reports identity, head, readiness, bindings and mode", async () => {
@@ -367,6 +426,34 @@ describe("get_ready_revision", () => {
     expect(answer.outcome).toBe("ready");
     expect(answer.revision).toBe(1);
     expect((answer.workflow as Workflow).name).toBe("Ship the fix");
+  });
+
+  it("says the workflow is not there rather than telling the caller to wait for it", async () => {
+    const { handlers } = await openTools();
+
+    const result = await handlers.getReadyRevision({ workflowId: "never-handed-over" });
+    const answer = answerOf(result);
+
+    expect(result.isError).toBeUndefined();
+    expect(answer.outcome).toBe("no_such_workflow");
+
+    // The waiting paragraph belongs to the refusals a user can clear. Told to
+    // finish the turn and ask again, a caller waits for a user who has nothing
+    // in front of them to approve.
+    expect(textOf(result)).not.toContain("call get_ready_revision again");
+    expect(textOf(result)).toContain("create_workflow_draft");
+    expect(answer.url).toBeUndefined();
+  });
+
+  it("tells the caller to come back where the user is the one who can open the gate", async () => {
+    const { handlers } = await openTools();
+    await handlers.createWorkflowDraft(draftInput({ mode: "approval-gate" }));
+
+    const waiting = await handlers.getReadyRevision({ workflowId: "workflow-1" });
+
+    expect(answerOf(waiting).outcome).toBe("not_ready");
+    expect(textOf(waiting)).toContain("call get_ready_revision again");
+    expect(textOf(waiting)).toContain("anthill://workflow/workflow-1");
   });
 
   it("carries the questions when the revision is not fit to be handed over", async () => {
@@ -482,6 +569,45 @@ describe("bind_run", () => {
 
     expect(result.isError).toBeUndefined();
     expect(answerOf(result).outcome).toBe("no_such_workflow");
+    expect(answerOf(result).url).toBeUndefined();
+  });
+
+  it("refuses a session id it could not carry, and creates no run", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+
+    const result = await handlers.bindRun({
+      workflowId: "workflow-1",
+      sessionId: "../../etc/passwd",
+    });
+    const answer = answerOf(result);
+
+    // The refusal reaches the sender, which is the only party that can send a
+    // different one. Registered as a run's session, this would be compared
+    // against the ids in the harness's own files and match nothing, and the
+    // run would look like one that was never observed.
+    expect(result.isError).toBeUndefined();
+    expect(answer.outcome).toBe("invalid");
+    expect(problemCodes(answer)).toEqual(["SUBMISSION_FIELD_INVALID"]);
+    expect(textOf(result)).toContain("sessionId");
+
+    const stored = await store.readWorkflow("workflow-1");
+    expect(stored?.bindings).toEqual([]);
+    expect((await inbox(store)).map((drop) => drop.kind)).toEqual(["display"]);
+  });
+
+  it("takes a session id from the shape the harnesses actually mint", async () => {
+    const { handlers } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+
+    const answer = answerOf(
+      await handlers.bindRun(bindInput({
+        sessionId: "0f7d4c2a-9b1e-4c33-8a5f-6d2e1b7c0a94",
+      })),
+    );
+
+    expect(answer.outcome).toBe("bound");
+    expect(answer.sessionId).toBe("0f7d4c2a-9b1e-4c33-8a5f-6d2e1b7c0a94");
   });
 
   it("returns the same run on a retry and permits an explicit new run", async () => {

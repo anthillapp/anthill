@@ -12,8 +12,8 @@ import { HARNESS_TARGETS } from "@anthill/workflow-schema";
 import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow";
 import { describe, expect, it } from "vitest";
 
-import { EXCHANGE_PROBLEM_CODES, EXCHANGE_VERSION } from "./contracts.js";
-import { checkExchangeVersion, readSubmission } from "./submission.js";
+import { EXCHANGE_PROBLEM_CODES, EXCHANGE_VERSION, SESSION_ID_MAX_LENGTH } from "./contracts.js";
+import { checkExchangeVersion, checkSessionId, readSubmission } from "./submission.js";
 
 /** The smallest thing `WorkflowSchema` accepts. Completeness is not in question here. */
 function workflow(): Record<string, unknown> {
@@ -49,6 +49,46 @@ function codes(problems: { code: string }[]): string[] {
 function fields(problems: { field?: string }[]): (string | undefined)[] {
   return problems.map((problem) => problem.field);
 }
+
+describe("checkSessionId", () => {
+  it("accepts what the three harnesses actually mint", () => {
+    expect(checkSessionId("0f7d4c2a-9b1e-4c33-8a5f-6d2e1b7c0a94", "source.sessionId")).toBeUndefined();
+    expect(checkSessionId("session-abc", "source.sessionId")).toBeUndefined();
+    expect(checkSessionId("1750000000000_abc", "source.sessionId")).toBeUndefined();
+  });
+
+  it("refuses one that would not survive being written into a file name", () => {
+    // Each of these comes back out of a path, or out of a line of a log, as a
+    // different string than went in — which shows up as a run that never
+    // matches its session rather than as a bad session id.
+    for (const id of ["../../etc/passwd", "sess/1", "sess 1", "sess\n1", "sess:1", "sess.1"]) {
+      const problem = checkSessionId(id, "source.sessionId");
+      expect(problem?.code).toBe(EXCHANGE_PROBLEM_CODES.SUBMISSION_FIELD_INVALID);
+      expect(problem?.field).toBe("source.sessionId");
+    }
+  });
+
+  it("refuses one longer than a file name is allowed to be", () => {
+    expect(checkSessionId("a".repeat(SESSION_ID_MAX_LENGTH), "sessionId")).toBeUndefined();
+    expect(checkSessionId("a".repeat(SESSION_ID_MAX_LENGTH + 1), "sessionId")?.field).toBe(
+      "sessionId",
+    );
+  });
+
+  it("tells an absent session id apart from a misshapen one", () => {
+    expect(checkSessionId(undefined, "sessionId")?.code).toBe(
+      EXCHANGE_PROBLEM_CODES.SUBMISSION_FIELD_MISSING,
+    );
+    expect(checkSessionId(12, "sessionId")?.code).toBe(
+      EXCHANGE_PROBLEM_CODES.SUBMISSION_FIELD_INVALID,
+    );
+  });
+
+  it("names the field it was asked about, so one message serves both doors", () => {
+    expect(checkSessionId("sess/1", "sessionId")?.field).toBe("sessionId");
+    expect(checkSessionId("sess/1", "source.sessionId")?.field).toBe("source.sessionId");
+  });
+});
 
 describe("checkExchangeVersion", () => {
   it("accepts this build's own version", () => {
@@ -220,6 +260,19 @@ describe("readSubmission", () => {
     expect(readSubmission(handover({ mode: "show-and-go" })).ok).toBe(true);
     expect(readSubmission(handover({ mode: "approval-gate" })).ok).toBe(true);
     expect(readSubmission(handover({ mode: "APPROVAL-GATE" })).ok).toBe(false);
+  });
+
+  it("refuses a session id it could not carry unchanged, and says which field", () => {
+    const result = readSubmission(
+      handover({
+        source: { harness: "codex", sessionId: "sess/1", taskText: "Fix the crash." },
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(codes(result.problems)).toEqual([EXCHANGE_PROBLEM_CODES.SUBMISSION_FIELD_INVALID]);
+    expect(fields(result.problems)).toEqual(["source.sessionId"]);
   });
 
   it("accepts a blank task text, which is a question for the user rather than a bad shape", () => {

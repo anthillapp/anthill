@@ -42,6 +42,31 @@ export const SERVER_NAME = "anthill";
 export const SERVER_VERSION = "0.6.6";
 
 /**
+ * What the process ends on when the transport fails.
+ *
+ * Non-zero because a transport error is a message that was never answered:
+ * either a request this server could not read, or — past the transport's 10 MB
+ * buffer — the connection itself going away. Somebody is waiting for a reply
+ * that is not coming, and ending on 0 tells the harness this session finished
+ * the way an ordinary one does. Distinct from the 2 a bad argument returns,
+ * which is a fault in how the server was started rather than in what it was
+ * asked.
+ */
+export const TRANSPORT_FAILURE_EXIT_CODE = 1;
+
+/**
+ * What stderr is told when the transport fails.
+ *
+ * Its own function so the wording can be held to account by a test without the
+ * test owning this process's streams, and because a string built inside an
+ * event handler is a string nothing ever reads back.
+ */
+export function transportFailureLine(error: unknown): string {
+  const reason = error instanceof Error ? error.message : String(error);
+  return `${SERVER_NAME} mcp server: the connection to the harness failed: ${reason}\n`;
+}
+
+/**
  * A server with the four tools registered, ready to be connected to a transport.
  *
  * Separate from starting one so a test can build it without owning the process's
@@ -72,7 +97,19 @@ export async function runServer(argv: readonly string[]): Promise<number> {
   }
 
   const server = createMcpServer(read.options);
-  await server.connect(new StdioServerTransport());
+
+  const transport = new StdioServerTransport();
+  // Set before `connect`, and both halves of that matter. `connect` chains
+  // whatever handler it finds onto the protocol's own, so a handler installed
+  // afterwards would replace the SDK's rather than run beside it — and the
+  // transport starts reading inside `connect`, so an error on the first chunk
+  // would have nowhere to go at all. Without this the process ends on 0 with an
+  // empty stderr: a connection that died and a clean shutdown look identical.
+  transport.onerror = (error) => {
+    process.stderr.write(transportFailureLine(error));
+    process.exitCode = TRANSPORT_FAILURE_EXIT_CODE;
+  };
+  await server.connect(transport);
 
   // Said on stderr once the transport is up, because the data directory is the
   // one thing that can be silently wrong: a server pointed at a directory the
@@ -85,5 +122,9 @@ export async function runServer(argv: readonly string[]): Promise<number> {
 // script Node was given, so comparing it with this module's own URL is what
 // tells the two apart.
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  process.exitCode = await runServer(process.argv.slice(2));
+  // Assigned only on a refusal to start. A clean start returns 0, and writing
+  // that back would overwrite a code the transport had already set on its way
+  // past.
+  const code = await runServer(process.argv.slice(2));
+  if (code !== 0) process.exitCode = code;
 }

@@ -131,7 +131,7 @@ function reachableFrom(workflow: Workflow, startId: string): Set<string> {
 }
 
 /**
- * Groups of blocks that loop among themselves, in diagram order.
+ * Groups of blocks that loop among themselves, each in the order it runs.
  *
  * Each group is a set of blocks mutually reachable from one another — a
  * developer/reviewer feedback loop comes back as one group of two. Reported as
@@ -188,14 +188,44 @@ export function findCycles(workflow: Workflow): string[][] {
     }
     count += 1;
   }
-  // Preserve diagram order for compiled prompts and existing consumers.
   const groups = new Map<number, string[]>();
   for (const id of ids) {
     const group = component.get(id)!;
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group)!.push(id);
   }
-  return [...groups.values()].filter((group) => group.length > 1 || selfLoops.has(group[0]));
+  return [...groups.values()]
+    .filter((group) => group.length > 1 || selfLoops.has(group[0]))
+    .map((group) => aroundTheLoop(group, forward));
+}
+
+/**
+ * One loop's blocks, in the order the work goes round them.
+ *
+ * Kosaraju hands back a component as a set, and the blocks in it are listed
+ * here in the order they were drawn. That is not the order they run in, and
+ * the difference is visible: the compiled prompt names a loop by joining its
+ * members — `### Implement ⇄ Review ⇄ Verify` — so a user whose three blocks
+ * were not drawn in the order they happen read a heading describing a loop
+ * that does not exist.
+ *
+ * Breadth-first from the member drawn first, following only the edges that
+ * stay inside the loop. Every block in a strongly connected component is
+ * reachable from every other, so this reaches all of them, and it reaches them
+ * the way the work does.
+ */
+function aroundTheLoop(group: readonly string[], forward: Map<string, string[]>): string[] {
+  const inside = new Set(group);
+  const order = [group[0]];
+  const seen = new Set(order);
+  for (let index = 0; index < order.length; index += 1) {
+    for (const next of forward.get(order[index]) ?? []) {
+      if (!inside.has(next) || seen.has(next)) continue;
+      seen.add(next);
+      order.push(next);
+    }
+  }
+  return order;
 }
 
 /** Node ids that sit on at least one cycle. */

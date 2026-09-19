@@ -369,12 +369,25 @@ button.link:hover {
   color: var(--on-dark-dimmer);
 }
 
+/*
+ * The chevron is drawn here rather than by the platform.
+ *
+ * A native `<select>` puts its indicator against the element's border edge and
+ * ignores `padding-right` entirely, so the arrow sat hard against the frame
+ * with no way to ask it to move. Turning the native appearance off and
+ * painting the chevron as a background image makes its position a property
+ * like any other — and it is the same Lucide stroke as the step buttons,
+ * rather than whatever the platform happens to draw.
+ */
 .library select {
+  appearance: none;
+  -webkit-appearance: none;
   height: 32px;
-  /* The chevron is drawn at the inline end of the padding box, so with the
-     global 9px it sat all but against the border. */
-  padding-right: 12px;
-  background: rgba(255, 255, 255, 0.07);
+  padding-right: 30px;
+  background-color: rgba(255, 255, 255, 0.07);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23bab6b6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
   border-color: var(--dark-border);
   color: var(--on-dark);
 }

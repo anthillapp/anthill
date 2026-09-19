@@ -17,8 +17,9 @@ should suggest otherwise to the user.
 
 ## What the argument means
 
-* `design <task>` — hand the task over and get on with it once it is complete.
-* `review <task>` — hand it over and wait for the user to approve a revision first.
+* `design <task>` — hand the task over, then ask the user whether to start.
+* `review <task>` — hand it over and wait for them to mark a revision ready in
+  Anthill, so their decision is recorded rather than only spoken.
 * `status [<workflow id>]` — where a handover stands.
 * `resume <workflow id>` — pick a handover back up in a new session.
 * `doctor` — check that Anthill and its tools are reachable.
@@ -107,6 +108,44 @@ damage than an admitted gap.
    local inbox and the app reads it on its own schedule. If Anthill is not
    running, the handover is waiting and will open when it starts. Say that
    plainly rather than claiming the user is looking at something.
+
+## Ask before you start. Always.
+
+The workflow is now in front of the user. **Do not begin the work until they have
+said to.** Ask, in your own words, whether the plan is right or something should
+change, and say where the workflow is so they can read it.
+
+This holds in both modes. The mode decides where the answer is recorded, not
+whether it is needed: under **approval gate** Anthill will not hand you a
+revision until the user marks one ready in the app, so their yes is written
+down; under **show-and-go** nothing stops you, so their yes is only what they
+said to you. Neither is a reason to start without asking. A workflow the user
+has not agreed to is a plan you wrote for yourself.
+
+Then **finish your turn** and wait. Anthill cannot interrupt this session — it
+has no way to reach you, by design — so nothing arrives to tell you they are
+done. The next thing they say is what starts you moving.
+
+### If they say yes
+
+Go on to `get_ready_revision` and bind.
+
+### If they want to change it
+
+Two ways, and the user picks:
+
+**They edit it in Anthill.** They change the graph and press Save. When they
+come back — whatever they say — call `get_workflow` before you do anything else.
+A higher revision number means they saved: say which revision you can now see,
+confirm that is what they want worked on, and only then bind. Never bind the
+revision you submitted after they have told you they were going to change it;
+read what is there now.
+
+**They ask you to change it.** You cannot revise a stored workflow: the tools
+create one and read it, and there is no third thing. Say so plainly — the
+workflow is theirs to edit in Anthill, and you can help by describing exactly
+what to change. Do not resubmit under a new id to get around it: that leaves two
+workflows where the user meant one, and the second one nobody approved.
 
 ## Starting the work
 

@@ -342,6 +342,7 @@ both copies — untried here rather than known to work.
 ```text
 apps/
   desktop/           Electron app: the launcher, canvas, handover and Live Session
+  mcp/               the local stdio MCP server a coding harness hands a workflow over through
 
 packages/
   workflow-schema/   the graph model and its validation

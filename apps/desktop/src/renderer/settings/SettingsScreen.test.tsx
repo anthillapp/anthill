@@ -1,0 +1,251 @@
+/**
+ * Settings, as a page that owns itself.
+ *
+ * It was a modal with a card nested inside it, and the five problems the
+ * review found were all one problem: nothing owned the page. The card brought
+ * its own heading, its own two ways to close — one of which quietly did
+ * something permanent under a neutral word — and a setting you change looked
+ * exactly like a status you read.
+ *
+ * So most of these tests are about what the page refuses to contain.
+ */
+
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { ObservationHarnessSetup } from "../../shared/ipc.js";
+import { SettingsScreen } from "./SettingsScreen.js";
+
+const HARNESS: ObservationHarnessSetup = {
+  id: "claude-code" as const,
+  label: "Claude Code",
+  cliCommand: "claude",
+  cliAvailable: true,
+  version: "2.1.261",
+  hookInstalled: true,
+  hookEntriesPresent: true,
+  hookLastEventAt: "2026-09-18T10:00:00.000Z",
+  configPath: "~/.claude/settings.json",
+  hookHandlerPath: "/Applications/Anthill.app/handler.js",
+  installerAction: "Merge four hook entries",
+  installCommand: "node handler.js",
+  hookCommands: ["node handler.js PreToolUse"],
+  eventCategories: ["Tool use", "Notification"],
+  localDataBoundary: "Event metadata only.",
+  changes: ["Adds four entries."],
+};
+
+function stub(
+  over: {
+    settings?: { stepNotifications: boolean };
+    harnesses?: ObservationHarnessSetup[];
+    probe?: { kind: "sent" } | { kind: "unsupported"; reason: string };
+  } = {},
+) {
+  let stored = over.settings ?? { stepNotifications: false };
+  const settingsWrite = vi.fn(async (patch: Partial<typeof stored>) => {
+    stored = { ...stored, ...patch };
+    return stored;
+  });
+  const api = {
+    settingsRead: vi.fn(async () => stored),
+    settingsWrite,
+    notificationsProbe: vi.fn(async () => over.probe ?? { kind: "sent" as const }),
+    liveSetupStatus: vi.fn(async () => ({
+      dismissed: false,
+      trigger: "Shown after the first meaningful Workflow edit.",
+      harnesses: over.harnesses ?? [HARNESS],
+    })),
+    liveSetupInstall: vi.fn(),
+    liveSetupDisable: vi.fn(async () => ({
+      ok: true as const,
+      status: { dismissed: false, trigger: "", harnesses: [] },
+      message: "Removed.",
+    })),
+  };
+  (window as unknown as { anthill: unknown }).anthill = api;
+  return api;
+}
+
+const show = (onLeave = vi.fn()) => {
+  render(<SettingsScreen onLeave={onLeave} />);
+  return { onLeave };
+};
+
+const page = (name: string) => screen.getByRole("button", { name });
+
+afterEach(() => {
+  cleanup();
+  delete (window as unknown as { anthill?: unknown }).anthill;
+});
+
+describe("the page owns itself", () => {
+  it("has exactly one heading at the top of the outline", async () => {
+    stub();
+    show();
+    await waitFor(() => expect(screen.getByRole("switch")).toBeTruthy());
+    // One h1, and nothing nested brings a rival.
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Notifications");
+  });
+
+  it("offers exactly one way out", async () => {
+    stub();
+    const { onLeave } = show();
+    await waitFor(() => expect(screen.getByLabelText("Back to Anthill")).toBeTruthy());
+    // No ✕, no Close, and above all no "Not now" — a neutral word on a
+    // control that dismissed the prompt for good.
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "✕" })).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("Back to Anthill"));
+    expect(onLeave).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks the page you are on, and moves when you move", async () => {
+    stub();
+    show();
+    await waitFor(() => expect(page("Notifications")).toBeTruthy());
+    expect(page("Notifications").getAttribute("aria-current")).toBe("page");
+
+    fireEvent.click(page("About"));
+    expect(page("About").getAttribute("aria-current")).toBe("page");
+    expect(page("Notifications").getAttribute("aria-current")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("About");
+  });
+
+  it("narrows the rail to what you searched for", async () => {
+    stub();
+    show();
+    fireEvent.change(screen.getByLabelText("Search settings"), { target: { value: "obs" } });
+    expect(screen.queryByRole("button", { name: "Notifications" })).toBeNull();
+    expect(page("Live observation")).toBeTruthy();
+  });
+});
+
+describe("the notification setting", () => {
+  const theSwitch = () => screen.getByRole("switch");
+
+  it("is a switch rather than a checkbox, so the global input rule cannot stretch it", async () => {
+    stub();
+    show();
+    await waitFor(() => expect(theSwitch()).toBeTruthy());
+    expect(theSwitch().tagName).toBe("BUTTON");
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("shows what is stored and writes what is changed", async () => {
+    const api = stub();
+    show();
+    await waitFor(() => expect(theSwitch().getAttribute("aria-checked")).toBe("false"));
+    fireEvent.click(theSwitch());
+    await waitFor(() => expect(api.settingsWrite).toHaveBeenCalledWith({ stepNotifications: true }));
+    expect(theSwitch().getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("asks about macOS permission only once something would be sent", async () => {
+    // A permission row while nothing would be sent is a question nobody asked.
+    stub();
+    show();
+    await waitFor(() => expect(theSwitch()).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "Send a test" })).toBeNull();
+
+    fireEvent.click(theSwitch());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send a test" })).toBeTruthy());
+    expect(screen.getByText(/System Settings ▸ Notifications ▸ Anthill/)).toBeTruthy();
+  });
+
+  it("names the likely culprit honestly when a test is sent", async () => {
+    stub({ settings: { stepNotifications: true } });
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: "Send a test" }));
+    expect(
+      await screen.findByText(/macOS is holding it back rather than Anthill/),
+    ).toBeTruthy();
+  });
+
+  it("drops a stale test result when the switch is turned off", async () => {
+    stub({ settings: { stepNotifications: true } });
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: "Send a test" }));
+    await screen.findByText(/macOS is holding it back/);
+    fireEvent.click(theSwitch());
+    await waitFor(() => expect(screen.queryByText(/macOS is holding it back/)).toBeNull());
+  });
+});
+
+describe("live observation", () => {
+  const observation = async () => {
+    stub();
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: "Live observation" }));
+    return screen.findByRole("button", { name: "Review setup" });
+  };
+
+  it("brings no heading of its own — the page already has one", async () => {
+    await observation();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Live observation");
+    expect(screen.queryByText(/Enable local hooks for honest/)).toBeNull();
+  });
+
+  it("says nothing about a trigger, because nothing triggered it", async () => {
+    await observation();
+    expect(screen.queryByText(/^Trigger:/)).toBeNull();
+    expect(screen.queryByText(/first meaningful Workflow edit/)).toBeNull();
+  });
+
+  it("offers one action per harness, and it is the one that only reads", async () => {
+    const review = await observation();
+    expect(review.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("button", { name: /^Disable/ })).toBeNull();
+  });
+
+  it("keeps the destructive action inside the detail, named in full", async () => {
+    // A destructive action should cost a deliberate step and never sit as a
+    // peer of a read action.
+    const review = await observation();
+    fireEvent.click(review);
+    expect(review.getAttribute("aria-expanded")).toBe("true");
+    const disable = screen.getByRole("button", { name: "Disable hooks for Claude Code" });
+    expect(disable.className).toContain("set-btn-danger");
+    expect(screen.getByText("Observation falls back to session records.")).toBeTruthy();
+  });
+
+  it("reports a harness rather than offering one", async () => {
+    await observation();
+    // A chip you read, and the word carries it — never colour alone.
+    expect(screen.getByText("Enabled")).toBeTruthy();
+    expect(screen.queryByRole("switch")).toBeNull();
+  });
+
+  it("keeps the amber note for hooks that have never fired", async () => {
+    stub({
+      harnesses: [
+        { ...HARNESS, id: "codex", label: "Codex CLI", hookLastEventAt: undefined },
+      ],
+    });
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: "Live observation" }));
+    expect(await screen.findByText(/has never called it/)).toBeTruthy();
+    expect(screen.getByText("Not seen firing")).toBeTruthy();
+  });
+
+  it("says so plainly when there is no CLI to report on", async () => {
+    stub({ harnesses: [] });
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: "Live observation" }));
+    expect(await screen.findByText(/No supported CLI was found/)).toBeTruthy();
+  });
+});
+
+describe("about", () => {
+  it("says which version this is", async () => {
+    stub();
+    show();
+    fireEvent.click(page("About"));
+    const group = screen.getByText("Version").closest(".set-row") as HTMLElement;
+    expect(within(group).getByText(__ANTHILL_VERSION__)).toBeTruthy();
+  });
+});

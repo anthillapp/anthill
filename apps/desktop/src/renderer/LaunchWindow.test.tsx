@@ -69,6 +69,7 @@ async function show(recents: RecentWorkflow[], runs: PendingRun[] = [], events: 
       onOpen={onOpen}
       onOpenLive={onOpenLive}
       onExplain={() => undefined}
+      onSettings={() => undefined}
     />,
   );
   await waitFor(() => expect(api.listRecentPlans).toHaveBeenCalled());
@@ -350,7 +351,8 @@ describe("the three list states survive", () => {
     stub([]);
     render(
       <LaunchWindow onNewWorkflow={() => undefined} onFromPrompt={() => undefined} onOpen={() => undefined}
-      onExplain={() => undefined} />,
+      onExplain={() => undefined}
+      onSettings={() => undefined} />,
     );
     expect(screen.getByText("Looking for your workflows…")).toBeTruthy();
   });
@@ -398,6 +400,7 @@ describe("the way to the explainer", () => {
         onFromPrompt={() => undefined}
         onOpen={() => undefined}
         onExplain={onExplain}
+      onSettings={() => undefined}
       />,
     );
     await waitFor(() => expect(api.listRecentPlans).toHaveBeenCalled());

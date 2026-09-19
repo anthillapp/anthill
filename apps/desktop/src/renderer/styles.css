@@ -590,7 +590,22 @@ button.link:hover {
   gap: 12px;
 }
 
-input,
+/*
+ * Fields fill their container; controls do not.
+ *
+ * This used to say `input, select, textarea`, which also caught checkboxes and
+ * radios — a checkbox stretched to the width of its row and pushed its own
+ * label off the panel. The exclusions are the fix; a switch is a button rather
+ * than a checkbox for the same reason, and never relies on this.
+ *
+ * The exclusion is wrapped in `:where()` on purpose. A bare
+ * `:not([type="checkbox"])` counts its argument towards specificity, which
+ * lifted this rule above every class that sets a field's own width — the
+ * workflow name input, 230px wide, stretched across the whole bar and pushed
+ * the harness, the step buttons and Prompt off the end of it. `:where()`
+ * contributes nothing, so this stays exactly as weak as the rule it replaced.
+ */
+input:not(:where([type="checkbox"], [type="radio"])),
 select,
 textarea {
   font: inherit;
@@ -6856,6 +6871,18 @@ button.state-chip {
   }
 }
 
+/* Two doors side by side, with the margin on the row rather than on each
+   link — on the links it would have pushed the separator out of line with
+   them. */
+.launch-welcome-links {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--ink-quiet);
+}
+
 /* Centred with the column it sits in. It used to be `align-self: flex-start`,
    which put it alone against the left edge under a mark, a title, a blurb and
    three actions that are all centred. */
@@ -6873,6 +6900,10 @@ button.state-chip {
 
 .launch-welcome-link:hover {
   color: var(--ink);
+}
+
+.launch-welcome-links .launch-welcome-link {
+  margin-top: 0;
 }
 
 /* The settled session's accounting, above the graph it describes. */
@@ -7814,161 +7845,566 @@ button.presence-chip {
   text-align: center;
 }
 
-/* ---------------- settings ---------------- */
+
+/* ---------------- settings, and the rail fixes that came with it ----------------
+ *
+ * Taken from design_handoff_settings/settings.css (ANT-85). The comments there
+ * carry the reasoning; what follows is the same rules against this app's own
+ * token names.
+ */
+/* ==================================================================
+   1 · Settings — the page
+   ================================================================== */
 
 /*
- * Settings opens over whatever screen is showing, because ⌘, is answered at
- * the app's level rather than by a page. Same scrim and raised card as the
- * handover, so the two read as the same kind of thing.
+ * A page, not a dialog. It fills the window below the title bar, keeps its
+ * own dark rail, and returns you to the screen you opened it from.
  */
-.settings-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  background: rgba(24, 22, 21, 0.55);
+.settings-page {
+  flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 40px 24px;
+  min-height: 0;
 }
 
-.settings-sheet {
-  width: min(620px, 100%);
-  max-height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--canvas);
-  border-radius: var(--radius-slab);
-  box-shadow: var(--shadow-raised);
-}
-
-.settings-top {
+.settings-rail {
+  width: 248px;
   flex: none;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px 0 18px;
-  height: 48px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  flex-direction: column;
+  background: var(--chrome-panel);
+  padding: 14px 10px 12px;
 }
 
-.settings-top h2 {
+.settings-rail-top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 6px 14px;
+}
+
+.settings-rail-top h2 {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
+  white-space: nowrap;
+  color: #f8f4f4;
 }
 
-.settings-body {
-  overflow-y: auto;
-  padding: 18px;
+/* The one way out. No ✕, no Close, no Not now. */
+.settings-back {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 7px;
+  background: transparent;
+  color: #e6e2e2;
+  font-size: 13px;
+  cursor: pointer;
+}
+.settings-back:hover { background: rgba(255, 255, 255, 0.10); }
+
+.settings-search {
   display: flex;
-  flex-direction: column;
-  gap: 18px;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  flex: none;
+  padding: 0 10px;
+  margin-bottom: 14px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
 }
 
-.settings-section {
+.settings-search input {
+  flex: 1;
   min-width: 0;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  padding: 16px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font-size: 12.5px;
+  color: #f8f4f4;
 }
 
-.settings-section h3 {
+.settings-nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-nav-group { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; }
+
+.settings-nav-group > span {
+  padding: 6px 8px 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #7d7979;
+}
+
+.settings-nav a,
+.settings-nav button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 13.5px;
+  color: #bab6b6;
+  cursor: pointer;
+}
+.settings-nav button:hover { background: rgba(255, 255, 255, 0.08); }
+
+.settings-nav button[aria-current="page"] {
+  background: rgba(255, 255, 255, 0.13);
+  color: #f8f4f4;
+  font-weight: 600;
+}
+
+/* The accent stripe marks the current page; an inactive row keeps the same
+   3px so nothing shifts when selection moves. */
+.settings-nav .mark {
+  width: 3px;
+  align-self: stretch;
+  flex: none;
+  border-radius: 999px;
+  background: transparent;
+}
+.settings-nav button[aria-current="page"] .mark { background: var(--accent); }
+
+.settings-nav .label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-nav .badge {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: rgba(216, 162, 26, 0.18);
+  color: #e8c675;
+}
+.settings-nav button[aria-current="page"] .badge {
+  background: rgba(255, 255, 255, 0.18);
+  color: #f8f4f4;
+}
+
+.settings-rail-foot {
   margin: 0;
+  padding: 10px 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #7d7979;
+}
+
+.settings-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #fff; }
+
+.settings-header {
+  height: 56px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 26px;
+  border-bottom: 1px solid #efeded;
+}
+
+/* The only h1 on the page. Nothing nested brings its own heading. */
+.settings-header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+}
+
+.settings-body { flex: 1; min-height: 0; overflow-y: auto; padding: 24px 26px 32px; }
+
+/* ==================================================================
+   2 · Settings — the row grammar
+   ================================================================== */
+
+/* The page's own opening, where a nested card used to put its heading and
+   two paragraphs. It reads as prose under the title rather than as a second
+   thing announcing itself. */
+.settings-lede {
+  margin: 0 0 22px;
+  font-size: 13px;
+  line-height: 1.65;
+  max-width: 70ch;
+  color: var(--ink-2);
+}
+
+/* Group heading: small and quiet, because the page title already spoke. */
+.set-group-title {
+  margin: 0 0 10px;
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.13em;
   text-transform: uppercase;
   color: var(--ink-dim);
 }
 
-/* The switch and what it means sit on one row, so the sentence explaining it
-   is attached to the control rather than floating under the section. */
-.settings-switch {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  cursor: pointer;
+.set-group {
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: #fff;
+  overflow: hidden;
 }
 
-/* The sheet-wide `input` rule gives every field a padded box at 100% width,
-   which for a checkbox means one that fills the row and pushes its own label
-   off the edge. Sized back to a checkbox, the way the recents footer does. */
-.settings-switch input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
-  flex: none;
-  margin: 1px 0 0;
-  padding: 0;
-  accent-color: var(--accent);
-}
+.set-group + .set-group-title { margin-top: 26px; }
 
-/* min-width: 0 is load-bearing: a flex item's floor is its content's
-   min-content width, so without it the longest line here sets the row's width
-   and the text lays itself out past the edge of the sheet. */
-.settings-switch > span {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.settings-switch strong {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.settings-note {
-  margin: 0;
+.set-group-foot {
+  margin: 10px 2px 0;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.6;
+  max-width: 70ch;
   color: var(--ink-dim);
-}
-
-.settings-note.quiet {
-  color: var(--ink-quiet);
-}
-
-.settings-note.is-warn {
-  color: var(--accent-700);
-}
-
-.settings-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-/* The observation card was written to stand alone on a page; inside a section
-   it keeps its own structure but drops the outer frame that would double up. */
-.settings-section .observation-setup {
-  border: 0;
-  padding: 0;
-  background: transparent;
 }
 
 /*
- * A row whose session has ended, remembered after the live record was dropped.
- *
- * The same colours as the live states, deliberately — the meaning has not
- * changed, only its tense — and deliberately quieter, because "Finished" in a
- * live chip's weight reads as *now*. The date beside it is the other half of
- * saying so, and is why this treatment never appears without one (ANT-84).
+ * Every row is the same shape: what it is on the left, the control on the
+ * right. align-items: flex-start so a two-line description does not drag the
+ * control down with it.
  */
-.recent-mark.is-past {
-  opacity: 0.45;
+.set-row { display: flex; align-items: flex-start; gap: 20px; padding: 15px 16px; }
+.set-row-main { flex: 1; min-width: 0; }
+.set-row-side { display: flex; align-items: center; gap: 9px; flex: none; }
+
+.set-label { display: block; font-size: 13.5px; font-weight: 600; line-height: 1.45; }
+
+.set-note {
+  display: block;
+  margin-top: 3px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  max-width: 62ch;
+  color: var(--ink-dim);
 }
 
-.recent-chip.is-past {
-  background: transparent;
-  border: 1px solid var(--border);
+.set-divider { display: block; height: 1px; background: #efeded; }
+
+.set-btn {
+  padding: 6px 12px;
+  flex: none;
+  border: 1px solid var(--field-border);
+  border-radius: 7px;
+  background: #fff;
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--ink-2);
+}
+.set-btn:hover { background: #f5f3f3; }
+
+.set-btn-danger {
+  padding: 7px 13px;
+  flex: none;
+  border: 1px solid var(--accent-300);
+  border-radius: 7px;
+  background: #fff;
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--accent-700);
+}
+.set-btn-danger:hover { background: #fff2ef; }
+
+.set-row select {
+  flex: none;
+  width: auto;                  /* see the trap in README §6 */
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--field-border);
+  border-radius: 7px;
+  background: #fff;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+/* ------------------------------------------------------------------
+   The switch — a button, never a checkbox
+   ------------------------------------------------------------------
+   The app's global `input, select, textarea { width: 100% }` also hits
+   checkboxes, which is what stretched one across a row and pushed its label
+   off the panel. A role="switch" button is immune, and it is the right
+   control for a setting that applies immediately. */
+.set-switch {
+  position: relative;
+  width: 40px;
+  height: 24px;
+  flex: none;
+  margin-top: 1px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--field-border);
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.set-switch[aria-checked="true"] { background: var(--accent); }
+
+.set-switch i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  display: block;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(32, 30, 29, 0.28);
+  transition: left 140ms ease;
+}
+
+.set-switch[aria-checked="true"] i { left: 19px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .set-switch, .set-switch i { transition: none; }
+}
+
+/* The test-notification result, inside the group it belongs to. */
+.set-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 16px 15px;
+  padding: 11px 12px;
+  border-radius: 9px;
+  background: #f6faf7;
+}
+.set-result i { width: 8px; height: 8px; flex: none; margin-top: 5px; border-radius: 50%; background: #2f8f5f; }
+.set-result span { flex: 1; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
+
+/* ==================================================================
+   3 · Settings — Live observation (status, not settings)
+   ================================================================== */
+
+/* A harness reports; it does not offer a control. So the row carries a state
+   chip and one disclosure, and the destructive action lives inside it. */
+.harness-row + .harness-row { border-top: 1px solid #efeded; }
+
+.harness-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.harness-chip i { width: 6px; height: 6px; flex: none; display: block; border-radius: 50%; background: currentColor; }
+
+.harness-chip.is-on    { background: #e6f3ec; color: #2f6b48; }
+.harness-chip.is-quiet { background: #f7ecd0; color: #8a6a08; }
+.harness-chip.is-off   { background: #f3f2f2; color: var(--ink-quiet); }
+
+/* Amber, not red: hooks that never fired are not a failure. */
+.harness-warning {
+  margin: 0 16px 15px;
+  padding: 11px 13px;
+  border-left: 3px solid #d8a21a;
+  border-radius: 9px;
+  background: #fdf8ec;
+  font-size: 12.5px;
+  line-height: 1.65;
+  max-width: 70ch;
+  color: #8a6a08;
+}
+
+.harness-details {
+  margin: 2px 16px 16px;
+  padding: 14px 16px;
+  border-radius: 9px;
+  background: var(--canvas);
+}
+
+.harness-details dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 7px 18px;
+  margin: 0;
+}
+
+.harness-details dt {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
   color: var(--ink-dim);
+}
+
+.harness-details dd {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  color: var(--ink-2);
+}
+.harness-details dd.mono { font-family: var(--mono); font-size: 11.5px; }
+
+.harness-details-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid var(--border);
+}
+
+/* ==================================================================
+   4 · The Workflow / Live Session rail
+   ================================================================== */
+
+/* Bottom of the rail, where Claude Code and Codex keep theirs. Same rounded
+   row as every other rail item — a square, full-bleed row read as a footer
+   bar bolted on. */
+.rail-settings {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  flex: none;
+  padding: 8px;
+  margin-top: 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-align: left;
+  color: #bab6b6;
+  cursor: pointer;
+}
+.rail-settings:hover { background: rgba(255, 255, 255, 0.08); }
+.rail-settings .glyph { width: 16px; flex: none; text-align: center; font-size: 13px; line-height: 1; }
+
+/*
+ * A list cut off mid-row reads as broken layout, not as "there is more".
+ *
+ * The fade says it continues. The matching padding-bottom is the part that
+ * matters: at the end of the scroll the last row clears the fade and is fully
+ * opaque, so the end of the list is never permanently dimmed.
+ */
+.fade-list {
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 26px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 26px), transparent 100%);
+  padding-bottom: 26px;
+  scrollbar-gutter: stable;
+}
+
+.fade-list::-webkit-scrollbar { width: 8px; }
+.fade-list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.20); border-radius: 6px; }
+.fade-list:hover::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.32); }
+
+/* ==================================================================
+   5 · Topbar
+   ================================================================== */
+
+/* Drawn, not typeset. The ↰ ↱ glyphs sat off-centre, rendered at a different
+   weight from every other icon, and changed shape between fonts. */
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 7px;
+  background: transparent;
+  color: #e6e2e2;
+  cursor: pointer;
+}
+.icon-btn:hover { background: rgba(255, 255, 255, 0.10); }
+
+/* Dimmed, not missing: the action still exists, and the title says why it is
+   unavailable. */
+.icon-btn[aria-disabled="true"] {
+  border-color: rgba(255, 255, 255, 0.10);
+  color: var(--ink-quiet);
+  cursor: not-allowed;
+}
+.icon-btn[aria-disabled="true"]:hover { background: transparent; }
+
+.harness-picker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  flex: none;
+  padding: 0 4px 0 11px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 7px;
+}
+
+.harness-picker > span {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+
+.harness-picker select {
+  width: auto;
+  height: 26px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  font-size: 13px;
+  color: #f8f4f4;
+}
+
+/*
+ * The accent focus ring is tuned for the light canvas. On the dark chrome it
+ * reads as an error on the control you just picked — but removing it would
+ * lose keyboard focus, so it changes colour rather than disappearing.
+ *
+ * Put this class on every focusable control that sits on the dark bars.
+ */
+.on-dark:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.72);
+  outline-offset: 2px;
+}
+
+/* One entry per line: joined into a paragraph they are a wall that takes over
+   the panel, and what is worth reading — how many there are, and that they all
+   point at Anthill's own handler — is what the wall hides. */
+.harness-entries {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }

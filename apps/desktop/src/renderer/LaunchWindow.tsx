@@ -42,6 +42,7 @@ export type LaunchWindowProps = {
   onOpenLive?: (path: string, run: PendingRun) => void;
   /** Open the explainer screen. */
   onExplain: () => void;
+  onSettings: () => void;
 };
 
 /**
@@ -110,6 +111,7 @@ export function LaunchWindow({
   onOpen,
   onOpenLive,
   onExplain,
+  onSettings,
 }: LaunchWindowProps) {
   /**
    * The welcome shows itself once, on the first start, and stays a click away
@@ -403,6 +405,7 @@ export function LaunchWindow({
             onFromPrompt={onFromPrompt}
             onOpen={onOpen}
             onExplain={onExplain}
+            onSettings={onSettings}
           />
         )}
       </div>
@@ -551,11 +554,13 @@ function LaunchIntro({
   onFromPrompt,
   onOpen,
   onExplain,
+  onSettings,
 }: {
   onNewWorkflow: () => void;
   onFromPrompt: () => void;
   onOpen: (path?: string) => void;
   onExplain: () => void;
+  onSettings: () => void;
 }) {
   /*
     Ask for the file here, and leave this screen only once there is one.
@@ -632,9 +637,17 @@ function LaunchIntro({
         />
       </div>
 
-      <button type="button" className="launch-welcome-link" onClick={onExplain}>
-        How Anthill works
-      </button>
+      {/* Two doors, side by side: what this is, and how it behaves. Settings
+          is app-level and belongs here rather than in a bar about a document. */}
+      <div className="launch-welcome-links">
+        <button type="button" className="launch-welcome-link" onClick={onExplain}>
+          How Anthill works
+        </button>
+        <span aria-hidden="true">·</span>
+        <button type="button" className="launch-welcome-link" onClick={onSettings}>
+          Settings
+        </button>
+      </div>
 
       <p className="launch-foot">Turn an idea into a workflow</p>
 

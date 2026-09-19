@@ -183,6 +183,7 @@ export function BlockLibrary({ custom, onAddCustom, onAdd }: BlockLibraryProps) 
       <label className="search">
         <span aria-hidden="true">⌕</span>
         <input
+          className="on-dark"
           value={search}
           placeholder="Find a block in any category"
           onChange={(event) => setSearch(event.target.value)}
@@ -196,6 +197,7 @@ export function BlockLibrary({ custom, onAddCustom, onAdd }: BlockLibraryProps) 
             <span>{shown.length}</span>
           </div>
           <select
+            className="on-dark"
             value={category}
             onChange={(event) => {
               setCategory(event.target.value as Category);
@@ -211,7 +213,10 @@ export function BlockLibrary({ custom, onAddCustom, onAdd }: BlockLibraryProps) 
         </>
       ) : null}
 
-      <div className="library-list">
+      {/* The fade says there is more below; the matching padding is what
+          keeps the last row fully opaque once you reach the end, so the fade
+          never reads as a permanently dimmed list. */}
+      <div className="library-list fade-list">
         {shown.length === 0 ? (
           <p className="hint">
             {category === "custom" && !query
@@ -223,7 +228,7 @@ export function BlockLibrary({ custom, onAddCustom, onAdd }: BlockLibraryProps) 
         {shown.map((block) => (
           <button
             key={`${block.label}-${block.actionKind ?? block.nodeType}`}
-            className="library-item"
+            className="library-item on-dark"
             draggable
             onDragStart={(event) => {
               event.dataTransfer.setData("application/anthill-block", JSON.stringify(block));
@@ -272,13 +277,14 @@ export function BlockLibrary({ custom, onAddCustom, onAdd }: BlockLibraryProps) 
             <button onClick={() => setCreating(false)}>Cancel</button>
           </div>
         </>
-      ) : (
-        <button className="add-custom" onClick={() => setCreating(true)}>
+      ) : category === "custom" ? (
+        // Offered only here, because here is where the new block lands. In any
+        // other category it implied the block would join the one being looked
+        // at, which it never does.
+        <button className="add-custom on-dark" onClick={() => setCreating(true)}>
           + Your own block
         </button>
-      )}
-
-      <p className="hint">Drag a block onto the canvas, or click to add it.</p>
+      ) : null}
     </div>
   );
 }

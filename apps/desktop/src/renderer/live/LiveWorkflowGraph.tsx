@@ -20,7 +20,7 @@ import {
   ZOOM_STEP,
   blockRect,
   buildCanvasModel,
-  withDisplayLayout,
+  useDisplayLayout,
   useWheelZoom,
   zoomAbout,
   type Workflow,
@@ -229,7 +229,11 @@ export function LiveWorkflowGraph({
   selectedBlockId,
   onSelect,
 }: LiveWorkflowGraphProps) {
-  const workflow = useMemo(() => withDisplayLayout(sourceWorkflow), [sourceWorkflow]);
+  // Through the hook, so a block this graph placed keeps the place it was
+  // given. Called directly, every reflow of a workflow that arrived without
+  // positions — a handover, drawn afresh — was free to put the same block
+  // somewhere else, with nothing on the page to explain the move.
+  const workflow = useDisplayLayout(sourceWorkflow);
   const model = useMemo(() => buildCanvasModel(workflow), [workflow]);
   const surface = useRef<HTMLDivElement>(null);
   /** For the running block's "so far" — the one figure on the graph that ticks. */

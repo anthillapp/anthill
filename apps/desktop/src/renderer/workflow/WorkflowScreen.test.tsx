@@ -54,6 +54,9 @@ function stubApi() {
     chooseRunFolder: vi.fn(async (): Promise<string | null> => "/tmp"),
     saveWorkflow: vi.fn(async (): Promise<SaveWorkflowResult> => ({ kind: "saved", path: "/tmp/w.workflow.json" })),
     openWorkflow: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
+    // Which workflow is open is what main answers an `anthill://` link with,
+    // so the screen tells it on every open and on unmount.
+    workflowOpened: vi.fn(async () => undefined),
     // File ▸ Save / ⌘S arrives from the menu, so tests hold the listener and
     // fire it themselves rather than pressing a key the page never sees.
     onSaveWorkflow: vi.fn((listener: () => void): (() => void) => {

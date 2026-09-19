@@ -166,9 +166,9 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   const currentWorkflow = useRef(workflow);
   currentWorkflow.current = workflow;
   useEffect(() => {
-    if (workflow) void window.anthill.workflowOpened?.(path ?? "");
+    if (workflow) void window.anthill.workflowOpened(path ?? "");
   }, [path, workflow?.id]);
-  useEffect(() => () => { void window.anthill.workflowOpened?.(""); }, []);
+  useEffect(() => () => { void window.anthill.workflowOpened(""); }, []);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: "idle" });
   /** Held in a ref, not state: it gates the next call, it does not draw. */
   const saving = useRef(false);

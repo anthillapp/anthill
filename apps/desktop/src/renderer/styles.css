@@ -8413,9 +8413,21 @@ button.presence-chip {
 
 /* Dimmed, not missing: the action still exists, and the title says why it is
    unavailable. */
+/*
+ * As dim as these buttons used to be, which is dimmer than this first read.
+ *
+ * The glyph version was an ordinary `disabled` button, so `button:disabled`
+ * took it to `opacity: 0.5` — border and mark together. Switching to
+ * `aria-disabled` to keep the control reachable also opted it out of that
+ * rule, and the replacement colour (`--ink-quiet`, #bab6b6) sat at full
+ * strength on the dark bar and read as available.
+ *
+ * The same half-opacity, restated for the attribute that now carries the
+ * state: #e6e2e2 at 0.5 over this chrome is where these sat before, and the
+ * border thins to match without a second rule for it.
+ */
 .icon-btn[aria-disabled="true"] {
-  border-color: rgba(255, 255, 255, 0.10);
-  color: var(--ink-quiet);
+  opacity: 0.5;
   cursor: not-allowed;
 }
 .icon-btn[aria-disabled="true"]:hover { background: transparent; }

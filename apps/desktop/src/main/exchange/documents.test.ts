@@ -91,6 +91,48 @@ it("withdraws a standing approval without disturbing the run that holds it", asy
   expect((await store.readBinding(workflow.id, "ANT-EARLY"))?.revision).toBe(1);
 });
 
+/*
+ * The whole of it reached through what the panel offers and nothing else:
+ * approve, edit, approve, edit, withdraw. The panel promised that withdrawing
+ * left the handover with nothing approved; here it hands the gate to revision
+ * 1, which the user has edited past twice, the moment they act to stop exactly
+ * that. The store is right — revision 1 was approved and never withdrawn — so
+ * what the view has to carry is the revision underneath, and the panel says
+ * that instead of guessing.
+ */
+it("names the approval a withdrawal would fall back to, and offers that one too", async () => {
+  const { store, path, workflow } = await fixture();
+  const approve = async () => {
+    const view = (await readExchangeView(store, path, workflow.id))!;
+    // Exactly the panel's gate: the button is offered only on a draft head.
+    expect(view.state).toBe("draft");
+    return readyExchangeRevision(store, { path, ...view });
+  };
+
+  expect(await approve()).toEqual({ ok: true });
+  await saveExchangeCopy(store, path, { ...workflow, name: "Second thoughts" });
+  expect(await approve()).toEqual({ ok: true });
+  await saveExchangeCopy(store, path, { ...workflow, name: "Third thoughts" });
+
+  expect(await readExchangeView(store, path, workflow.id)).toMatchObject({
+    revision: 3, approved: { revision: 2, withdrawable: true, below: 1 },
+  });
+
+  expect(await revokeExchangeRevision(store, { path, workflowId: workflow.id, revision: 2 })).toEqual({ ok: true });
+
+  // What the sentence said would happen, and what a new bind is now given.
+  const after = (await readExchangeView(store, path, workflow.id))!;
+  expect(after.approved).toMatchObject({ revision: 1, withdrawable: true });
+  expect(after.approved?.below).toBeUndefined();
+  expect(await store.eligibleRevision(workflow.id)).toMatchObject({ eligible: true, revision: { revision: 1 } });
+
+  // Re-reading is all the panel does after recording a decision, and it is
+  // enough to offer the older approval in its turn.
+  expect(await revokeExchangeRevision(store, { path, workflowId: workflow.id, revision: 1 })).toEqual({ ok: true });
+  expect((await readExchangeView(store, path, workflow.id))?.approved).toBeUndefined();
+  expect(await store.eligibleRevision(workflow.id)).toMatchObject({ eligible: false, reason: "awaiting_approval" });
+});
+
 it("refuses to withdraw an approval the panel has not seen", async () => {
   const { store, path, workflow } = await fixture();
   const view = (await readExchangeView(store, path, workflow.id))!;

@@ -64,6 +64,11 @@ export async function readExchangeView(store: ExchangeStore, path: string, workf
       // Only a gate makes an approval into permission, so only there is there
       // permission to take back.
       withdrawable: identity.mode === "approval-gate",
+      // What withdrawing this one would actually leave behind, which is not
+      // always nothing. The store walks its approvals highest-first and skips
+      // the withdrawn ones, so an older approval that was never taken back is
+      // what the gate falls to.
+      ...(stored.readyBelow ? { below: stored.readyBelow.revision } : {}),
     } } : {}),
     problems, bindings: stored.bindings.map(({ runId, revision }) => ({ runId, revision })),
   };

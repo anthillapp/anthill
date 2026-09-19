@@ -554,6 +554,61 @@ describe("revokeReady", () => {
     });
   });
 
+  /*
+   * Withdrawing does not always leave nothing approved, and the store says so
+   * before it happens. Approving twice with an edit between them leaves two
+   * markers standing; taking the newer one back hands the gate to the older,
+   * which is content the user has edited past twice. That is the store working
+   * as designed — an approval nobody withdrew is still an approval — so what
+   * has to be right is that the answer is available to ask for, rather than
+   * inferred by whoever is about to offer the user the button.
+   */
+  it("hands the gate to the approval underneath, and names it before it happens", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission({ mode: "approval-gate" }));
+    await store.markReady("workflow-1", 1);
+    await store.addRevision("workflow-1", completeWorkflow({ name: "Second thoughts" }), "user");
+    await store.markReady("workflow-1", 2);
+    await store.addRevision("workflow-1", completeWorkflow({ name: "Third thoughts" }), "user");
+
+    expect(await store.readWorkflow("workflow-1")).toMatchObject({
+      ready: { revision: 2 }, readyBelow: { revision: 1 },
+    });
+
+    await store.revokeReady("workflow-1", 2);
+
+    expect(await store.readyRevision("workflow-1")).toBe(1);
+    expect(await store.eligibleRevision("workflow-1")).toMatchObject({
+      eligible: true,
+      revision: { revision: 1 },
+    });
+    // And nothing under that one, so withdrawing it would leave the handover
+    // with nothing approved after all.
+    expect((await store.readWorkflow("workflow-1"))?.readyBelow).toBeUndefined();
+  });
+
+  it("will not let a damaged approval underneath disturb the one that stands", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission({ mode: "approval-gate" }));
+    await store.markReady("workflow-1", 1);
+    await store.addRevision("workflow-1", completeWorkflow({ name: "Second thoughts" }), "user");
+    await store.markReady("workflow-1", 2);
+    await writeFile(join(store.root, "workflows/workflow-1/revisions/0001.ready"), "{bad");
+
+    // Nothing below the standing approval decides anything, so a record that
+    // cannot be read down there is not a problem with this workflow: reporting
+    // it would make the whole thing unreadable and refuse revision 2, which is
+    // readable, current and approved.
+    const stored = await store.readWorkflow("workflow-1");
+    expect(stored?.problems).toEqual([]);
+    expect(stored?.ready?.revision).toBe(2);
+    expect(stored?.readyBelow).toBeUndefined();
+    expect(await store.eligibleRevision("workflow-1")).toMatchObject({
+      eligible: true,
+      revision: { revision: 2 },
+    });
+  });
+
   it("will not withdraw an approval nobody made", async () => {
     const store = await openStore();
     await store.createWorkflow(submission({ mode: "approval-gate" }));

@@ -46,6 +46,21 @@ export function ExchangeHandover({ workflow, path, dirty, runs }: {
    * read as "nothing is authorised" while something was.
    */
   const standing = view.approved && view.approved.revision !== view.revision ? view.approved : undefined;
+  /**
+   * What withdrawing it would leave behind, as the store reports it.
+   *
+   * The panel used to promise that withdrawing left the handover with nothing
+   * approved. That is true only when this is the one approval there is, and
+   * the panel's own controls reach the case where it is not: approve, edit,
+   * approve, edit, withdraw leaves the approval from two edits ago standing,
+   * and a new run is given it immediately after the user acted to stop exactly
+   * that. So the consequence is read rather than assumed, and the approval
+   * underneath can be withdrawn in its turn — recording one re-reads the
+   * exchange, which brings back the older approval with a control of its own.
+   */
+  const afterWithdrawal = standing?.below === undefined
+    ? "this handover is left with nothing approved"
+    : `revision ${standing.below} — approved before it and never withdrawn — becomes the one an agent may take`;
   // Both decisions are recorded the same way: ask main, show what it says, and
   // read the exchange again so the panel describes what is now on disk rather
   // than what was just asked for.
@@ -111,10 +126,10 @@ export function ExchangeHandover({ workflow, path, dirty, runs }: {
           {standing.withdrawable ? (
             <>
               <p>
-                Withdrawing it leaves this handover with nothing approved, so no new run may be given
-                revision {standing.revision}. A run already bound to that revision keeps running and keeps
-                reporting; withdrawing does not stop it. Revision {standing.revision} cannot be approved
-                again afterwards — approve revision {view.revision} when that is what an agent should work from.
+                Withdrawing it means no new run may be given revision {standing.revision}, and {afterWithdrawal}. A
+                run already bound to revision {standing.revision} keeps running and keeps reporting; withdrawing
+                does not stop it. Revision {standing.revision} cannot be approved again afterwards — approve
+                revision {view.revision} when that is what an agent should work from.
               </p>
               <button disabled={busy} onClick={() => void withdraw()}>
                 {busy ? "Withdrawing approval..." : `Withdraw approval of revision ${standing.revision}`}

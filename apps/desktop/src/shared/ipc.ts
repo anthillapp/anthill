@@ -327,6 +327,17 @@ export type ExchangeView = {
      * re-derived it would eventually derive it differently.
      */
     withdrawable: boolean;
+    /**
+     * The revision an approval would fall back to if this one were withdrawn.
+     *
+     * Absent when withdrawing this one leaves nothing approved, which is the
+     * case the page used to describe as if it were the only one. Approving
+     * twice with an edit between them leaves two approvals standing, and the
+     * older one becomes what an agent may take the moment the newer is taken
+     * back. Carried here rather than worked out in the page, because the store
+     * is what will act on it.
+     */
+    below?: number;
   };
   problems: ExchangeProblem[];
   bindings: { runId: string; revision: number }[];

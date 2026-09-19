@@ -113,6 +113,36 @@ it("withdraws a standing approval, and says the bound run keeps going", async ()
   expect(methods.exchangeRevoke).toHaveBeenCalledWith({ path: "/tmp/workflow.json", workflowId: "w", revision: 1 });
 });
 
+/*
+ * "Withdrawing it leaves this handover with nothing approved" was false
+ * whenever an older approval had never been withdrawn, and the panel's own
+ * controls reach that: approve, edit, approve, edit, withdraw hands the gate
+ * back to the revision approved two edits ago. So the consequence is read from
+ * the exchange rather than promised, and the approval underneath is offered in
+ * its turn — which needs nothing but the re-read every decision already does.
+ */
+it("names the approval a withdrawal falls back to, then offers that one too", async () => {
+  const methods = api({ revision: 3, state: "draft", approved: { revision: 2, withdrawable: true, below: 1 } });
+  render(<ExchangeHandover workflow={workflow} path="/tmp/workflow.json" dirty={false} runs={[]} />);
+
+  const button = await screen.findByRole("button", { name: "Withdraw approval of revision 2" });
+  expect(screen.getByText(/no new run may be given revision 2/).textContent).toBe(
+    "Withdrawing it means no new run may be given revision 2, and revision 1 — approved before it and never " +
+      "withdrawn — becomes the one an agent may take. A run already bound to revision 2 keeps running and keeps " +
+      "reporting; withdrawing does not stop it. Revision 2 cannot be approved again afterwards — approve " +
+      "revision 3 when that is what an agent should work from.",
+  );
+
+  methods.exchangeRead.mockResolvedValue({
+    ...view, revision: 3, state: "draft", approved: { revision: 1, withdrawable: true },
+  });
+  await act(async () => { fireEvent.click(button); });
+
+  expect(methods.exchangeRevoke).toHaveBeenCalledWith({ path: "/tmp/workflow.json", workflowId: "w", revision: 2 });
+  expect(await screen.findByRole("button", { name: "Withdraw approval of revision 1" })).toBeTruthy();
+  expect(screen.getByText(/this handover is left with nothing approved/)).toBeTruthy();
+});
+
 it("offers no withdrawal where withdrawing would change nothing", async () => {
   // Show-and-go hands over the head revision whatever is approved, so a
   // control here would promise an effect it does not have.

@@ -204,6 +204,19 @@ export type ExchangeWorkflow = {
   /** The highest revision the user has marked ready and not withdrawn, if any. */
   ready?: StoredReadiness;
   /**
+   * The approval that would stand if `ready` were withdrawn.
+   *
+   * Withdrawing an approval does not always leave a handover with nothing
+   * approved. Readiness belongs to one revision and never carries forward, so
+   * a user who approves revision 1, edits, approves revision 2 and edits again
+   * has two markers standing, and taking the newer one back hands the gate to
+   * the older — which is the store behaving as designed, and not at all what
+   * somebody pressing Withdraw expects. It is answered here, by the same walk
+   * that answers `ready`, so that what the app tells them will happen and what
+   * `eligibleRevision` does next cannot be two different answers.
+   */
+  readyBelow?: StoredReadiness;
+  /**
    * Every revision the user has withdrawn an approval of, in order.
    *
    * Listed rather than folded into `ready`, because the two answer different
@@ -499,6 +512,7 @@ export class ExchangeStore {
       ...(history.head ? { head: history.head } : {}),
       revisions: history.numbers,
       ...(ready.record ? { ready: ready.record } : {}),
+      ...(ready.below ? { readyBelow: ready.below } : {}),
       revoked: ready.revoked,
       bindings: bindings.records,
       problems,
@@ -1116,6 +1130,7 @@ export class ExchangeStore {
 
   private async readReadiness(workflowId: string): Promise<{
     record?: StoredReadiness;
+    below?: StoredReadiness;
     revoked: number[];
     problems: ExchangeProblem[];
   }> {
@@ -1138,6 +1153,7 @@ export class ExchangeStore {
     const revoked = [...withdrawn].sort((left, right) => left - right);
 
     const problems: ExchangeProblem[] = [];
+    let record: StoredReadiness | undefined;
     for (const revision of numbers) {
       // The withdrawal wins on its presence alone, without being opened. It is
       // the one record here whose meaning is entirely in existing, and a
@@ -1145,20 +1161,47 @@ export class ExchangeStore {
       // agent the revision the user had just taken back — so the file is
       // enough, and eligibility is what this fails closed into.
       if (withdrawn.has(revision)) continue;
-      const text = await readTextIfPresent(readyPath(this.root, workflowId, revision));
-      if (text === undefined) return { revoked, problems: [corruptRecord(`${readyName(workflowId, revision)} disappeared during the read.`)] };
-      const record = parseReadiness(text, readyName(workflowId, revision));
-      if (!record.ok) return { revoked, problems: [record.problem] };
-      const snapshot = await this.readRevision(workflowId, revision);
-      if (!snapshot || record.record.revision !== revision ||
-          (record.record.workflowId !== undefined && record.record.workflowId !== workflowId) ||
-          (record.record.digest !== undefined && record.record.digest !== snapshot.digest)) {
-        return { revoked, problems: [corruptRecord(`${readyName(workflowId, revision)} does not match its revision.`)] };
+      const approval = await this.readApproval(workflowId, revision);
+      if ("problem" in approval) {
+        // Below the approval that stands, a damaged record is not reported.
+        // Nothing is decided by it — the walk stops here either way — and a
+        // problem raised from down here would make `eligibleRevision` call the
+        // whole workflow unreadable and refuse the approval above it, which is
+        // readable, current and the user's.
+        return record ? { record, revoked, problems } : { revoked, problems: [approval.problem] };
       }
-      return { record: record.record, revoked, problems };
+      if (!record) { record = approval.record; continue; }
+      return { record, below: approval.record, revoked, problems };
     }
 
-    return { revoked, problems };
+    return { ...(record ? { record } : {}), revoked, problems };
+  }
+
+  /**
+   * One approval, checked against the revision it claims to be for.
+   *
+   * Every field it carries has to agree with what is on disk, because an
+   * approval is a record of a person having read one exact snapshot: one that
+   * names another workflow, another revision or other content is not their
+   * decision about this one, and there is nothing to do with it but refuse it.
+   */
+  private async readApproval(
+    workflowId: string,
+    revision: number,
+  ): Promise<{ record: StoredReadiness } | { problem: ExchangeProblem }> {
+    const text = await readTextIfPresent(readyPath(this.root, workflowId, revision));
+    if (text === undefined) {
+      return { problem: corruptRecord(`${readyName(workflowId, revision)} disappeared during the read.`) };
+    }
+    const record = parseReadiness(text, readyName(workflowId, revision));
+    if (!record.ok) return { problem: record.problem };
+    const snapshot = await this.readRevision(workflowId, revision);
+    if (!snapshot || record.record.revision !== revision ||
+        (record.record.workflowId !== undefined && record.record.workflowId !== workflowId) ||
+        (record.record.digest !== undefined && record.record.digest !== snapshot.digest)) {
+      return { problem: corruptRecord(`${readyName(workflowId, revision)} does not match its revision.`) };
+    }
+    return { record: record.record };
   }
 
   private async readBindings(workflowId: string): Promise<{

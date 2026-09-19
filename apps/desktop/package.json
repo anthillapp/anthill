@@ -47,6 +47,7 @@
   "build": {
     "appId": "com.anthill.desktop",
     "productName": "Anthill",
+    "protocols": [{ "name": "Anthill workflow", "schemes": ["anthill"], "role": "Viewer" }],
     "directories": {
       "buildResources": "build",
       "output": "release"

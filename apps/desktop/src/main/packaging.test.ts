@@ -30,6 +30,16 @@ const manifest = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as {
 };
 const main = readFileSync(resolve("src/main/index.ts"), "utf8");
 
+it("registers the workflow protocol without changing entitlements", () => {
+  expect((manifest.build as unknown as { protocols: unknown[] }).protocols).toEqual([
+    { name: "Anthill workflow", schemes: ["anthill"], role: "Viewer" },
+  ]);
+  expect(main).toContain('app.on("open-url"');
+  expect(main).toContain('app.on("second-instance"');
+  expect(main).toContain('linksFromArgv(process.argv)');
+  expect(main).toContain('app.setAsDefaultProtocolClient("anthill", process.execPath, [resolve(process.argv[1])])');
+});
+
 describe("the native binding survives packaging", () => {
   it("ships the Electron-ABI binary", () => {
     expect(manifest.build.files).toContain("native/**/*");

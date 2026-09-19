@@ -52,6 +52,8 @@ export type OpenPermission =
 
 /** A run the server bound, and everything needed to start following it. */
 export type BoundRun = {
+  sessionId?: string;
+  boundAt: string;
   runId: string;
   nonce: string;
   /** The harness that handed the workflow over. The run is that tool's. */
@@ -70,6 +72,7 @@ export type BoundRun = {
  * live service, none of which exists outside Electron.
  */
 export type InboxEffects = {
+  serialize?<T>(work: () => Promise<T>): Promise<T>;
   /**
    * May a workflow replace what the user is looking at?
    *
@@ -78,7 +81,7 @@ export type InboxEffects = {
    * way to being refused would leave a harness's content in a file the user
    * believes is theirs.
    */
-  mayOpen(): Promise<OpenPermission>;
+  mayOpen(path?: string): Promise<OpenPermission>;
   /** Open the workflow at this path, as the Open command would. */
   open(path: string): Promise<{ ok: true } | { ok: false; error: string }>;
   /** Tell the user about something that arrived and cannot be acted on. */
@@ -195,7 +198,10 @@ export class ExchangeInbox {
     // discard the work the first just put on screen — is one the user has had
     // no chance to answer yet.
     const next = drops.find((drop) => drop.kind === "display" && !this.declined.has(drop.key));
-    if (next) await this.display(next);
+    if (next) {
+      if (this.effects.serialize) await this.effects.serialize(() => this.display(next));
+      else await this.display(next);
+    }
   }
 
   /**
@@ -215,7 +221,8 @@ export class ExchangeInbox {
       return;
     }
 
-    const permission = await this.effects.mayOpen();
+    const path = this.store.workingCopyPath(drop.workflowId);
+    const permission = await this.effects.mayOpen(path);
     // Left exactly where it is, both times. The workflow is stored and the
     // request still stands; what has not happened is the user seeing it.
     if (permission === "no_window") return;
@@ -224,19 +231,25 @@ export class ExchangeInbox {
       return;
     }
 
-    const path = this.store.workingCopyPath(drop.workflowId);
-    await writeWorkingCopy(path, revision.workflow);
+    try {
+      await writeWorkingCopy(path, revision.workflow);
+    } catch (error) {
+      this.declined.add(drop.key);
+      await this.effects.refuse(
+        `Anthill could not prepare ${drop.workflowId}: ${error instanceof Error ? error.message : String(error)} The handover remains pending. Fix the file or storage problem, then reopen its link or restart Anthill.`,
+      );
+      return;
+    }
 
     const opened = await this.effects.open(path);
     if (!opened.ok) {
       await this.effects.refuse(
         `Anthill could not open ${drop.workflowId}, which was handed over to it: ${opened.error}`,
       );
+      this.declined.add(drop.key);
+      return;
     }
-    // Consumed either way. The request was to show this workflow, and it has
-    // been answered — with the workflow, or with the reason there is nothing to
-    // show. Leaving it would put the same error in front of the user every two
-    // seconds, and the workflow is still in the store either way.
+    // Only a confirmed display acknowledges the handover.
     await this.store.consumeInbox(drop.key);
   }
 
@@ -254,7 +267,8 @@ export class ExchangeInbox {
       : undefined;
     const harness = stored?.identity?.source.harness;
 
-    if (!binding || !revision || !harness) {
+    if (!binding || !revision || !harness || drop.revision !== binding.revision ||
+        (binding.digest && binding.digest !== revision.digest)) {
       await this.effects.refuse(
         `Anthill was asked to follow run ${drop.runId ?? "(unnamed)"} of ${drop.workflowId} and cannot read what it is bound to. The run will not appear on the Live Session page.`,
       );
@@ -265,6 +279,8 @@ export class ExchangeInbox {
     const registered = await this.effects.register({
       runId: binding.runId,
       nonce: binding.nonce,
+      boundAt: binding.at,
+      ...(binding.sessionId ? { sessionId: binding.sessionId } : {}),
       harness,
       workflowId: binding.workflowId,
       revision,

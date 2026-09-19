@@ -1,20 +1,21 @@
 /**
- * The working copy: written so the editor can open it.
+ * The working copy: written so the editor can open it, read back so an edit
+ * becomes a revision.
  *
  * Against a real store in a real temporary directory, because what is being
- * checked is where a file lands — which a stub would be free to agree with
- * this code about.
+ * checked is where a file lands and what the store makes of it afterwards —
+ * both of which a stub would be free to agree with this code about.
  */
 
 import { ExchangeStore } from "@anthill/exchange-store";
-import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-exchange";
+import { WORKFLOW_FORMAT_VERSION, type DraftSubmission } from "@anthill/workflow-exchange";
 import type { Workflow } from "@anthill/workflow-schema";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { writeWorkingCopy } from "./working-copy.js";
+import { captureSavedRevision, writeWorkingCopy } from "./working-copy.js";
 
 const roots: string[] = [];
 
@@ -69,6 +70,20 @@ function workflow(overrides: Partial<Workflow> = {}): Workflow {
   };
 }
 
+function submission(): DraftSubmission {
+  return {
+    exchangeVersion: 1,
+    idempotencyKey: "handover-7",
+    source: {
+      harness: "claude-code",
+      sessionId: "session-abc",
+      taskText: "Fix the crash on startup.",
+    },
+    mode: "show-and-go",
+    workflow: workflow(),
+  };
+}
+
 describe("writeWorkingCopy", () => {
   it("writes a workflow the editor can open, in the shape a save leaves", async () => {
     const store = await openStore();
@@ -86,5 +101,104 @@ describe("writeWorkingCopy", () => {
     await writeWorkingCopy(store.workingCopyPath("never-stored"), workflow());
 
     expect((await readFile(store.workingCopyPath("never-stored"), "utf8")).length).toBeGreaterThan(0);
+  });
+});
+
+describe("captureSavedRevision", () => {
+  it("records an edit of a handed-over workflow as the next revision", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission());
+
+    const edited = workflow({ name: "Ship the fix, properly" });
+    const captured = await captureSavedRevision(
+      store,
+      store.workingCopyPath("workflow-1"),
+      edited,
+    );
+
+    expect(captured?.outcome).toBe("added");
+    expect(captured?.revision).toBe(2);
+
+    const stored = await store.readWorkflow("workflow-1");
+    expect(stored?.head?.by).toBe("user");
+    expect(stored?.head?.workflow.name).toBe("Ship the fix, properly");
+  });
+
+  /* Revision N is never modified: the one the harness submitted is still there. */
+  it("leaves the revision that was handed over exactly as it was", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission());
+
+    await captureSavedRevision(
+      store,
+      store.workingCopyPath("workflow-1"),
+      workflow({ name: "Ship the fix, properly" }),
+    );
+
+    const first = await store.readRevision("workflow-1", 1);
+    expect(first?.by).toBe("harness");
+    expect(first?.workflow.name).toBe("Ship the fix");
+  });
+
+  it("writes nothing when the save changed nothing", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission());
+
+    const captured = await captureSavedRevision(
+      store,
+      store.workingCopyPath("workflow-1"),
+      workflow(),
+    );
+
+    expect(captured?.outcome).toBe("unchanged");
+    expect((await store.readWorkflow("workflow-1"))?.revisions).toEqual([1]);
+  });
+
+  /*
+   * Almost every save in the app is this one, and it must cost nothing and
+   * decide nothing.
+   */
+  it("says nothing about a save somewhere else entirely", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission());
+
+    const captured = await captureSavedRevision(
+      store,
+      join(tmpdir(), "somebody-elses.workflow.json"),
+      workflow(),
+    );
+
+    expect(captured).toBeUndefined();
+  });
+
+  /*
+   * A Save As that lands inside the exchange is not an edit of what lives
+   * there. The test is the path this document's id would be filed under, not
+   * "somewhere under the exchange".
+   */
+  it("says nothing about a save into another workflow's directory", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission());
+
+    const captured = await captureSavedRevision(
+      store,
+      store.workingCopyPath("workflow-1"),
+      workflow({ id: "a-different-workflow" }),
+    );
+
+    expect(captured).toBeUndefined();
+    expect((await store.readWorkflow("workflow-1"))?.revisions).toEqual([1]);
+  });
+
+  it("has nothing to record for a workflow nobody handed over", async () => {
+    const store = await openStore();
+
+    const captured = await captureSavedRevision(
+      store,
+      store.workingCopyPath("workflow-1"),
+      workflow(),
+    );
+
+    expect(captured?.outcome).toBe("no_such_workflow");
   });
 });

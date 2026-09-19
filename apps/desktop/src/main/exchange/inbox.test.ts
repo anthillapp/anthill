@@ -141,6 +141,26 @@ async function settled(store: ExchangeStore): Promise<string[]> {
 }
 
 describe("a workflow handed over", () => {
+  it("keeps an unreadable working copy and pending request, reports once, and recovers on restart", async () => {
+    const store = await openStore();
+    await handOver(store);
+    const path = store.workingCopyPath("workflow-1");
+    await writeFile(path, "incomplete local edit");
+    const window = watcher();
+    const inbox = new ExchangeInbox(store, window.effects);
+    await inbox.read();
+    await inbox.read();
+    expect(window.refused).toHaveLength(1);
+    expect(window.refused[0]).toContain("handover remains pending");
+    expect(await readFile(path, "utf8")).toBe("incomplete local edit");
+    expect(await waiting(store)).toEqual(["display-1.json"]);
+    expect(window.opened).toEqual([]);
+    await writeFile(path, JSON.stringify(workflow()));
+    await new ExchangeInbox(store, window.effects).read();
+    expect(await waiting(store)).toEqual([]);
+    expect(window.opened).toEqual([path]);
+  });
+
   it("is written where the editor will find it, opened, and the request retired", async () => {
     const store = await openStore();
     await handOver(store);
@@ -276,7 +296,8 @@ describe("a request that cannot be carried out", () => {
     expect(window.refused).toEqual([
       expect.stringContaining("Unexpected token") as string,
     ]);
-    expect(await settled(store)).toEqual(["display-1.json"]);
+    expect(await settled(store)).toEqual([]);
+    expect(await waiting(store)).toEqual(["display-1.json"]);
   });
 
   /*

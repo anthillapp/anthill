@@ -1,8 +1,16 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { desktopUserDataPath } from "./user-data.js";
+import { desktopUserDataPath, desktopDataDirectory } from "./user-data.js";
 
 describe("desktop data profiles", () => {
+  it("accepts an explicit local profile and refuses ambiguous overrides", () => {
+    expect(desktopDataDirectory(["--data-dir", "/tmp/qa"], "/default")).toBe("/tmp/qa");
+    expect(desktopDataDirectory(["--data-dir=/tmp/qa"], "/default")).toBe("/tmp/qa");
+    expect(desktopDataDirectory([], "/default")).toBe("/default");
+    for (const args of [["--data-dir"], ["--data-dir", "relative"], ["--data-dir=/one", "--data-dir=/two"]]) {
+      expect(() => desktopDataDirectory(args, "/default")).toThrow();
+    }
+  });
   const appData = join("/test", "Library", "Application Support");
 
   it("preserves the installed app's existing data location", () => {

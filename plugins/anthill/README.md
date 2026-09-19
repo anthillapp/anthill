@@ -6,7 +6,7 @@ edit and approve, then reports progress against the revision you approved.
 Anthill runs nothing. Claude Code does the work; Anthill draws it and watches.
 
 Verified against **Claude Code 2.1.261** (desktop app 2.2553.1) and **Anthill
-0.7.0** on macOS. Other versions are untested rather than unsupported.
+0.7.1** on macOS. Other versions are untested rather than unsupported.
 
 ## What it gives you
 

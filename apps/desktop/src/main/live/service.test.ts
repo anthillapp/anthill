@@ -192,6 +192,41 @@ describe("external revision bindings", () => {
     service.stop();
   });
 
+  /*
+   * A binding is the answer to the question `ambiguous_match` exists to say
+   * nobody has. Turning the mismatch back into `ambiguous` evidence demoted
+   * the very run the pin protects — `detected_live`/`strong` became
+   * `ambiguous_match`/`medium`, with a status message contradicting the
+   * binding — because that one kind of evidence names several sessions and so
+   * slips past the fold's own guard.
+   */
+  it("stays with the bound session, and records the second transcript as a note", async () => {
+    const { service, claudeRoot, reportLogPath, setNow } = await harness();
+    await service.registerBinding(input);
+    await mkdir(join(reportLogPath, ".."), { recursive: true });
+    await writeFile(reportLogPath, JSON.stringify(
+      { version: 1, kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "fix", at: "2026-08-29T10:00:02.000Z" },
+    ) + "\n");
+    setNow("2026-08-29T10:00:03.000Z");
+    await service.poll();
+    const live = only(service.snapshot());
+    expect(live).toMatchObject({ state: "detected_live", detectedSessionId: "bound-session", confidence: "strong" });
+
+    await writeTranscript(claudeRoot, "other-session");
+    setNow("2026-08-29T10:00:08.000Z");
+    await service.poll();
+    await service.poll();
+
+    const run = only(service.snapshot());
+    expect(run).toMatchObject({ state: "detected_live", detectedSessionId: "bound-session", confidence: "strong" });
+    expect(run.statusMessage).toBe(live.statusMessage);
+    const notes = (await service.events(RUN_ID)).filter((event) => event.channel === "exchange:session-mismatch");
+    expect(notes).toHaveLength(1);
+    expect(notes[0].sessionId).toBe("bound-session");
+    expect(notes[0].detail).toContain("other-session");
+    service.stop();
+  });
+
   it("does not adopt another transcript's session even after ambiguous evidence", async () => {
     const { service, claudeRoot, setNow } = await harness();
     await service.registerBinding(input);

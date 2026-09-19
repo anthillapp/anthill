@@ -104,6 +104,8 @@ export class LiveSessionService {
   private recoveryLookedAt = 0;
   /** The step each run has already been announced as reaching. See step-notices.ts. */
   private readonly announced: AnnouncedSteps = new Map();
+  /** Sessions already noted as carrying a bound run's marker, per run. */
+  private readonly mismatched = new Map<string, Set<string>>();
 
   constructor(
     private readonly store: PendingRunStore,
@@ -286,6 +288,7 @@ export class LiveSessionService {
     this.hooks.forget(runId);
     this.reports.forget(runId);
     forgetAnnounced(this.announced, runId);
+    this.mismatched.delete(runId);
   }
 
   /** Tell everyone what is now true, and hand the same thing back. */
@@ -445,14 +448,11 @@ export class LiveSessionService {
     // marker. A copied marker in a second transcript must not move that binding.
     const sessionId = run.exchange?.sessionId;
     if (sessionId) {
-      const conflicts = evidence.flatMap((item) => item.kind === "ambiguous" ? item.sessionIds :
-        "sessionId" in item && item.sessionId !== sessionId ? [item.sessionId] : []);
-      evidence = evidence.filter((item) => !("sessionId" in item) || item.sessionId === sessionId);
-      evidence = evidence.filter((item) => item.kind !== "ambiguous");
-      drafts = drafts.filter((item) => item.sessionId === sessionId);
-      if (conflicts.length) {
-        evidence.push({ kind: "ambiguous", sessionIds: [...new Set([sessionId, ...conflicts])], channel: "exchange:session-mismatch", at: now });
-      }
+      const conflicts = new Set(evidence.flatMap((item) => item.kind === "ambiguous" ? item.sessionIds :
+        "sessionId" in item && item.sessionId !== sessionId ? [item.sessionId] : []));
+      conflicts.delete(sessionId);
+      evidence = evidence.filter((item) => (!("sessionId" in item) || item.sessionId === sessionId) && item.kind !== "ambiguous");
+      drafts = [...drafts.filter((item) => item.sessionId === sessionId), ...this.noteMismatch(run, sessionId, conflicts, now)];
     }
     // Observers with no transcript support must not shorten the report window.
     if (run.exchange) {
@@ -460,6 +460,51 @@ export class LiveSessionService {
       drafts = drafts.filter((item) => Date.parse(item.at) >= Date.parse(run.createdAt));
     }
     return { evidence, drafts };
+  }
+
+  /**
+   * Write down that another local session on this machine carries this run's
+   * marker — as a note, never as evidence.
+   *
+   * The binding is the answer to the question `ambiguous_match` exists to say
+   * nobody has: a plugin named the session, so there is nothing to be
+   * uncertain about and the second transcript is simply not this run. Feeding
+   * the mismatch back in as an `ambiguous` item took a pinned run from
+   * `detected_live` to `ambiguous_match`, demoted its confidence and put a
+   * status message on screen contradicting the binding — the very thing the
+   * filtering in `read` exists to prevent, arriving through the one kind of
+   * evidence the fold's own guard cannot recognise as being about a different
+   * session, because it names several.
+   *
+   * Once per session id per run: the other transcript keeps being read for as
+   * long as it keeps growing, and a note on every poll would be a feed of the
+   * same sentence rather than a record of something that happened.
+   */
+  private noteMismatch(
+    run: PendingRun,
+    sessionId: string,
+    conflicts: ReadonlySet<string>,
+    now: string,
+  ): ObservationEventDraft[] {
+    if (conflicts.size === 0) return [];
+    const noted = this.mismatched.get(run.anthillRunId) ?? new Set<string>();
+    this.mismatched.set(run.anthillRunId, noted);
+    const drafts: ObservationEventDraft[] = [];
+    for (const other of conflicts) {
+      if (noted.has(other)) continue;
+      noted.add(other);
+      drafts.push({
+        at: now,
+        cli: run.selectedCli,
+        source: "anthill",
+        channel: "exchange:session-mismatch",
+        sessionId,
+        kind: "notification",
+        title: "Another local session carries this run's marker",
+        detail: `Anthill is following ${sessionId}, the session the handover named, and is not reading ${other} for this run.`,
+      });
+    }
+    return drafts;
   }
 
   /** Write what was read into the journal, and say so if any of it was new. */

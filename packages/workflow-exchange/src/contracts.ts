@@ -42,10 +42,23 @@ export type SourceHarness = HarnessTarget;
  * it nor parses it. It is kept because a run bound to this workflow needs a
  * session to be recoverable after it goes quiet, and the report channel alone
  * never supplies one.
+ *
+ * Everything in here is written into the handover's identity, which is created
+ * once and never rewritten. That is what makes it a record of the handover
+ * rather than a description of the workflow's current content, and it is why
+ * both fields are checked before they are stored rather than after.
  */
 export type ExchangeSource = {
   harness: SourceHarness;
-  /** The harness's own identifier for the conversation. Opaque. */
+  /**
+   * The harness's own identifier for the conversation.
+   *
+   * Opaque in meaning and checked in shape: Anthill does not parse it, but it
+   * writes it onto a binding, registers it as a run's session, compares it
+   * against the ids in the harness's own session files and shows it to the
+   * user. `isSessionId` says what may travel; anything else is refused at the
+   * door rather than mangled by whatever writes it down next.
+   */
   sessionId: string;
   /**
    * What the user asked for, in the user's words.
@@ -53,6 +66,15 @@ export type ExchangeSource = {
    * Never the model's reasoning about what the user asked for. This is the text
    * a person reads back to check that Anthill understood the same job they did,
    * and a summary would quietly replace their sentence with the model's.
+   *
+   * Frozen at the handover, deliberately. It lives in the identity, it is not
+   * in the document the user edits, and no later submission may replace it —
+   * so what a user reads back is what the harness said they asked for, at the
+   * moment it said it. That is the whole value of the field: a text the sender
+   * could correct after the fact would be evidence of nothing, and a user who
+   * finds a summary here instead of their own sentence has learnt the one
+   * thing this field exists to tell them. Their recourse is the workflow,
+   * which is theirs to edit and is what the work is actually driven by.
    */
   taskText: string;
 };
@@ -88,10 +110,13 @@ export type DraftSubmission = {
   /**
    * The sender's own key for this handover, repeated verbatim on a retry.
    *
-   * A harness that submits, loses the answer and submits again must land on the
-   * same workflow rather than a second one. The key is what makes the second
-   * call recognisable as the same call; the store compares it and answers
-   * `already_exists` rather than creating anything.
+   * Not an address. What a submission lands on is the document's own
+   * `workflow.id`; the key is the sender's promise that a second submission
+   * under that id is the same call rather than a different piece of work. The
+   * store compares it against the one the identity recorded, answers
+   * `already_exists` when they agree and refuses when they do not, and
+   * overwrites nothing either way. So one key carrying two different documents
+   * creates two workflows, and is not a way to revise the first.
    */
   idempotencyKey: string;
   source: ExchangeSource;
@@ -211,4 +236,34 @@ export function isSourceHarness(value: unknown): value is SourceHarness {
 
 export function isHandoverMode(value: unknown): value is HandoverMode {
   return HANDOVER_MODES.includes(value as HandoverMode);
+}
+
+/**
+ * The longest session id Anthill will carry.
+ *
+ * The length `safeSegment` in `@anthill/exchange-store` cuts a file name down
+ * to, so an id that fits here is an id no path can shorten. Generous for the
+ * thing it describes: the three harnesses all mint a UUID.
+ */
+export const SESSION_ID_MAX_LENGTH = 120;
+
+/** Letters, digits, hyphens and underscores — `safeSegment`'s alphabet. */
+const SESSION_ID = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * Whether a value that arrived as `unknown` is a session id Anthill can carry
+ * without changing it.
+ *
+ * The rule is `safeSegment`'s, restated rather than imported: that function
+ * lives in the store, which depends on this package, and the dependency does
+ * not run the other way. Restating it is the cost of the two sides agreeing
+ * about what may travel, and the agreement is what matters — a session id
+ * containing a separator or a newline is one that comes back out of a file
+ * name as a different string, and the comparison that should have matched a
+ * run to its session fails silently instead of loudly.
+ */
+export function isSessionId(value: unknown): value is string {
+  return (
+    typeof value === "string" && value.length <= SESSION_ID_MAX_LENGTH && SESSION_ID.test(value)
+  );
 }

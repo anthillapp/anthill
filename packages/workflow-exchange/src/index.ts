@@ -27,7 +27,9 @@ export {
   EXCHANGE_PROBLEM_CODES,
   EXCHANGE_VERSION,
   HANDOVER_MODES,
+  SESSION_ID_MAX_LENGTH,
   isHandoverMode,
+  isSessionId,
   isSourceHarness,
   type DraftSubmission,
   type ExchangeProblem,
@@ -40,6 +42,7 @@ export {
 
 export {
   checkExchangeVersion,
+  checkSessionId,
   readSubmission,
   type ReadSubmissionResult,
 } from "./submission.js";

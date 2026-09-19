@@ -27,7 +27,9 @@ import {
   EXCHANGE_PROBLEM_CODES,
   EXCHANGE_VERSION,
   HANDOVER_MODES,
+  SESSION_ID_MAX_LENGTH,
   isHandoverMode,
+  isSessionId,
   isSourceHarness,
   type DraftSubmission,
   type ExchangeProblem,
@@ -65,6 +67,39 @@ export function checkExchangeVersion(submitted: number): ExchangeProblem | undef
   }
 
   return undefined;
+}
+
+/**
+ * Whether a session id is one Anthill can carry without changing it.
+ *
+ * Exported because two doors let one in and they have to shut on the same
+ * things: a handover carries the session that composed the workflow, and a
+ * bind may name a different session to do the work. Anthill still does not
+ * parse either — what a session id means is the harness's business — but it
+ * writes one onto a binding, registers it as a run's session, compares it
+ * against the ids in the harness's own session files and shows it to the user.
+ * An id carrying a separator or a newline survives none of that intact, and
+ * the failure it causes is a run that never matches its session rather than
+ * anything anyone would recognise as a bad session id. So it is refused here,
+ * where the refusal can still reach the only party able to send another one.
+ */
+export function checkSessionId(value: unknown, field: string): ExchangeProblem | undefined {
+  if (isSessionId(value)) return undefined;
+
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return fieldProblem(
+      value,
+      field,
+      "a string",
+      "It is the harness's own id for this session. A run bound to this workflow needs one to be picked up again after it goes quiet, and the progress channel never supplies it.",
+    );
+  }
+
+  return {
+    code: EXCHANGE_PROBLEM_CODES.SUBMISSION_FIELD_INVALID,
+    message: `${field} has to be letters, digits, hyphens and underscores, and at most ${SESSION_ID_MAX_LENGTH} of them. Anthill does not read a session id, but it writes one down, compares it against the ids in the harness's own session files and shows it to the user, and one carrying anything else comes back out of a file name as a different string.`,
+    field,
+  };
 }
 
 /**
@@ -118,7 +153,7 @@ export function readSubmission(value: unknown): ReadSubmissionResult {
         value.idempotencyKey,
         "idempotencyKey",
         "a string",
-        "It is the sender's own key for this handover, repeated verbatim if the handover is retried, and it is what lets a retry land on the workflow it already created rather than on a second one.",
+        "It is the sender's own key for this handover, repeated verbatim if the handover is retried. A submission lands on the id the document carries, and the key is what says a second one under that id is the same call rather than different work.",
       ),
     );
   }
@@ -202,17 +237,12 @@ function readSource(value: unknown, problems: ExchangeProblem[]): ExchangeSource
     problems.push(fieldProblem(value.harness, "source.harness", anyOf(HARNESS_TARGETS)));
   }
 
-  const sessionId = readNonBlankString(value.sessionId);
-  if (sessionId === undefined) {
-    problems.push(
-      fieldProblem(
-        value.sessionId,
-        "source.sessionId",
-        "a string",
-        "It is the harness's own id for this session. A run bound to this workflow needs one to be picked up again after it goes quiet, and the progress channel never supplies it.",
-      ),
-    );
-  }
+  // Shape as well as presence, which no other envelope field asks for. This is
+  // the one id in here that leaves Anthill's own vocabulary and is matched
+  // against strings a harness wrote somewhere else.
+  const badSession = checkSessionId(value.sessionId, "source.sessionId");
+  if (badSession) problems.push(badSession);
+  const sessionId = isSessionId(value.sessionId) ? value.sessionId : undefined;
 
   // Present-but-blank is deliberately not a problem here. It is a completeness
   // problem, and `checkCompleteness` puts the question to the user; a sender

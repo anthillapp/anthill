@@ -7,11 +7,17 @@
  * the store raises, prefixed `STORE_` so a reader can tell at a glance that the
  * answer came from the disk rather than from the validator.
  *
- * None of them carries an `ask`. That field exists to make clarifying questions
- * a requirement of the system rather than a hope about the model, and a user
- * asked what to do about two processes disagreeing over revision 4 has been
- * handed somebody else's problem. Where the store is passing a completeness
- * problem through, the question comes with it and is not rewritten.
+ * Almost none of them carries an `ask`. That field exists to make clarifying
+ * questions a requirement of the system rather than a hope about the model, and
+ * a user asked what to do about two processes disagreeing over revision 4 has
+ * been handed somebody else's problem. Where the store is passing a
+ * completeness problem through, the question comes with it and is not
+ * rewritten.
+ *
+ * The exception is a workflow id that is already taken, which is the one refusal
+ * here a person can actually answer: the id is the document's own, the harness
+ * took it from whatever it was editing, and naming the work differently is a
+ * decision only the user can make.
  */
 
 import type { ExchangeProblem } from "@anthill/workflow-exchange";
@@ -27,6 +33,8 @@ export const EXCHANGE_STORE_PROBLEM_CODES = {
   STORE_RECORD_TOO_NEW: "STORE_RECORD_TOO_NEW",
   /** Two handovers claim the same workflow id and disagree about it. */
   STORE_IDENTITY_CONFLICT: "STORE_IDENTITY_CONFLICT",
+  /** Another workflow already holds this id, or the directory name it becomes. */
+  STORE_WORKFLOW_ID_TAKEN: "STORE_WORKFLOW_ID_TAKEN",
   /** A revision number is taken, by content that is not the content offered. */
   STORE_REVISION_CONFLICT: "STORE_REVISION_CONFLICT",
   /** That run id is already bound, to something else. */
@@ -44,11 +52,11 @@ export const EXCHANGE_STORE_PROBLEM_CODES = {
 export type ExchangeStoreProblemCode =
   (typeof EXCHANGE_STORE_PROBLEM_CODES)[keyof typeof EXCHANGE_STORE_PROBLEM_CODES];
 
-/** One of the store's own problems, with nothing to ask the user. */
+/** One of the store's own problems, with a question only where there is one. */
 export function storeProblem(
   code: ExchangeStoreProblemCode,
   message: string,
-  extra: { field?: string } = {},
+  extra: { field?: string; ask?: string } = {},
 ): ExchangeProblem {
   return { code, message, ...extra };
 }

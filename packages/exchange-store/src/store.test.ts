@@ -14,9 +14,13 @@
  * tests agree with the implementation instead of with the kernel.
  */
 
-import { revisionDigest, type DraftSubmission } from "@anthill/workflow-exchange";
+import {
+  EXCHANGE_PROBLEM_CODES,
+  revisionDigest,
+  type DraftSubmission,
+} from "@anthill/workflow-exchange";
 import type { Workflow } from "@anthill/workflow-schema";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -162,8 +166,17 @@ describe("createWorkflow", () => {
 
     const other = await store.createWorkflow(submission({ idempotencyKey: "handover-9" }));
 
-    expect(other.outcome).toBe("conflict");
+    // An outcome of its own rather than a conflict, and a question rather than
+    // a diagnosis: the id is the document's own, a harness brings whatever the
+    // document it was editing was called, and `createEmptyWorkflow` calls every
+    // blank one "workflow". Two people's work landing on one name is a naming
+    // collision the user is the only one who can settle.
+    expect(other.outcome).toBe("id_taken");
+    expect(codes(other.problems)).toEqual([
+      EXCHANGE_STORE_PROBLEM_CODES.STORE_WORKFLOW_ID_TAKEN,
+    ]);
     expect(other.problems?.[0]?.message).toContain("handover-9");
+    expect(other.problems?.[0]?.ask).toBeTruthy();
     expect((await store.readWorkflow("workflow-1"))?.identity?.idempotencyKey).toBe("handover-7");
   });
 
@@ -218,8 +231,51 @@ describe("createWorkflow", () => {
       submission({ idempotencyKey: "handover-8", workflow: completeWorkflow({ id: "a:b" }) }),
     );
 
-    expect(collision.outcome).toBe("conflict");
+    expect(collision.outcome).toBe("id_taken");
     expect(collision.problems?.[0]?.message).toContain("a/b");
+    expect(collision.problems?.[0]?.ask).toBeTruthy();
+  });
+
+  it("refuses a handover that does not say what the user asked for", async () => {
+    const store = await openStore();
+
+    const blank = await store.createWorkflow(
+      submission({
+        source: { harness: "claude-code", sessionId: "session-abc", taskText: "   " },
+      }),
+    );
+
+    // Not stored, unlike an incomplete diagram. The task text goes into the
+    // identity, which is written once, so a blank one could never be corrected:
+    // the user has nothing to edit, and the retry carrying the real text would
+    // be told the workflow already exists and is in good order.
+    expect(blank.outcome).toBe("refused");
+    expect(codes(blank.problems)).toContain(EXCHANGE_PROBLEM_CODES.HANDOVER_NO_TASK_TEXT);
+    expect(blank.problems?.every((problem) => problem.ask)).toBe(true);
+    expect(await store.readWorkflow("workflow-1")).toBeUndefined();
+  });
+
+  it("answers a retry against the handover that is stored, not the one just sent", async () => {
+    const root = await dataDir();
+    const store = new ExchangeStore(root, ticking());
+    await store.createWorkflow(submission());
+    // A handover from an older build, which stored a task text this one would
+    // have refused. Nothing rewrites an identity, so this is the only way it
+    // can exist — and it is exactly the state a retry must be told about.
+    const identity = join(root, "exchange", "workflows", "workflow-1", "identity.json");
+    const stored = JSON.parse(await readFile(identity, "utf8")) as {
+      source: { taskText: string };
+    };
+    await writeFile(
+      identity,
+      JSON.stringify({ ...stored, source: { ...stored.source, taskText: "" } }),
+      "utf8",
+    );
+
+    const again = await store.createWorkflow(submission());
+
+    expect(again.outcome).toBe("already_exists");
+    expect(codes(again.problems)).toContain(EXCHANGE_PROBLEM_CODES.HANDOVER_NO_TASK_TEXT);
   });
 });
 
@@ -487,6 +543,9 @@ describe("bind", () => {
 
     expect(bound.outcome).toBe("bound");
     expect(bound.binding?.sessionId).toBe("session-abc");
+    // The document's own id, which is what ties the run to what the user has
+    // open. A binding filed under anything else is invisible on the session page.
+    expect(bound.binding?.workflowId).toBe("workflow-1");
     expect((await store.readBinding("workflow-1", "ANT-11111111"))?.revision).toBe(1);
   });
 
@@ -512,6 +571,37 @@ describe("bind", () => {
     expect(moved.outcome).toBe("conflict");
     expect(codes(moved.problems)).toEqual([EXCHANGE_STORE_PROBLEM_CODES.STORE_BINDING_CONFLICT]);
     expect((await store.readBinding("workflow-1", "ANT-11111111"))?.revision).toBe(1);
+  });
+
+  it("refuses a second run wearing the first one's id, and says which nonce holds it", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission());
+    await store.bind("workflow-1", 1, { runId: "ANT-11111111", nonce: "abc123" });
+
+    const impostor = await store.bind("workflow-1", 1, { runId: "ANT-11111111", nonce: "zzz999" });
+
+    expect(impostor.outcome).toBe("conflict");
+    // Both nonces, or the message says the two sides agree about the revision
+    // and leaves the reader to wonder what the argument is about.
+    expect(impostor.problems?.[0]?.message).toContain("abc123");
+    expect(impostor.problems?.[0]?.message).toContain("zzz999");
+    expect((await store.readBinding("workflow-1", "ANT-11111111"))?.nonce).toBe("abc123");
+  });
+
+  it("tells two run ids that become one file apart from a run rebinding itself", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission());
+    await store.bind("workflow-1", 1, { runId: "ANT-1/a", nonce: "abc123" });
+
+    const collision = await store.bind("workflow-1", 1, { runId: "ANT-1:a", nonce: "def456" });
+
+    expect(collision.outcome).toBe("conflict");
+    // The run that holds the binding is named as the holder. Saying the asking
+    // run is already bound would send its caller looking for a binding it does
+    // not have, under a revision it never asked for.
+    expect(collision.problems?.[0]?.message).toContain("ANT-1/a");
+    expect(collision.problems?.[0]?.message).toContain("ANT-1:a");
+    expect(collision.binding?.runId).toBe("ANT-1/a");
   });
 
   it("refuses a revision the mode does not make eligible", async () => {
@@ -550,6 +640,78 @@ describe("bind", () => {
 
     expect(eligible.eligible).toBe(true);
     if (eligible.eligible) expect(eligible.state).toBe("bound");
+  });
+});
+
+/**
+ * Two ids, one directory.
+ *
+ * `safeSegment` is not injective — every character it rejects becomes the same
+ * underscore — so `a/b` and `a:b` are two workflows and one directory name. The
+ * id a handover was submitted under is written into its identity, and every
+ * entry point compares the two, because the alternative is that the second id
+ * silently reads, approves, revises and binds the first one's workflow.
+ */
+describe("an id that lands in another workflow's directory", () => {
+  async function storeHolding(id: string): Promise<ExchangeStore> {
+    const store = await openStore();
+    const created = await store.createWorkflow(
+      submission({ workflow: completeWorkflow({ id }) }),
+    );
+    expect(created.outcome).toBe("created");
+    return store;
+  }
+
+  it("has nothing to say about a workflow that was never handed over", async () => {
+    const store = await storeHolding("a/b");
+
+    expect(await store.readWorkflow("a:b")).toBeUndefined();
+    expect((await store.readWorkflow("a/b"))?.head?.revision).toBe(1);
+  });
+
+  it("refuses to approve a revision that belongs to the other one", async () => {
+    const store = await storeHolding("a/b");
+
+    const ready = await store.markReady("a:b", 1);
+
+    expect(ready.outcome).toBe("no_such_workflow");
+    expect(codes(ready.problems)).toEqual([
+      EXCHANGE_STORE_PROBLEM_CODES.STORE_WORKFLOW_ID_TAKEN,
+    ]);
+    expect(await store.readyRevision("a/b")).toBeUndefined();
+  });
+
+  it("refuses to bind a revision that belongs to the other one", async () => {
+    const store = await storeHolding("a/b");
+
+    const bound = await store.bind("a:b", 1, { runId: "ANT-11111111", nonce: "abc123" });
+
+    expect(bound.outcome).toBe("no_such_workflow");
+    expect(codes(bound.problems)).toEqual([
+      EXCHANGE_STORE_PROBLEM_CODES.STORE_WORKFLOW_ID_TAKEN,
+    ]);
+    expect(await store.readBinding("a/b", "ANT-11111111")).toBeUndefined();
+  });
+
+  it("refuses to add a revision to the other one's history", async () => {
+    const store = await storeHolding("a/b");
+
+    const added = await store.addRevision("a:b", completeWorkflow({ id: "a:b" }), "user");
+
+    expect(added.outcome).toBe("conflict");
+    expect(codes(added.problems)).toEqual([
+      EXCHANGE_STORE_PROBLEM_CODES.STORE_WORKFLOW_ID_TAKEN,
+    ]);
+    expect((await store.readWorkflow("a/b"))?.revisions).toEqual([1]);
+  });
+
+  it("has nothing eligible, rather than the other one's revision", async () => {
+    const store = await storeHolding("a/b");
+
+    const eligible = await store.eligibleRevision("a:b");
+
+    expect(eligible.eligible).toBe(false);
+    if (!eligible.eligible) expect(eligible.reason).toBe("no_such_workflow");
   });
 });
 
@@ -596,15 +758,60 @@ describe("the inbox", () => {
     await store.dropInbox({ kind: "display", key: "drop-1", workflowId: "workflow-1", revision: 1 });
     await writeFile(join(root, "exchange", "inbox", "drop-2.json"), "not json at all", "utf8");
 
-    const waiting = await store.listInbox();
+    const first = await store.listInbox();
+    const second = await store.listInbox();
 
-    expect(waiting.drops.map((drop) => drop.key)).toEqual(["drop-1"]);
-    expect(waiting.damaged.map((drop) => drop.key)).toEqual(["drop-2"]);
-    expect(codes(waiting.damaged.map((drop) => drop.problem))).toEqual([
+    expect(second.drops.map((drop) => drop.key)).toEqual(["drop-1"]);
+    expect(second.damaged.map((drop) => drop.key)).toEqual(["drop-2"]);
+    expect(codes(second.damaged.map((drop) => drop.problem))).toEqual([
       EXCHANGE_STORE_PROBLEM_CODES.STORE_RECORD_UNREADABLE,
     ]);
+    // Not on the first look, though. Showing a damaged drop is what gets it
+    // consumed, consuming it is what makes it undeliverable for ever, and a
+    // file that reads badly once has cost nothing but the next poll.
+    expect(first.damaged).toEqual([]);
     expect((await store.consumeInbox("drop-2")).outcome).toBe("consumed");
     expect((await store.listInbox()).damaged).toEqual([]);
+  });
+
+  it("gives a drop that arrives between two looks the benefit of the doubt", async () => {
+    const root = await dataDir();
+    const store = new ExchangeStore(root, ticking());
+    const path = join(root, "exchange", "inbox", "drop-1.json");
+    await store.dropInbox({ kind: "display", key: "drop-1", workflowId: "workflow-1", revision: 1 });
+    const whole = await readFile(path, "utf8");
+    await rm(path);
+    await writeFile(path, whole.slice(0, 20), "utf8");
+
+    const half = await store.listInbox();
+    await rm(path);
+    await writeFile(path, whole, "utf8");
+    const finished = await store.listInbox();
+
+    expect(half.damaged).toEqual([]);
+    expect(half.drops).toEqual([]);
+    expect(finished.drops.map((drop) => drop.key)).toEqual(["drop-1"]);
+    expect(finished.damaged).toEqual([]);
+  });
+
+  it("does not hand the app a request a crash left behind after consuming it", async () => {
+    const root = await dataDir();
+    const store = new ExchangeStore(root, ticking());
+    await store.dropInbox({ kind: "display", key: "drop-1", workflowId: "workflow-1", revision: 1 });
+    // Consuming a drop is a create in `done/` and then an unlink, which is two
+    // steps and not one. This is a process dying between them.
+    const inbox = join(root, "exchange", "inbox", "drop-1.json");
+    await mkdir(join(root, "exchange", "inbox", "done"), { recursive: true });
+    await writeFile(
+      join(root, "exchange", "inbox", "done", "drop-1.json"),
+      await readFile(inbox, "utf8"),
+      "utf8",
+    );
+
+    expect((await store.listInbox()).drops).toEqual([]);
+    // And the drop left in the inbox is cleared away by the next consume
+    // rather than being carried out a second time.
+    expect((await store.consumeInbox("drop-1")).outcome).toBe("consumed");
   });
 
   it("refuses a second, different request under one key", async () => {

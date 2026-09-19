@@ -64,6 +64,7 @@ import {
   bindingsDir,
   exchangeRoot,
   identityPath,
+  inboxDoneDir,
   inboxDonePath,
   inboxDir,
   inboxPath,
@@ -89,7 +90,23 @@ import { EXCHANGE_STORE_PROBLEM_CODES, storeProblem } from "./problems.js";
 const MAX_REVISION_ATTEMPTS = 5;
 
 export type CreateResult = {
-  outcome: "created" | "already_exists" | "conflict";
+  outcome:
+    | "created"
+    | "already_exists"
+    /**
+     * A different workflow already answers to this id.
+     *
+     * Its own outcome rather than a conflict because it is the one refusal
+     * here a person can answer, and the problem carries the question: ids are
+     * the document's own, a harness takes one from whatever it was editing,
+     * and Anthill's own `createEmptyWorkflow` mints the constant `workflow`.
+     * Two unrelated handovers arriving under that id is a naming collision
+     * between two pieces of work, not a fault in either of them.
+     */
+    | "id_taken"
+    /** Something the identity would carry for ever is not fit to be written. */
+    | "refused"
+    | "conflict";
   workflowId: string;
   /** The revision this submission's content is at, when it is at one. */
   revision?: number;
@@ -100,6 +117,10 @@ export type CreateResult = {
    * for the user, the user answers them by reading the workflow, and a draft
    * nobody can open is a draft nobody can fix. Eligibility is where
    * incompleteness stops something happening.
+   *
+   * The exception is anything the identity carries, which is written once and
+   * is not in the document the user would edit. There the question has to be
+   * answered before the workflow exists at all, and the outcome is `refused`.
    */
   problems?: ExchangeProblem[];
 };
@@ -148,7 +169,13 @@ export type BindResult = {
  * as of the moment it was read and nothing pretends otherwise.
  */
 export type ExchangeWorkflow = {
-  /** As asked for. It differs from the id inside `identity` only on a collision. */
+  /**
+   * As asked for, and the same string the identity records.
+   *
+   * They cannot differ: a directory holding a workflow submitted under another
+   * id that sanitises the same way is not this workflow, and nothing about it
+   * is returned.
+   */
   workflowId: string;
   /**
    * Who handed this over, and how.
@@ -223,6 +250,12 @@ export type ConsumeInboxResult = { outcome: "consumed" | "not_found" };
  * The damaged ones are listed rather than skipped, because skipping them means
  * re-reading the same broken file on every poll for ever. The app shows one as
  * a readable error and consumes it; nothing is repaired on its behalf.
+ *
+ * A drop is listed as damaged on the *second* look, never the first. Consuming
+ * it is the one thing that cannot be undone — `dropInbox` answers
+ * `already_dropped` for that key ever after, so the sender can never redeliver
+ * the request — and a file that reads as damaged once and well the next time
+ * has cost nothing but a poll.
  */
 export type InboxListing = {
   drops: InboxDrop[];
@@ -237,6 +270,18 @@ type EligibilityRefused = Extract<Eligibility, { eligible: false }>;
 export class ExchangeStore {
   /** The exchange's directory. The desktop needs it to tell a saved path from any other. */
   readonly root: string;
+
+  /**
+   * Inbox keys that failed to parse on the previous look.
+   *
+   * The only thing this class remembers between calls, and it is a memory
+   * about *this* reader rather than about the store: a drop is reported as
+   * damaged once it has failed twice, so a file caught mid-arrival is given
+   * the next poll to finish rather than being handed to the app to destroy.
+   * A store constructed afresh for every poll simply never reports one, which
+   * is the safe direction to be wrong in — the drop stays where it is.
+   */
+  private damagedBefore = new Set<string>();
 
   /**
    * @param dataDir Anthill's user-data directory; the exchange is a directory inside it.
@@ -268,6 +313,11 @@ export class ExchangeStore {
    * that this is the same call it made before, and a store that quietly took
    * the newer content would make that promise unfalsifiable. A harness with a
    * corrected workflow is revising one that exists, which is `addRevision`.
+   *
+   * The id is the document's own and arrives from the harness; Anthill does not
+   * mint it. So it may already be taken — `createEmptyWorkflow` calls every
+   * blank document `workflow` — and that is an outcome of its own, with the
+   * question to put to the user attached.
    */
   async createWorkflow(submission: DraftSubmission): Promise<CreateResult> {
     const workflowId = submission.workflow.id;
@@ -276,6 +326,18 @@ export class ExchangeStore {
     if (misaddressed) return { outcome: "conflict", workflowId, problems: [misaddressed] };
 
     const problems = checkCompleteness(submission.workflow, submission.source);
+
+    // `taskText` goes into the identity, and the identity is written once. A
+    // blank one stored here would make this workflow ineligible for as long as
+    // it exists: completeness would refuse every revision of it for ever, and
+    // the user could not fix it by editing, because the text they would have to
+    // change is not in the document. Worse, the retry that carried the missing
+    // text would be told `already_exists` with nothing wrong. It is the sender's
+    // to correct, so it goes back with the question rather than onto the disk.
+    if (!submission.source.taskText.trim()) {
+      return { outcome: "refused", workflowId, problems };
+    }
+
     const identity: StoredIdentity = {
       workflowId,
       createdAt: this.now(),
@@ -287,7 +349,7 @@ export class ExchangeStore {
 
     const claim = await createExclusive(identityPath(this.root, workflowId), encodeRecord(identity));
     if (claim.outcome === "existed") {
-      return this.reconcileCreate(workflowId, submission, claim.text, problems);
+      return this.reconcileCreate(workflowId, submission, claim.text);
     }
 
     // The identity is ours, so revision 1 cannot be anybody else's: nothing
@@ -341,7 +403,7 @@ export class ExchangeStore {
 
     const identity = await this.identityOf(workflowId);
     if (identity.outcome === "missing") return { outcome: "no_such_workflow" };
-    if (identity.outcome === "unreadable") {
+    if (identity.outcome === "elsewhere" || identity.outcome === "unreadable") {
       return { outcome: "conflict", problems: [identity.problem] };
     }
 
@@ -379,14 +441,23 @@ export class ExchangeStore {
     };
   }
 
-  /** Everything on disk about one workflow, or nothing when there is nothing. */
+  /**
+   * Everything on disk about one workflow, or nothing when nothing of that id
+   * is here.
+   *
+   * "Of that id" is the whole of it. A directory holding a workflow submitted
+   * under a *different* id that sanitises to the same name is not this
+   * workflow, and handing back its revisions, approvals and bindings would let
+   * one handover read another's. Nothing is returned, because nothing of this
+   * id was ever handed over; the callers that write — `bind`, `markReady`,
+   * `addRevision`, `createWorkflow` — say which workflow is in the way.
+   */
   async readWorkflow(workflowId: string): Promise<ExchangeWorkflow | undefined> {
-    const text = await readTextIfPresent(identityPath(this.root, workflowId));
-    if (text === undefined) return undefined;
+    const identity = await this.identityOf(workflowId);
+    if (identity.outcome === "missing" || identity.outcome === "elsewhere") return undefined;
 
     const problems: ExchangeProblem[] = [];
-    const identity = parseIdentity(text, `${workflowId}/identity.json`);
-    if (!identity.ok) problems.push(identity.problem);
+    if (identity.outcome === "unreadable") problems.push(identity.problem);
 
     const history = await this.readRevisions(workflowId);
     problems.push(...history.problems);
@@ -399,7 +470,7 @@ export class ExchangeStore {
 
     return {
       workflowId,
-      ...(identity.ok ? { identity: identity.record } : {}),
+      ...(identity.outcome === "read" ? { identity: identity.record } : {}),
       ...(history.head ? { head: history.head } : {}),
       revisions: history.numbers,
       ...(ready.record ? { ready: ready.record } : {}),
@@ -437,8 +508,14 @@ export class ExchangeStore {
   async markReady(workflowId: string, revision: number): Promise<MarkReadyResult> {
     // Presence, not readability: approving a revision is a decision about that
     // revision, and it does not need the handover's own record to be legible.
-    const exists = await readTextIfPresent(identityPath(this.root, workflowId));
-    if (exists === undefined) return { outcome: "no_such_workflow" };
+    // Whose revision it is, though, is not something to be lenient about — a
+    // readable identity naming another id means this approval would land on
+    // somebody else's workflow.
+    const identity = await this.identityOf(workflowId);
+    if (identity.outcome === "missing") return { outcome: "no_such_workflow" };
+    if (identity.outcome === "elsewhere") {
+      return { outcome: "no_such_workflow", problems: [identity.problem] };
+    }
 
     const stored = await this.readRevision(workflowId, revision);
     if (!stored) return { outcome: "no_such_revision" };
@@ -481,12 +558,7 @@ export class ExchangeStore {
       return {
         eligible: false,
         reason: "no_such_workflow",
-        problems: [
-          storeProblem(
-            EXCHANGE_STORE_PROBLEM_CODES.STORE_WORKFLOW_UNKNOWN,
-            `No workflow ${workflowId} has been handed over to this Anthill.`,
-          ),
-        ],
+        problems: [unknownWorkflow(workflowId)],
       };
     }
 
@@ -532,6 +604,23 @@ export class ExchangeStore {
    * existing binding returned rather than replaced.
    */
   async bind(workflowId: string, revision: number, run: BindRun): Promise<BindResult> {
+    // Before anything else: whose workflow this is. The binding is written from
+    // the identity, so an identity that cannot be read or that belongs to
+    // another id is the end of it rather than something to work around.
+    const identity = await this.identityOf(workflowId);
+    if (identity.outcome === "missing") {
+      return {
+        outcome: "no_such_workflow",
+        problems: [unknownWorkflow(workflowId)],
+      };
+    }
+    if (identity.outcome === "elsewhere") {
+      return { outcome: "no_such_workflow", problems: [identity.problem] };
+    }
+    if (identity.outcome === "unreadable") {
+      return { outcome: "not_eligible", problems: [identity.problem] };
+    }
+
     const eligible = await this.eligibleRevision(workflowId);
     if (!eligible.eligible) {
       return {
@@ -552,12 +641,15 @@ export class ExchangeStore {
       };
     }
 
-    const identity = await this.identityOf(workflowId);
-    const sessionId =
-      run.sessionId ?? (identity.outcome === "read" ? identity.record.source.sessionId : undefined);
+    const sessionId = run.sessionId ?? identity.record.source.sessionId;
     const binding: Binding = {
       runId: run.runId,
-      workflowId,
+      // The id the identity records, not the string the caller addressed this
+      // with. The two differ when a caller's spelling merely sanitises to the
+      // same directory, and this field is how a run is tied to the document the
+      // user has open — the live session page matches runs against the open
+      // document's own id, so a run filed under a near-miss is invisible.
+      workflowId: identity.record.workflowId,
       revision,
       nonce: run.nonce,
       at: this.now(),
@@ -573,17 +665,40 @@ export class ExchangeStore {
     const held = parseBinding(claim.text, bindingName(workflowId, run.runId));
     if (!held.ok) return { outcome: "conflict", problems: [held.problem] };
 
+    // Two runs, one file. Run ids become a file name through the same
+    // sanitising as workflow ids, so `ANT-1/a` and `ANT-1:a` collide, and
+    // reporting that as "this run is already bound" would send the caller
+    // looking for a binding its run does not have. The identity path diagnoses
+    // its own version of this collision precisely; so does this one.
+    if (held.record.runId !== run.runId) {
+      return {
+        outcome: "conflict",
+        binding: held.record,
+        problems: [
+          storeProblem(
+            EXCHANGE_STORE_PROBLEM_CODES.STORE_BINDING_CONFLICT,
+            `Run ${run.runId} cannot be bound to ${identity.record.workflowId}: run ${held.record.runId} already occupies the file both ids become. Nothing was overwritten.`,
+          ),
+        ],
+      };
+    }
+
     if (held.record.revision === revision && held.record.nonce === run.nonce) {
       return { outcome: "already_bound", binding: held.record };
     }
 
+    // The holder is the binding on disk, not the caller: naming the asking run
+    // as the one already bound reads as though it were arguing with itself.
+    // The nonce is named as well as the revision, because a bind that differs
+    // only in nonce is a second run wearing the first one's id, and a message
+    // about revisions alone would say the two sides agree.
     return {
       outcome: "conflict",
       binding: held.record,
       problems: [
         storeProblem(
           EXCHANGE_STORE_PROBLEM_CODES.STORE_BINDING_CONFLICT,
-          `Run ${run.runId} is already bound to revision ${held.record.revision} of ${held.record.workflowId}; this bind asked for revision ${revision}. The existing binding is unchanged.`,
+          `Run ${held.record.runId} is already bound to revision ${held.record.revision} of ${held.record.workflowId} under nonce ${held.record.nonce}; this bind asked for revision ${revision} under nonce ${run.nonce}. The existing binding is unchanged.`,
         ),
       ],
     };
@@ -603,20 +718,40 @@ export class ExchangeStore {
    * everywhere else in Anthill leaves `<name>.<pid>.<seq>.tmp` beside its
    * target, and a reader that took every file in the directory would sooner or
    * later read half of one and act on it.
+   *
+   * A key that already has a copy in `done/` is skipped whatever is still in
+   * `inbox/`. Consuming a drop is a create followed by an unlink, so a process
+   * that dies between the two leaves the drop where it was, and a reader that
+   * took the directory at face value would hand the app a request it has
+   * already carried out. `dropInbox` consults `done/` so the sender is
+   * idempotent across that crash; this is the same courtesy for the receiver.
    */
   async listInbox(): Promise<InboxListing> {
     const drops: InboxDrop[] = [];
     const damaged: DamagedDrop[] = [];
+    const settled = new Set(await listDirectory(inboxDoneDir(this.root)));
+    const unreadable = new Set<string>();
 
     for (const name of await listDirectory(inboxDir(this.root))) {
       const key = keyFromInboxFileName(name);
       if (key === undefined) continue;
+      if (settled.has(name)) continue;
       const text = await readTextIfPresent(inboxPath(this.root, key));
       if (text === undefined) continue;
+
       const drop = parseInboxDrop(text, `inbox/${name}`);
-      if (drop.ok) drops.push(drop.record);
-      else damaged.push({ key, problem: drop.problem });
+      if (drop.ok) {
+        drops.push(drop.record);
+        continue;
+      }
+
+      unreadable.add(key);
+      if (this.damagedBefore.has(key)) damaged.push({ key, problem: drop.problem });
     }
+
+    // Only the keys still failing are remembered, so a drop that reads badly
+    // once and well afterwards leaves nothing behind.
+    this.damagedBefore = unreadable;
 
     drops.sort(
       (left, right) => left.at.localeCompare(right.at) || left.key.localeCompare(right.key),
@@ -807,8 +942,13 @@ export class ExchangeStore {
       const revision = revisionFromReadyFileName(name);
       if (revision !== undefined) numbers.push(revision);
     }
-    // Highest first: several markers mean the user approved more than once, and
-    // the latest decision is the one that stands.
+    // Highest revision first: several markers mean the user approved more than
+    // once, and the approval that stands is the one for the newest content
+    // rather than the one made most recently. The two part company when
+    // somebody approves an older revision after a newer one, and the revision
+    // number is the better answer — it is the order the content was written
+    // in, which is a fact about this store, where the dates come from two
+    // processes' clocks and need not agree with each other.
     numbers.sort((left, right) => right - left);
 
     const problems: ExchangeProblem[] = [];
@@ -898,20 +1038,18 @@ export class ExchangeStore {
     workflowId: string,
     submission: DraftSubmission,
     text: string,
-    problems: ExchangeProblem[],
   ): Promise<CreateResult> {
     const held = parseIdentity(text, `${workflowId}/identity.json`);
     if (!held.ok) return { outcome: "conflict", workflowId, problems: [held.problem] };
 
     if (held.record.workflowId !== workflowId) {
       return {
-        outcome: "conflict",
+        outcome: "id_taken",
         workflowId,
         problems: [
-          storeProblem(
-            EXCHANGE_STORE_PROBLEM_CODES.STORE_IDENTITY_CONFLICT,
+          takenProblem(
+            workflowId,
             `Workflow ${workflowId} cannot be stored: ${held.record.workflowId} already occupies the same directory. The two ids differ only in characters a directory name cannot carry.`,
-            { field: "workflow.id" },
           ),
         ],
       };
@@ -919,17 +1057,24 @@ export class ExchangeStore {
 
     if (held.record.idempotencyKey !== submission.idempotencyKey) {
       return {
-        outcome: "conflict",
+        outcome: "id_taken",
         workflowId,
         problems: [
-          storeProblem(
-            EXCHANGE_STORE_PROBLEM_CODES.STORE_IDENTITY_CONFLICT,
-            `Workflow ${workflowId} was handed over by an earlier submission (key ${held.record.idempotencyKey}); this one carries key ${submission.idempotencyKey}. Nothing was overwritten. Revise the workflow that exists rather than creating it again.`,
-            { field: "idempotencyKey" },
+          takenProblem(
+            workflowId,
+            `Workflow ${workflowId} was handed over by an earlier submission (key ${held.record.idempotencyKey}); this one carries key ${submission.idempotencyKey}. Nothing was overwritten. Revise the workflow that exists, or hand this one over under an id of its own.`,
           ),
         ],
       };
     }
+
+    // What is missing is asked of the handover that is *stored*, not of the one
+    // that has just arrived. `taskText` lives in the identity and the identity
+    // is written once, so this submission's copy of it describes a handover
+    // that may not be the one on disk — and an `already_exists` that reported
+    // no problems because the arriving copy was fine would be telling the
+    // sender that a workflow it can never make eligible is in good order.
+    const problems = checkCompleteness(submission.workflow, held.record.source);
 
     // The same key, so this claims to be the same call. It is only the same
     // call if it says the same thing: revision 1 is what that key created, and
@@ -983,20 +1128,66 @@ export class ExchangeStore {
     };
   }
 
+  /**
+   * The handover this id belongs to, if this id is the one it belongs to.
+   *
+   * `elsewhere` is the case every caller that addresses a workflow by id has to
+   * know about. Ids arrive from a harness and become a directory name through
+   * `safeSegment`, which is not injective: `a/b` and `a:b` are two workflows
+   * and one directory. The id a record was submitted under is written down in
+   * it, so the check is a string comparison — and without it the second id
+   * would read, approve and bind the first one's workflow while every answer
+   * looked ordinary.
+   */
   private async identityOf(
     workflowId: string,
   ): Promise<
     | { outcome: "read"; record: StoredIdentity }
     | { outcome: "missing" }
+    | { outcome: "elsewhere"; problem: ExchangeProblem }
     | { outcome: "unreadable"; problem: ExchangeProblem }
   > {
     const text = await readTextIfPresent(identityPath(this.root, workflowId));
     if (text === undefined) return { outcome: "missing" };
+
     const record = parseIdentity(text, `${workflowId}/identity.json`);
-    return record.ok
-      ? { outcome: "read", record: record.record }
-      : { outcome: "unreadable", problem: record.problem };
+    if (!record.ok) return { outcome: "unreadable", problem: record.problem };
+
+    if (record.record.workflowId !== workflowId) {
+      return {
+        outcome: "elsewhere",
+        problem: takenProblem(
+          workflowId,
+          `Workflow ${workflowId} is not stored here: ${record.record.workflowId} occupies the directory both ids become. The two differ only in characters a directory name cannot carry, and nothing of ${workflowId} has been handed over.`,
+        ),
+      };
+    }
+
+    return { outcome: "read", record: record.record };
   }
+}
+
+/** Nothing of that id is here, said the same way wherever it is discovered. */
+function unknownWorkflow(workflowId: string): ExchangeProblem {
+  return storeProblem(
+    EXCHANGE_STORE_PROBLEM_CODES.STORE_WORKFLOW_UNKNOWN,
+    `No workflow ${workflowId} has been handed over to this Anthill.`,
+  );
+}
+
+/**
+ * An id that belongs to somebody else's workflow.
+ *
+ * The one refusal in this store that carries an `ask`. A workflow id is the
+ * document's own and the harness brings it — Anthill assigns nothing — so two
+ * unrelated pieces of work can arrive under one name, and the only person who
+ * can say which is which is the user who asked for them.
+ */
+function takenProblem(workflowId: string, message: string): ExchangeProblem {
+  return storeProblem(EXCHANGE_STORE_PROBLEM_CODES.STORE_WORKFLOW_ID_TAKEN, message, {
+    field: "workflow.id",
+    ask: `Anthill already has a different piece of work filed under the name ${workflowId}. What should this one be called, so the two do not land on top of each other?`,
+  });
 }
 
 /**

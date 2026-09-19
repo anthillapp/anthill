@@ -67,7 +67,7 @@ import {
   saveDestination,
   type SavedRecord,
 } from "./save-destination.js";
-import { desktopUserDataPath, desktopDataDirectory } from "./user-data.js";
+import { dataDirectoryRefusal, desktopUserDataPath, desktopDataDirectory } from "./user-data.js";
 import { ExchangeInbox, type OpenPermission } from "./exchange/inbox.js";
 import { writeWorkingCopy } from "./exchange/working-copy.js";
 import { exchangeDestination, saveExchangeCopy, readExchangeView, readyExchangeRevision, boundWorkflow } from "./exchange/documents.js";
@@ -86,6 +86,21 @@ import {
   rememberRecent,
   setRecentsPaths,
 } from "./recents.js";
+
+// Startup failures in the main process are otherwise invisible — the app just
+// sits there with no window and no message. Surface them loudly.
+//
+// Installed above everything, including the choice of data directory below,
+// because that choice is itself the earliest thing that can refuse to happen:
+// a `--data-dir` this build will not accept, or one the filesystem will not
+// create, threw out of module evaluation with these handlers six lines beneath
+// it and no window anywhere, and the app died without printing a word.
+process.on("uncaughtException", (error) => {
+  console.error("[anthill] uncaught exception:", error);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[anthill] unhandled rejection:", reason);
+});
 
 /**
  * The name the operating system shows: the dock, the menu bar, the About item.
@@ -112,19 +127,32 @@ import {
  * builds use desktop-dev so QA cannot share stores or the instance lock with
  * the installed app. Select this before taking the lock or creating stores.
  */
-const USER_DATA_DIR = desktopDataDirectory(process.argv, desktopUserDataPath(app.getPath("appData"), app.isPackaged));
-mkdirSync(USER_DATA_DIR, { recursive: true, mode: 0o700 });
+const USER_DATA_DIR = chooseDataDirectory();
 app.setName("Anthill");
 app.setPath("userData", USER_DATA_DIR);
 
-// Startup failures in the main process are otherwise invisible — the app just
-// sits there with no window and no message. Surface them loudly.
-process.on("uncaughtException", (error) => {
-  console.error("[anthill] uncaught exception:", error);
-});
-process.on("unhandledRejection", (reason) => {
-  console.error("[anthill] unhandled rejection:", reason);
-});
+/**
+ * The data directory, or a box saying why there is not going to be one.
+ *
+ * `dialog.showErrorBox` is the one dialog Electron allows before `ready`,
+ * which is exactly where this is — long before a window exists and before any
+ * store has been opened. Nothing else in the app could carry this message: a
+ * refusal here means there is nowhere to write, so there will be no window and
+ * no page to put a notice in.
+ */
+function chooseDataDirectory(): string {
+  const fallback = desktopUserDataPath(app.getPath("appData"), app.isPackaged);
+  try {
+    const directory = desktopDataDirectory(process.argv, fallback);
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    return directory;
+  } catch (error) {
+    dialog.showErrorBox("Anthill cannot start", dataDirectoryRefusal(error, fallback));
+    app.exit(1);
+    // `app.exit` ends the process, which the type checker has no way to know.
+    throw error;
+  }
+}
 
 let mainWindow: BrowserWindow | null = null;
 let services: RunServices | null = null;

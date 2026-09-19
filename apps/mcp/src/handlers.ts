@@ -43,9 +43,11 @@ import { MARKER_VERSION, cliInstruction, newNonce, newRunId, workflowSteps } fro
 import {
   EXCHANGE_PROBLEM_CODES,
   EXCHANGE_VERSION,
+  checkCompleteness,
   checkSessionId,
   isSessionId,
   readSubmission,
+  readWorkflowDocument,
   type ExchangeProblem,
 } from "@anthill/workflow-exchange";
 import type { Workflow } from "@anthill/workflow-schema";
@@ -58,11 +60,13 @@ import {
   draftText,
   questionsFrom,
   readyText,
+  reviseText,
   workflowText,
   type BindAnswer,
   type CallAnswer,
   type DraftAnswer,
   type ReadyAnswer,
+  type ReviseAnswer,
   type WorkflowAnswer,
 } from "./text.js";
 import { workflowUrl } from "./url.js";
@@ -143,6 +147,17 @@ export type CreateDraftInput = {
 export type WorkflowInput = { workflowId?: unknown };
 
 /**
+ * What `revise_workflow` is given: which workflow, and what it should say now.
+ *
+ * No idempotency key, unlike a handover. A revision is identified by its
+ * content — the store recognises what it already holds and answers
+ * `unchanged` — so a retry after a lost reply needs no promise from the
+ * sender to be safe, and a key would only be a second way to say the same
+ * thing and a second way to get it wrong.
+ */
+export type ReviseInput = { workflowId?: unknown; workflow?: unknown };
+
+/**
  * What `bind_run` is given, judged here for the same reason a draft is.
  *
  * These carried their types on the schema until a reviewer drove the tool over
@@ -164,6 +179,7 @@ export type BindRunInput = {
 
 export type Handlers = {
   createWorkflowDraft(input: CreateDraftInput): Promise<CallToolResult>;
+  reviseWorkflow(input: ReviseInput): Promise<CallToolResult>;
   getWorkflow(input: WorkflowInput): Promise<CallToolResult>;
   getReadyRevision(input: WorkflowInput): Promise<CallToolResult>;
   bindRun(input: BindRunInput): Promise<CallToolResult>;
@@ -266,6 +282,114 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         displayed: false,
         displayRequested: drop.outcome !== "conflict",
         ...(all.length > 0 ? { problems: all, questions: questionsFrom(all, submission.workflow) } : {}),
+      });
+    },
+
+    /**
+     * A later say about a workflow that already exists.
+     *
+     * Kept apart from `create_workflow_draft` rather than folded into it.
+     * Creating and revising differ in what they need and in what they refuse:
+     * one claims a name and needs a key promising a retry is a retry, the
+     * other addresses a name already claimed and is identified by content.
+     * The one field they would have shared is `idempotencyKey`, which would
+     * then mean two things depending on whether the id was taken — and its
+     * whole job is to mean one.
+     *
+     * A revision is not a decision. Anything the store hands back says so: the
+     * user is the one who chooses what is worked on, and a harness that writes
+     * a revision and binds it has approved its own work.
+     */
+    async reviseWorkflow(input): Promise<CallToolResult> {
+      const oversize = checkSize(input);
+      if (oversize) return result(reviseText, { outcome: "invalid", problems: [oversize] });
+
+      const addressed = readWorkflowId(input.workflowId);
+      if ("problem" in addressed) {
+        return result(reviseText, { outcome: "invalid", problems: [addressed.problem] });
+      }
+      const { workflowId } = addressed;
+
+      // Read before writing, for two reasons that both matter: a workflow this
+      // Anthill has never been given is a different answer from one that
+      // refuses the content, and completeness is judged against the source
+      // recorded at the handover, which only the stored identity carries.
+      const stored = await store.readWorkflow(workflowId);
+      if (!stored?.identity) {
+        return result(reviseText, { outcome: "no_such_workflow", workflowId });
+      }
+
+      const read = readWorkflowDocument(input.workflow);
+      if (!read.ok) {
+        return result(reviseText, { outcome: "invalid", workflowId, problems: read.problems });
+      }
+      if (read.workflow.id !== workflowId) {
+        return result(reviseText, {
+          outcome: "invalid",
+          workflowId,
+          problems: [
+            callProblem(
+              read.workflow.id,
+              "workflow.id",
+              `the id of the workflow being revised, ${workflowId}`,
+              "A revision replaces nothing and renames nothing: it is a later say about one workflow, and the document has to be that workflow.",
+            ),
+          ],
+        });
+      }
+
+      const problems = checkCompleteness(read.workflow, stored.identity.source);
+      if (problems.length > 0) {
+        return result(reviseText, {
+          outcome: "incomplete",
+          workflowId,
+          problems,
+          questions: questionsFrom(problems, read.workflow),
+        });
+      }
+
+      const added = await store.addRevision(workflowId, read.workflow, "harness");
+      if (added.outcome !== "added" && added.outcome !== "unchanged") {
+        return result(reviseText, {
+          outcome: added.outcome === "no_such_workflow" ? "no_such_workflow" : "conflict",
+          workflowId,
+          ...(added.problems ? { problems: added.problems } : {}),
+        });
+      }
+
+      const revision = added.revision;
+      if (revision === undefined) {
+        throw new Error(`${workflowId} took a revision but no number came back.`);
+      }
+
+      /*
+        Ask the app to show it.
+
+        A revision on its own is a record the user cannot see: the document
+        they have open is the working copy, which this server does not touch,
+        so without this they would be reading the old graph while the store
+        held a newer one — and the next thing they were asked to approve would
+        not be what was in front of them. The drop is keyed on the content, so
+        a retry asks once rather than reopening the workflow each time, and the
+        app puts the unsaved-changes question before replacing anything.
+      */
+      const drop = await store.dropInbox({
+        kind: "display",
+        key: displayKey(workflowId, added.digest ?? String(revision)),
+        workflowId,
+        revision,
+      });
+
+      const bound = stored.bindings.at(-1)?.revision;
+      return result(reviseText, {
+        outcome: added.outcome === "added" ? "revised" : "unchanged",
+        workflowId,
+        url: workflowUrl(workflowId),
+        revision,
+        ...(added.digest ? { digest: added.digest } : {}),
+        ...(bound !== undefined && bound !== revision ? { boundRevision: bound } : {}),
+        displayRequested: drop.outcome !== "conflict",
+        ...(drop.problems ? { problems: drop.problems } : {}),
       });
     },
 

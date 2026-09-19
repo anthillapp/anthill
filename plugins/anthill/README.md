@@ -15,7 +15,7 @@ Verified against **Claude Code 2.1.261** (desktop app 2.2553.1) and **Anthill
   and a session with no other skill of that name also answers to the short
   `/workflow` — the namespaced spelling is the one that cannot be taken by
   somebody else's plugin.
-* Four MCP tools from Anthill's own server, which the skill calls for you.
+* Five MCP tools from Anthill's own server, which the skill calls for you.
 
 ## Installing
 
@@ -141,7 +141,7 @@ does not move.
 ## What it will not do
 
 No Anthill API, no additional model key, no shell or filesystem tools, no
-network listener. The four tools write into Anthill's local exchange directory
+network listener. The tools write into Anthill's local exchange directory
 and read it back, and nothing else. Your reasoning is not collected: what
 crosses the boundary is the task in your own words, the workflow, approval state
 and run metadata.

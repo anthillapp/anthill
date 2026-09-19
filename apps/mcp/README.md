@@ -2,7 +2,7 @@
 
 One local process, spawned by the harness, speaking JSON-RPC over stdio. A
 harness the user already started designs a workflow and gives it to Anthill
-through the four tools here; Anthill validates it, stores it, shows it, lets the
+through the tools here; Anthill validates it, stores it, shows it, lets the
 user edit and approve it, and watches the work the harness then does. This
 server launches no agent, runs no command, reads none of the user's files, opens
 no port and makes no network request. It writes into Anthill's exchange
@@ -46,10 +46,15 @@ Once the server is up it writes the directory it is serving to stderr. Nothing
 in the process may write to stdout: that is the transport, and a stray line
 corrupts the message stream.
 
-## The four tools, and the sequence they make
+## The tools, and the sequence they make
 
 `create_workflow_draft` → `get_ready_revision` → `bind_run`, once per handover.
 `get_workflow` answers where a handover stands and is not part of the sequence.
+`revise_workflow` stores a later version of one that exists, for when the user
+asks the harness to change the plan rather than changing it in the app; it is
+kept apart from `create_workflow_draft` because the two differ in what they
+need — one claims a name and carries a key promising a retry is a retry, the
+other addresses a name already claimed and is identified by its content.
 The names carry no prefix, since a host namespaces them already, and generously:
 Claude Code 2.1.261 presents them to a model as
 `mcp__plugin_anthill_exchange__create_workflow_draft` — `plugin`, then the
@@ -93,6 +98,18 @@ exchange directory — not the app, which it cannot reach and does not speak for
    means a deliberate new run. Editing after binding makes a new revision and
    leaves the bound run on the one it started from, so nothing changes
    underneath the work.
+
+4. **`revise_workflow`** takes the workflow id and the whole document as it
+   should now read, and answers `revised`, `unchanged`, `incomplete`,
+   `no_such_workflow`, `invalid` or `conflict`. It carries no idempotency key:
+   a revision is identified by its content, so the store recognises what it
+   already holds and answers `unchanged`, which makes a retry after a lost
+   reply safe without a promise from the sender. It decides nothing — the
+   revision a run is bound to never changes, and a revision the harness wrote
+   is not one the user has agreed to. A display request is queued with it,
+   because the document the user has open is the working copy, which this
+   server never writes: without it they would read the old graph while the
+   store held a newer one.
 
 Every result carries both a human-readable text block and `structuredContent`:
 hosts differ in whether the model sees structured output, so the text is the

@@ -2,7 +2,7 @@
  * The one test that proves the wiring.
  *
  * Everything else in this package is exercised by calling a handler directly,
- * which says nothing about whether the four tools are registered, whether the
+ * which says nothing about whether the tools are registered, whether the
  * built file starts when Node is pointed at it, or whether what comes out of its
  * stdout is JSON-RPC. Those are exactly the things that break silently — a
  * server whose tools never registered answers `tools/list` with an empty array
@@ -170,7 +170,7 @@ describe("the built server over stdio", () => {
     const status = await call("get_workflow", { workflowId: workflow.id });
     expect(status.structuredContent.bindings).toHaveLength(1);
   }, 20_000);
-  it("announces the four tools and the handover sequence", async () => {
+  it("announces every tool and the handover sequence", async () => {
     const session = await connect();
 
     const listed = await session.request("tools/list");
@@ -181,6 +181,7 @@ describe("the built server over stdio", () => {
       "create_workflow_draft",
       "get_ready_revision",
       "get_workflow",
+      "revise_workflow",
     ]);
   }, 20_000);
 

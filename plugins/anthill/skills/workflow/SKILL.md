@@ -147,11 +147,23 @@ mind: a save that did not land is worth knowing about, and they may simply have
 forgotten to press it. Never bind the revision you submitted after they have
 told you they were going to change it; read what is there now.
 
-**They ask you to change it.** You cannot revise a stored workflow: the tools
-create one and read it, and there is no third thing. Say so plainly — the
-workflow is theirs to edit in Anthill, and you can help by describing exactly
-what to change. Do not resubmit under a new id to get around it: that leaves two
-workflows where the user meant one, and the second one nobody approved.
+**They ask you to change it.** `revise_workflow` takes the workflow id and the
+whole document as it should now read — not a description of the change, and not
+just the part that moved. Anthill stores it as a new revision and asks the app
+to show it, so they are reading what you wrote rather than what they had.
+
+Then **ask again**. A revision you wrote is not a revision they agreed to, and
+writing one and binding it is approving your own work. Say what you changed, and
+let them answer.
+
+Two things that are not errors: `unchanged` means Anthill already held exactly
+that content, so there was nothing to add — usually a retry, or a change they had
+already made themselves. And a workflow with a run bound to it can still be
+revised; the run stays on the revision it bound, so nothing shifts under work
+already under way.
+
+Never resubmit under a new id to get around a refusal. That leaves two workflows
+where the user meant one, and the second is one nobody approved.
 
 ## Starting the work
 

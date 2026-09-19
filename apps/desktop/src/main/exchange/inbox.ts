@@ -74,6 +74,7 @@ export type OpenPermission =
  * page silence a handover for the rest of the session.
  */
 export type OpenOutcome =
+  | { kind: "declined" }
   /** The page confirmed it is showing this document. */
   | { kind: "shown" }
   /** There was no page to send to; the path waits for the next one. */
@@ -108,8 +109,9 @@ export type InboxEffects = {
   /**
    * Whatever keeps window work from overlapping, where there is a window.
    *
-   * It covers asking the question and writing the working copy, and nothing
-   * after them. The queue is shared with the window's own close handler, and
+   * It covers checking for a window and preparing the working copy. The final
+   * discard question belongs to the renderer at navigation commit. This queue
+   * is shared with the window's own close handler, and
    * waiting inside it for the page to acknowledge a document is waiting for as
    * long as the page takes.
    */
@@ -117,10 +119,9 @@ export type InboxEffects = {
   /**
    * May a workflow replace what the user is looking at?
    *
-   * Asked before the working copy is written rather than after. The answer can
-   * be no, only the person can give it, and a working copy overwritten on the
-   * way to being refused would leave a harness's content in a file the user
-   * believes is theirs.
+   * A host may decline here, but the desktop defers consent until navigation.
+   * Preparing a working copy only creates a missing file; it never replaces
+   * an existing user's document, even if the final navigation is declined.
    */
   mayOpen(path?: string): Promise<OpenPermission>;
   /** Open the workflow at this path, as the Open command would. */
@@ -257,16 +258,10 @@ export class ExchangeInbox {
   /**
    * Put a submitted revision in front of the user.
    *
-   * The order is the whole of it: read what is being asked for, ask whether it
-   * may be shown, write the working copy, open it, and only then record the
-   * request as carried out.
-   *
-   * The window's queue is held for the question and the write and let go
-   * before the page is waited on. Those two are what must not race the
-   * window's own dialogs; an acknowledgement takes as long as the renderer
-   * takes to mount a document, and holding a queue that the close handler
-   * shares for that long swallowed every close click for ten seconds and
-   * answered every other request with "there is no window".
+   * Prepare without replacing an existing working copy, then ask the page to
+   * open it. The page checks consent against its current document immediately
+   * before navigation. Only a confirmed open consumes the request; waiting for
+   * that confirmation must not hold the queue shared with window closing.
    */
   private async display(drop: InboxDrop): Promise<void> {
     const revision = await this.store.readRevision(drop.workflowId, drop.revision);
@@ -283,6 +278,10 @@ export class ExchangeInbox {
     if (!prepared) return;
 
     const opened = await this.effects.open(path);
+    if (opened.kind === "declined") {
+      this.declined.add(drop.key);
+      return;
+    }
     if (opened.kind === "shown") {
       // Only a confirmed display acknowledges the handover.
       await this.store.consumeInbox(drop.key);

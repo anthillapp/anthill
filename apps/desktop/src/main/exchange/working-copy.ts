@@ -16,7 +16,7 @@
 
 import type { AddRevisionResult, ExchangeStore } from "@anthill/exchange-store";
 import type { Workflow } from "@anthill/workflow-schema";
-import { readWorkflowDocument } from "@anthill/workflow-exchange";
+import { readStoredWorkflowDocument } from "@anthill/workflow-exchange";
 import { randomUUID } from "node:crypto";
 import { link, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -44,7 +44,7 @@ export async function writeWorkingCopy(path: string, workflow: Workflow): Promis
       await link(temp, path);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const existing = readWorkflowDocument(JSON.parse(await readFile(path, "utf8")));
+      const existing = readStoredWorkflowDocument(JSON.parse(await readFile(path, "utf8")));
       if (!existing.ok || existing.workflow.id !== workflow.id) {
         throw new Error("The working copy is unreadable or belongs to another workflow. It was not replaced.");
       }

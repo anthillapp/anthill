@@ -45,13 +45,13 @@ const api: AnthillApi = {
     ipcRenderer.invoke(IpcChannel.workspaceStatus, rootPath),
   openWorkflow: (path?: string) => ipcRenderer.invoke(IpcChannel.workflowOpen, path),
   pendingWorkflowOpen: () => ipcRenderer.invoke(IpcChannel.workflowPendingOpen),
-  workflowOpened: (path) => ipcRenderer.invoke(IpcChannel.workflowOpened, path),
+  workflowOpened: (path, id, outcome) => ipcRenderer.invoke(IpcChannel.workflowOpened, path, id, outcome),
   exchangeRead: (path, id) => ipcRenderer.invoke(IpcChannel.exchangeRead, path, id),
   exchangeReady: (request) => ipcRenderer.invoke(IpcChannel.exchangeReady, request),
   exchangeRevoke: (request) => ipcRenderer.invoke(IpcChannel.exchangeRevoke, request),
   liveWorkflow: (runId) => ipcRenderer.invoke(IpcChannel.liveWorkflow, runId),
-  onOpenWorkflow: (listener: (path: string) => void) => {
-    const handler = (_event: unknown, path: string) => listener(path);
+  onOpenWorkflow: (listener: (path: string, deliveryId?: number) => void) => {
+    const handler = (_event: unknown, path: string, id?: number) => listener(path, id);
     ipcRenderer.on(OPEN_WORKFLOW_CHANNEL, handler);
     return () => ipcRenderer.removeListener(OPEN_WORKFLOW_CHANNEL, handler);
   },

@@ -158,22 +158,10 @@ let mainWindow: BrowserWindow | null = null;
 let services: RunServices | null = null;
 
 /**
- * A workflow handed over before there was a page ready to be told about it.
- *
- * The window exists from the moment it is constructed, but the page inside it
- * does not, and a message sent to a page that has not mounted reaches nobody.
- * So the path waits here and the renderer collects it with
- * `workflow:pending-open` once it is up. The pair is what makes a cold start
- * from an `anthill://` link work at all, and it is exactly one delivery: this
- * is cleared by whichever of the two gets there.
- */
-let pendingOpenPath: string | undefined;
-
-/**
  * Whether the page has asked for its pending workflow yet.
  *
- * The only evidence main has that there is a listener on the other end. Before
- * it, a handover is parked in `pendingOpenPath`; after it, it is pushed.
+ * Until then requests stay in their source queue (inbox or pendingLinks),
+ * rather than competing for a single pending path that could overwrite one.
  */
 let rendererListening = false;
 const windowOperations = new WindowOperations();
@@ -658,40 +646,24 @@ function workflowWindow(): { window: BrowserWindow; opened: boolean } | undefine
 }
 
 /** Whether a workflow nobody asked for may take the screen. */
-async function mayShowWorkflow(path?: string): Promise<OpenPermission> {
+async function mayShowWorkflow(): Promise<OpenPermission> {
   const target = workflowWindow();
   if (!target) return "no_window";
   if (!rendererListening || closePending) return "no_window";
-  if (path && workflowDelivery.currentPath === path) return "yes";
-  return (await mayDiscardWorkflow(
-    target.window,
-    "Open the new workflow",
-    "Opening the workflow that was just handed over discards everything since the last save.",
-  ))
-    ? "yes"
-    : "declined";
+  // The renderer asks at navigation commit, after all asynchronous preparation.
+  // Consent here could refer to a document that is no longer on screen then.
+  return "yes";
 }
 
 /**
- * Hand a path to the page, or keep it until there is a page to hand it to.
- *
- * Which of the two happens is decided by `rendererListening` and nothing else,
- * so exactly one of the push and the pending answer ever carries a given
- * workflow. A push into a page that is still loading is silently lost, and
- * silently losing this one means a user who followed a link watching an app
- * that opened and did nothing.
- *
- * `false` says the path was parked rather than sent, so the caller can stop
- * waiting for an acknowledgement that nobody is in a position to give: a
- * parked handover is answered by the next page to ask for its pending
- * workflow, minutes later if that is how long the user takes.
+ * Hand a request to the current page. If it went away during preparation,
+ * leave the request in its source queue for the next ready page.
  */
-function handOverToRenderer(path: string): boolean {
-  if (rendererListening && mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(OPEN_WORKFLOW_CHANNEL, path);
+function handOverToRenderer(path: string, deliveryId: number): boolean {
+  if (rendererListening && !closePending && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(OPEN_WORKFLOW_CHANNEL, path, deliveryId);
     return true;
   }
-  pendingOpenPath = path;
   return false;
 }
 
@@ -701,7 +673,8 @@ async function showWorkflow(path: string): Promise<OpenOutcome> {
   if (!result.ok) {
     return { kind: "refused", error: "error" in result ? result.error : "It could not be opened." };
   }
-  const delivery = await workflowDelivery.deliver(path, () => handOverToRenderer(path));
+  const delivery = await workflowDelivery.deliver(path, (id) => handOverToRenderer(path, id));
+  if (delivery === "declined") return { kind: "declined" };
   if (delivery === "shown") {
     mainWindow?.show();
     mainWindow?.focus();
@@ -741,11 +714,8 @@ async function drainOnce(): Promise<void> {
   if (!rendererListening) return;
   for (const url of [...pendingLinks]) {
     pendingLinks.delete(url);
-    // The queue covers the question and the write, and is let go before the
-    // renderer is waited on. It is shared with the window's close handler, and
-    // ten seconds of waiting for an acknowledgement inside it is ten seconds
-    // in which every close click is swallowed and every other handover is told
-    // there is no window.
+    // Coordinate window availability and preparation with closing, but never
+    // hold the close queue while the renderer asks for consent or opens a file.
     const prepared = await windowOperations
       .run(async (): Promise<string | undefined> => {
         const id = workflowIdFromLink(url)!;
@@ -755,7 +725,7 @@ async function drainOnce(): Promise<void> {
           return undefined;
         }
         const path = exchange().workingCopyPath(id);
-        const permission = await mayShowWorkflow(path);
+        const permission = await mayShowWorkflow();
         if (permission === "no_window") { pendingLinks.add(url); return undefined; }
         if (permission === "declined") return undefined;
         await writeWorkingCopy(path, stored.head.workflow);
@@ -764,6 +734,7 @@ async function drainOnce(): Promise<void> {
       .catch(async (error) => { await refuseHandover(String(error)); return undefined; });
     if (!prepared) continue;
     const result = await showWorkflow(prepared).catch((error): OpenOutcome => ({ kind: "refused", error: String(error) }));
+    if (result.kind === "parked") pendingLinks.add(url);
     // A parked handover is on its way to the next page that asks for one, so
     // saying it failed would be untrue and the user would be shown it twice.
     // Anything else the person clicked a link for is worth a sentence.
@@ -923,24 +894,16 @@ function registerIpcHandlers(): void {
     },
   );
 
-  /*
-    The page saying it is ready to be handed a workflow, and collecting
-    whatever arrived while it was not.
-
-    Taken rather than read, so the same workflow is never opened twice: React's
-    StrictMode mounts every effect twice in development, and either of the two
-    calls is as good as the other. Answering it is also the only evidence main
-    has that there is a listener on the other end, which is what
-    `handOverToRenderer` decides between pushing and parking on.
-  */
+  // Keep the readiness handshake, but deliver every request through the same
+  // acknowledged channel, including requests that arrived before this page.
   handle(IpcChannel.workflowPendingOpen, async (): Promise<string | undefined> => {
     rendererListening = true;
-    const path = pendingOpenPath;
-    pendingOpenPath = undefined;
     void drainLinks();
-    return path;
+    return undefined;
   });
-  handle(IpcChannel.workflowOpened, async (_event, path: string) => { workflowDelivery.acknowledge(path); });
+  handle(IpcChannel.workflowOpened, async (event, path: string, id?: number, outcome?: "shown" | "declined" | "confirming" | "opening") => {
+    if (rendererListening && event.sender === mainWindow?.webContents) workflowDelivery.acknowledge(path, id, outcome);
+  });
   handle(IpcChannel.exchangeRead, async (_event, path: string, id: string) => readExchangeView(exchange(), path, id));
   handle(IpcChannel.exchangeReady, async (_event, request) => readyExchangeRevision(exchange(), request));
   handle(IpcChannel.exchangeRevoke, async (_event, request) => revokeExchangeRevision(exchange(), request));

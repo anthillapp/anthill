@@ -61,63 +61,91 @@ export class WindowOperations {
 /**
  * What became of one attempt to put a document in front of the user.
  *
- * Three answers rather than a boolean, because the two ways of not succeeding
- * call for opposite treatment and a caller given `false` cannot tell them
- * apart. A parked handover is going to arrive — the next page to ask for its
- * pending workflow collects it — so saying it failed would be untrue and would
- * also produce the second opening a minute later. An unconfirmed one was sent
- * to a page that never answered, and whoever asked for it is the one who can
- * ask again.
+ * A missing page leaves the request in its source queue; a user declining
+ * navigation must not be asked again at every poll. A message that was sent
+ * but never acknowledged is neither a confirmed display nor a refusal.
  */
 export type Delivery =
   /** The page acknowledged this exact path. */
   | "shown"
-  /** There was no page to send to. The path waits for the next one. */
+  /** There was no page to send to. The caller keeps its request pending. */
   | "parked"
+  /** The page's final discard check was declined. */
+  | "declined"
   /** It was sent, and nothing came back. */
   | "unconfirmed";
 
 /** An IPC send is not an acknowledgement that the page opened the document. */
 export class WorkflowDelivery {
   currentPath: string | undefined;
-  private pending?: { path: string; finish: (outcome: Delivery) => void };
-  /**
-   * `send` reports whether the message actually reached a page, so a path that
-   * was parked instead resolves at once rather than waiting out a timeout for
-   * an acknowledgement nobody is in a position to give.
-   */
-  async deliver(path: string, send: () => boolean, timeoutMs = 10_000): Promise<Delivery> {
-    if (this.currentPath === path) return "shown";
-    return new Promise<Delivery>((resolve) => {
-      let timer: NodeJS.Timeout | undefined;
-      const record = {
-        path,
-        finish: (outcome: Delivery) => {
-          if (timer) clearTimeout(timer);
-          // Only while this is still the delivery in flight. An earlier one
-          // timing out used to clear the slot whatever was in it, which
-          // disowned the delivery that had replaced it: the page's
-          // acknowledgement then matched nothing, and a workflow the user was
-          // looking at was reported as never shown.
-          if (this.pending === record) this.pending = undefined;
-          resolve(outcome);
-        },
-      };
-      timer = setTimeout(() => record.finish("unconfirmed"), timeoutMs);
-      this.pending = record;
-      try {
-        if (!send()) record.finish("parked");
-      } catch {
-        record.finish("unconfirmed");
-      }
-    });
+  private sequence = 0;
+  private active?: PendingDelivery;
+  private readonly pending = new Map<string, PendingDelivery>();
+
+  /** A separate navigation queue: waiting for a page must not hold the close queue. */
+  deliver(path: string, send: (id: number) => boolean, timeoutMs = 10_000): Promise<Delivery> {
+    const existing = this.pending.get(path);
+    if (existing) return existing.promise;
+    if (!this.active && this.currentPath === path) return Promise.resolve("shown");
+    let settle!: (outcome: Delivery) => void;
+    const promise = new Promise<Delivery>((resolve) => { settle = resolve; });
+    const record: PendingDelivery = {
+      id: ++this.sequence, path, promise, send, timeoutMs,
+      finish: (outcome) => {
+        if (this.pending.get(path) !== record) return;
+        clearTimeout(record.timer);
+        this.pending.delete(path);
+        if (this.active === record) this.active = undefined;
+        settle(outcome);
+        queueMicrotask(() => this.dispatch());
+      },
+    };
+    this.pending.set(path, record);
+    this.dispatch();
+    return promise;
   }
-  acknowledge(path: string): void {
-    this.currentPath = path || undefined;
-    if (this.pending?.path === path) this.pending.finish("shown");
+
+  private dispatch(): void {
+    if (this.active) return;
+    const record = this.pending.values().next().value;
+    if (!record) return;
+    this.active = record;
+    if (this.currentPath === record.path) { record.finish("shown"); return; }
+    record.timer = setTimeout(() => record.finish("unconfirmed"), record.timeoutMs);
+    try {
+      if (!record.send(record.id)) record.finish("parked");
+    } catch {
+      record.finish("unconfirmed");
+    }
+  }
+
+  acknowledge(path: string, id?: number, outcome: "shown" | "declined" | "confirming" | "opening" = "shown"): void {
+    if (id === undefined) {
+      if (outcome === "shown") this.currentPath = path || undefined;
+      return;
+    }
+    if (this.active?.id !== id || this.active.path !== path) return;
+    if (outcome === "confirming" || outcome === "opening") {
+      clearTimeout(this.active.timer);
+      const record = this.active;
+      if (outcome === "opening") record.timer = setTimeout(() => record.finish("unconfirmed"), record.timeoutMs);
+      return;
+    }
+    if (outcome === "shown") this.currentPath = path;
+    this.active.finish(outcome);
   }
   reset(): void {
     this.currentPath = undefined;
-    this.pending?.finish("unconfirmed");
+    for (const record of this.pending.values()) record.finish("unconfirmed");
   }
 }
+
+type PendingDelivery = {
+  id: number;
+  path: string;
+  promise: Promise<Delivery>;
+  send: (id: number) => boolean;
+  timeoutMs: number;
+  timer?: NodeJS.Timeout;
+  finish(outcome: Delivery): void;
+};

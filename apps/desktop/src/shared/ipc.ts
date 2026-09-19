@@ -93,8 +93,13 @@ export const IpcChannel = {
  * channel rejects, a rejection nobody awaited is swallowed, and a feature just
  * quietly showed nothing. Bump this whenever a channel is added, and the
  * renderer can find out before it subscribes to something that will never fire.
+ *
+ * A channel whose shape or meaning changes counts as much as a new one. The
+ * hazard is the same — a renderer talking to a main process that answers a
+ * different question — and it is harder to see, because both sides still have
+ * the channel and nothing rejects.
  */
-export const IPC_CONTRACT = 18;
+export const IPC_CONTRACT = 19;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -755,14 +760,12 @@ export interface AnthillApi {
   /**
    * The workflow Anthill was asked to show before this page could show one.
    *
-   * A handover or an `anthill://` link can arrive while the window is still
-   * loading, and a message sent to a page that is not listening is a message
-   * nobody receives. So main keeps the path and the page asks for it once it is
-   * up. Taken rather than read: a second call answers `undefined`, so the same
-   * workflow is never opened twice by two callers or by one mounting twice.
+   * Also announces that the page is listening. Current desktop builds retain
+   * requests in their source queues and push them with delivery IDs after this
+   * handshake; an older host may instead return a pending path once.
    */
   pendingWorkflowOpen(): Promise<string | undefined>;
-  workflowOpened(path: string): Promise<void>;
+  workflowOpened(path: string, deliveryId?: number, outcome?: "shown" | "declined" | "confirming" | "opening"): Promise<void>;
   exchangeRead(path: string, workflowId: string): Promise<ExchangeView | undefined>;
   exchangeReady(request: ExchangeReadyRequest): Promise<ExchangeReadyResult>;
   exchangeRevoke(request: ExchangeRevokeRequest): Promise<ExchangeReadyResult>;
@@ -772,10 +775,10 @@ export interface AnthillApi {
    * unsubscribe.
    *
    * The path of a working copy, to be opened through `openWorkflow`. Whether
-   * the user wanted this interruption was settled in main, which asked before
-   * sending it.
+   * the user wants this interruption is checked by the renderer immediately
+   * before navigation, not against a stale document in main.
    */
-  onOpenWorkflow(listener: (path: string) => void): () => void;
+  onOpenWorkflow(listener: (path: string, deliveryId?: number) => void): () => void;
   saveWorkflow(request: SaveWorkflowRequest): Promise<SaveWorkflowResult>;
   /** File ▸ Save, or ⌘S. Returns the unsubscribe. */
   onSaveWorkflow(listener: () => void): () => void;

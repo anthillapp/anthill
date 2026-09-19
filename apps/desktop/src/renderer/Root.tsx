@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import type { PendingRun } from "@anthill/live";
 
 import { HowItWorksScreen } from "./explain/HowItWorksScreen.js";
@@ -18,7 +19,7 @@ import { WorkflowScreen } from "./workflow/WorkflowScreen.js";
 type Start =
   | { kind: "templates" }
   | { kind: "prompt" }
-  | { kind: "open"; path?: string; live?: PendingRun };
+  | { kind: "open"; path?: string; live?: PendingRun; deliveryId?: number };
 
 export function Root() {
   const [start, setStart] = useState<Start | null>(null);
@@ -55,18 +56,30 @@ export function Root() {
    * here clicking anything, and the workflow screen opens the file it was
    * given once, on arrival. Routing a second one at a screen that has already
    * done that would change the route and show the old document, so the count
-   * is the screen's key and a handover mounts a new one. Whether there were
-   * unsaved edits to lose was settled before the route arrived: main asked.
+   * is the screen's key and a handover mounts a new one. Consent is checked
+   * here, against the document present when the message actually arrives.
    */
   const [handedOver, setHandedOver] = useState(0);
-  const openHandedOver = useCallback((path: string) => {
-    setStart({ kind: "open", path });
-    setHandedOver((count) => count + 1);
-    // Settings takes the window, and a workflow opened underneath it would be
-    // an answer of "yes, show me" that nothing visibly happened about. The
-    // question of whether to interrupt was already put and already answered.
-    setSettingsFrom(null);
-    setExplaining(false);
+  const openHandedOver = useCallback((path: string, deliveryId?: number) => {
+    const dirty = (window as unknown as Record<string, unknown>).__anthillWorkflowDirty === true;
+    if (dirty) {
+      // The acknowledgement timeout measures a page opening, not the time a
+      // person needs to decide. Neither phase reports the document as shown.
+      void window.anthill.workflowOpened(path, deliveryId, "confirming");
+      if (!window.confirm("This workflow has unsaved changes.\n\nOpening the handed-over workflow discards everything since the last save.")) {
+        void window.anthill.workflowOpened(path, deliveryId, "declined");
+        return;
+      }
+      void window.anthill.workflowOpened(path, deliveryId, "opening");
+    }
+    // No await or deferred render between permission and replacement: a new
+    // edit must not sneak into the document the user just agreed to discard.
+    flushSync(() => {
+      setStart({ kind: "open", path, deliveryId });
+      setHandedOver((count) => count + 1);
+      setSettingsFrom(null);
+      setExplaining(false);
+    });
   }, []);
 
   useEffect(() => window.anthill.onOpenWorkflow(openHandedOver), [openHandedOver]);

@@ -10,7 +10,7 @@
 import { ExchangeStore } from "@anthill/exchange-store";
 import { WORKFLOW_FORMAT_VERSION, type DraftSubmission } from "@anthill/workflow-exchange";
 import type { Workflow } from "@anthill/workflow-schema";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -85,6 +85,31 @@ function submission(): DraftSubmission {
 }
 
 describe("writeWorkingCopy", () => {
+  it("accepts a supported older working copy without rewriting the user's bytes", async () => {
+    const store = await openStore();
+    const path = store.workingCopyPath("workflow-1");
+    await writeWorkingCopy(path, workflow());
+    const older = workflow({ metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION - 1 } } });
+    const bytes = JSON.stringify(older);
+    await writeFile(path, bytes);
+    await writeWorkingCopy(path, workflow());
+    expect(await readFile(path, "utf8")).toBe(bytes);
+  });
+
+  it.each([
+    ["future format", () => workflow({ metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION + 1 } } })],
+    ["wrong identity", () => workflow({ id: "someone-else" })],
+    ["invalid document", () => ({ id: "workflow-1", nodes: "broken" })],
+  ] as const)("refuses an existing %s without replacing it", async (_label, make) => {
+    const store = await openStore();
+    const path = store.workingCopyPath("workflow-1");
+    await writeWorkingCopy(path, workflow());
+    const bytes = JSON.stringify(make());
+    await writeFile(path, bytes);
+    await expect(writeWorkingCopy(path, workflow())).rejects.toThrow("unreadable or belongs to another workflow");
+    expect(await readFile(path, "utf8")).toBe(bytes);
+  });
+
   it("writes a workflow the editor can open, in the shape a save leaves", async () => {
     const store = await openStore();
     const path = store.workingCopyPath("workflow-1");

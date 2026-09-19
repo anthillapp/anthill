@@ -229,6 +229,19 @@ describe("a workflow handed over", () => {
     expect(await waiting(store)).toEqual(["display-1.json"]);
   });
 
+  it("remembers refusal at the renderer's final guard without consuming or nagging", async () => {
+    const store = await openStore();
+    await handOver(store);
+    const window = watcher();
+    window.answerOpenWith({ kind: "declined" });
+    const inbox = new ExchangeInbox(store, window.effects);
+    await inbox.read();
+    await inbox.read();
+    expect(window.opened).toHaveLength(1);
+    expect(window.refused).toEqual([]);
+    expect(await waiting(store)).toEqual(["display-1.json"]);
+  });
+
   /* Asking again two seconds later is not asking, it is nagging. */
   it("asks once per run of the app, not once per poll", async () => {
     const store = await openStore();

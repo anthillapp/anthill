@@ -61,10 +61,11 @@ it("runs one pass at a time and runs again for whatever arrived during one", asy
 
 it("requires the matching renderer acknowledgement and does not remount a duplicate", async () => {
   const delivery = new WorkflowDelivery();
-  const send = vi.fn(() => true);
+  const send = vi.fn((_id: number) => true);
   const result = delivery.deliver("/workflow.json", send);
-  delivery.acknowledge("/different.json");
-  delivery.acknowledge("/workflow.json");
+  const id = send.mock.calls[0]![0];
+  delivery.acknowledge("/different.json", id);
+  delivery.acknowledge("/workflow.json", id);
   expect(await result).toBe("shown");
   expect(await delivery.deliver("/workflow.json", send)).toBe("shown");
   expect(send).toHaveBeenCalledTimes(1);
@@ -86,11 +87,88 @@ it("answers at once when there was no page to send to, rather than waiting out t
   expect(Date.now() - started).toBeLessThan(1_000);
 });
 
-it("lets an older delivery time out without disowning the one that replaced it", async () => {
+it("serializes distinct targets and ignores an old acknowledgement after timeout", async () => {
   const delivery = new WorkflowDelivery();
-  const stale = delivery.deliver("/first.json", () => true, 1);
-  const current = delivery.deliver("/second.json", () => true, 60_000);
+  const send = vi.fn((_id: number) => true);
+  const stale = delivery.deliver("/first.json", send, 1);
+  const current = delivery.deliver("/second.json", send, 60_000);
+  expect(send).toHaveBeenCalledTimes(1);
   expect(await stale).toBe("unconfirmed");
-  delivery.acknowledge("/second.json");
+  await Promise.resolve();
+  expect(send).toHaveBeenCalledTimes(2);
+  delivery.acknowledge("/first.json", send.mock.calls[0]![0]);
+  expect(delivery.currentPath).toBeUndefined();
+  delivery.acknowledge("/second.json", send.mock.calls[1]![0]);
   expect(await current).toBe("shown");
+});
+
+it("coalesces the same path before acknowledgement for inbox and deep-link callers", async () => {
+  const delivery = new WorkflowDelivery();
+  const send = vi.fn((_id: number) => true);
+  const first = delivery.deliver("/workflow.json", send);
+  const second = delivery.deliver("/workflow.json", send);
+  expect(second).toBe(first);
+  expect(send).toHaveBeenCalledTimes(1);
+  delivery.acknowledge("/workflow.json", send.mock.calls[0]![0]);
+  expect(await Promise.all([first, second])).toEqual(["shown", "shown"]);
+});
+
+it("a declined navigation does not change the open path and can be requested again", async () => {
+  const delivery = new WorkflowDelivery();
+  delivery.acknowledge("/original.json");
+  const send = vi.fn((_id: number) => true);
+  const first = delivery.deliver("/new.json", send);
+  delivery.acknowledge("/new.json", send.mock.calls[0]![0], "declined");
+  expect(await first).toBe("declined");
+  expect(delivery.currentPath).toBe("/original.json");
+  const retry = delivery.deliver("/new.json", send);
+  delivery.acknowledge("/new.json", send.mock.calls[1]![0]);
+  expect(await retry).toBe("shown");
+});
+
+it("reset cancels queued deliveries and old acknowledgements cannot settle a retry", async () => {
+  const delivery = new WorkflowDelivery();
+  const send = vi.fn((_id: number) => true);
+  const first = delivery.deliver("/first.json", send);
+  const second = delivery.deliver("/second.json", send);
+  const staleId = send.mock.calls[0]![0];
+  delivery.reset();
+  expect(await Promise.all([first, second])).toEqual(["unconfirmed", "unconfirmed"]);
+  expect(send).toHaveBeenCalledTimes(1);
+  const retry = delivery.deliver("/first.json", send);
+  delivery.acknowledge("/first.json", staleId);
+  expect(delivery.currentPath).toBeUndefined();
+  delivery.acknowledge("/first.json", send.mock.calls[1]![0]);
+  expect(await retry).toBe("shown");
+});
+
+it("does not hold window operations while a navigation awaits the page", async () => {
+  const queue = new WindowOperations();
+  const delivery = new WorkflowDelivery();
+  const send = vi.fn((_id: number) => true);
+  const opening = delivery.deliver("/workflow.json", send);
+  expect(await queue.run(async () => "close was checked")).toBe("close was checked");
+  delivery.reset();
+  expect(await opening).toBe("unconfirmed");
+});
+
+it("does not time out a human decision, but resumes the timeout when opening", async () => {
+  vi.useFakeTimers();
+  try {
+    const delivery = new WorkflowDelivery();
+    const send = vi.fn((_id: number) => true);
+    const first = delivery.deliver("/first.json", send, 10);
+    const second = delivery.deliver("/second.json", send, 10);
+    const id = send.mock.calls[0]![0];
+    delivery.acknowledge("/first.json", id, "confirming");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(delivery.currentPath).toBeUndefined();
+    delivery.acknowledge("/first.json", id, "opening");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(await first).toBe("unconfirmed");
+    expect(send).toHaveBeenCalledTimes(2);
+    delivery.reset();
+    expect(await second).toBe("unconfirmed");
+  } finally { vi.useRealTimers(); }
 });

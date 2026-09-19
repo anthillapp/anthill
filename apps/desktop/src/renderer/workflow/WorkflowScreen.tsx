@@ -78,7 +78,7 @@ export type WorkflowScreenProps = {
   start?:
     | { kind: "templates" }
     | { kind: "prompt" }
-    | { kind: "open"; path?: string; live?: PendingRun };
+    | { kind: "open"; path?: string; live?: PendingRun; deliveryId?: number };
 };
 
 /**
@@ -165,8 +165,12 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   const [dirty, setDirty] = useState(false);
   const currentWorkflow = useRef(workflow);
   currentWorkflow.current = workflow;
+  const handover = useRef(start?.kind === "open" ? start : undefined);
   useEffect(() => {
-    if (workflow) void window.anthill.workflowOpened(path ?? "");
+    if (!workflow) return;
+    const deliveryId = handover.current?.path === path ? handover.current?.deliveryId : undefined;
+    handover.current = undefined;
+    void window.anthill.workflowOpened(path ?? "", deliveryId);
   }, [path, workflow?.id]);
   useEffect(() => () => { void window.anthill.workflowOpened(""); }, []);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: "idle" });

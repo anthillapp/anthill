@@ -735,12 +735,16 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
       handle(IpcChannel.workspaceStatus, rootPath),
     openWorkflow: (path?: string) => handle(IpcChannel.workflowOpen, path),
     pendingWorkflowOpen: () => handle(IpcChannel.workflowPendingOpen),
-    workflowOpened: (path) => handle(IpcChannel.workflowOpened, path),
+    workflowOpened: (path, id, outcome) => handle(IpcChannel.workflowOpened, path, id, outcome),
     exchangeRead: (path, id) => handle(IpcChannel.exchangeRead, path, id),
     exchangeReady: (request) => handle(IpcChannel.exchangeReady, request),
     exchangeRevoke: (request) => handle(IpcChannel.exchangeRevoke, request),
     liveWorkflow: (runId) => handle(IpcChannel.liveWorkflow, runId),
-    onOpenWorkflow: (listener: (path: string) => void) =>
+    // No delivery id: this shell's pushes carry one payload, and nothing here
+    // waits to be told a page opened a document. The desktop's acknowledgement
+    // handshake exists for the exchange, which this shell refuses outright, so
+    // a page that answers without an id is answering about nothing.
+    onOpenWorkflow: (listener: (path: string, deliveryId?: number) => void) =>
       on(OPEN_WORKFLOW_CHANNEL, (path) => listener(path as string)),
     saveWorkflow: (request: SaveWorkflowRequest) =>
       handle(IpcChannel.workflowSave, request),

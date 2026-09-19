@@ -5882,6 +5882,16 @@ button.state-chip {
   border-bottom: 1px solid var(--border);
 }
 
+/*
+ * `.spacer` has no rule of its own anywhere in this sheet — every header that
+ * uses one declares it, and this header never did. The close button had been
+ * sitting next to the title all along instead of at the panel's edge, with
+ * nothing pushing it there.
+ */
+.assistant-top .spacer {
+  flex: 1;
+}
+
 .assistant-top h2 {
   margin: 0;
   font-size: 13px;

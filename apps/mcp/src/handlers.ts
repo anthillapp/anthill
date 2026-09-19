@@ -36,6 +36,7 @@ import { MARKER_VERSION, cliInstruction, newNonce, newRunId, workflowSteps } fro
 import {
   EXCHANGE_VERSION,
   checkSessionId,
+  isSessionId,
   readSubmission,
   type ExchangeProblem,
 } from "@anthill/workflow-exchange";
@@ -70,6 +71,16 @@ import { workflowUrl } from "./url.js";
  * ever runs; that message is lost in the transport before a handler sees it.
  */
 export const MAX_SUBMISSION_BYTES = 1_000_000;
+
+/**
+ * The longest binding key this server will take.
+ *
+ * The sender's own string, written onto a binding that is never rewritten and
+ * compared against on every retry. It lived on the tool's input schema until
+ * that schema had to stop judging what is in these fields; the limit is a
+ * judgement about content, so it moved here with the rest of them.
+ */
+export const MAX_BIND_KEY_LENGTH = 256;
 
 /**
  * The server's own problem code.
@@ -119,13 +130,24 @@ export type CreateDraftInput = {
 
 export type WorkflowInput = { workflowId: string };
 
+/**
+ * What `bind_run` is given, judged here for the same reason a draft is.
+ *
+ * These carried their types on the schema until a reviewer drove the tool over
+ * stdio: five of six malformed binds came back as `isError: true` with a zod
+ * sentence and no `outcome`, which is the one shape the comment at the top of
+ * this file says a refusal must never take. The precondition refusal below had
+ * been written and could not be reached. So the schema now says only that the
+ * keys are there, and the answering is done where an answer can carry a
+ * sentence the model can act on.
+ */
 export type BindRunInput = {
   workflowId: string;
-  revision?: number;
-  digest?: string;
-  idempotencyKey?: string;
+  revision?: unknown;
+  digest?: unknown;
+  idempotencyKey?: unknown;
   /** The harness's own session, checked for shape here rather than downstream. */
-  sessionId?: string;
+  sessionId?: unknown;
 };
 
 export type Handlers = {
@@ -304,8 +326,12 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       // harness's own files — so an id that cannot survive being written down
       // is refused here, with something to read, rather than quietly failing
       // to match anything a layer or two further on.
-      const badSession =
-        sessionId === undefined ? undefined : checkSessionId(sessionId, "sessionId");
+      //
+      // An explicit `null` counts as not sending one, the way `readSubmission`
+      // reads a null `workflowId`: senders do write it, and reading it as an
+      // unusable session id would refuse a call that asked for the default.
+      const given = sessionId === undefined || sessionId === null ? undefined : sessionId;
+      const badSession = given === undefined ? undefined : checkSessionId(given, "sessionId");
       if (badSession) {
         // No link: this is refused before Anthill has looked at the workflow,
         // so nothing here knows whether there is one to open.
@@ -316,15 +342,27 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         });
       }
 
-      if (!Number.isSafeInteger(revision) || revision! < 1 || !digest?.trim() || !idempotencyKey?.trim()) {
+      // Asked again rather than cast: passing `checkSessionId` is exactly
+      // `isSessionId` holding, and a cast would say so without checking.
+      const session = isSessionId(given) ? given : undefined;
+
+      const at = typeof revision === "number" && Number.isSafeInteger(revision) && revision >= 1
+        ? revision : undefined;
+      const content = typeof digest === "string" && digest.trim() ? digest : undefined;
+      // The length is judged here too, now that the schema no longer does it:
+      // a key of any size would otherwise be written into a binding that is
+      // never rewritten.
+      const key = typeof idempotencyKey === "string" && idempotencyKey.trim() &&
+        idempotencyKey.length <= MAX_BIND_KEY_LENGTH ? idempotencyKey : undefined;
+      if (at === undefined || content === undefined || key === undefined) {
         return result(bindText, {
           outcome: "invalid", workflowId,
           problems: [{ code: "BIND_PRECONDITION_REQUIRED", message:
-            "Provide the revision and digest returned by get_ready_revision and a stable idempotencyKey. Retry with the same key and payload; use a new key only for an intentional new run." }],
+            `Provide the revision and digest returned by get_ready_revision and a stable idempotencyKey of at most ${MAX_BIND_KEY_LENGTH} characters. Retry with the same key and payload; use a new key only for an intentional new run.` }],
         });
       }
       const url = workflowUrl(workflowId);
-      const bound = await store.bindRequest(workflowId, revision!, digest!, idempotencyKey!, sessionId,
+      const bound = await store.bindRequest(workflowId, at, content, key, session,
         () => ({ runId: mintRunId(), nonce: mintNonce() }));
 
       if (bound.outcome !== "bound" && bound.outcome !== "already_bound") {
@@ -337,7 +375,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
                 : "conflict",
           workflowId,
           ...(bound.outcome !== "no_such_workflow" ? { url } : {}),
-          revision,
+          revision: at,
           ...(bound.reason ? { reason: bound.reason } : {}),
           ...problemFields(bound.problems),
         });

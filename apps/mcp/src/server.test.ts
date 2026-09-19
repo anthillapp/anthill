@@ -270,6 +270,34 @@ describe("the built server over stdio", () => {
     );
   }, 20_000);
 
+  it("refuses a malformed bind as an answer rather than as a crash", async () => {
+    const session = await connect();
+
+    // Every one of these is a value the handler has a sentence for. They used
+    // to be refused by the tool's input schema instead, which the SDK
+    // validates inside the try block that turns a failure into `isError`, so
+    // the caller got a zod message with no `outcome` and no way to tell a
+    // refusal from the server falling over.
+    for (const malformed of [
+      { revision: 0 }, { revision: "1" }, { revision: 1.5 },
+      { digest: "" }, { idempotencyKey: "" }, { sessionId: 7 },
+    ]) {
+      const called = await session.request("tools/call", {
+        name: "bind_run",
+        arguments: {
+          workflowId: "never-handed-over", revision: 1, digest: "0123456789abcdef",
+          idempotencyKey: "binding", ...malformed,
+        },
+      });
+      const result = called.result as { structuredContent: { outcome: string }; isError?: boolean };
+      const where = JSON.stringify(malformed);
+
+      expect(called.error, where).toBeUndefined();
+      expect(result.isError, where).toBeUndefined();
+      expect(result.structuredContent.outcome, where).toBe("invalid");
+    }
+  }, 20_000);
+
   it("says on stderr that the connection failed, and does not end as though it had not", async () => {
     const session = await connect();
 

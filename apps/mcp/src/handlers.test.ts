@@ -483,6 +483,27 @@ describe("bind_run", () => {
     expect((await store.readWorkflow("workflow-1"))?.bindings).toHaveLength(0);
   });
 
+  it("answers for a field of the wrong kind rather than leaving it to the schema", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+
+    // Each of these used to be refused by the tool's input schema, which the
+    // SDK validates inside the try block that turns everything into
+    // `isError: true` — so a caller got a zod sentence and no outcome, and the
+    // refusal written for exactly this never ran.
+    for (const malformed of [
+      { revision: 0 }, { revision: "1" }, { revision: 1.5 }, { digest: "" }, { digest: 7 },
+      { idempotencyKey: "   " }, { idempotencyKey: "k".repeat(257) }, { sessionId: 7 },
+    ]) {
+      const where = JSON.stringify(malformed);
+      const result = await handlers.bindRun({ ...bindInput(), ...malformed });
+      expect(result.isError, where).toBeUndefined();
+      expect(answerOf(result).outcome, where).toBe("invalid");
+      expect(textOf(result).length, where).toBeGreaterThan(0);
+    }
+    expect((await store.readWorkflow("workflow-1"))?.bindings).toHaveLength(0);
+  });
+
   it("returns the committed binding after restart and a later edit, refusing key reuse", async () => {
     const { handlers, store } = await openTools();
     await handlers.createWorkflowDraft(draftInput());

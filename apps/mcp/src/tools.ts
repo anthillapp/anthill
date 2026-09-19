@@ -186,16 +186,18 @@ or confirm that the desktop has registered observation.`,
       inputSchema: {
         workflowId: WORKFLOW_ID,
         revision: z
-          .number()
-          .int()
-          .positive()
+          .unknown()
           .describe(
             "The exact revision returned by get_ready_revision. A stale revision is refused.",
           ),
-        digest: z.string().min(1).describe("The digest returned with that exact revision."),
-        idempotencyKey: z.string().min(1).max(256).describe("A stable key for this binding request; keep it unchanged on retries."),
+        digest: z.unknown().describe("The digest returned with that exact revision."),
+        idempotencyKey: z
+          .unknown()
+          .describe(
+            "A stable key for this binding request, of at most 256 characters; keep it unchanged on retries.",
+          ),
         sessionId: z
-          .string()
+          .unknown()
           .optional()
           .describe(
             "The harness session that will do the work, when it is not the one that handed the workflow over. Letters, digits, hyphens and underscores, as in the handover. Defaults to the submitting session.",

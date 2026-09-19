@@ -8445,3 +8445,19 @@ button.presence-chip {
   box-shadow: none;
   border-color: transparent;
 }
+
+/*
+ * A caret needs a column of its own to stand in.
+ *
+ * Both search fields sit inside a pill and carry `padding: 0`, so the caret at
+ * position zero is drawn on the field's very first pixel column — where the
+ * field's own clipping takes it, and it vanishes in front of the first letter.
+ * That is exactly where someone looks for it before they start typing.
+ *
+ * Two pixels is the whole fix. The placeholder moves with it, which nobody can
+ * see; the caret gains a column inside the box, which is the point.
+ */
+.settings-search input,
+.library .search input {
+  padding-left: 2px;
+}

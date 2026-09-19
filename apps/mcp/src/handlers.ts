@@ -3,12 +3,14 @@
  *
  * Deliberately a thin shell. Every rule this server appears to enforce belongs
  * to somebody else: `readSubmission` decides whether a handover can be read,
+ * `checkSessionId` decides whether a session id can be carried at all,
  * `checkCompleteness` decides whether it can be shown to a person, and
  * `ExchangeStore.eligibleRevision` decides whether it can be worked on. A second
  * copy of any of those living here would be a second answer the app could
- * disagree with, in front of the same user, about the same workflow. The only
- * judgement made in this file is a size ceiling, which is the server's own
- * because the transport is.
+ * disagree with, in front of the same user, about the same workflow — which is
+ * also why `bind_run` asks `checkSessionId` the same question a handover is
+ * asked, rather than a laxer one of its own. The only judgement made in this
+ * file is a size ceiling, which is the server's own because the transport is.
  *
  * The one rule that shapes every function below comes from the SDK rather than
  * from the domain: a handler that throws is turned into
@@ -33,10 +35,12 @@ import {
 import { MARKER_VERSION, cliInstruction, newNonce, newRunId, workflowSteps } from "@anthill/live";
 import {
   EXCHANGE_VERSION,
+  checkSessionId,
   readSubmission,
   type ExchangeProblem,
 } from "@anthill/workflow-exchange";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { createHash } from "node:crypto";
 
 import {
   bindText,
@@ -86,24 +90,31 @@ export type HandlerDependencies = {
 };
 
 /**
- * What `create_workflow_draft` is given.
+ * What `create_workflow_draft` is given: the six fields, none of them judged.
  *
- * Loose on purpose, and the looseness is the point rather than an oversight. The
- * SDK validates a tool's declared input schema *inside* the try block that turns
- * every failure into `isError: true`, so anything the schema refuses comes back
- * looking like a crash, with a zod message and no question for the user. The
- * design asks instead for an `invalid` outcome carrying every problem with its
- * dotted path and its `ask` — and `readSubmission` is written to produce exactly
- * that. So the schema asks only for the fields to be present and lets
- * `readSubmission` judge what is in them.
+ * `unknown` rather than the types they are supposed to have, and the looseness
+ * is the point rather than an oversight. The SDK validates a tool's declared
+ * input schema *inside* the try block that turns every failure into
+ * `isError: true`, so anything the schema refuses comes back looking like a
+ * crash, with a zod message and no question for the user. The design asks
+ * instead for an `invalid` outcome carrying every problem with its dotted path
+ * and its `ask` — and `readSubmission` is written to produce exactly that, for
+ * every one of these fields. A schema that declared their types would refuse
+ * them first and leave that work unreachable.
+ *
+ * What the schema still decides is which keys have to be there at all, because
+ * zod has no way to say "required, and I will judge it myself": a missing
+ * required field is the one mistake the SDK answers on its own. The schema is
+ * where that requirement is advertised, so the answer at least names the field
+ * the caller left out.
  */
 export type CreateDraftInput = {
-  idempotencyKey: string;
-  mode: string;
-  source: { harness?: string; sessionId?: string; taskText?: string };
-  workflowId?: string;
-  workflow?: unknown;
-  exchangeVersion?: number;
+  idempotencyKey: unknown;
+  mode: unknown;
+  source: unknown;
+  workflow: unknown;
+  workflowId?: unknown;
+  exchangeVersion?: unknown;
 };
 
 export type WorkflowInput = { workflowId: string };
@@ -111,6 +122,7 @@ export type WorkflowInput = { workflowId: string };
 export type BindRunInput = {
   workflowId: string;
   revision?: number;
+  /** The harness's own session, checked for shape here rather than downstream. */
   sessionId?: string;
 };
 
@@ -149,20 +161,24 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
 
       const submission = read.submission;
       const created = await store.createWorkflow(submission);
-      const url = workflowUrl(created.workflowId);
       const problems = created.problems ?? [];
 
       // `id_taken`, `refused` and `conflict` all mean the same thing to a
       // caller: nothing it can work with was stored. They are folded into the
       // one outcome the design names for that, and the store's own code and
       // message travel through untouched so the difference is still legible.
+      //
+      // No link on any of them. Under `refused` there is nothing of this id to
+      // open, and under `id_taken` the link opens the *other* workflow that
+      // holds the name — which is the confusion the refusal exists to report.
       if (created.outcome !== "created" && created.outcome !== "already_exists") {
         return result(draftText, {
           ...invalidDraft(problems),
           workflowId: created.workflowId,
-          url,
         });
       }
+
+      const url = workflowUrl(created.workflowId);
 
       const revision = created.revision;
       if (revision === undefined) {
@@ -177,11 +193,11 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
 
       // Asking the app to open it is a separate write from storing it, and a
       // draft the user never sees is a draft nobody can answer the questions
-      // about. The key is the sender's own, so a retried handover does not make
-      // the app open the same workflow twice.
+      // about. The key is derived rather than minted, so a retried handover
+      // does not make the app open the same workflow twice.
       const drop = await store.dropInbox({
         kind: "display",
-        key: displayKey(submission.idempotencyKey),
+        key: displayKey(created.workflowId, submission.idempotencyKey),
         workflowId: created.workflowId,
         revision,
       });
@@ -199,9 +215,10 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
     },
 
     async getWorkflow({ workflowId }): Promise<CallToolResult> {
-      const url = workflowUrl(workflowId);
       const stored = await store.readWorkflow(workflowId);
-      if (!stored) return result(workflowText, { outcome: "not_found", workflowId, url });
+      if (!stored) return result(workflowText, { outcome: "not_found", workflowId });
+
+      const url = workflowUrl(workflowId);
 
       // Whether a revision may be worked on is asked of the store rather than
       // assembled here out of readiness and bindings. It is the same question
@@ -238,18 +255,30 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
     },
 
     async getReadyRevision({ workflowId }): Promise<CallToolResult> {
-      const url = workflowUrl(workflowId);
       const eligibility = await store.eligibleRevision(workflowId);
 
       if (!eligibility.eligible) {
+        // An id nothing was stored under is not a workflow that is not ready
+        // yet. Relaying it as one tells the caller to wait for a user who has
+        // nothing in front of them to approve, and no amount of waiting turns
+        // an id this machine has never seen into a revision.
+        if (eligibility.reason === "no_such_workflow") {
+          return result(readyText, {
+            outcome: "no_such_workflow",
+            workflowId,
+            ...notReadyFields(eligibility),
+          });
+        }
+
         return result(readyText, {
           outcome: "not_ready",
           workflowId,
-          url,
+          url: workflowUrl(workflowId),
           ...notReadyFields(eligibility),
         });
       }
 
+      const url = workflowUrl(workflowId);
       const workflow = eligibility.revision.workflow;
       return result(readyText, {
         outcome: "ready",
@@ -265,17 +294,44 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
     },
 
     async bindRun({ workflowId, revision, sessionId }): Promise<CallToolResult> {
-      const url = workflowUrl(workflowId);
+      // Before anything is read or written: the one id in this call that
+      // Anthill did not mint. It is copied onto the binding and registered as
+      // the run's session, where it is compared against the ids in the
+      // harness's own files — so an id that cannot survive being written down
+      // is refused here, with something to read, rather than quietly failing
+      // to match anything a layer or two further on.
+      const badSession =
+        sessionId === undefined ? undefined : checkSessionId(sessionId, "sessionId");
+      if (badSession) {
+        // No link: this is refused before Anthill has looked at the workflow,
+        // so nothing here knows whether there is one to open.
+        return result(bindText, {
+          outcome: "invalid",
+          workflowId,
+          ...problemFields([badSession]),
+        });
+      }
+
       const eligibility = await store.eligibleRevision(workflowId);
 
       if (!eligibility.eligible) {
+        if (eligibility.reason === "no_such_workflow") {
+          return result(bindText, {
+            outcome: "no_such_workflow",
+            workflowId,
+            ...notReadyFields(eligibility),
+          });
+        }
+
         return result(bindText, {
-          outcome: eligibility.reason === "no_such_workflow" ? "no_such_workflow" : "not_ready",
+          outcome: "not_ready",
           workflowId,
-          url,
+          url: workflowUrl(workflowId),
           ...notReadyFields(eligibility),
         });
       }
+
+      const url = workflowUrl(workflowId);
 
       // A caller may name the revision it believes it is binding. When it does
       // and the user has edited past it, the store refuses with both numbers
@@ -455,11 +511,37 @@ function checkSize(submitted: unknown): ExchangeProblem | undefined {
  *
  * Both are derived from something the sender already owns rather than minted
  * here, which is what makes a repeat recognisable: dropping a display request
- * twice under one idempotency key does not open the workflow twice, and a run
- * id belongs to exactly one bind.
+ * twice for one workflow under one idempotency key does not open it twice, and
+ * a run id belongs to exactly one bind.
+ *
+ * The display key is about the workflow as well as the key, because the key
+ * alone does not say which document this is. Nothing refuses a sender that
+ * reuses one key under a second `workflow.id` — a submission is filed under
+ * the id its document carries, and the key is only compared once two of them
+ * land on one id — so a drop keyed on the key alone collided with the first
+ * handover's in the inbox. That collision is not a repeat, so it is refused as
+ * a conflict, and the workflow it would have opened never opens.
+ *
+ * Hashed rather than spelled out, because a key becomes a file name through
+ * `safeSegment`, which rewrites everything outside its alphabet and then cuts
+ * the result to 120 characters. Two pairs that differ only in punctuation, or
+ * only past that length, would be one file again — and a file the app has
+ * already consumed is worse than a collision, because `dropInbox` reads the
+ * copy in `done/` as this request having been carried out and answers
+ * `already_dropped` for a workflow nobody has seen. The id is repeated
+ * afterwards so the directory can still be read by a person; it is the half
+ * that gets cut, and nothing depends on it.
  */
-function displayKey(idempotencyKey: string): string {
-  return `display-${idempotencyKey}`;
+function displayKey(workflowId: string, idempotencyKey: string): string {
+  // Length-prefixed rather than joined on a separator. Both halves arrived
+  // from somewhere else and may contain any character, so any separator is one
+  // two different pairs could imitate.
+  const pair = `${workflowId.length}:${workflowId}${idempotencyKey}`;
+  // `node:crypto`, not `@anthill/workflow-exchange`'s hand-rolled SHA-256:
+  // that one is hand-rolled so the renderer's bundle can import it, and this
+  // process is Node and nothing else.
+  const fingerprint = createHash("sha256").update(pair, "utf8").digest("hex").slice(0, 16);
+  return `display-${fingerprint}-${workflowId}`;
 }
 
 function bindKey(runId: string): string {

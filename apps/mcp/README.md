@@ -50,8 +50,13 @@ corrupts the message stream.
 
 `create_workflow_draft` → `get_ready_revision` → `bind_run`, once per handover.
 `get_workflow` answers where a handover stands and is not part of the sequence.
-The names carry no prefix, since a host namespaces them already
-(`mcp__anthill__create_workflow_draft`).
+The names carry no prefix, since a host namespaces them already, and generously:
+Claude Code 2.1.261 presents them to a model as
+`mcp__plugin_anthill_anthill__create_workflow_draft` — `plugin`, then the
+plugin's name, then the key its `.mcp.json` gives this server. A server
+configured directly rather than through a plugin gets the shorter
+`mcp__anthill__…`. Either way the prefix is the host's to choose, and an
+`anthill_` of our own would only repeat it.
 
 1. **`create_workflow_draft`** takes `idempotencyKey`, `mode`, `source`
    (`harness`, `sessionId`, `taskText`) and the whole `workflow` document. The

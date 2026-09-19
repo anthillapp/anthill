@@ -6,12 +6,13 @@
  * the MCP server — and no lock covers all three: Electron's single-instance
  * lock and the CLI's `instance.lock` do not know about each other, and the
  * server is covered by neither. Rather than invent a fourth lock for them to
- * not know about either, every write is an exclusive create, which is atomic on
- * every platform Anthill ships and can only ever succeed for one writer.
+ * not know about either, every write claims its name in one operation the
+ * kernel performs, which is atomic on every platform Anthill ships and can only
+ * ever succeed for one writer.
  *
  * That is why this module exists rather than the store reaching for
  * `node:fs/promises` directly: the invariant is checkable by reading one small
- * file. There is no `writeFile` here, no `rename` and no `truncate`, so there is
+ * file. Nothing here replaces the contents of a name that exists, so there is
  * nowhere in the store a file can be overwritten.
  *
  * `EEXIST` is not an error here, it is the answer: somebody else got there
@@ -25,8 +26,8 @@
  * that says it could not.
  */
 
-import { mkdir, open, readdir, readFile, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import { link, mkdir, open, readdir, readFile, unlink } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 export type ExclusiveWrite =
   /** The file did not exist, and now holds exactly this text. */
@@ -37,7 +38,7 @@ export type ExclusiveWrite =
 /**
  * How many times to resolve a created-then-deleted race before giving up.
  *
- * The case is a file that exists when the create runs and is gone when the
+ * The case is a file that exists when the name is claimed and is gone when the
  * read-back runs, which resolves on the next pass. The budget is here so a
  * pathological thrash fails honestly rather than looping — the same reason the
  * CLI's lock has one.
@@ -47,39 +48,79 @@ const MAX_ATTEMPTS = 5;
 /**
  * Write a file that must not already exist.
  *
- * `open(path, "wx")` is `O_CREAT | O_EXCL`: the create and the exclusivity
- * check are one operation the kernel performs, so two processes racing on the
- * same path produce exactly one winner and one `EEXIST`. A `writeFile` guarded
- * by an existence check is not the same thing and never has been — both callers
- * can read "absent" and both then write, and the loser's content is what
- * survives while both believe they succeeded.
+ * The content is written to a private temporary file in the same directory,
+ * flushed, and only then given the name it is meant to have. `link` is what
+ * makes the name exclusive: like `open(path, "wx")` it is one operation the
+ * kernel performs, so two processes racing on the same path produce exactly one
+ * winner and one `EEXIST`. A `writeFile` guarded by an existence check is not
+ * the same thing and never has been — both callers can read "absent" and both
+ * then write, and the loser's content is what survives while both believe they
+ * succeeded.
+ *
+ * The temporary file is why this is not simply `open(path, "wx")`, which is
+ * what it was. That makes the *creation* of the name atomic and says nothing
+ * about its contents: between the create and the end of the write it exists at
+ * zero bytes and anybody may read it. Every `EEXIST` in this store is answered
+ * by reading the winner's file back, so a loser racing a 2 MB revision would
+ * read an empty file and report a conflict against a record that is perfectly
+ * healthy — an idempotent retry turned into an accusation. Writing the bytes
+ * first and claiming the name afterwards means the name never exists
+ * half-written, so a read-back is always of a whole file.
+ *
+ * It is also what makes an interrupted write survivable. A process that dies
+ * mid-write leaves an orphan temporary file, which nothing reads and the next
+ * write of that record replaces; the same crash under `open(path, "wx")` left a
+ * zero-byte record under a real name, which no code in this package can ever
+ * repair because repairing it would mean overwriting it.
  */
 export async function createExclusive(path: string, text: string): Promise<ExclusiveWrite> {
-  await mkdir(dirname(path), { recursive: true });
+  const directory = dirname(path);
+  await mkdir(directory, { recursive: true });
 
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+  // In the same directory, so the link below cannot cross a filesystem, and
+  // named so that every listing in this package ignores it: the readers take
+  // `*.json` and `*.ready` and nothing beginning with a dot.
+  const temp = join(directory, `.${process.pid}-${nextTemp()}.tmp`);
+  try {
+    const handle = await open(temp, "wx");
     try {
-      const handle = await open(path, "wx");
-      try {
-        await handle.writeFile(text, "utf8");
-      } finally {
-        await handle.close();
-      }
-      return { outcome: "created" };
-    } catch (error) {
-      if (code(error) !== "EEXIST") throw error;
+      await handle.writeFile(text, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
     }
 
-    const existing = await readTextIfPresent(path);
-    if (existing !== undefined) return { outcome: "existed", text: existing };
-    // The file was there for the create and gone for the read. Somebody is
-    // deleting what they just wrote; go round again rather than reporting a
-    // conflict with a file that no longer exists.
-  }
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+      try {
+        await link(temp, path);
+        return { outcome: "created" };
+      } catch (error) {
+        if (code(error) !== "EEXIST") throw error;
+      }
 
-  throw new Error(
-    `Could not settle who owns ${path}: it exists when written to and is absent when read back.`,
-  );
+      const existing = await readTextIfPresent(path);
+      if (existing !== undefined) return { outcome: "existed", text: existing };
+      // The file was there for the link and gone for the read. Somebody is
+      // deleting what they just wrote; go round again rather than reporting a
+      // conflict with a file that no longer exists.
+    }
+
+    throw new Error(
+      `Could not settle who owns ${path}: it exists when written to and is absent when read back.`,
+    );
+  } finally {
+    // The name now has its own link to the content, or somebody else's name
+    // does. Either way this one has served its purpose.
+    await removeFile(temp);
+  }
+}
+
+/** Enough to tell two writes by one process apart; the pid does the rest. */
+let tempCounter = 0;
+
+function nextTemp(): string {
+  tempCounter += 1;
+  return `${Date.now().toString(36)}-${tempCounter}`;
 }
 
 /** A file's contents, or `undefined` when there is no such file. */
@@ -112,11 +153,12 @@ export async function listDirectory(path: string): Promise<string[]> {
 /**
  * Remove a file, tolerating its already being gone.
  *
- * The one deletion in the store, and it is never of a record: an inbox drop is
- * removed once a copy of it is safely in `done/`, which makes consuming a drop
- * a create followed by an unlink rather than a rename. A rename would replace
- * whatever `done/` already held for that key, and replacing a file is the thing
- * this store does not do.
+ * Never of a record under its own name: an inbox drop is removed once a copy of
+ * it is safely in `done/`, which makes consuming a drop a create followed by an
+ * unlink rather than a rename. A rename would replace whatever `done/` already
+ * held for that key, and replacing a file is the thing this store does not do.
+ * The other caller is `createExclusive`, dropping a temporary name the content
+ * no longer needs.
  */
 export async function removeFile(path: string): Promise<void> {
   try {

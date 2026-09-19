@@ -68,10 +68,20 @@ const MAX_ATTEMPTS = 5;
  * half-written, so a read-back is always of a whole file.
  *
  * It is also what makes an interrupted write survivable. A process that dies
- * mid-write leaves an orphan temporary file, which nothing reads and the next
- * write of that record replaces; the same crash under `open(path, "wx")` left a
- * zero-byte record under a real name, which no code in this package can ever
- * repair because repairing it would mean overwriting it.
+ * mid-write leaves an orphan temporary file, and the same crash under
+ * `open(path, "wx")` left a zero-byte record under a real name, which no code
+ * in this package can ever repair because repairing it would mean overwriting
+ * it. The orphan costs disk and nothing else: no listing here can see it, and
+ * the record it was becoming is simply absent, which is a state every caller
+ * already handles.
+ *
+ * Nothing collects those orphans, and a later write of the same record does not
+ * — each temporary name carries the instant it was made, so no two writes ever
+ * choose the same one. A sweep would have to tell a temp whose writer is gone
+ * from one being written this moment, and a pid means nothing across a reboot,
+ * so the honest version of that is a decision about ages rather than a line
+ * here. Until there is one, a crashed 2 MB revision is 2 MB in the user's data
+ * directory for good.
  */
 export async function createExclusive(path: string, text: string): Promise<ExclusiveWrite> {
   const directory = dirname(path);

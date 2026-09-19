@@ -1,6 +1,6 @@
 {
   "name": "@anthill/desktop",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "private": true,
   "description": "Anthill desktop shell (Electron): visual workflow authoring plus local execution.",
   "main": "out/main/index.js",

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "anthill",
+  "metadata": {
+    "description": "Anthill's own plugins, served from this checkout."
+  },
+  "owner": {
+    "name": "Nick Nesterov",
+    "email": "njrnesterov@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "anthill",
+      "description": "Hand the work of this session to Anthill as a reviewable workflow, then report progress against the revision the user approved.",
+      "version": "0.7.0",
+      "author": {
+        "name": "Nick Nesterov",
+        "email": "njrnesterov@gmail.com"
+      },
+      "source": "./plugins/anthill",
+      "category": "productivity",
+      "homepage": "https://github.com/nstr/anthill",
+      "tags": ["workflow", "planning", "observability", "anthill"]
+    }
+  ]
+}

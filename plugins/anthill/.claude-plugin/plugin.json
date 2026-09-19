@@ -1,0 +1,13 @@
+{
+  "name": "anthill",
+  "description": "Hand the work of this session to Anthill as a reviewable workflow, then report progress against the revision the user approved.",
+  "version": "0.7.0",
+  "author": {
+    "name": "Nick Nesterov",
+    "email": "njrnesterov@gmail.com"
+  },
+  "homepage": "https://github.com/nstr/anthill",
+  "repository": "https://github.com/nstr/anthill",
+  "keywords": ["workflow", "planning", "observability", "anthill"],
+  "skills": "./skills/"
+}

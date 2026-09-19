@@ -29,6 +29,7 @@
 import { ExchangeStore } from "@anthill/exchange-store";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
 import { createHandlers } from "./handlers.js";
@@ -38,8 +39,18 @@ import { registerExchangeTools } from "./tools.js";
 
 const SERVER_NAME = "anthill";
 
-/** The repository's version, which every workspace here carries in step. */
-const SERVER_VERSION = "0.6.6";
+/**
+ * The version this server reports at initialize.
+ *
+ * Read from the package rather than written out here. It was a literal, and the
+ * 0.7.0 release moved every manifest in the repository and left it behind
+ * saying 0.6.6 — under a comment claiming the two were kept in step. A number
+ * that has to be remembered in two places is a number that will disagree with
+ * itself; this one can only be wrong if the package is.
+ */
+const SERVER_VERSION = String(
+  (createRequire(import.meta.url)("../package.json") as { version?: unknown }).version ?? "0.0.0",
+);
 
 /**
  * What the process ends on when the transport fails.

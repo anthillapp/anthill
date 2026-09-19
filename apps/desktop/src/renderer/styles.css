@@ -8550,16 +8550,263 @@ button.presence-chip {
   box-shadow: none;
   border-color: var(--dark-border);
 }
-.exchange-handover {
-  flex: 0 0 auto;
-  border-bottom: 1px solid #d8d8d8;
-  padding: 10px 16px;
-  background: #fafafa;
-  max-height: 220px;
-  overflow: auto;
-  font-size: 13px;
+/* ==================================================================
+   The workflow toolbar, once a workflow can arrive from a coding session
+   ==================================================================
+   Most workflows are not handovers. For those the bar is what it has always
+   been — every rule below is inert without `.is-handover`, and `.wf-toolbar`
+   adds no box of its own because `.topbar` already sets the same height,
+   gap, padding and ground.
+
+   The state colours are literal on purpose. They are the vocabulary shared
+   with the canvas run states and the live-session plaque, and a theme change
+   must not repaint "Waiting for you" into something calm or "Running" into
+   something that reads as an error.
+*/
+
+/* A handover adds a pill to a bar that neither wraps nor scrolls: `.topbar`
+   clips, and it clips from the right, which is where the primary button is.
+   The name is the element with slack — it is also in the window's own title —
+   so it is the one that gives way, down to a floor where it is still a name
+   rather than a sliver. */
+.wf-toolbar.is-handover .title-input {
+  flex: 0 1 auto;
+  min-width: 120px;
 }
-.exchange-handover-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
-.exchange-handover p { margin: 6px 0; overflow-wrap: anywhere; }
-.exchange-handover summary { cursor: pointer; }
-.exchange-task { white-space: pre-wrap; }
+
+/* One slot holds the harness picker OR the source button, so the two states
+   swap in place rather than reshuffling the bar around them. The lock is not
+   decoration: the exchange validates that a workflow targets the tool that
+   handed it over, so switching saves fine and the revision silently becomes
+   one that can never be bound. */
+.wf-toolbar .wf-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  height: 32px;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-control);
+  background: var(--dark-inset);
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  color: var(--ink-quiet);
+  cursor: pointer;
+}
+.wf-toolbar .wf-source:hover { background: rgba(255, 255, 255, 0.09); }
+
+.wf-toolbar .wf-source .logo {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  display: block;
+  border-radius: 3px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.wf-toolbar .wf-source .lock { flex: none; opacity: 0.75; }
+
+/* Two pills, never one. "Does the graph compile" and "where does this stand
+   with the agent" are different facts that disagree regularly — a valid graph
+   waiting for approval, a broken one whose earlier revision is already
+   running — so one pill would always be hiding one of them. */
+.wf-toolbar .wf-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Only the handover pill carries a dot and the extra weight. The validation
+   pill is one of a row of quiet indicators; the handover pill is a claim
+   about work that may be under way, and it is read at a glance. */
+.wf-toolbar .wf-pill i { width: 6px; height: 6px; flex: none; display: block; border-radius: 50%; }
+.wf-toolbar .wf-pill-handover { font-weight: 600; }
+
+/* "No problems", not "Ready" — Ready now belongs to the handover, where it
+   means the work may begin. Clickable only when there is something to open. */
+.wf-toolbar .wf-pill-validation.is-clean {
+  border: 1px solid rgba(63, 143, 94, 0.5);
+  background: rgba(63, 143, 94, 0.16);
+  color: #a9e0bd;
+}
+
+.wf-toolbar .wf-pill-validation.has-problems {
+  border: 1px solid rgba(255, 151, 131, 0.45);
+  background: rgba(255, 151, 131, 0.12);
+  color: var(--accent-300);
+  cursor: pointer;
+}
+
+/* Only the state that asks something of the reader is coloured; the states
+   that merely report stay quiet. */
+.wf-toolbar .wf-pill-handover.is-draft,
+.wf-toolbar .wf-pill-handover.is-bound { background: rgba(255, 255, 255, 0.09); color: var(--ink-quiet); }
+.wf-toolbar .wf-pill-handover.is-draft i,
+.wf-toolbar .wf-pill-handover.is-bound i { background: var(--on-dark-dimmer); }
+
+.wf-toolbar .wf-pill-handover.is-waiting { background: rgba(216, 162, 26, 0.18); color: #e8c675; }
+.wf-toolbar .wf-pill-handover.is-waiting i { background: #d8a21a; }
+
+.wf-toolbar .wf-pill-handover.is-approved,
+.wf-toolbar .wf-pill-handover.is-ready { background: rgba(47, 143, 95, 0.18); color: #a9e0bd; }
+.wf-toolbar .wf-pill-handover.is-approved i,
+.wf-toolbar .wf-pill-handover.is-ready i { background: #2f8f5f; }
+
+/* Running is the same blue that means running on the canvas and in the
+   session feed. Bound is grey. A binding is not evidence a session is alive,
+   and the colour carries half of how that is said. */
+.wf-toolbar .wf-pill-handover.is-running { background: rgba(86, 174, 224, 0.18); color: #bcdcf1; }
+.wf-toolbar .wf-pill-handover.is-running i { background: #56aee0; }
+
+/* The primary slot. For a handover, Prompt is not merely redundant — it mints
+   a fresh run id and registers a second, unrelated run from the same
+   workflow. The slot holds the decision the person actually has, when they
+   have one. */
+.wf-toolbar .wf-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  padding: 8px 15px;
+  border: 0;
+  border-radius: var(--radius-control);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+.wf-toolbar .wf-primary:hover { background: var(--accent-600); }
+
+/* Blocked, not hidden. A grey button with no reason teaches nothing — the
+   reason is in the title and, at length, in the notice card. */
+.wf-toolbar .wf-primary[aria-disabled="true"] {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--on-dark-dim);
+  cursor: not-allowed;
+}
+.wf-toolbar .wf-primary[aria-disabled="true"]:hover { background: rgba(255, 255, 255, 0.1); }
+
+/* The notice card. Three conditions need a sentence and cannot be a pill. It
+   floats over the canvas rather than sitting in the layout: the exchange is
+   re-read on a timer, so a card can appear while nobody is interacting, and
+   the canvas must not jump under the reader's cursor when it does. It is
+   confined to the canvas column — full-bleed covered the rail's Blocks/Agents
+   switcher and the canvas chip row. */
+.wf-notice {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 58px;
+  z-index: 12;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 14px;
+  border: 1px solid #eddfbc;
+  border-left: 3px solid #d8a21a;
+  border-radius: var(--radius-slab);
+  background: #fdf8ec;
+  box-shadow: var(--shadow-raised);
+}
+
+.wf-notice p {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  color: #8a6a08;
+}
+.wf-notice i {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: #d8a21a;
+}
+
+/* Red only for a failed write. Amber is "something needs you"; it is not a
+   fault that an approval is standing or that edits have diverged. */
+.wf-notice.is-error { border-color: var(--accent-300); border-left-color: var(--accent); background: var(--accent-100); }
+.wf-notice.is-error p { color: var(--accent-700); }
+.wf-notice.is-error i { background: var(--accent); }
+
+.wf-notice button {
+  padding: 6px 12px;
+  flex: none;
+  border: 1px solid #e0d6bb;
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  color: #8a6a08;
+}
+
+/* The provenance popover: the original task, read once to check the same job
+   was understood. Portalled, because the top bar clips its overflow. */
+.wf-provenance {
+  position: fixed;
+  z-index: 40;
+  width: 430px;
+  max-width: calc(100vw - 32px);
+  padding: 16px 18px;
+  border-radius: 11px;
+  background: var(--surface);
+  box-shadow: 0 12px 34px rgba(32, 30, 29, 0.26);
+}
+
+.wf-provenance .task {
+  margin: 0;
+  /* The task is the user's own words — a paragraph and a single line are both
+     ordinary, and neither should be reflowed into the other. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+
+.wf-provenance .meta {
+  margin: 11px 0 0;
+  padding-top: 11px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--ink-dim);
+}
+
+/* The canvas origin chip. A handed-over workflow did not come from a
+   template, and the chip must not claim so two inches from a button that
+   says the truth. Grey, because the accent dot belongs to a template. */
+.canvas-origin {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font-size: 12.5px;
+  white-space: nowrap;
+  box-shadow: var(--shadow-card);
+}
+
+.canvas-origin i { width: 7px; height: 7px; flex: none; border-radius: 50%; }
+.canvas-origin.from-template i { background: var(--accent); }
+.canvas-origin.from-session i { background: var(--ink-dim); }

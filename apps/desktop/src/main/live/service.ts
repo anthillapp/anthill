@@ -22,6 +22,8 @@
 
 import {
   type ObservationEvent,
+  CLI_LABEL,
+  TIMING,
   applyEvidence,
   createPendingRun,
   expireIfStale,
@@ -433,9 +435,28 @@ export class LiveSessionService {
     if (sessionId) {
       const conflicts = new Set(evidence.flatMap((item) => item.kind === "ambiguous" ? item.sessionIds :
         "sessionId" in item && item.sessionId !== sessionId ? [item.sessionId] : []));
+      for (const draft of drafts) if (draft.sessionId && draft.sessionId !== sessionId) conflicts.add(draft.sessionId);
       conflicts.delete(sessionId);
+      /*
+        Whether this session's own records have been found.
+
+        The report channel is not evidence of it: it borrows whatever id the
+        run carries rather than reading one, so a run bound to an id no
+        transcript holds looks located by that measure alone — which is how
+        the case this guards against went unnoticed.
+
+        Judged after a minute, because a session that has just started has
+        often not written anything yet, and a warning that is usually wrong is
+        one nobody reads by the time it is right.
+      */
+      const found = drafts.some((item) => item.sessionId === sessionId && item.channel !== "anthill:report");
+      const overdue = Date.parse(now) - Date.parse(run.createdAt) > TIMING.activityTtlMs;
       evidence = evidence.filter((item) => (!("sessionId" in item) || item.sessionId === sessionId) && item.kind !== "ambiguous");
-      drafts = [...drafts.filter((item) => item.sessionId === sessionId), ...this.noteMismatch(run, sessionId, conflicts, now)];
+      drafts = [
+        ...drafts.filter((item) => item.sessionId === sessionId),
+        ...this.noteMismatch(run, sessionId, conflicts, now),
+        ...(found || !overdue ? [] : this.noteUnseen(run, sessionId, now)),
+      ];
     }
     // Observers with no transcript support must not shorten the report window.
     if (run.exchange) {
@@ -463,6 +484,39 @@ export class LiveSessionService {
    * long as it keeps growing, and a note on every poll would be a feed of the
    * same sentence rather than a record of something that happened.
    */
+  /**
+   * Say so when the session a binding named has left no records at all.
+   *
+   * The filter above keeps a bound run to the session the harness said it was
+   * working in. When that id is wrong, the filter is total: every word the
+   * session wrote is discarded, and the page draws the steps the CLI reported
+   * against a feed with nothing in it — beside a badge reading "strong". A
+   * handover once recorded the desktop app's own session id, which is the same
+   * for every session it starts, and it looked exactly like a quiet run.
+   *
+   * Once per run: it is a fact about the binding, not about this poll, and a
+   * line every two seconds would bury the work it is complaining about.
+   */
+  private noteUnseen(run: PendingRun, sessionId: string, now: string): ObservationEventDraft[] {
+    const noted = this.mismatched.get(run.anthillRunId) ?? new Set<string>();
+    this.mismatched.set(run.anthillRunId, noted);
+    const key = `unseen:${sessionId}`;
+    if (noted.has(key)) return [];
+    noted.add(key);
+    return [
+      {
+        at: now,
+        cli: run.selectedCli,
+        source: "anthill",
+        channel: "exchange:session-mismatch",
+        sessionId,
+        kind: "notification",
+        title: "The session this run was bound to has written nothing here",
+        detail: `The handover named ${sessionId}, and no local ${CLI_LABEL[run.selectedCli]} record carries that id. Progress reported through the CLI still arrives; everything the session itself writes is being passed over, because it cannot be told from another session's.`,
+      },
+    ];
+  }
+
   private noteMismatch(
     run: PendingRun,
     sessionId: string,

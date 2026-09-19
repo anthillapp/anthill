@@ -890,3 +890,89 @@ describe("workflow ids that arrived from somewhere else", () => {
     expect(found.outcome).toBe("found");
   });
 });
+
+describe("revise_workflow", () => {
+  it("stores a later version and asks the app to show it", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+
+    const revised = completeWorkflow({ name: "Ship the fix, carefully" });
+    const result = await handlers.reviseWorkflow({ workflowId: "workflow-1", workflow: revised });
+
+    expect(answerOf(result)).toMatchObject({ outcome: "revised", revision: 2, displayRequested: true });
+    expect((await store.readRevision("workflow-1", 2))?.workflow.name).toBe("Ship the fix, carefully");
+    // The user is looking at the working copy, which this server never writes;
+    // without the request they would read the old graph while the store held
+    // the new one.
+    expect((await inbox(store)).filter((drop) => drop.revision === 2)).toHaveLength(1);
+  });
+
+  it("recognises content it already holds rather than stacking a duplicate", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+
+    const again = await handlers.reviseWorkflow({ workflowId: "workflow-1", workflow: completeWorkflow() });
+    expect(answerOf(again)).toMatchObject({ outcome: "unchanged", revision: 1 });
+    expect((await store.readWorkflow("workflow-1"))?.head?.revision).toBe(1);
+  });
+
+  it("leaves a bound run on the revision it bound, and says so", async () => {
+    const { handlers } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    const ready = answerOf(await handlers.getReadyRevision({ workflowId: "workflow-1" }));
+    await handlers.bindRun({
+      workflowId: "workflow-1",
+      revision: ready.revision,
+      digest: ready.digest,
+      idempotencyKey: "bind-1",
+    });
+
+    const result = await handlers.reviseWorkflow({
+      workflowId: "workflow-1",
+      workflow: completeWorkflow({ name: "A different plan" }),
+    });
+    expect(answerOf(result)).toMatchObject({ outcome: "revised", revision: 2, boundRevision: 1 });
+    expect(textOf(result)).toContain("bound to revision 1 and stays on it");
+
+    // And the bind still answers for what it bound, not for what was written after.
+    const stands = answerOf(await handlers.getWorkflow({ workflowId: "workflow-1" }));
+    expect(stands.bindings).toMatchObject([{ revision: 1 }]);
+  });
+
+  it("refuses a document whose id is not the workflow being revised", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+
+    const result = await handlers.reviseWorkflow({
+      workflowId: "workflow-1",
+      workflow: completeWorkflow({ id: "workflow-2" }),
+    });
+    expect(answerOf(result).outcome).toBe("invalid");
+    expect((await store.readWorkflow("workflow-1"))?.head?.revision).toBe(1);
+    expect(await store.readWorkflow("workflow-2")).toBeUndefined();
+  });
+
+  it("asks the questions rather than storing an incomplete revision", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+
+    const gutted = completeWorkflow();
+    const result = await handlers.reviseWorkflow({
+      workflowId: "workflow-1",
+      workflow: { ...gutted, brief: { ...gutted.brief, doneCriteria: [] } },
+    });
+    expect(answerOf(result).outcome).toBe("incomplete");
+    expect(answerOf(result).questions).not.toHaveLength(0);
+    expect((await store.readWorkflow("workflow-1"))?.head?.revision).toBe(1);
+  });
+
+  it("says when nothing of that id was ever handed over", async () => {
+    const { handlers } = await openTools();
+    const result = await handlers.reviseWorkflow({
+      workflowId: "workflow-nobody-sent",
+      workflow: completeWorkflow({ id: "workflow-nobody-sent" }),
+    });
+    expect(answerOf(result).outcome).toBe("no_such_workflow");
+    expect(textOf(result)).toContain("waiting will not change it");
+  });
+});

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "exchange": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/anthill-mcp"]
+    }
+  }
+}

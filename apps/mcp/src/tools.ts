@@ -2,9 +2,13 @@
  * The four tools, as the harness sees them.
  *
  * `registerTool` rather than `server.tool`, which is deprecated in every one of
- * its overloads in SDK 1.30.0. Names carry no prefix: Claude Code already
- * presents a plugin's tools as `mcp__anthill__create_workflow_draft`, so an
- * `anthill_` of our own would say it twice.
+ * its overloads in SDK 1.30.0. Names carry no prefix, because the host adds a
+ * generous one of its own: Claude Code 2.1.261 presents a plugin's tools as
+ * `mcp__plugin_anthill_exchange__create_workflow_draft`, built from the plugin's
+ * name and the key its `.mcp.json` gives this server. (An earlier comment here
+ * guessed `mcp__anthill__`, which is what a server configured directly rather
+ * than through a plugin gets; the guess was corrected by calling one.) An
+ * `anthill_` of our own would only repeat what the host already said.
  *
  * No `outputSchema` on any of them, and that is a decision rather than an
  * omission. Declaring one obliges every non-error result to carry
@@ -138,6 +142,52 @@ which one, and nothing is stored.`,
       },
     },
     async (args) => handlers.createWorkflowDraft(args),
+  );
+
+  server.registerTool(
+    "revise_workflow",
+    {
+      title: "Change a workflow Anthill already has",
+      description: `Store a later version of a workflow that was handed over, and ask Anthill to show it.
+
+For when the user asks you to change the plan rather than changing it themselves
+in Anthill. What you send is the whole workflow as it should now read, not a
+description of the change.
+
+Returns an outcome of:
+  revised           stored as a new revision, and Anthill was asked to show it.
+  unchanged         Anthill already held exactly this content. Nothing was added,
+                    and nothing needed to be — a retry, or a change the user had
+                    already made.
+  incomplete        nothing was stored; the questions have to be answered first.
+  no_such_workflow  nothing of that id has been handed over to this Anthill.
+  invalid           nothing was stored, and the call itself is what has to change.
+  conflict          nothing was stored, and the reason says what is in the way.
+
+A revision is not a decision, and this tool makes none. The revision a run is
+bound to never changes, so a workflow being worked on right now carries on
+exactly as it was — your revision does not reach it. And nothing here approves
+anything: tell the user what you changed and let them say whether to work from
+it. Writing a revision and then binding it is approving your own work.`,
+      inputSchema: {
+        workflowId: WORKFLOW_ID,
+        workflow: z
+          .unknown()
+          .optional()
+          .describe(
+            `The whole workflow document as it should now read, in the same shape create_workflow_draft takes, at metadata.workflow.formatVersion: ${WORKFLOW_FORMAT_VERSION}. Its \`id\` must be the workflow you are revising: this replaces a workflow's content, and never its identity.`,
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        // Nothing is overwritten: a revision is a new record beside the ones
+        // already there, and content that is already held is recognised.
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (args) => handlers.reviseWorkflow(args),
   );
 
   server.registerTool(

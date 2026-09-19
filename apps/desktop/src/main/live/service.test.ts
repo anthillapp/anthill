@@ -227,6 +227,78 @@ describe("external revision bindings", () => {
     service.stop();
   });
 
+  /*
+   * A handover through the exchange pastes no prompt, so the bound session's
+   * transcript carries no marker and nothing used to recognise it. The steps
+   * arrived through the CLI and the feed stayed empty beside a badge reading
+   * "strong": everything the session wrote was read and then thrown away.
+   */
+  it("reads the bound session's own transcript, which carries no marker", async () => {
+    const { service, claudeRoot, setNow } = await harness();
+    await service.registerBinding(input);
+    await mkdir(join(claudeRoot, "-tmp-scratch"), { recursive: true });
+    await writeFile(
+      join(claudeRoot, "-tmp-scratch", "bound-session.jsonl"),
+      [
+        { type: "user", sessionId: "bound-session", timestamp: "2026-08-29T10:00:05.000Z", message: { role: "user", content: "do the thing" } },
+        {
+          type: "assistant",
+          sessionId: "bound-session",
+          timestamp: "2026-08-29T10:00:06.000Z",
+          message: { role: "assistant", content: [{ type: "text", text: "Reading the checkout path first." }] },
+        },
+      ].map((row) => JSON.stringify(row)).join("\n") + "\n",
+      "utf8",
+    );
+    setNow("2026-08-29T10:00:08.000Z");
+    await service.poll();
+
+    const said = (await service.events(RUN_ID)).filter(
+      (event) => event.sessionId === "bound-session" && event.kind === "message",
+    );
+    expect(said).toHaveLength(1);
+    expect(said[0].detail).toContain("Reading the checkout path");
+    /*
+      And the transcript is evidence of life, not only a source of cards.
+      Events reach the page through a fallback that needs no match, so they
+      arrived before this; evidence does not, and without it a bound run whose
+      harness stops running `anthill step` — because the command is missing, or
+      because it forgot — goes quiet and is declared lost while its session is
+      visibly still writing.
+    */
+    expect(only(service.snapshot())).toMatchObject({
+      state: "detected_live",
+      detectedSessionId: "bound-session",
+    });
+    service.stop();
+  });
+
+  /*
+   * The same filter, against an id no record carries — a handover once named
+   * the desktop app's own session, which is the same for every session it
+   * starts. Silence was indistinguishable from a quiet agent.
+   */
+  it("says so when the session it was bound to has written nothing", async () => {
+    const { service, reportLogPath, setNow } = await harness();
+    await service.registerBinding(input);
+    await mkdir(join(reportLogPath, ".."), { recursive: true });
+    await writeFile(reportLogPath, JSON.stringify(
+      { version: 1, kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "fix", at: "2026-08-29T10:00:02.000Z" },
+    ) + "\n");
+    // Long enough that a session which had started would have written by now;
+    // the reports prove the harness is working, so the silence is the session's.
+    setNow("2026-08-29T10:06:00.000Z");
+    await service.poll();
+    await service.poll();
+
+    const notes = (await service.events(RUN_ID)).filter(
+      (event) => event.title === "The session this run was bound to has written nothing here",
+    );
+    expect(notes).toHaveLength(1);
+    expect(notes[0].detail).toContain("bound-session");
+    service.stop();
+  });
+
   it("does not adopt another transcript's session even after ambiguous evidence", async () => {
     const { service, claudeRoot, setNow } = await harness();
     await service.registerBinding(input);

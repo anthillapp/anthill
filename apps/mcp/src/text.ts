@@ -85,6 +85,29 @@ export type WorkflowAnswer = {
   problems?: ExchangeProblem[];
 };
 
+/**
+ * What became of a revision offered to a workflow that already exists.
+ *
+ * `unchanged` is a success and has to read as one. The store recognises the
+ * content it already holds, so a retry after a lost reply, or a change the user
+ * had already made themselves, lands on the revision that is there rather than
+ * stacking a duplicate beside it — and a caller told "unchanged" has nothing to
+ * fix and nothing to do again.
+ */
+export type ReviseAnswer = {
+  outcome: "revised" | "unchanged" | "no_such_workflow" | "incomplete" | "invalid" | "conflict";
+  workflowId?: string;
+  /** Absent from every refusal, for the reason `DraftAnswer.url` gives. */
+  url?: string;
+  revision?: number;
+  digest?: string;
+  /** The revision a run is working from, when one is, and it is not this one. */
+  boundRevision?: number;
+  displayRequested?: boolean;
+  problems?: ExchangeProblem[];
+  questions?: string[];
+};
+
 export type ReadyAnswer = {
   /**
    * `no_such_workflow` is its own outcome rather than a flavour of `not_ready`.
@@ -209,6 +232,54 @@ export function draftText(answer: DraftAnswer): string {
   if (answer.problems && answer.problems.length > 0) {
     parts.push("Also worth knowing:", numbered(answer.problems.map(sentence)));
   }
+
+  if (answer.url) parts.push(answer.url);
+  return join(parts);
+}
+
+export function reviseText(answer: ReviseAnswer): string {
+  const where = answer.workflowId ?? "that workflow";
+
+  if (answer.outcome === "no_such_workflow") return join([
+    `Nothing of the id ${where} has been handed over to this Anthill, so there was nothing to revise. Check the id against the one create_workflow_draft returned; waiting will not change it.`,
+  ]);
+
+  if (answer.outcome === "incomplete") return join([
+    `Revision of ${where} was refused, and nothing was written. The workflow it would have stored is missing something a person has to answer for.`,
+    ...detail(answer.questions, answer.problems),
+    "Put these to the user, correct the workflow, and send it again.",
+  ]);
+
+  if (answer.outcome === "invalid" || answer.outcome === "conflict") return join([
+    `Nothing was written to ${where}.`,
+    ...(answer.problems && answer.problems.length > 0 ? [numbered(answer.problems.map(sentence))] : []),
+  ]);
+
+  const stored =
+    answer.outcome === "unchanged"
+      ? `${where} already held this content, as revision ${answer.revision}. Nothing was added, and nothing needed to be.`
+      : `Stored as revision ${answer.revision} of ${where}.`;
+
+  const parts = [stored];
+
+  parts.push(
+    answer.displayRequested
+      ? "A display request is queued; the desktop has not acknowledged opening it. The user will be asked before it replaces anything they have not saved."
+      : "No display request was queued, so the user is still looking at whatever they had open.",
+  );
+
+  // The one thing a caller is most likely to get wrong about revising while a
+  // run is going: that it did something to the run. It did not, and saying so
+  // is cheaper than the answer to "why is the agent ignoring my change".
+  if (answer.boundRevision !== undefined) {
+    parts.push(
+      `A run is bound to revision ${answer.boundRevision} and stays on it. This revision does not reach that run; nothing about the work already under way has changed.`,
+    );
+  }
+
+  parts.push(
+    "The user decides what is worked on. Tell them what you changed and ask, rather than binding this revision because you wrote it.",
+  );
 
   if (answer.url) parts.push(answer.url);
   return join(parts);

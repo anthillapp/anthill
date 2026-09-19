@@ -31,10 +31,11 @@ import {
   withRunRoot,
   type WorkflowTemplate,
 } from "@anthill/workflow";
-import { HARNESS_TARGETS, type HarnessTarget, type Workflow } from "@anthill/workflow-schema";
+import { type Workflow } from "@anthill/workflow-schema";
 import type { PendingRun } from "@anthill/live";
+import { revisionDigest } from "@anthill/workflow-exchange";
 
-import { SAVED_LINGER_MS, isFailure, saveMessage, type SaveStatus } from "./save-status.js";
+import { SAVED_LINGER_MS, type SaveStatus } from "./save-status.js";
 import { AgentEditor } from "./AgentLibrary.js";
 import { type CustomBlock, type LibraryBlock } from "./BlockLibrary.js";
 import { BlockInspector } from "./BlockInspector.js";
@@ -55,7 +56,6 @@ import {
   stepForward,
   type History,
 } from "./workflow-history.js";
-import { AnthillMark } from "../AnthillMark.js";
 import { LiveIndicator } from "../live/LiveIndicator.js";
 import { PresencePlaque } from "../live/PresenceChip.js";
 import { mostRelevant, presenceKey, runsFor } from "../live/presence.js";
@@ -65,7 +65,10 @@ import {
   shouldAnnounce,
 } from "../live/SessionStartedDialog.js";
 import { LiveSessionPage } from "../live/LiveSessionPage.js";
-import { ExchangeHandover } from "./ExchangeHandover.js";
+import { WorkflowToolbar, type ToolbarHandover } from "./WorkflowToolbar.js";
+import { HandoverNotice } from "./HandoverNotice.js";
+import { handoverModel } from "./handover.js";
+import { useExchange } from "./use-exchange.js";
 
 export type WorkflowScreenProps = {
   onExit: () => void;
@@ -80,73 +83,6 @@ export type WorkflowScreenProps = {
     | { kind: "prompt" }
     | { kind: "open"; path?: string; live?: PendingRun; deliveryId?: number };
 };
-
-/**
- * One step of the undo history, drawn rather than typeset.
- *
- * These were the glyphs `↶ ↷`, which sat off-centre in their buttons, came
- * out at a different weight from every other icon in the bar, and changed
- * shape with the font. An SVG is the same icon everywhere.
- *
- * Unavailable it dims rather than disappears — and stays focusable, with a
- * title that says why. A control that vanishes teaches nothing: the reader
- * cannot tell whether it is gone because there is nothing to do or because
- * they misremembered it existing.
- */
-function StepButton({
-  direction,
-  available,
-  onStep,
-}: {
-  direction: "back" | "forward";
-  available: boolean;
-  onStep: () => void;
-}) {
-  const back = direction === "back";
-  const label = back ? "Step back" : "Step forward";
-  return (
-    <button
-      type="button"
-      className="icon-button icon-btn on-dark"
-      aria-label={label}
-      aria-disabled={available ? undefined : true}
-      title={
-        available
-          ? `${label} (${back ? "⌘Z" : "⇧⌘Z"})`
-          : back
-            ? "Nothing to undo"
-            : "Nothing to redo"
-      }
-      onClick={() => {
-        if (available) onStep();
-      }}
-    >
-      <svg
-        width="15"
-        height="15"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        {back ? (
-          <>
-            <path d="M9 14 4 9l5-5" />
-            <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
-          </>
-        ) : (
-          <>
-            <path d="m15 14 5-5-5-5" />
-            <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
-          </>
-        )}
-      </svg>
-    </button>
-  );
-}
 
 export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProps) {
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
@@ -165,11 +101,11 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   const [dirty, setDirty] = useState(false);
   const currentWorkflow = useRef(workflow);
   currentWorkflow.current = workflow;
-  const handover = useRef(start?.kind === "open" ? start : undefined);
+  const delivered = useRef(start?.kind === "open" ? start : undefined);
   useEffect(() => {
     if (!workflow) return;
-    const deliveryId = handover.current?.path === path ? handover.current?.deliveryId : undefined;
-    handover.current = undefined;
+    const deliveryId = delivered.current?.path === path ? delivered.current?.deliveryId : undefined;
+    delivered.current = undefined;
     void window.anthill.workflowOpened(path ?? "", deliveryId);
   }, [path, workflow?.id]);
   useEffect(() => () => { void window.anthill.workflowOpened(""); }, []);
@@ -614,6 +550,15 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     [editWorkflow],
   );
 
+  /*
+   * The handover, read once for the whole screen.
+   *
+   * Called here rather than where it is used because a hook cannot sit behind
+   * the early returns below, and read at all because the state changes outside
+   * this app: another session binds a revision and nothing tells us.
+   */
+  const exchange = useExchange(workflow?.id ?? "", path, dirty);
+
   if (!workflow) {
     if (fromPrompt) {
       return (
@@ -664,6 +609,32 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     if (target.kind === "block") setSelection({ kind: "block", nodeId: target.nodeId });
     else setSelection({ kind: "output", nodeId: target.nodeId, outputId: target.edgeId });
   };
+
+  /*
+   * What the toolbar's pill, its primary slot and the floating notice all say.
+   *
+   * Worked out in one place from one problem count: the pill, the canvas chips
+   * and the inspector each derived their own once, and they contradicted each
+   * other on screen at the same moment.
+   */
+  const handover: ToolbarHandover | undefined = exchange.view
+    ? {
+        model: handoverModel({
+          view: exchange.view,
+          dirty,
+          matches: revisionDigest(stampWorkflowFormat(workflow)) === exchange.view.digest,
+          problemCount: validation.errors.length,
+          ...(exchange.error ? { writeError: exchange.error } : {}),
+          runs: liveRuns,
+        }),
+        source: exchange.view.source,
+        onApprove: () => {
+          if (!exchange.view) return;
+          void exchange.approve(exchange.view.revision, exchange.view.digest);
+        },
+        busy: exchange.busy,
+      }
+    : undefined;
 
   const selectedAgentProfile = agents.find((profile) => profile.id === selectedAgent);
   const returnStep = agentReturn
@@ -725,114 +696,26 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         />
       ) : null}
 
-      <header className="topbar">
-        <button className="icon-button" onClick={exit} title="Back to mode selection">
-          ←
-        </button>
-        <AnthillMark className="logo-mark" size={22} />
-        <span className="screen-name">Workflow</span>
-
-        <input
-          className="title-input on-dark"
-          value={workflow.name}
-          onChange={(event) =>
-            editWorkflow((current) => ({ ...current, name: event.target.value }))
-          }
-          placeholder="Workflow name"
-        />
-
-        <span className="spacer" />
-
-        {dirty ? (
-          <span className="pill dirty">
-            <span className="dot" /> Unsaved
-          </span>
-        ) : null}
-
-        {/* Announced politely and never focused: the author is told without
-            being interrupted, and the caret stays where they left it. */}
-        <span
-          className={`save-status${isFailure(saveStatus) ? " is-failed" : ""}`}
-          role="status"
-          aria-live="polite"
-        >
-          {saveMessage(saveStatus)}
-        </span>
-
-        {validation.errors.length > 0 ? (
-          <button
-            className="pill problems"
-            ref={problemsPill}
-            onClick={() => setShowProblems((current) => !current)}
-            aria-expanded={showProblems}
-          >
-            {validation.errors.length} to fix
-          </button>
-        ) : (
-          <span className="pill on">Ready</span>
-        )}
-
-        {/* It compiles into the prompt and decides which harness the prompt
-            targets, so it belongs beside the button that hands it over — not
-            on the far side of the bar next to the workflow's name. */}
-        <label className="harness harness-picker">
-          <span>Harness</span>
-          {/* The picker is the control; the select inside it is not. */}
-          <select
-            value={workflow.target ?? ""}
-            onChange={(event) =>
-              editWorkflow((current) => ({
-                ...current,
-                target: event.target.value as HarnessTarget,
-              }))
-            }
-          >
-            <option value="" disabled>
-              Choose…
-            </option>
-            {HARNESS_TARGETS.map((target) => (
-              <option key={target} value={target}>
-                {HARNESS_PROFILES[target].displayName}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <span className="divider" />
-        {/* Beside the document actions, because that is what a step is: the
-            whole workflow moving, not something inside it changing. */}
-        <StepButton
-          direction="back"
-          available={canStepBack(history)}
-          onStep={() => step("back")}
-        />
-        <StepButton
-          direction="forward"
-          available={canStepForward(history)}
-          onStep={() => step("forward")}
-        />
-
-        <button onClick={newWorkflow}>New</button>
-        <button onClick={() => void open()}>Open</button>
-        <button onClick={save}>Save</button>
-        {/* Not `disabled`: a button that cannot be clicked cannot say where to
-            go instead. It looks unavailable and takes the author to the
-            problems that made it so — but it never opens the handover, which
-            is the pairing that matters and the one that broke once. */}
-        <button
-          className={`primary${validation.valid ? "" : " is-blocked"}`}
-          aria-disabled={!validation.valid}
-          onClick={() => (validation.valid ? setShowPrompt(true) : setShowProblems(true))}
-          title={validation.valid ? undefined : "Fix the problems first"}
-        >
-          <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
-            <path d="M2.5 1.5 L10 6 L2.5 10.5 Z" fill="currentColor" />
-          </svg>
-          Prompt
-        </button>
-      </header>
-
-      <ExchangeHandover workflow={workflow} {...(path ? { path } : {})} dirty={dirty} runs={liveRuns} />
+      <WorkflowToolbar
+        workflow={workflow}
+        onExit={exit}
+        onRename={(name) => editWorkflow((current) => ({ ...current, name }))}
+        onTarget={(target) => editWorkflow((current) => ({ ...current, target }))}
+        dirty={dirty}
+        saveStatus={saveStatus}
+        problemCount={validation.errors.length}
+        showProblems={showProblems}
+        onToggleProblems={() => setShowProblems((current) => !current)}
+        problemsPill={problemsPill}
+        canStepBack={canStepBack(history)}
+        canStepForward={canStepForward(history)}
+        onStep={step}
+        onNew={newWorkflow}
+        onOpen={() => void open()}
+        onSave={save}
+        onPrompt={() => setShowPrompt(true)}
+        {...(handover ? { handover } : {})}
+      />
 
       {showProblems ? (
         <ProblemsPopover
@@ -914,6 +797,17 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
             assembling={assembling}
           />
 
+          {/* Floating rather than in the layout: the exchange is re-read on a
+              timer, so this can appear while nobody is interacting, and the
+              canvas must not jump under the reader's cursor when it does. */}
+          {handover?.model.notice ? (
+            <HandoverNotice
+              notice={handover.model.notice}
+              busy={exchange.busy}
+              onWithdraw={(revision) => void exchange.withdraw(revision)}
+            />
+          ) : null}
+
           {/* One cluster in the canvas's own coordinates: the plaque explains,
               the chip claims. Both sit outside the layer that pans and zooms,
               so neither drifts with the diagram. */}
@@ -946,6 +840,12 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
           </button>
 
           <div className="canvas-chips">
+            {handover ? (
+              <span className="canvas-origin from-session">
+                <i aria-hidden="true" />
+                Handed over · {workflow.name}
+              </span>
+            ) : null}
             <span className="pill">
               {workflow.nodes.length} blocks · {outputCount} connections ·{" "}
               {cycles.length} {cycles.length === 1 ? "loop" : "loops"}

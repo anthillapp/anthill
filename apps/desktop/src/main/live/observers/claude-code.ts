@@ -252,6 +252,27 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
       scan(chunk.lines, state, now, { runId: run.anthillRunId, nonce: run.correlationNonce }, events);
     }
 
+    /*
+      The session a binding named.
+
+      A handover made through the exchange never pastes a prompt, so no
+      transcript carries this run's marker and nothing below would ever match:
+      the run drew its steps from the CLI's reports and the page showed a
+      session with not one word in it. The binding is the better answer
+      anyway — the harness said which session it is working in, rather than
+      Anthill recognising text it printed about itself — and it is the same
+      reasoning that already matches a delegate by which folder its file is in.
+
+      Only the file whose records carry that id; being told which session it is
+      does not say which file it is, and a project directory holds many.
+    */
+    const named = run.exchange?.sessionId;
+    if (named) {
+      for (const state of states.values()) {
+        if (state.sessionId === named) state.matched = true;
+      }
+    }
+
     const matched = [...states.entries()].filter(([, state]) => state.matched && state.sessionId);
 
     /*

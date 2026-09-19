@@ -4,11 +4,11 @@
  * `registerTool` rather than `server.tool`, which is deprecated in every one of
  * its overloads in SDK 1.30.0. Names carry no prefix, because the host adds a
  * generous one of its own: Claude Code 2.1.261 presents a plugin's tools as
- * `mcp__plugin_anthill_anthill__create_workflow_draft`, built from the plugin's
+ * `mcp__plugin_anthill_exchange__create_workflow_draft`, built from the plugin's
  * name and the key its `.mcp.json` gives this server. (An earlier comment here
  * guessed `mcp__anthill__`, which is what a server configured directly rather
  * than through a plugin gets; the guess was corrected by calling one.) An
- * `anthill_` of our own would be the third time in one name.
+ * `anthill_` of our own would only repeat what the host already said.
  *
  * No `outputSchema` on any of them, and that is a decision rather than an
  * omission. Declaring one obliges every non-error result to carry

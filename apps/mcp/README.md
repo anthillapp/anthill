@@ -52,11 +52,14 @@ corrupts the message stream.
 `get_workflow` answers where a handover stands and is not part of the sequence.
 The names carry no prefix, since a host namespaces them already, and generously:
 Claude Code 2.1.261 presents them to a model as
-`mcp__plugin_anthill_anthill__create_workflow_draft` — `plugin`, then the
+`mcp__plugin_anthill_exchange__create_workflow_draft` — `plugin`, then the
 plugin's name, then the key its `.mcp.json` gives this server. A server
 configured directly rather than through a plugin gets the shorter
 `mcp__anthill__…`. Either way the prefix is the host's to choose, and an
 `anthill_` of our own would only repeat it.
+
+An adapter naming this server is naming what it operates on, which is the
+exchange directory — not the app, which it cannot reach and does not speak for.
 
 1. **`create_workflow_draft`** takes `idempotencyKey`, `mode`, `source`
    (`harness`, `sessionId`, `taskText`) and the whole `workflow` document. The

@@ -117,9 +117,10 @@ the plugin.
 ## When something is wrong
 
 **The tools are not there.** The skill looks for
-`mcp__plugin_anthill_anthill__create_workflow_draft`; the prefix is built from
-the plugin's name and the key its `.mcp.json` gives the server, which is why
-anthill appears twice. Check with:
+`mcp__plugin_anthill_exchange__create_workflow_draft`; the prefix is built from
+the plugin's name and the key its `.mcp.json` gives the server — `exchange`,
+because what the server operates on is Anthill's exchange directory rather than
+the app itself, which it cannot reach and does not speak for. Check with:
 
 ```bash
 claude mcp list | grep anthill
@@ -127,7 +128,7 @@ claude mcp list | grep anthill
 
 **It says connected but a session disagrees.** A server that failed to start
 once is not retried for fifteen minutes. Fix the cause, then start a new session
-— or, to retry at once, remove the `plugin:anthill:anthill` entry from
+— or, to retry at once, remove the `plugin:anthill:exchange` entry from
 `~/.claude/mcp-needs-auth-cache.json`.
 
 **`no_such_workflow` for an id you just made.** Almost always the data

@@ -31,9 +31,9 @@ starts without them.
 ## Before anything else
 
 Check the tools exist. Claude Code presents them as
-`mcp__plugin_anthill_anthill__create_workflow_draft` and the other three — the
-prefix is built from the plugin name and the server's key, so it says anthill
-twice. If they are not there, the plugin is installed but its MCP server is not
+`mcp__plugin_anthill_exchange__create_workflow_draft` and the other three — the
+prefix is built from the plugin's name and the key its config gives the server.
+If they are not there, the plugin is installed but its MCP server is not
 connected. Say so, say the work can go ahead without Anthill if they want, and do
 not pretend a workflow exists. Never build a workflow you cannot submit.
 

@@ -371,6 +371,9 @@ button.link:hover {
 
 .library select {
   height: 32px;
+  /* The chevron is drawn at the inline end of the padding box, so with the
+     global 9px it sat all but against the border. */
+  padding-right: 12px;
   background: rgba(255, 255, 255, 0.07);
   border-color: var(--dark-border);
   color: var(--on-dark);
@@ -8345,9 +8348,34 @@ button.presence-chip {
   scrollbar-gutter: stable;
 }
 
-.fade-list::-webkit-scrollbar { width: 8px; }
-.fade-list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.20); border-radius: 6px; }
-.fade-list:hover::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.32); }
+/*
+ * Thin, short of the ends, and only while the list is moving.
+ *
+ * A bar standing permanently beside a list nobody is scrolling is furniture.
+ * The system's own overlay bars behave this way and are invisible on dark
+ * chrome, which is the only reason this is drawn by hand at all.
+ *
+ * `is-scrolling` comes from `use-scrolling.ts` and lingers a beat past the
+ * last event, so one continuous gesture does not make it blink. The track's
+ * margin keeps the thumb clear of the very top and bottom, where it would
+ * otherwise run into the fade and the first row.
+ */
+.fade-list::-webkit-scrollbar { width: 6px; }
+
+.fade-list::-webkit-scrollbar-track { margin: 6px 0 26px; }
+
+.fade-list::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  transition: background 180ms ease;
+}
+
+.fade-list.is-scrolling::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.26);
+  background-clip: padding-box;
+}
 
 /* ==================================================================
    5 · Topbar

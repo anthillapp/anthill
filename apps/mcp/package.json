@@ -1,6 +1,6 @@
 {
   "name": "@anthill/mcp",
-  "version": "0.6.6",
+  "version": "0.7.0",
   "private": true,
   "description": "The local stdio MCP server a coding harness hands a workflow to Anthill through.",
   "type": "module",

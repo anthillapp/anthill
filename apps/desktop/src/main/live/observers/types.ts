@@ -44,6 +44,17 @@ export type ObservationEventDraft = Omit<ObservationEvent, "runId" | "seq" | "re
 export type ObservationContext = {
   /** Whether the hook log is carrying news about this run. */
   hooksWatching: boolean;
+  /**
+   * Whether the hook log says work is still outstanding: a tool call opened
+   * and not closed, or a delegation the session last listed as running.
+   *
+   * The transcript's own ending is inferred from silence, and silence is not
+   * an ending while another channel is holding a claim of work. It used to be
+   * inferred anyway and then taken back by that claim on the same poll, which
+   * happened to give the right answer and could not tell a maintained claim
+   * from a stale one (ANT-119). Absent when there is no hook channel to ask.
+   */
+  hooksWaiting?: boolean;
 };
 
 export type PollResult = {

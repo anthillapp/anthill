@@ -523,6 +523,35 @@ describe("a marker that turns up in more than one session", () => {
  * the CLI writes on this machine. The rules below are mostly about who does
  * NOT get reopened, because that is where the honesty lives.
  */
+/**
+ * ANT-119. `working` could reopen a finished run the way `activity` can, but
+ * without `activity`'s guard: a tool call still open from *before* the session
+ * said it was done kept reviving a run the harness had explicitly reported
+ * finished, poll after poll, for as long as the stale record lived.
+ */
+describe("a finished run and a claim of work", () => {
+  const finished = () =>
+    applyEvidence(applyEvidence(run(), strongMatch), {
+      kind: "completed", sessionId: "sess-1", channel: "anthill:report", at: later(10 * 60_000),
+      detail: "The harness reported the work as finished.",
+    });
+
+  it("is not reopened by a call that was already open when it finished", () => {
+    const next = applyEvidence(finished(), {
+      kind: "working", sessionId: "sess-1", at: later(12 * 60_000), since: later(8 * 60_000),
+    });
+    expect(next.state).toBe("completed");
+    expect(next.statusMessage).toContain("reported the work as finished");
+  });
+
+  it("is reopened by work that started after it finished, which is a real revival", () => {
+    const next = applyEvidence(finished(), {
+      kind: "working", sessionId: "sess-1", at: later(12 * 60_000), since: later(11 * 60_000),
+    });
+    expect(next.state).toBe("detected_live");
+  });
+});
+
 describe("reopening a run for another look", () => {
   const lostAndClosed = (): PendingRun => ({
     ...applyEvidence(run(), strongMatch),

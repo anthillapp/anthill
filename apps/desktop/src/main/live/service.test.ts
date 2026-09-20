@@ -1225,6 +1225,55 @@ describe("a session waiting on a tool it started", () => {
     }
   });
 
+  /**
+   * ANT-119, in the shape it was found. One `PreToolUse` with no `PostToolUse`
+   * — a subagent's, written under the parent's session id — then the session
+   * finished: `end_turn` in the transcript, `Stop` in the hooks. The orphan
+   * kept asserting work for the whole TTL, and every assertion moved the clock
+   * the settle rule reads, so the five quiet minutes never accrued and the run
+   * stayed Live for thirty-four minutes after the session had ended.
+   */
+  it("does not let a call the turn left open outlive the turn", async () => {
+    const h = await live();
+    await hookLine(h.hookLogPath, "sess-1", "PreToolUse", at(60_000), "toolu_orphan");
+    await appendFile(
+      join(h.claudeRoot, "-tmp-scratch", "sess-1.jsonl"),
+      JSON.stringify({
+        type: "assistant", sessionId: "sess-1", timestamp: at(90_000),
+        message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "All done." }] },
+      }) + "\n",
+    );
+    await hookLine(h.hookLogPath, "sess-1", "Stop", at(92_000));
+    h.setNow(at(93_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("detected_live");
+
+    // The transcript observer's settle window: five quiet minutes after a
+    // terminal stop reason. Before the fix this poll still said "still working".
+    h.setNow(at(92_000 + 5 * 60_000 + 1_000));
+    await h.service.poll();
+    const run = only(h.service.snapshot());
+    expect(run.state).toBe("completed");
+    expect(run.statusMessage).not.toContain("still working");
+  });
+
+  it("ends the run the moment the agent prints the done marker, with nothing waited out", async () => {
+    const h = await live();
+    await hookLine(h.hookLogPath, "sess-1", "PreToolUse", at(60_000), "toolu_orphan");
+    await appendFile(
+      join(h.claudeRoot, "-tmp-scratch", "sess-1.jsonl"),
+      JSON.stringify({
+        type: "assistant", sessionId: "sess-1", timestamp: at(90_000),
+        message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: `Finished.\n\nANTHILL-DONE ${RUN_ID} ${NONCE}\n` }] },
+      }) + "\n",
+    );
+    h.setNow(at(91_000));
+    await h.service.poll();
+    const run = only(h.service.snapshot());
+    expect(run.state).toBe("completed");
+    expect(run.statusMessage).toContain("reported the work as finished");
+  });
+
   it("goes quiet once the call reports back and nothing follows", async () => {
     const h = await live();
     await hookLine(h.hookLogPath, "sess-1", "PreToolUse", at(60_000), "toolu_1");

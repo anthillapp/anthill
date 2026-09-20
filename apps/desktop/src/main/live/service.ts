@@ -473,6 +473,7 @@ export class LiveSessionService {
     try {
       const result = await observer.poll(run, now, {
         hooksWatching: this.hooks.watching(run.anthillRunId),
+        hooksWaiting: this.hooks.waiting(run.anthillRunId, now),
       });
       evidence = result.evidence;
       drafts = result.events;

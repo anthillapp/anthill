@@ -6,7 +6,7 @@
  * than as a page that quietly stops reporting permission prompts.
  */
 
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -264,6 +264,35 @@ describe("work still in flight", () => {
     expect(evidence.some((item) => item.kind === "working")).toBe(false);
   });
 
+  /**
+   * ANT-119. A subagent's `Bash` opened under the parent's session id and its
+   * `PostToolUse` never landed; the parent's `Stop` did. The observer kept
+   * claiming work for the whole thirty-minute TTL, each claim moving the clock
+   * the settle rule reads, and the run stayed Live thirty-four minutes after
+   * the session had finished.
+   */
+  it("closes whatever a turn left open when the agent hands control back", async () => {
+    const path = await log([
+      started("2026-08-29T10:02:00.000Z"),
+      at("2026-08-29T10:03:00.000Z", { hook_event_name: "Stop", background_tasks: [] }),
+    ]);
+    const observer = new HookLogObserver(path);
+    expect((await observer.poll(pending(), NOW)).evidence.some((item) => item.kind === "working")).toBe(false);
+    // And it stays closed on the polls that read nothing new.
+    expect((await observer.poll(pending(), NOW)).evidence.some((item) => item.kind === "working")).toBe(false);
+  });
+
+  it("does not close a call the next turn opened", async () => {
+    // Lines interleave. A call that started after the stop belongs to the
+    // turn that followed it, and that turn is still going.
+    const path = await log([
+      at("2026-08-29T10:02:00.000Z", { hook_event_name: "Stop", background_tasks: [] }),
+      started("2026-08-29T10:03:00.000Z", "toolu_2"),
+    ]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    expect(evidence).toContainEqual(expect.objectContaining({ kind: "working", since: "2026-08-29T10:03:00.000Z" }));
+  });
+
   it("says nothing about a call belonging to another session", async () => {
     const path = await log([
       {
@@ -389,5 +418,93 @@ describe("what the hook log says it covers", () => {
     await observer.poll(pending(), new Date().toISOString());
     observer.forget(RUN_ID);
     expect(observer.watching(RUN_ID)).toBe(false);
+  });
+});
+
+
+/**
+ * The two things this channel can end a run on outright.
+ *
+ * ANT-119. Everything else here is a sign of life; these are the session
+ * saying it is over — the harness's `SessionEnd`, and the agent printing the
+ * done marker, which is the marker-line form of `anthill done`. Neither needs
+ * a silence waited out.
+ */
+describe("a session that said it was finished", () => {
+  const NOW = "2026-08-29T10:10:00.000Z";
+  const at = (iso: string, data: Record<string, unknown>) => ({ ...line(data), recordedAt: iso });
+
+  it("settles the run when the session ends, and stops claiming work", async () => {
+    const path = await log([
+      at("2026-08-29T10:02:00.000Z", { hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "toolu_1" }),
+      at("2026-08-29T10:04:00.000Z", { hook_event_name: "SessionEnd" }),
+    ]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    expect(evidence).toContainEqual(
+      expect.objectContaining({ kind: "completed", sessionId: "sess-1", at: "2026-08-29T10:04:00.000Z", channel: "claude-code:hook" }),
+    );
+    expect(evidence.some((item) => item.kind === "working")).toBe(false);
+  });
+
+  it("settles the run when the agent printed the done marker", async () => {
+    const path = await log([
+      at("2026-08-29T10:04:00.000Z", {
+        hook_event_name: "Stop",
+        background_tasks: [],
+        last_assistant_message: `All four steps are done.\n\nANTHILL-DONE ${RUN_ID} ${NONCE}\n`,
+      }),
+    ]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    const done = evidence.find((item) => item.kind === "completed");
+    expect(done).toBeTruthy();
+    expect(done && "detail" in done && done.detail).toContain("reported the work as finished");
+  });
+
+  it("does not settle on a done marker from another run or another copy", async () => {
+    const path = await log([
+      at("2026-08-29T10:04:00.000Z", { hook_event_name: "Stop", last_assistant_message: "ANTHILL-DONE ANT-OTHER 9f8e7d" }),
+      at("2026-08-29T10:05:00.000Z", { hook_event_name: "Stop", last_assistant_message: `ANTHILL-DONE ${RUN_ID} 000000` }),
+    ]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+  });
+});
+
+
+/**
+ * What the transcript asks before it infers an ending from silence.
+ */
+describe("whether the log is holding a claim of work", () => {
+  const NOW = "2026-08-29T10:10:00.000Z";
+  const at = (iso: string, data: Record<string, unknown>) => ({ ...line(data), recordedAt: iso });
+
+  it("says so while a call is open, and not once the turn that opened it ended", async () => {
+    const path = await log([
+      at("2026-08-29T10:02:00.000Z", { hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "toolu_1" }),
+    ]);
+    const observer = new HookLogObserver(path);
+    await observer.poll(pending(), NOW);
+    expect(observer.waiting(RUN_ID, NOW)).toBe(true);
+
+    await appendFile(path, JSON.stringify(at("2026-08-29T10:03:00.000Z", { hook_event_name: "Stop", background_tasks: [] })) + "\n");
+    await observer.poll(pending(), NOW);
+    expect(observer.waiting(RUN_ID, NOW)).toBe(false);
+  });
+
+  it("says so while the session lists a delegation as running, and not once it is too old to believe", async () => {
+    const path = await log([
+      at("2026-08-29T10:05:00.000Z", {
+        hook_event_name: "Stop",
+        background_tasks: [{ id: "t1", type: "subagent", status: "running", description: "Stage 2 OCR" }],
+      }),
+    ]);
+    const observer = new HookLogObserver(path);
+    await observer.poll(pending(), NOW);
+    expect(observer.waiting(RUN_ID, NOW)).toBe(true);
+    expect(observer.waiting(RUN_ID, "2026-08-29T10:36:00.000Z")).toBe(false);
+  });
+
+  it("says nothing about a run it has never read", () => {
+    expect(new HookLogObserver("/nonexistent").waiting(RUN_ID, NOW)).toBe(false);
   });
 });

@@ -892,7 +892,24 @@ export function WorkflowCanvas({
                     flex: "none",
                   }}
                 />
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: "#201e1d" }}>
+                {/* Two lines at most, then an ellipsis with the whole name on
+                    hover. `blockSize` has already made the pill as wide as it
+                    is allowed to be for this name; what is left over is cut
+                    rather than allowed to spill (ANT-113). */}
+                <span
+                  title={node.name}
+                  style={{
+                    fontSize: 13.5,
+                    fontWeight: 600,
+                    color: "#201e1d",
+                    display: "-webkit-box",
+                    WebkitBoxOrient: "vertical",
+                    WebkitLineClamp: 2,
+                    overflow: "hidden",
+                    lineHeight: 1.25,
+                    wordBreak: "break-word",
+                  }}
+                >
                   {node.name}
                 </span>
               </>

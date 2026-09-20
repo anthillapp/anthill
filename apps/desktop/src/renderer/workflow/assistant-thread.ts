@@ -54,7 +54,17 @@ export type ChatTurn =
    * and means nothing (ANT-36).
    */
   | { kind: "question"; question: string; asked: string }
-  | { kind: "failed"; error: string }
+  | {
+      kind: "failed";
+      error: string;
+      /**
+       * Which CLI's sign-in expired, when that is what went wrong.
+       *
+       * The only failure here with a recovery the app can offer, so it is the
+       * only one that carries anything beyond its sentence (ANT-111).
+       */
+      signedOut?: string;
+    }
   | {
       kind: "proposal";
       summary: string;
@@ -133,7 +143,9 @@ export function readTurn(value: unknown): ChatTurn | undefined {
     }
     case "failed": {
       const error = str(value.error);
-      return error === undefined ? undefined : { kind: "failed", error };
+      if (error === undefined) return undefined;
+      const signedOut = str(value.signedOut);
+      return { kind: "failed", error, ...(signedOut ? { signedOut } : {}) };
     }
     case "proposal": {
       const summary = str(value.summary);

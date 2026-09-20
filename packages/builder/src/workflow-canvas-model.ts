@@ -35,7 +35,55 @@ const HANDLE_HALF = 9;
 
 /** Step cards and control pills are different sizes. */
 export const STEP_SIZE = { w: 196, h: 100 };
+/** The smallest a control pill gets — what "Start", "End" and "Done" need. */
 export const PILL_SIZE = { w: 108, h: 40 };
+
+/**
+ * How large a control pill may grow before its name is cut instead.
+ *
+ * A pill is a label, not a paragraph. Past this the name is truncated and the
+ * whole of it is available on hover, which is better than a terminal block
+ * wider than the steps around it.
+ */
+export const PILL_MAX = { w: 242, h: PILL_SIZE.h + 20 };
+
+/**
+ * What the pill spends on everything that is not the name: 16px of padding on
+ * each side, the 9px status dot, and the 8px gap after it. Kept here because
+ * the width below is only as right as this is — `WorkflowCanvas` lays the pill
+ * out with exactly these numbers.
+ */
+const PILL_CHROME = 16 + 9 + 8 + 16;
+
+/**
+ * Roughly how wide one character of the pill's label is.
+ *
+ * The label is 13.5px at weight 600. This is an estimate and deliberately so:
+ * `blockSize` is called during layout and from tests that run without a real
+ * text renderer — jsdom reports nothing useful for `measureText` — so a
+ * measured width would be either unavailable or wrong exactly where the
+ * geometry is checked. An estimate that is a little generous costs a few
+ * pixels of padding; one that is short cuts the name (ANT-113).
+ */
+const PILL_CHAR = 7.6;
+
+/**
+ * The size a control pill needs for its name: wider first, then taller.
+ *
+ * Start and End take whatever name the author gives them, and the shape never
+ * followed. "Ready for the PR" wrapped to three cramped lines inside 108×40.
+ */
+function pillSize(name: string): { w: number; h: number } {
+  const wanted = PILL_CHROME + name.trim().length * PILL_CHAR;
+  if (wanted <= PILL_SIZE.w) return PILL_SIZE;
+
+  const w = Math.min(snapToGrid(Math.ceil(wanted)), PILL_MAX.w);
+  // A name too long even at full width gets a second line rather than a
+  // smaller font — and past two lines it is truncated, which is the renderer's
+  // business and not this function's.
+  const h = wanted > PILL_MAX.w ? PILL_MAX.h : PILL_SIZE.h;
+  return { w, h };
+}
 
 /** Colour per block category. Meaning, not decoration — red is reserved. */
 export const CATEGORY_COLORS: Record<ActionCategory | "control" | "approval" | "end", string> = {
@@ -65,7 +113,10 @@ export const OUTCOME_STYLES: Record<BlockOutput["kind"], OutcomeStyle> = {
 };
 
 export function blockSize(node: WorkflowNode): { w: number; h: number } {
-  return node.type === "start" || node.type === "end" ? PILL_SIZE : STEP_SIZE;
+  // One answer, because this is not only about drawing: layout, the canvas
+  // extent, edge anchoring and hit-testing all read it, and a pill that
+  // reports one size and draws another puts the arrows in the wrong place.
+  return node.type === "start" || node.type === "end" ? pillSize(node.name) : STEP_SIZE;
 }
 
 export function blockRect(node: WorkflowNode): Rect {

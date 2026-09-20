@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 import type { Workflow } from "@anthill/workflow-schema";
 
+import { agentProfiles } from "./agents.js";
 import {
   EDIT_PROPOSAL_VERSION,
   applyEditProposal,
@@ -379,5 +380,139 @@ describe("a reply that asks instead of proposing", () => {
     if (!parsed.ok) return;
     expect(parsed.proposal.question).toBeUndefined();
     expect(parsed.proposal.ops).toHaveLength(1);
+  });
+});
+
+/**
+ * The assistant can say who carries a step out (ANT-112).
+ *
+ * It could add agent steps and had no operation for agents at all, so every
+ * step it added was born unassigned and the graph stopped validating — while
+ * the answer said "applied to the canvas".
+ */
+describe("agents", () => {
+  const propose = (ops: unknown[]) =>
+    parseEditProposal(JSON.stringify({
+      version: EDIT_PROPOSAL_VERSION,
+      summary: "Add a QA step.",
+      ops,
+    }));
+
+  it("assigns an agent the workflow already has", () => {
+    const parsed = propose([
+      { op: "add-block", ref: "qa", blockType: "agent", name: "Run the suite",
+        config: { actionKind: "agent-step", task: "Run it", agentId: "agent-1" } },
+    ]);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const applied = applyEditProposal(workflow(), parsed.proposal);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+
+    const added = applied.workflow.nodes.find((node) => node.name === "Run the suite");
+    expect(added?.config).toMatchObject({ agentId: "agent-1" });
+  });
+
+  it("creates an agent the workflow does not have, and lists it as a change", () => {
+    const parsed = propose([
+      { op: "add-agent", ref: "qa", name: "QA Engineer", role: "Drives the app" },
+      { op: "add-block", ref: "step", blockType: "agent", name: "Run the suite",
+        config: { actionKind: "agent-step", task: "Run it", agentId: "qa" } },
+    ]);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const applied = applyEditProposal(workflow(), parsed.proposal);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+
+    const profiles = agentProfiles(applied.workflow);
+    const qa = profiles.find((profile) => profile.name === "QA Engineer");
+    expect(qa).toBeTruthy();
+    expect(qa?.role).toBe("Drives the app");
+    // The block points at the real id, not at the proposal's handle.
+    const added = applied.workflow.nodes.find((node) => node.name === "Run the suite");
+    expect(added?.config).toMatchObject({ agentId: qa?.id });
+    expect((added?.config as { agentId?: string }).agentId).not.toBe("qa");
+
+    // Named before the author accepts it: an agent that appeared without being
+    // listed would be a change nobody agreed to.
+    expect(applied.changes).toContainEqual(
+      expect.objectContaining({ kind: "agent-added", name: "QA Engineer" }),
+    );
+  });
+
+  it("keeps the agents the workflow already had", () => {
+    const parsed = propose([{ op: "add-agent", ref: "qa", name: "QA Engineer" }]);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const applied = applyEditProposal(workflow(), parsed.proposal);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    expect(agentProfiles(applied.workflow).map((profile) => profile.name)).toEqual([
+      "Developer",
+      "QA Engineer",
+    ]);
+  });
+
+  it("lets one new agent carry several steps", () => {
+    const parsed = propose([
+      { op: "add-agent", ref: "qa", name: "QA Engineer" },
+      { op: "add-block", ref: "a", blockType: "agent", name: "Drive it",
+        config: { actionKind: "agent-step", task: "Drive", agentId: "qa" } },
+      { op: "add-block", ref: "b", blockType: "agent", name: "Watch it",
+        config: { actionKind: "agent-step", task: "Watch", agentId: "qa" } },
+    ]);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const applied = applyEditProposal(workflow(), parsed.proposal);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+
+    const ids = ["Drive it", "Watch it"].map(
+      (name) => (applied.workflow.nodes.find((node) => node.name === name)?.config as { agentId?: string }).agentId,
+    );
+    expect(ids[0]).toBe(ids[1]);
+    expect(agentProfiles(applied.workflow)).toHaveLength(2);
+  });
+
+  it("assigns an agent to a step that already exists", () => {
+    const parsed = propose([
+      { op: "add-agent", ref: "qa", name: "QA Engineer" },
+      { op: "update-block", id: "check", config: { agentId: "qa" } },
+    ]);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const applied = applyEditProposal(workflow(), parsed.proposal);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+
+    const qa = agentProfiles(applied.workflow).find((profile) => profile.name === "QA Engineer");
+    const check = applied.workflow.nodes.find((node) => node.id === "check");
+    expect((check?.config as { agentId?: string }).agentId).toBe(qa?.id);
+  });
+
+  it("refuses a proposal that gives an agent and a block the same handle", () => {
+    const parsed = propose([
+      { op: "add-agent", ref: "same", name: "QA Engineer" },
+      { op: "add-block", ref: "same", blockType: "agent", name: "Run it",
+        config: { actionKind: "agent-step", task: "Run" } },
+    ]);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const applied = applyEditProposal(workflow(), parsed.proposal);
+    expect(applied.ok).toBe(false);
+    if (!applied.ok) expect(applied.error).toContain("reuses the ref");
+  });
+
+  it("refuses an add-agent with no name to call it by", () => {
+    const parsed = propose([{ op: "add-agent", ref: "qa" }]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("add-agent");
   });
 });

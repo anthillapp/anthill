@@ -567,7 +567,26 @@ export type PromptDraftStage = "preparing" | "analyzing" | "replying";
 /** The CLI's raw reply. Parsing and validation happen in `@anthill/workflow`. */
 export type PromptDraftResponse =
   | { ok: true; reply: string; command: string }
-  | { ok: false; error: string; command: string; cancelled?: undefined }
+  | {
+      ok: false;
+      error: string;
+      command: string;
+      cancelled?: undefined;
+      /**
+       * The CLI's own sign-in has expired, and nothing else is wrong.
+       *
+       * Carried apart from `error` because it is the one failure with a
+       * recovery the app can offer: it opens the CLI's own login. Relaying the
+       * CLI's sentence and nothing else left the author reading
+       * "exited with code 1: Failed to authenticate" with no way forward
+       * (ANT-111).
+       *
+       * Set only when the CLI itself says so — `claude auth status` is asked,
+       * not guessed at from the wording, which belongs to the CLI and will
+       * change.
+       */
+      signedOut?: InterpreterId;
+    }
   /** The author cancelled. Not an error, and not shown as one. */
   | { ok: false; cancelled: true; command: string; error?: undefined };
 

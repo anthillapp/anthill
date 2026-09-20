@@ -822,3 +822,90 @@ describe("a handover being saved", () => {
     );
   });
 });
+
+/**
+ * Going to a problem, in whichever mode the author is in (ANT-114).
+ *
+ * The assistant replaces the inspector rather than sitting beside it, so while
+ * it is open a selection has nowhere to be shown. Clicking a problem set the
+ * selection anyway: the popover closed and nothing else happened.
+ */
+describe("clicking a problem", () => {
+  /** An agent step with no agent assigned — two problems, one block. */
+  const BROKEN: Workflow = {
+    id: "workflow-broken",
+    name: "Has a problem",
+    version: "1",
+    target: "claude-code",
+    brief: { goal: "Fix the crash", doneCriteria: ["Tests pass"] },
+    nodes: [
+      { id: "start", name: "Start", type: "start", config: {} },
+      { id: "step-1", name: "Do the work", type: "agent", config: {} },
+      { id: "end", name: "End", type: "end", config: {} },
+    ],
+    edges: [
+      { id: "a", source: "start", target: "step-1" },
+      { id: "b", source: "step-1", target: "end" },
+    ],
+    metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION, agents: [] } },
+  };
+
+  function openBroken() {
+    const api = stubApi();
+    Object.assign(api, {
+      openWorkflow: vi.fn(async () => ({
+        ok: true as const,
+        opened: { workflow: BROKEN, path: "/tmp/broken.workflow.json" },
+      })),
+    });
+    render(
+      <WorkflowScreen
+        onExit={() => undefined}
+        onSettings={() => undefined}
+        start={{ kind: "open", path: "/tmp/broken.workflow.json" }}
+      />,
+    );
+    return api;
+  }
+
+  async function openProblems() {
+    const pill = await waitFor(() => {
+      const found = [...document.querySelectorAll(".topbar button")].find((button) =>
+        /to fix$/.test(button.textContent ?? ""),
+      );
+      if (!found) throw new Error("no problems pill yet");
+      return found as HTMLElement;
+    });
+    fireEvent.click(pill);
+    return document.querySelectorAll(".problems-popover .problem");
+  }
+
+  it("mentions the block to the assistant while the assistant is open", async () => {
+    openBroken();
+    fireEvent.click(await screen.findByRole("button", { name: /Describe a change/ }));
+
+    const rows = await openProblems();
+    expect(rows.length).toBeGreaterThan(0);
+    fireEvent.click(rows[0]);
+
+    // The mention is the assistant's own verb — the same thing a canvas click
+    // does in this mode — and it is visible as a chip above the input.
+    await waitFor(() => {
+      const chips = document.querySelector(".assistant-mentions");
+      expect(chips?.textContent).toContain("Do the work");
+    });
+  });
+
+  it("selects the block when the assistant is closed", async () => {
+    openBroken();
+
+    const rows = await openProblems();
+    fireEvent.click(rows[0]);
+
+    // The inspector is what a selection is for, and it names the block.
+    await waitFor(() => {
+      const inspector = document.querySelector(".inspector");
+      expect(inspector?.textContent).toContain("Do the work");
+    });
+  });
+});

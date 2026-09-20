@@ -88,7 +88,7 @@ which one, and nothing is stored.`,
           .unknown()
           .optional()
           .describe(
-            'How much say the user gets before work starts. "approval-gate": nothing may start until they mark a revision ready. "show-and-go": work may start as soon as the workflow is complete, and they can still edit it.',
+            'What the user asked for, recorded and not enforced. "approval-gate" once held work back until they marked a revision ready in Anthill; it no longer does, because nothing here can stop a harness working and withholding the revision withheld only the run record. Either value is accepted and stored. What decides whether work starts is asking the user and waiting for their answer.',
           ),
         source: z
           .object({
@@ -195,8 +195,8 @@ it. Writing a revision and then binding it is approving your own work.`,
     {
       title: "Look up a handed-over workflow",
       description: `Where a handover stands: who handed it over and what they asked for, the head
-revision, which revision the user has approved, which runs are bound to it, and
-the handover mode it was stored under.
+revision, which runs are bound to it, and the handover mode it was stored
+under.
 
 A status read. It changes nothing and it never waits. It takes the workflowId
 and nothing else, and a call that does not name one answers "invalid" without
@@ -225,10 +225,13 @@ Returns an outcome of:
   invalid           nothing was looked up: the call named no workflow to look
                     up, and the problems say what to send instead.
 
-This call answers immediately and never waits for anybody. Under approval-gate it
-stays "not_ready" until the user approves a revision, which takes as long as
-reading takes: say what Anthill is waiting for, finish your turn, and ask again
-when they say they are done. Do not poll this in a loop.`,
+This call answers immediately and never waits for anybody, and there is no
+approval for it to wait on: Anthill records work rather than authorising it.
+"not_ready" means the graph cannot be compiled into a prompt yet, and the
+questions to put to the user come with it.
+
+What should keep you from binding is not this call. It is that you asked the
+user whether to start and they have not answered.`,
       inputSchema: { workflowId: WORKFLOW_ID },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },

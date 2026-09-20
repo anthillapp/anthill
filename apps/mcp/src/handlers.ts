@@ -430,7 +430,6 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
             }
           : {}),
         revisions: stored.revisions,
-        ...(stored.ready ? { ready: stored.ready } : {}),
         bindings: stored.bindings,
         ...eligibilityFields(eligibility),
         ...(problems.length > 0 ? { problems } : {}),

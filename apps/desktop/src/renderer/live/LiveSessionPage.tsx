@@ -89,17 +89,48 @@ function clock(at: string): string {
   return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+/**
+ * The graph a run was started from, which is never the one on the canvas.
+ *
+ * A session is evidence of what the agent was asked to follow, so its diagram
+ * has to be the copy taken when the run bound and not whatever the editor has
+ * open. Drawing the open workflow meant editing it redrew a session that had
+ * already finished — the steps moved, the names changed, and the record of
+ * what actually ran was gone.
+ *
+ * Two places hold that copy, because runs arrive two ways. A handover's is the
+ * exchange revision the run bound, read back by number. An ordinary run's is
+ * the snapshot the run store wrote when it started, which it has kept all
+ * along and nothing was reading.
+ */
+type GraphResult = { ok: true; workflow: Workflow } | { ok: false; error: string };
+
+async function startedFrom(run: PendingRun, open?: Workflow): Promise<GraphResult> {
+  if (run.exchange) return window.anthill.liveWorkflow(run.anthillRunId);
+  const stored = await window.anthill.getRun(run.anthillRunId);
+  if (stored?.snapshot) return { ok: true, workflow: stored.snapshot as unknown as Workflow };
+  /*
+   * A run the store has not caught up with yet.
+   *
+   * This is the moment between starting a run and its record landing, and in
+   * it the open workflow is the one it started from — nobody has had time to
+   * edit anything. Falling back is right here and would not be a moment later,
+   * which is why the snapshot is preferred whenever there is one.
+   */
+  if (open) return { ok: true, workflow: open };
+  return { ok: false, error: "This run's workflow snapshot has not been stored, so its diagram cannot be drawn." };
+}
+
 export function LiveSessionPage(props: LiveSessionPageProps) {
-  const [snapshot, setSnapshot] = useState<{ runId: string; result: BoundWorkflowResult }>();
+  const [snapshot, setSnapshot] = useState<{ runId: string; result: GraphResult }>();
   const [retry, setRetry] = useState(0);
   const { run } = props;
   useEffect(() => {
-    if (!run.exchange) return;
     let current = true;
     setSnapshot(undefined);
     const read = async () => {
       try {
-        const result = await window.anthill.liveWorkflow(run.anthillRunId);
+        const result = await startedFrom(run, props.workflow);
         if (current) setSnapshot({ runId: run.anthillRunId, result });
       } catch (error) {
         if (current) setSnapshot({ runId: run.anthillRunId, result: { ok: false, error: String(error) } });
@@ -108,13 +139,12 @@ export function LiveSessionPage(props: LiveSessionPageProps) {
     void read();
     return () => { current = false; };
   }, [run.anthillRunId, run.exchange?.revision, retry]);
-  if (!run.exchange) return <LiveSessionContent {...props} />;
   const result = snapshot?.runId === run.anthillRunId ? snapshot.result : undefined;
   if (!result?.ok) return (
     <div className="app live-page">
       <header className="topbar"><button onClick={props.onBack}>Back to workflow</button><span>Live session</span></header>
-      <p role={result ? "alert" : "status"}>{result ? result.error : "Reading the bound workflow revision..."}</p>
-      {result ? <button onClick={() => setRetry((value) => value + 1)}>Retry reading revision</button> : null}
+      <p role={result ? "alert" : "status"}>{result ? result.error : "Reading the workflow this run started from..."}</p>
+      {result ? <button onClick={() => setRetry((value) => value + 1)}>Retry reading it</button> : null}
     </div>
   );
   return <LiveSessionContent {...props} workflow={result.workflow} />;

@@ -3,7 +3,7 @@
 One local process, spawned by the harness, speaking JSON-RPC over stdio. A
 harness the user already started designs a workflow and gives it to Anthill
 through the tools here; Anthill validates it, stores it, shows it, lets the
-user edit and approve it, and watches the work the harness then does. This
+user edit it, and watches the work the harness then does. This
 server launches no agent, runs no command, reads none of the user's files, opens
 no port and makes no network request. It writes into Anthill's exchange
 directory and leaves a request there for the app, which reads on its own
@@ -79,15 +79,19 @@ exchange directory — not the app, which it cannot reach and does not speak for
    understood — so quote them rather than paraphrasing.
 
 2. **`get_ready_revision`** takes the workflow id and answers `ready`,
-   `not_ready`, `no_such_workflow` or `invalid`. **It never blocks.** Under
-   `approval-gate` it stays `not_ready` until the user approves a revision,
-   which takes as long as reading takes; the answer is to say what Anthill is
-   waiting for, finish the turn, and ask again when the user says they are done.
-   Do not loop on it. `no_such_workflow` is not a slower `not_ready`: nothing of
-   that id was ever handed to this Anthill, and waiting will not change it —
+   `not_ready`, `no_such_workflow` or `invalid`. **It never blocks**, and there
+   is no approval for it to block on. It used to: a `mode` of `approval-gate`
+   held the answer at `not_ready` until the user pressed a button in the app.
+   That gate withheld the run record and not the work — nothing here has a hook
+   on a harness — so it bought no guarantee and cost the user a second act
+   after the answer they had already given in conversation. `not_ready` now
+   means the graph cannot be compiled into a prompt, and carries the questions
+   to put to the user. `no_such_workflow` is not a slower `not_ready`: nothing
+   of that id was ever handed to this Anthill, and waiting will not change it —
    usually it means the server is pointed at the wrong data directory. What
-   comes back is the revision, its digest and its content, which may not be what
-   was submitted, because the user can edit it.
+   comes back is the head revision, its digest and its content, which may not
+   be what was submitted, because the user can edit it and the app writes their
+   edits down as they make them.
 
 3. **`bind_run`** takes that exact `revision` and `digest`, plus a stable
    `idempotencyKey` of its own and optionally a `sessionId` when the session
@@ -160,18 +164,17 @@ command cannot be run, the work carries on without it.
 ## Records on disk
 
 Handovers are stored by `@anthill/exchange-store`, which never rewrites a file:
-identity is created once, revisions are immutable and numbered, an approval and
-a withdrawal are records of their own, and a binding belongs to one run.
-Cooperating writers take a `proper-lockfile` lease before mutating a workflow
-and then publish records exclusively, so binding precondition checks are
-serialised against the app's edits and approvals. An abandoned lease becomes
+identity is created once, revisions are immutable and numbered, and a binding
+belongs to one run. Cooperating writers take a `proper-lockfile` lease before
+mutating a workflow and then publish records exclusively, so binding
+precondition checks are serialised against the app's edits. An abandoned lease becomes
 recoverable after 60 seconds without a heartbeat; a contended call retries for
 roughly four seconds before reporting a filesystem error. Never delete a live
 writer's lease by hand. This is cooperation between a user's own processes, not
 isolation from a process that rewrites the directory underneath it.
 
 Records are checked against their path and their digest, and a damaged head
-revision or approval fails closed rather than falling back to an older one.
+revision fails closed rather than falling back to an older one.
 Older readable revisions stay individually retrievable for deliberate recovery.
 A submission has to be at the workflow format the create tool's description
 advertises: a legacy, missing or future format is refused rather than migrated.

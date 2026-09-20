@@ -44,16 +44,13 @@ function draw(over: Partial<Parameters<typeof WorkflowToolbar>[0]> = {}) {
   return { onPrompt };
 }
 
-function handover(model: Partial<HandoverModel> = {}, onApprove = vi.fn()): ToolbarHandover {
+function handover(model: Partial<HandoverModel> = {}): ToolbarHandover {
   return {
     model: {
-      pill: { label: "Waiting for you", tone: "waiting", title: "Nothing may start until you approve this revision." },
-      primary: { label: "Ready for agent" },
+      pill: { label: "Ready", tone: "ready", title: "This revision is complete." },
       ...model,
     },
     source: { harness: "claude-code", sessionId: "s1", taskText: "The user's own words" },
-    onApprove,
-    busy: false,
   };
 }
 
@@ -83,36 +80,27 @@ it("offers no Prompt and no harness picker on a handover", () => {
   expect(source.getAttribute("title")).toContain("harness cannot be changed");
 });
 
-it("records the approval only when the user presses it", () => {
-  const onApprove = vi.fn();
-  draw({ handover: handover({}, onApprove) });
-  const button = screen.getByRole("button", { name: "Ready for agent" });
-  expect(onApprove).not.toHaveBeenCalled();
-  expect(button.getAttribute("title")).toContain("does not start or control the external session");
-  fireEvent.click(button);
-  expect(onApprove).toHaveBeenCalledTimes(1);
-});
-
-/*
- * Blocked, not hidden, and never merely grey: a control that vanishes teaches
- * nothing, and one that greys out without a reason teaches only that something
- * is wrong somewhere.
+/**
+ * The primary slot is empty on a handover, in every state.
+ *
+ * It held `Ready for agent`, which recorded a decision the user had already
+ * given the session in conversation and could hold no work back. `Prompt` is
+ * not there either, and for a different reason: it mints a fresh run id, so a
+ * handover would end up with two unrelated runs for one piece of work.
  */
-it("keeps a blocked approval on screen, with its reason readable", () => {
-  const onApprove = vi.fn();
-  draw({ handover: handover({ primary: { label: "Ready for agent", blocked: "Save them first." } }, onApprove) });
-  const button = screen.getByRole("button", { name: "Ready for agent" });
-  expect(button.getAttribute("aria-disabled")).toBe("true");
-  expect(button.getAttribute("title")).toBe("Save them first.");
-  fireEvent.click(button);
-  expect(onApprove).not.toHaveBeenCalled();
-});
-
-it("holds nothing in the primary slot where there is no decision to make", () => {
-  draw({ handover: handover({ pill: { label: "Running revision 1", tone: "running", title: "t" }, primary: undefined }) });
-  expect(screen.queryByRole("button", { name: "Ready for agent" })).toBeNull();
-  expect(screen.queryByRole("button", { name: /Prompt/ })).toBeNull();
-  expect(screen.getByText("Running revision 1")).toBeTruthy();
+it("holds nothing in the primary slot, whatever the handover is doing", () => {
+  for (const pill of [
+    { label: "Ready", tone: "ready" as const, title: "t" },
+    { label: "Draft", tone: "draft" as const, title: "t" },
+    { label: "Running revision 1", tone: "running" as const, title: "t" },
+  ]) {
+    cleanup();
+    draw({ handover: handover({ pill }) });
+    expect(screen.queryByRole("button", { name: /Ready for agent/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Prompt/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Approve/i })).toBeNull();
+    expect(screen.getByText(pill.label)).toBeTruthy();
+  }
 });
 
 it("shows the task in the user's own words, from the control that names the source", () => {
@@ -130,7 +118,7 @@ it("shows the task in the user's own words, from the control that names the sour
 it("reports the graph and the handover separately", () => {
   draw({ problemCount: 2, handover: handover() });
   expect(screen.getByText("2 to fix")).toBeTruthy();
-  expect(screen.getByText("Waiting for you")).toBeTruthy();
+  expect(screen.getByText("Ready")).toBeTruthy();
 });
 
 it("never offers a control that would start or steer the session", () => {

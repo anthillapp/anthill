@@ -27,12 +27,13 @@ The sequence, once per handover:
    document, and resubmit it. A queued display request does not confirm that
    the desktop has opened it.
 
-2. get_ready_revision — ask whether there is a revision you may work from. Under
-   approval-gate there is not one until the user has approved it, which takes as
-   long as reading takes. This call answers immediately and never waits. Do not
-   poll it in a loop and do not hold the user's turn open waiting for it: say
-   what Anthill is waiting for, finish your turn, and ask again when they say
-   they are done.
+2. get_ready_revision — ask which revision to work from. It is the latest the
+   user has, which may not be what you submitted, because they can edit it.
+   There is no approval to wait for: Anthill records the work, it does not
+   authorise it, and nothing here can stop you starting. What should stop you
+   is that you asked the user and they have not answered yet. A revision is
+   refused only when the graph itself cannot be compiled into a prompt, and the
+   questions to put to the user come back with the refusal.
 
 3. bind_run — pass the exact revision and digest you retrieved, plus a stable
    idempotencyKey for this request. Retry the same payload/key after a lost

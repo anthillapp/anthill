@@ -80,15 +80,24 @@ export type ExchangeSource = {
 };
 
 /**
- * What the harness may do once the workflow is in Anthill.
+ * What the harness said it intended when it handed the workflow over.
  *
- * `show-and-go` — the workflow is shown and the harness may start on it
- * straight away. The user can still edit, and an edit becomes a new revision,
- * but nothing waits for them.
+ * **Recorded, and enforced nowhere.** It used to decide which revision
+ * `eligibleRevision` handed back: `approval-gate` withheld everything until
+ * the user marked one ready, `show-and-go` gave out the head. The gate was
+ * removed because it did not do what its name promised — nothing in this
+ * system has a hook on a harness, so withholding a revision withheld Anthill's
+ * record of the run and not the work — while costing the user a second act
+ * after the answer they had already given in conversation.
  *
- * `approval-gate` — nothing may start until the user marks a revision ready,
- * and only that exact revision. There is no falling back to `show-and-go`: the
- * mode is recorded at the handover and a bind that ignores it is refused.
+ * It stays in the contract because it is written into every handover already
+ * on disk and a harness may still submit it, and removing it would be a format
+ * change that made those records unreadable for no gain. Read it as a note
+ * about what the harness meant, never as a condition on anything.
+ *
+ * What decides whether work starts is the user's answer to the session that
+ * asked them. That lives in their conversation, which is the only place it
+ * ever really lived.
  */
 export type HandoverMode = "show-and-go" | "approval-gate";
 

@@ -74,7 +74,6 @@ export type WorkflowAnswer = {
   head?: { revision: number; digest: string; createdAt: string; by: RevisionAuthor };
   /** Every revision on disk, readable or not. */
   revisions?: number[];
-  ready?: { revision: number; at?: string };
   bindings?: Binding[];
   eligible?: boolean;
   /** The revision eligibility is about: the one to work from, or the one refused. */
@@ -220,14 +219,14 @@ export function draftText(answer: DraftAnswer): string {
 
   const parts = [`${stored}${shown}`];
 
-  if (answer.mode) {
-    parts.push(
-      stateText(answer.mode === "approval-gate" ? "draft" : "ready_for_agent", answer.mode),
-      answer.mode === "approval-gate"
-        ? "Tell the user that, then call get_ready_revision when they say they have approved it. It answers straight away and never waits."
-        : "Call get_ready_revision, then bind_run, before you start work.",
-    );
-  }
+  // A stored revision is a complete one — an incomplete submission is refused
+  // without being stored — so there is one thing to say about it and one
+  // sequence to follow. What decides whether work starts is the user's answer,
+  // not anything this server holds.
+  parts.push(
+    stateText("ready_for_agent"),
+    "Ask the user whether to start. When they say so, call get_ready_revision, then bind_run.",
+  );
 
   if (answer.problems && answer.problems.length > 0) {
     parts.push("Also worth knowing:", numbered(answer.problems.map(sentence)));
@@ -303,11 +302,6 @@ export function workflowText(answer: WorkflowAnswer): string {
     facts.push(`Revisions on disk: ${answer.revisions.join(", ")}`);
   }
   facts.push(
-    answer.ready
-      ? `Approved: revision ${answer.ready.revision}${answer.ready.at ? ` at ${answer.ready.at}` : ""}`
-      : "Approved: nothing yet",
-  );
-  facts.push(
     answer.bindings && answer.bindings.length > 0
       ? // The nonce beside the run id, because the two together are what the
         // reporting commands take: this is where a harness that lost them —
@@ -318,10 +312,10 @@ export function workflowText(answer: WorkflowAnswer): string {
   );
   parts.push(bulleted(facts));
 
-  if (answer.eligible && answer.state && answer.mode) {
+  if (answer.eligible && answer.state) {
     parts.push(
       `Revision ${answer.revision} is the one to work from.`,
-      stateText(answer.state, answer.mode),
+      stateText(answer.state),
     );
   } else if (answer.reason) {
     parts.push(refusalText(answer.reason, answer.workflowId, answer.revision));
@@ -364,7 +358,7 @@ export function readyText(answer: ReadyAnswer): string {
   const parts = [
     `Revision ${answer.revision} of ${answer.workflowId} is the one to work from. Digest ${answer.digest}.`,
   ];
-  if (answer.state && answer.mode) parts.push(stateText(answer.state, answer.mode));
+  if (answer.state) parts.push(stateText(answer.state));
   if (answer.workflow) parts.push(workflowSummary(answer.workflow, answer.steps ?? []),
     "Authoritative workflow JSON for this exact revision:\n" + JSON.stringify(answer.workflow));
   parts.push(
@@ -462,7 +456,6 @@ function detail(
   }
 
   const echoes: readonly string[] = [
-    EXCHANGE_STORE_PROBLEM_CODES.STORE_AWAITING_APPROVAL,
     EXCHANGE_STORE_PROBLEM_CODES.STORE_WORKFLOW_UNKNOWN,
   ];
   const rest = (problems ?? []).filter((problem) => !echoes.includes(problem.code));
@@ -472,15 +465,18 @@ function detail(
 /**
  * Whether the user is the one who can change this answer.
  *
- * Two of the five refusals are theirs: an approval they have not given yet,
- * and questions they have not answered. The other three — an id nothing was
- * ever stored under, a record this build cannot read, a workflow with no
- * revision at all — are not things a person can settle by reading and coming
- * back, and asking them to would leave them waiting for a change that is never
- * going to arrive.
+ * One of the four refusals is theirs: questions they have not answered. The
+ * other three — an id nothing was ever stored under, a record this build
+ * cannot read, a workflow with no revision at all — are not things a person
+ * can settle by reading and coming back, and asking them to would leave them
+ * waiting for a change that is never going to arrive.
+ *
+ * There used to be a second: an approval they had not given. It went with the
+ * gate, and nothing replaced it, because a complete graph is now workable the
+ * moment it is stored.
  */
 function userCanClear(reason: EligibilityRefusal): boolean {
-  return reason === "awaiting_approval" || reason === "incomplete";
+  return reason === "incomplete";
 }
 
 /**
@@ -557,9 +553,6 @@ function refusalText(
     return `Something is stored under ${workflowId} that this build of Anthill cannot read, so it cannot say what may be worked on.`;
   }
   if (reason === "no_revision") return `${workflowId} has no revision to work from.`;
-  if (reason === "awaiting_approval") {
-    return `${workflowId} waits for the user to approve a revision, and they have not approved one yet.`;
-  }
   const which = revision === undefined ? workflowId : `Revision ${revision} of ${workflowId}`;
   return `${which} is not finished enough to hand to anybody yet.`;
 }
@@ -569,8 +562,8 @@ function unknownWorkflowText(workflowId: string): string {
 }
 
 /** The shared words for a state, laid out as a short paragraph. */
-function stateText(state: RevisionState, mode: HandoverMode): string {
-  const described = describeState(state, mode);
+function stateText(state: RevisionState): string {
+  const described = describeState(state);
   return [`${described.label} — ${described.detail}`, described.next].filter(Boolean).join(" ");
 }
 

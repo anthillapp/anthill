@@ -296,8 +296,6 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   // Desktop owns exchange handover. The web shell must refuse approval rather
   // than claim a decision it has nowhere to persist.
   register(IpcChannel.exchangeRead, async () => undefined);
-  register(IpcChannel.exchangeReady, async () => ({ ok: false, error: "Open this handover in Anthill desktop to approve it." }));
-  register(IpcChannel.exchangeRevoke, async () => ({ ok: false, error: "Open this handover in Anthill desktop to withdraw an approval." }));
   register(IpcChannel.liveWorkflow, async () => ({ ok: false, error: "Bound revisions are available in Anthill desktop." }));
 
   /**
@@ -737,8 +735,6 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     pendingWorkflowOpen: () => handle(IpcChannel.workflowPendingOpen),
     workflowOpened: (path, id, outcome) => handle(IpcChannel.workflowOpened, path, id, outcome),
     exchangeRead: (path, id) => handle(IpcChannel.exchangeRead, path, id),
-    exchangeReady: (request) => handle(IpcChannel.exchangeReady, request),
-    exchangeRevoke: (request) => handle(IpcChannel.exchangeRevoke, request),
     liveWorkflow: (runId) => handle(IpcChannel.liveWorkflow, runId),
     // No delivery id: this shell's pushes carry one payload, and nothing here
     // waits to be told a page opened a document. The desktop's acknowledgement

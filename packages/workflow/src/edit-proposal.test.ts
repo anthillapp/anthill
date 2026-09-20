@@ -516,3 +516,73 @@ describe("agents", () => {
     if (!parsed.ok) expect(parsed.error).toContain("add-agent");
   });
 });
+
+/**
+ * Where a new block lands (ANT-117).
+ *
+ * A workflow handed over by a CLI carries no positions — a harness sends a
+ * graph, not a layout — and the canvas lays it out itself. Giving one new
+ * block an explicit position put it on top of the auto-laid-out rest, with
+ * the connections hidden underneath.
+ */
+describe("placing a block the assistant adds", () => {
+  const add = () =>
+    parseEditProposal(JSON.stringify({
+      version: EDIT_PROPOSAL_VERSION,
+      summary: "Add a step.",
+      ops: [{ op: "add-block", ref: "new", blockType: "agent", name: "Added",
+        config: { actionKind: "agent-step", task: "Do it" } }],
+    }));
+
+  function applyTo(source: Workflow) {
+    const parsed = add();
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error("unparsed");
+    const applied = applyEditProposal(source, parsed.proposal);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) throw new Error(applied.error);
+    return applied.workflow.nodes.find((node) => node.name === "Added");
+  }
+
+  it("gives it no position when nothing else has one", () => {
+    const bare = {
+      ...workflow(),
+      nodes: workflow().nodes.map(({ position: _drop, ...rest }) => rest),
+    };
+    // Every block laid out by the canvas, including this one — which is what
+    // stops it landing on top of them.
+    expect(applyTo(bare)?.position).toBeUndefined();
+  });
+
+  it("places it beside the others when they are arranged", () => {
+    const added = applyTo(workflow());
+    expect(added?.position).toBeTruthy();
+    // To the right of the furthest-right block, not on top of it.
+    const rightmost = Math.max(...workflow().nodes.map((node) => node.position?.x ?? 0));
+    expect(added?.position?.x).toBeGreaterThan(rightmost);
+  });
+
+  /**
+   * The in-between case: some blocks arranged, some not. The arranged ones are
+   * what a new position has to avoid, and they are enough to compute one from.
+   */
+  it("avoids the arranged blocks when only some of them are", () => {
+    const mixed = {
+      ...workflow(),
+      nodes: workflow().nodes.map((node, at) =>
+        at % 2 === 0 ? node : (({ position: _drop, ...rest }) => rest)(node),
+      ),
+    };
+
+    const added = applyTo(mixed);
+
+    expect(added?.position).toBeTruthy();
+    for (const node of mixed.nodes) {
+      if (!node.position || !added?.position) continue;
+      const apart =
+        Math.abs(node.position.x - added.position.x) >= 196 ||
+        Math.abs(node.position.y - added.position.y) >= 120;
+      expect(apart, `overlaps ${node.id}`).toBe(true);
+    }
+  });
+});

@@ -197,7 +197,7 @@ describe("answering a question the interpreter asked", () => {
  */
 describe("what the instruction says about agents", () => {
   const instruction = () =>
-    buildEditInstruction(workflow, { kind: "none" }, "Add a QA step and an agent for it");
+    buildEditInstruction(workflow, { kind: "workflow" }, "Add a QA step and an agent for it");
 
   it("lists the agents the workflow has, with their ids", () => {
     const text = instruction();
@@ -207,7 +207,7 @@ describe("what the instruction says about agents", () => {
 
   it("says so plainly when there are none", () => {
     const bare = { ...workflow, metadata: { workflow: { formatVersion: 4, agents: [] } } };
-    expect(buildEditInstruction(bare, { kind: "none" }, "Add a step")).toContain("- none yet");
+    expect(buildEditInstruction(bare, { kind: "workflow" }, "Add a step")).toContain("- none yet");
   });
 
   it("offers an operation for creating one, and shows agentId on a block", () => {

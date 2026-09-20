@@ -26,8 +26,9 @@ should suggest otherwise to the user.
 
 With no argument, read the request: "show me this in Anthill and do it" is
 `design`; "let me look at it first", "check with me before you start" is
-`review`. The two differ in what you say to the user, and in nothing else:
-**neither starts work before they answer.**
+`review`. The two differ in what you say to the user, and in nothing else.
+**Both ask the user questions before drafting, and neither starts work before
+they answer.**
 
 ## Before anything else
 
@@ -69,12 +70,46 @@ damage than an admitted gap.
    have been written without opening the project is a workflow the user will
    have to rewrite.
 
-2. **Ask what you do not know.** The user's own sentence is usually missing the
-   things a reviewer needs: what "done" looks like, what must not be touched,
-   which parts are already decided. Ask those now rather than filling them in.
-   Anthill will refuse a handover that names no goal or says nothing about done,
-   and it returns the questions to put to the user — but arriving with them
-   already answered is better than a refusal round trip.
+2. **Ask before drafting. Every new handover needs the user's answers.** This
+   applies to `design` and `review` alike. Before building or calling
+   `create_workflow_draft`, ask a short batch of questions covering:
+
+   * **Project and scope:** which project/directory to use, whether this is new
+     work or a change to an existing project, and what is in or out of scope.
+   * **Constraints:** architecture/patterns, limits, and what must not change or
+     must be preserved.
+   * **Success criteria:** what the user will check to call this done.
+   * **Decisions already made:** what is fixed, what remains open, and which
+     choices the user explicitly wants you to make.
+
+   Use what the user has already said: summarize those answers and ask them to
+   confirm or correct them rather than asking them to type everything again.
+   Even a detailed request needs this confirmation before the first draft.
+   An empty directory is an observation, **not permission to create a project**.
+   Ask whether to create it there or use an existing project elsewhere. An
+   installed toolchain is not a choice of architecture or scope.
+
+   **Wait for an actual user response.** Use the host's question tool when
+   available; otherwise ask in chat and finish your turn. Do not submit in the
+   same unanswered turn, answer your own questions, treat silence as agreement,
+   or add a future "clarify requirements" block instead of asking now. Do not
+   create/scaffold a project during this clarification stage; read-only
+   inspection is enough. A schema-valid document proves no user intent.
+
+   Proceed only when the user has supplied or confirmed the answers, including
+   explicit delegation such as "you choose the architecture" or "no additional
+   constraints". If their reply covers only some areas, ask about the remaining
+   ones instead of inventing answers. Keep the confirmed answers in the brief's
+   context, constraints and done criteria, with delegated choices identified.
+
+   This is what a **new draft** needs, not a questionnaire to repeat on every
+   `status`, `doctor`, unchanged retry or `resume` of the same agreed scope.
+   Materially new scope needs its own clarification.
+
+   Asking whether to start, once the workflow is on their screen, is a separate
+   question and comes later. It does not replace this conversation, and this
+   conversation does not stand in for it: one settles what the plan is, the
+   other settles whether to act on it.
 
 3. **Build the document.** The shape is in
    [reference/workflow-format.md](reference/workflow-format.md). Read it; it is
@@ -86,6 +121,9 @@ damage than an admitted gap.
    `taskText`), and `workflow`.
 
    `taskText` is **the user's own words**, quoted, not your summary of them.
+   Preserve the original request and quote the user's clarification answers
+   alongside it, clearly separated; do not put your proposed answers in their
+   mouth. Collect these before the first submission.
    Anthill shows it back to them to check it understood the same job they did,
    and it is written down once — nothing said later replaces it.
 
@@ -97,7 +135,8 @@ damage than an admitted gap.
    * `already_exists` — this same handover was already stored. Not an error.
    * `incomplete` — nothing was stored. The result carries the questions; put
      them to the user in their own words, then submit the corrected document
-     under the same key.
+     under the same key after they answer. Do not fill missing requirements
+     yourself just to pass validation.
    * `invalid` — nothing was stored, and the problems say what to change.
 
    The result carries an `anthill://workflow/<id>` link. Give it to the user —

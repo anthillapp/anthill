@@ -26,6 +26,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-exchange";
+import { DRAFT_CLARIFICATION, SERVER_INSTRUCTIONS } from "./instructions.js";
 
 /** The compiled server, which is what a harness is configured to run. */
 const SERVER = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "server.js");
@@ -36,6 +37,7 @@ type Response = { id: number; result?: Record<string, unknown>; error?: { messag
 class Session {
   /** Everything the server has said on stderr, which is the only place it may. */
   stderr = "";
+  instructions?: unknown;
 
   private readonly pending = new Map<number, (response: Response) => void>();
   private buffer = "";
@@ -119,11 +121,26 @@ async function connect(): Promise<Session> {
     clientInfo: { name: "anthill-mcp-test", version: "0" },
   });
   expect(initialized.error).toBeUndefined();
+  session.instructions = initialized.result?.instructions;
   session.notify("notifications/initialized");
   return session;
 }
 
 describe("the built server over stdio", () => {
+  it("delivers the pre-draft gate at initialization and tool discovery", async () => {
+    const session = await connect();
+    // Check the built server's wire output, not only an imported prompt: a
+    // host may discover tools without retaining initialize instructions.
+    expect(session.instructions).toBe(SERVER_INSTRUCTIONS);
+    const listed = await session.request("tools/list");
+    const tools = listed.result?.tools as { name: string; description: string }[];
+    const create = tools.find((tool) => tool.name === "create_workflow_draft")!;
+    expect(create.description).toContain(DRAFT_CLARIFICATION);
+    expect(SERVER_INSTRUCTIONS).toContain(DRAFT_CLARIFICATION);
+    // This is host guidance, not a claimed conversation-attestation mechanism.
+    // Existing create/bind protocol tests still accept the unchanged contract.
+  }, 20_000);
+
   it("creates, retrieves and idempotently binds the exact draft over JSON-RPC", async () => {
     const session = await connect();
     const call = async (name: string, args: Record<string, unknown>) => {

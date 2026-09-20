@@ -201,15 +201,7 @@ export class ObservationSetupService {
     // Only worth probing when there is something to probe: a run costs a
     // process, and "not installed" is already the honest answer.
     const commands = anthillCommands(config, def);
-    const untrusted = commands.some(({ command, event }) =>
-      !this.trustedHook(command, id) || parseHookCommand(command)?.event !== event);
-    const problem = entriesPresent
-      ? untrusted
-        ? commands.some(({ command }) => parseHookCommand(command)?.runnable === false)
-          ? "The hook interpreter depends on PATH. Re-enable observation to use Anthill's absolute path."
-          : "The hook config names a different executable, handler or event. Re-enable observation to repair Anthill's entries. No config command was run."
-        : await this.probeHook(commands[0]?.command)
-      : undefined;
+    const problem = entriesPresent ? await this.hookProblem(commands, id) : undefined;
     // Asked only when there is an install to describe: a harness with no
     // entries has nothing to have fired.
     const lastEventAt = entriesPresent ? await this.lastHookEvent(id) : undefined;
@@ -257,12 +249,63 @@ export class ObservationSetupService {
     return this.paths.execPath ?? process.execPath;
   }
 
-  private trustedHook(command: string, harness?: HookHarness): boolean {
+  /**
+   * Whether this entry names *this* installation's own executable and handler
+   * — the only thing this app will ever spawn.
+   *
+   * Deliberately stricter than "is it Anthill's line". A path that merely
+   * looks like a hook handler is still somebody else's program, so the exact
+   * comparison stays exactly where it guards a spawn. What it must not do is
+   * decide what the user is *told*: see `hookProblem`.
+   */
+  private ownHook(command: string, harness?: HookHarness): boolean {
     const parsed = parseHookCommand(command);
     return Boolean(parsed && parsed.runnable &&
       parsed.execPath === this.execPath() && parsed.handlerPath === this.hookHandlerPath() &&
       isHookHarnessId(parsed.harness) && (!harness || parsed.harness === harness) &&
       (HARNESS[parsed.harness].events as readonly string[]).includes(parsed.event));
+  }
+
+  /**
+   * What is wrong with this harness's Anthill entries, or nothing at all.
+   *
+   * Four questions, in this order because they are four different questions:
+   * is there an entry to speak about; does it name an interpreter nobody here
+   * can resolve; is it Anthill's line at all; and does the handler actually
+   * run. Only the last one spawns anything, and only ever this installation's
+   * own handler.
+   *
+   * The middle distinction is the one that was missing. An entry another
+   * Anthill wrote — the CLI bridge beside the desktop app, a dev build beside
+   * the packaged one, last version's bundle beside this one — carries the same
+   * marker in the same position, names the same harness and the same slot, and
+   * fires perfectly well into the same log this installation reads. Judging it
+   * by *this* process's `execPath` made each shell announce the other's
+   * working install as "Anthill installed hooks here, but they are not
+   * running", and Enable then moved the complaint to the other shell rather
+   * than ending it. So a foreign Anthill entry is reported as working and left
+   * alone; it is simply never probed, because probing means spawning.
+   */
+  private async hookProblem(
+    commands: { command: string; event: string }[],
+    harness: HookHarness,
+  ): Promise<string | undefined> {
+    const mismatch =
+      "The hook config names a different executable, handler or event. Re-enable observation to repair Anthill's entries. No config command was run.";
+    if (commands.length === 0) return this.probeHook(undefined);
+    if (commands.some(({ command }) => parseHookCommand(command)?.runnable === false)) {
+      return "The hook interpreter depends on PATH. Re-enable observation to use Anthill's absolute path.";
+    }
+    if (commands.some(({ command, event }) => !anthillShaped(command, harness, event))) return mismatch;
+
+    // Every entry is an Anthill line. The ones this installation did not write
+    // have to show they are an Anthill at all before they are called working.
+    for (const { command } of commands.filter(({ command }) => !this.ownHook(command, harness))) {
+      const parsed = parseHookCommand(command);
+      if (!parsed || !(await anthillElsewhere(parsed))) return mismatch;
+    }
+    const own = commands.find(({ command }) => this.ownHook(command, harness));
+    return own ? this.probeHook(own.command) : undefined;
   }
 
   /**
@@ -310,7 +353,7 @@ export class ObservationSetupService {
     if (!parsed.runnable) {
       return "The hook command finds its interpreter through PATH, which the harness may not share with Anthill. Re-enable observation to rewrite the entries with an absolute path.";
     }
-    if (!this.trustedHook(command)) return "The configured hook is not the handler shipped with this Anthill. Re-enable observation to repair it.";
+    if (!this.ownHook(command)) return "The configured hook is not the handler shipped with this Anthill. Re-enable observation to repair it.";
     const log = join(tmpdir(), `anthill-hook-probe-${process.pid}-${Date.now()}.jsonl`);
     try {
       const outcome = await runProcess({
@@ -559,19 +602,43 @@ export type ParsedHookCommand = {
 };
 
 /**
- * Anything that would make a shell do more than run one program.
+ * Anything that would make a shell do more than run one program, in a word
+ * that nothing is protecting.
  *
- * Checked before tokenising rather than after: the point is not to understand
- * these safely, it is to have nothing to do with a string that contains them.
+ * This used to be tested against the whole line before tokenising, on the
+ * reasoning that the point is not to understand these safely but to have
+ * nothing to do with a string containing them. The line this app writes,
+ * though, carries two absolute paths *in double quotes* — and macOS hands out
+ * paths like `~/Downloads/Anthill (1).app` for the asking. Anthill then wrote
+ * an entry it refused to recognise a moment later: hooks that fired perfectly
+ * well through the harness's own shell, reported as "Not working" for as long
+ * as the app stayed in that folder, with re-enabling producing the same
+ * refusal every time.
+ *
+ * So the question is asked per word, and quoting is the answer to it.
  */
 const SHELL_METACHARACTERS = /[;|&$`><(){}[\]!*?~\n\r\\#]/;
+
+/**
+ * The few of those that double quotes do *not* defuse.
+ *
+ * Inside `"…"` a POSIX shell still expands `$` and backticks and still reads
+ * `\` as an escape, and a newline ends the line wherever it appears. Those
+ * stay refused in every word. The rest — brackets, parentheses, `#`, `!`, `*`
+ * — are ordinary characters between quotes, and a folder is allowed to
+ * contain them.
+ */
+const QUOTED_METACHARACTERS = /[$`\\\n\r]/;
+
+/** One word of a hook command, and whether quotes were holding it together. */
+type Token = { value: string; quoted: boolean };
 
 /**
  * Split a command the way the writer quoted it: whitespace, and double quotes
  * around the two absolute paths. Not a shell parser — a reader for one shape.
  */
-function tokenise(command: string): string[] | undefined {
-  const tokens: string[] = [];
+function tokenise(command: string): Token[] | undefined {
+  const tokens: Token[] = [];
   let index = 0;
   while (index < command.length) {
     while (index < command.length && command[index] === " ") index += 1;
@@ -579,7 +646,7 @@ function tokenise(command: string): string[] | undefined {
     if (command[index] === '"') {
       const end = command.indexOf('"', index + 1);
       if (end === -1) return undefined;
-      tokens.push(command.slice(index + 1, end));
+      tokens.push({ value: command.slice(index + 1, end), quoted: true });
       index = end + 1;
       // A quoted token must end the token: `"a"b` is a shell concatenation,
       // and this reader does not do concatenation.
@@ -590,7 +657,7 @@ function tokenise(command: string): string[] | undefined {
     const stop = end === -1 ? command.length : end;
     const token = command.slice(index, stop);
     if (token.includes('"')) return undefined;
-    tokens.push(token);
+    tokens.push({ value: token, quoted: false });
     index = stop;
   }
   return tokens;
@@ -604,14 +671,20 @@ function tokenise(command: string): string[] | undefined {
  * harness and event after it and nothing else on the line.
  */
 export function parseHookCommand(command: string): ParsedHookCommand | undefined {
-  if (SHELL_METACHARACTERS.test(command)) return undefined;
   const tokens = tokenise(command);
   if (!tokens) return undefined;
+  // Quoting is read first and judged second. A word standing on its own gets
+  // the whole refusal; a quoted word gets only what quotes cannot hold.
+  for (const token of tokens) {
+    const forbidden = token.quoted ? QUOTED_METACHARACTERS : SHELL_METACHARACTERS;
+    if (forbidden.test(token.value)) return undefined;
+  }
+  const words = tokens.map((token) => token.value);
 
   // The one assignment this app writes, and no others: an assignment is a
   // shell feature, and accepting arbitrary ones would accept a way to change
   // what the program does without changing its name.
-  const rest = tokens[0] === "ELECTRON_RUN_AS_NODE=1" ? tokens.slice(1) : tokens;
+  const rest = words[0] === "ELECTRON_RUN_AS_NODE=1" ? words.slice(1) : words;
   if (rest.length !== 5) return undefined;
 
   const [execPath, handlerPath, marker, harness, event] = rest;
@@ -623,6 +696,71 @@ export function parseHookCommand(command: string): ParsedHookCommand | undefined
 
   const runnable = execPath.startsWith("/") && handlerPath.startsWith("/");
   return { execPath, handlerPath, harness, event, runnable };
+}
+
+/** How much of a handler file is read looking for Anthill's marker. */
+const HANDLER_HEAD_BYTES = 256 * 1024;
+
+/**
+ * Whether an entry that is not this installation's is nonetheless an Anthill.
+ *
+ * Asked only to decide what the user is *told* — never to decide what may be
+ * spawned, which stays pinned to this installation's own two paths in
+ * `ownHook`. The handler is Anthill's own script and carries the owner marker
+ * in its source and in every build of it, so reading the head of the file it
+ * names answers the question honestly and cheaply; the executable is a binary
+ * this app cannot read anything into, so it is only required to exist.
+ *
+ * What this is not: proof of authorship. Somebody who can already write the
+ * harness's config can also leave a marked file beside it, and the harness
+ * will run whatever that config says whatever Anthill's Settings reports.
+ * Anthill still never runs it. The bar is set where it changes the answer
+ * from "this is broken" to "this is not mine", which is the true one.
+ */
+async function anthillElsewhere(parsed: ParsedHookCommand): Promise<boolean> {
+  if (!existsSync(parsed.execPath)) return false;
+  if (await carriesMarker(parsed.handlerPath)) return true;
+  /*
+   * A packaged Anthill keeps its handler inside `app.asar`. Electron reads
+   * into an archive as if it were a directory, so the marker check above
+   * answers for one desktop app reading another's entry — but the CLI bridge
+   * is plain node, which cannot, and it would then announce every packaged
+   * install as broken. The archive's own existence is what can be checked
+   * from here, so that is what is checked. Nothing inside it is run either
+   * way: `ownHook` still decides that, and it compares whole paths.
+   */
+  const inside = parsed.handlerPath.indexOf(".asar/");
+  return inside > 0 && existsSync(parsed.handlerPath.slice(0, inside + ".asar".length));
+}
+
+/** Whether the head of a file carries Anthill's marker. */
+async function carriesMarker(path: string): Promise<boolean> {
+  const handle = await open(path, "r").catch(() => undefined);
+  if (!handle) return false;
+  try {
+    const buffer = Buffer.alloc(HANDLER_HEAD_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, HANDLER_HEAD_BYTES, 0);
+    return buffer.subarray(0, bytesRead).toString("utf8").includes(OWNER_MARKER);
+  } catch {
+    return false;
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
+
+/**
+ * Whether a command is an Anthill hook line at all — this installation's or
+ * another's.
+ *
+ * Everything the parser insists on, plus the two facts the parser cannot know
+ * on its own: which harness is being described, and which slot the entry was
+ * found in. An entry that says `codex` in a Claude config, or `Stop` while
+ * sitting under `PreToolUse`, is not Anthill's line however well it parses.
+ */
+function anthillShaped(command: string, harness: HookHarness, event: string): boolean {
+  const parsed = parseHookCommand(command);
+  return Boolean(parsed && isHookHarnessId(parsed.harness) &&
+    parsed.harness === harness && parsed.event === event);
 }
 
 /** The commands Anthill's own entries currently carry — what actually fires. */

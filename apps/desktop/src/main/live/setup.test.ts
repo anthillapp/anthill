@@ -63,7 +63,10 @@ function fakeSpawn(scripts: Script[]): { spawnFn: SpawnFn; calls: Recorded[] } {
   return { spawnFn, calls };
 }
 
-async function paths(handler = "// test handler\n") {
+// A real handler carries the owner marker — it reads it back out of its own
+// argv — and that is the one thing on disk that says an Anthill wrote a path
+// this installation does not own.
+async function paths(handler = "// test handler: anthill-observation-hook\n") {
   const root = await mkdtemp(join(tmpdir(), "anthill-live-setup-"));
   const hookHandlerPath = join(root, "live-hook-handler.js");
   await writeFile(hookHandlerPath, handler, "utf8");
@@ -346,6 +349,96 @@ describe("hooks that were installed and do not run", () => {
     expect(calls.slice(before).every((call) => call.args[0] === "--version")).toBe(true);
   });
 
+  /**
+   * Two Anthills, one config. The CLI bridge runs on node and points at the
+   * desktop sources; the desktop app runs its own binary and points at its
+   * bundled handler; a dev build sits beside a packaged one. Judging an entry
+   * by *this* process's paths made each of them announce the other's working
+   * install as broken, and Enable moved the complaint rather than ending it.
+   */
+  it("reports another Anthill's entries as working rather than broken", async () => {
+    const p = await paths();
+    const { spawnFn, calls } = fakeSpawn([...versions, { exitCode: 0 }]);
+    await new ObservationSetupService(p, spawnFn).install("claude-code");
+
+    const elsewhere = join(p.root, "other-anthill");
+    const otherHandler = join(elsewhere, "live-hook-handler.js");
+    await mkdir(elsewhere, { recursive: true });
+    await writeFile(otherHandler, "// another build: anthill-observation-hook\n", "utf8");
+    const otherExec = join(elsewhere, "node");
+    await writeFile(otherExec, "#!/bin/sh\n", "utf8");
+    const other = new ObservationSetupService(
+      { ...p, hookHandlerPath: otherHandler, execPath: otherExec },
+      spawnFn,
+    );
+    const before = calls.length;
+
+    const claude = (await other.status()).harnesses.find((item) => item.id === "claude-code");
+    expect(claude?.hookEntriesPresent).toBe(true);
+    expect(claude?.hookInstalled).toBe(true);
+    expect(claude?.hookProblem).toBeUndefined();
+    // Said, not run. Probing means spawning, and a path that looks like a
+    // handler is still somebody else's program.
+    expect(calls.slice(before).every((call) => call.args[0] === "--version")).toBe(true);
+  });
+
+  /**
+   * The CLI bridge is plain node and cannot read inside an `.asar`, which is
+   * where a packaged Anthill keeps its handler. Without this it would call
+   * every installed app's entries broken — the same bug from the other end.
+   */
+  it("accepts a packaged Anthill whose handler sits inside an archive", async () => {
+    const p = await paths();
+    const { spawnFn, calls } = fakeSpawn([...versions, { exitCode: 0 }]);
+    await new ObservationSetupService(p, spawnFn).install("claude-code");
+
+    const bundle = join(p.root, "Anthill.app", "Contents", "Resources");
+    await mkdir(bundle, { recursive: true });
+    const archive = join(bundle, "app.asar");
+    await writeFile(archive, "not really an archive\n", "utf8");
+    const packagedExec = join(p.root, "Anthill.app", "Contents", "MacOS", "Anthill");
+    await mkdir(dirname(packagedExec), { recursive: true });
+    await writeFile(packagedExec, "#!/bin/sh\n", "utf8");
+
+    // Rewrite the entries the way that install would have written them.
+    const config = JSON.parse(await readFile(p.claudeConfigPath, "utf8"));
+    for (const entries of Object.values(config.hooks) as { hooks: { command: string }[] }[][]) {
+      for (const entry of entries) {
+        for (const hook of entry.hooks) {
+          hook.command = hook.command
+            .replace(p.execPath, packagedExec)
+            .replace(p.hookHandlerPath, join(archive, "out", "main", "live-hook-handler.js"));
+        }
+      }
+    }
+    await writeFile(p.claudeConfigPath, JSON.stringify(config));
+    const before = calls.length;
+
+    const claude = (await new ObservationSetupService(p, spawnFn).status())
+      .harnesses.find((item) => item.id === "claude-code");
+    expect(claude?.hookInstalled).toBe(true);
+    expect(claude?.hookProblem).toBeUndefined();
+    expect(calls.slice(before).every((call) => call.args[0] === "--version")).toBe(true);
+  });
+
+  it("does not probe a config whose entry names the other harness", async () => {
+    const p = await paths();
+    const { spawnFn, calls } = fakeSpawn([...versions, { exitCode: 0 }]);
+    const service = new ObservationSetupService(p, spawnFn);
+    await service.install("claude-code");
+    const config = JSON.parse(await readFile(p.claudeConfigPath, "utf8"));
+    const groups = Object.values(config.hooks) as { hooks: { command: string }[] }[][];
+    const hook = groups[groups.length - 1][0].hooks[0];
+    hook.command = hook.command.replace(" claude-code ", " codex ");
+    await writeFile(p.claudeConfigPath, JSON.stringify(config));
+    const before = calls.length;
+
+    const status = (await service.status()).harnesses.find((item) => item.id === "claude-code");
+    expect(status?.hookInstalled).toBe(false);
+    expect(status?.hookProblem).toContain("No config command was run");
+    expect(calls.slice(before).every((call) => call.args[0] === "--version")).toBe(true);
+  });
+
   it("says nothing about a harness that was never enabled", async () => {
     const p = await paths();
     const { spawnFn, calls } = fakeSpawn(versions);
@@ -496,6 +589,35 @@ describe("recognising a hook entry", () => {
     const legacy = `node "${HANDLER}" anthill-observation-hook claude-code PreToolUse`;
     const parsed = parseHookCommand(legacy);
     expect(parsed).toMatchObject({ harness: "claude-code", runnable: false });
+  });
+
+  /**
+   * The refusal used to be tested against the whole line, so the app's own
+   * path disqualified it. macOS names a second download `Anthill (1).app`
+   * without being asked, and Anthill then wrote entries it refused to
+   * recognise a moment later — hooks that fired fine, reported as "Not
+   * working" for as long as the app stayed in that folder.
+   */
+  it("reads its own path out of a folder a shell would have opinions about", () => {
+    for (const folder of ["Anthill (1).app", "Apps [work]", "why#not", "Anthill!", "a*b", "~backup"]) {
+      const exec = `/Users/me/Downloads/${folder}/Contents/MacOS/Anthill`;
+      const parsed = parseHookCommand(
+        `ELECTRON_RUN_AS_NODE=1 "${exec}" "${HANDLER}" anthill-observation-hook claude-code Stop`,
+      );
+      expect(parsed, folder).toMatchObject({ execPath: exec, event: "Stop", runnable: true });
+    }
+  });
+
+  /**
+   * Quotes hold the rest of them; they do not hold these. A double-quoted
+   * string still expands `$` and backticks and still reads `\\` as an escape,
+   * so a path containing one is refused wherever it appears.
+   */
+  it("still refuses what quoting does not defuse", () => {
+    for (const path of ["/tmp/$(id)/Anthill", "/tmp/`id`/Anthill", "/tmp/a\\\\b/Anthill", "/tmp/${HOME}/Anthill"]) {
+      const command = `ELECTRON_RUN_AS_NODE=1 "${path}" "${HANDLER}" anthill-observation-hook claude-code Stop`;
+      expect(parseHookCommand(command), path).toBeUndefined();
+    }
   });
 
   it("reads a path with spaces in it, which is why it is quoted", () => {

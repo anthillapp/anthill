@@ -359,7 +359,18 @@ function ObservationPage() {
 
       <SettingGroup
         title="Hooks"
-        footer="Anthill reads event metadata only — no transcript, no file contents, and none of the model's reasoning."
+        footer={
+          <>
+            Anthill reads event metadata only — no transcript, no file
+            contents, and none of the model&rsquo;s reasoning. A hook writes
+            down which tool ran, when, and what it was aimed at; the command
+            itself, the contents it wrote and the answer it got are not kept,
+            and anything that looks like a credential is replaced before the
+            line is written. The log lives in{" "}
+            <strong>~/.anthill/live-hooks</strong>, rolls over at 8&nbsp;MB and
+            keeps one previous file. Nothing here is ever sent anywhere.
+          </>
+        }
       >
         {available.length === 0 ? (
           <SettingRow

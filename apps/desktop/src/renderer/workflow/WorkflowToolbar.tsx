@@ -237,9 +237,26 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
             style={{ backgroundImage: `url(${interpreterLogo(handover.source.harness)})` }}
           />
           From {HARNESS_PROFILES[handover.source.harness].displayName}
-          <span className="lock" aria-hidden="true">
-            🔒
-          </span>
+          {/* Drawn, not typed: the emoji padlock renders as a colour glyph the
+              font decides, so it ignored the button's colour and weight and sat
+              at a different size on every machine. The stroked icon is the one
+              in the design, and it inherits currentColor like the rest of the
+              toolbar's icons. */}
+          <svg
+            className="lock"
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.1"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="4" y="11" width="16" height="9" rx="2" />
+            <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+          </svg>
         </button>
       ) : (
         /* It compiles into the prompt and decides which harness the prompt

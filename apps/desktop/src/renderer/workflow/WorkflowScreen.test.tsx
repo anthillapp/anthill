@@ -732,18 +732,15 @@ describe("saving from the keyboard", () => {
 });
 
 /**
- * A handed-over workflow writes itself down.
+ * A handed-over workflow is saved on purpose, and not before (ANT-116).
  *
- * There used to be a second act between editing a handover and being able to
- * hand it back: save, then press `Ready for agent`. The button is gone, and
- * with it the reason the user had to think about saving at all — the file is
- * inside the exchange, something other than them put it there, and the session
- * that handed it over is waiting on their answer rather than their keystrokes.
- *
- * Only a handover. An ordinary workflow is the author's file in the author's
- * own place, and writing to it on a timer is not this feature's business.
+ * ANT-92 removed the approval gate and put autosave in its place, which left
+ * the user with nothing to press and a badge to interpret instead. `Save` is
+ * the act again — and it is the one thing standing between a broken graph and
+ * a session being handed it, because a handover has no other way to record a
+ * revision.
  */
-describe("a handover saving itself", () => {
+describe("a handover being saved", () => {
   const HANDOVER: Workflow = {
     id: "workflow-1",
     name: "Handed over",
@@ -760,7 +757,7 @@ describe("a handover saving itself", () => {
 
   const PATH = "/data/exchange/workflows/workflow-1/workflow.json";
 
-  function openHandover(over: Record<string, unknown> = {}) {
+  function openHandover() {
     const api = stubApi();
     Object.assign(api, {
       openWorkflow: vi.fn(async () => ({
@@ -776,7 +773,6 @@ describe("a handover saving itself", () => {
         problems: [],
         bindings: [],
       })),
-      ...over,
     });
     render(
       <WorkflowScreen
@@ -797,53 +793,32 @@ describe("a handover saving itself", () => {
     fireEvent.change(name, { target: { value: to } });
   }
 
-  it("writes an edit down without anybody pressing anything", async () => {
+  it("writes nothing on a keystroke, and nothing when the window loses focus", async () => {
     const api = openHandover();
     await rename("Renamed by the reader");
 
-    await waitFor(
-      () => expect(api.saveWorkflow).toHaveBeenCalledWith(
+    await act(async () => {
+      window.dispatchEvent(new Event("blur"));
+    });
+    // Well past the pause the old autosave waited out.
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+
+    expect(api.saveWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("writes what is on screen when Save is pressed", async () => {
+    const api = openHandover();
+    await rename("Renamed by the reader");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(api.saveWorkflow).toHaveBeenCalledWith(
         expect.objectContaining({
           path: PATH,
           workflow: expect.objectContaining({ name: "Renamed by the reader" }),
         }),
       ),
-      { timeout: 3000 },
     );
-  });
-
-  /*
-   * The moment the debounce would otherwise lose: the reader changes
-   * something and switches to their terminal to tell the session to start.
-   * The harness asks for the revision to work from within a second of that,
-   * so waiting out the timer would hand it the graph from before the edit.
-   */
-  it("writes at once when the window loses focus, without waiting out the pause", async () => {
-    const api = openHandover();
-    await rename("Changed just before switching away");
-    expect(api.saveWorkflow).not.toHaveBeenCalled();
-
-    await act(async () => {
-      window.dispatchEvent(new Event("blur"));
-    });
-
-    await waitFor(() => expect(api.saveWorkflow).toHaveBeenCalledTimes(1));
-  });
-
-  it("leaves a workflow nobody handed over to its author", async () => {
-    const api = stubApi();
-    render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />);
-    const template = await screen.findByText(/Implement, test, fix/);
-    fireEvent.click(template.closest("button") as HTMLElement);
-    await screen.findByRole("button", { name: "Prompt" });
-
-    await rename("An ordinary workflow");
-    await act(async () => {
-      window.dispatchEvent(new Event("blur"));
-    });
-
-    // 1.5s is well past the pause a handover waits out.
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    expect(api.saveWorkflow).not.toHaveBeenCalled();
   });
 });

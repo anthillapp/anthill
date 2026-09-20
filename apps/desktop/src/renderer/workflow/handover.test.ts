@@ -41,16 +41,15 @@ it("has no button to press, whatever state the handover is in", () => {
   }
 });
 
-it("says a complete revision is ready without claiming anybody approved it", () => {
-  const { pill } = model();
-  expect(pill.label).toBe("Ready");
-  expect(`${pill.label} ${pill.title}`.toLowerCase()).not.toContain("approv");
-});
-
-it("calls a revision that does not compile a draft, and points at the problems", () => {
-  const { pill } = model({ state: "draft" }, { problemCount: 2 });
-  expect(pill.label).toBe("Draft");
-  expect(pill.title).toContain("problems list");
+/**
+ * Readiness is not a badge any more (ANT-116).
+ *
+ * `Draft` and `Ready` said in a pill what a blocked or unblocked Save says
+ * where the user is about to act. A handover nobody has run shows nothing.
+ */
+it("shows no pill before a session has done anything with it", () => {
+  expect(model().pill).toBeUndefined();
+  expect(model({ state: "draft" }, { problemCount: 2 }).pill).toBeUndefined();
 });
 
 /**
@@ -64,11 +63,11 @@ it("tells a binding apart from a session that is actually reporting", () => {
   const bound = { state: "bound" as const, bindings: [{ runId: "ANT-1", revision: 2 }] };
 
   const pinned = model(bound);
-  expect(pinned.pill.label).toBe("Bound to revision 2");
-  expect(pinned.pill.title).toContain("not evidence");
+  expect(pinned.pill?.label).toBe("Bound to revision 2");
+  expect(pinned.pill?.title).toContain("not evidence");
 
   const live = model(bound, { runs: [liveRun("ANT-1")] });
-  expect(live.pill.label).toBe("Running revision 2");
+  expect(live.pill?.label).toBe("Running revision 2");
 });
 
 it("says a session is working from an older revision than the canvas", () => {
@@ -118,7 +117,7 @@ it("never asks the user to authorise anything, in any state", () => {
     { state: "bound" as const, bindings: [{ runId: "ANT-1", revision: 1 }] },
   ]) {
     const { pill, notice } = model(over);
-    const prose = `${pill.label} ${pill.title} ${notice?.text ?? ""}`.toLowerCase();
+    const prose = `${pill?.label ?? ""} ${pill?.title ?? ""} ${notice?.text ?? ""}`.toLowerCase();
     for (const word of ["approve", "approval", "ready for agent", "withdraw", "authoris", "authoriz"]) {
       expect(prose, `"${word}" in ${JSON.stringify(over)}`).not.toContain(word);
     }

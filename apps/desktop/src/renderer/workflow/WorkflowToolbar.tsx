@@ -151,6 +151,12 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
   const sourceButton = useRef<HTMLButtonElement>(null);
   const [showSource, setShowSource] = useState(false);
   const clean = props.problemCount === 0;
+  /**
+   * Only a handover blocks. An ordinary workflow is the author's own file and
+   * they may save it half-finished — that is what a draft is. A handover's
+   * file is the one a session reads.
+   */
+  const saveBlocked = props.handover !== undefined && !clean;
 
   return (
     <header className={`topbar wf-toolbar${handover ? " is-handover" : ""}`}>
@@ -200,7 +206,9 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
         </button>
       )}
 
-      {handover ? (
+      {/* Only while a session is doing something with it. Readiness is the
+          Save button's to say, and it says it by being blocked (ANT-116). */}
+      {handover?.model.pill ? (
         <span
           className={`wf-pill wf-pill-handover is-${handover.model.pill.tone}`}
           title={handover.model.pill.title}
@@ -268,7 +276,37 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
 
       <button onClick={props.onNew}>New</button>
       <button onClick={props.onOpen}>Open</button>
-      <button onClick={props.onSave}>Save</button>
+      {/*
+        On a handover, Save is the act — and the one thing standing between a
+        broken graph and a session being handed it.
+
+        A handed-over workflow has no other way to record a revision: nothing
+        writes it on a timer, and `Save` is what the session tells the user to
+        press. So blocking it while the graph does not compile means a broken
+        revision is never recorded at all, and the user finds out while looking
+        at the canvas rather than when their session asks for something to work
+        from. The server refuses such a revision too; this is the half they can
+        see, and it comes first.
+
+        Not `disabled`: a button that cannot be clicked cannot say why. It is
+        clickable, refuses, and carries the reason.
+      */}
+      <button
+        onClick={() => {
+          if (saveBlocked) return;
+          props.onSave();
+        }}
+        aria-disabled={saveBlocked ? true : undefined}
+        className={saveBlocked ? "is-blocked" : undefined}
+        title={
+          saveBlocked
+            ? `${props.problemCount} ${props.problemCount === 1 ? "problem" : "problems"} in the workflow. ` +
+              "Saving now would hand your session a graph it cannot follow — fix them first."
+            : undefined
+        }
+      >
+        Save
+      </button>
 
       {handover ? (
         /* Nothing. A handover's primary slot held `Ready for agent`, which

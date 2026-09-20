@@ -34,7 +34,7 @@ import type { ExchangeView } from "../../shared/ipc.js";
  * is made here rather than in `describeState` for that reason: adding liveness
  * to it would mix what the agent is told with what we have observed.
  */
-export type HandoverTone = "draft" | "ready" | "bound" | "running";
+export type HandoverTone = "bound" | "running";
 
 export type HandoverPill = { label: string; tone: HandoverTone; title: string };
 
@@ -45,7 +45,20 @@ export type HandoverNoticeModel = {
 };
 
 export type HandoverModel = {
-  pill: HandoverPill;
+  /**
+   * What a session is doing with this workflow, when one is.
+   *
+   * Absent before any run, and that absence is the point. There were two more
+   * states here — `Draft` and `Ready` — reporting whether the graph was fit to
+   * hand over. The Save button says that now, by being blocked or not, and
+   * says it where the user is about to act rather than in a badge they have to
+   * read and interpret (ANT-116).
+   *
+   * What is left is not readiness. `Bound` and `Running` report a session,
+   * which the button says nothing about and which cannot be learned any other
+   * way.
+   */
+  pill?: HandoverPill;
   notice?: HandoverNoticeModel;
 };
 
@@ -64,50 +77,30 @@ export type HandoverInput = {
   runs: PendingRun[];
 };
 
-function pillFor(input: HandoverInput): HandoverPill {
+function pillFor(input: HandoverInput): HandoverPill | undefined {
   const { view } = input;
   const bound = view.bindings[0];
-  if (view.state === "bound" && bound) {
-    /*
-     * "Running" is earned by the session's own reports arriving, and by
-     * nothing else. A binding is a revision being pinned, which happens before
-     * a session has done anything at all — and often before one starts.
-     */
-    const live = input.runs.some(
-      (run) => run.anthillRunId === bound.runId && run.state === "detected_live",
-    );
-    return live
-      ? {
-          label: `Running revision ${bound.revision}`,
-          tone: "running",
-          title: "The session's own progress reports are arriving.",
-        }
-      : {
-          label: `Bound to revision ${bound.revision}`,
-          tone: "bound",
-          title: `A run pinned revision ${bound.revision}. Binding alone is not evidence that the external session is running.`,
-        };
-  }
-
-  if (view.state === "ready_for_agent") {
-    return {
-      label: "Ready",
-      tone: "ready",
-      title: "This revision is complete. The work can begin on it whenever you tell the session to start.",
-    };
-  }
+  if (view.state !== "bound" || !bound) return undefined;
 
   /*
-   * `draft` means one thing now: the graph does not compile into a prompt yet.
-   * It used to also mean the user had not pressed a button, which is why the
-   * word had to carry a mode with it to be worth anything.
+   * "Running" is earned by the session's own reports arriving, and by nothing
+   * else. A binding is a revision being pinned, which happens before a session
+   * has done anything at all — and often before one starts.
    */
-  return {
-    label: "Draft",
-    tone: "draft",
-    title:
-      "Handed over, and not yet something the work can begin on. The problems list says what is missing.",
-  };
+  const live = input.runs.some(
+    (run) => run.anthillRunId === bound.runId && run.state === "detected_live",
+  );
+  return live
+    ? {
+        label: `Running revision ${bound.revision}`,
+        tone: "running",
+        title: "The session's own progress reports are arriving.",
+      }
+    : {
+        label: `Bound to revision ${bound.revision}`,
+        tone: "bound",
+        title: `A run pinned revision ${bound.revision}. Binding alone is not evidence that the external session is running.`,
+      };
 }
 
 const SAVE_FAILED =
@@ -159,6 +152,7 @@ function noticeFor(input: HandoverInput): HandoverNoticeModel | undefined {
 }
 
 export function handoverModel(input: HandoverInput): HandoverModel {
+  const pill = pillFor(input);
   const notice = noticeFor(input);
-  return { pill: pillFor(input), ...(notice ? { notice } : {}) };
+  return { ...(pill ? { pill } : {}), ...(notice ? { notice } : {}) };
 }

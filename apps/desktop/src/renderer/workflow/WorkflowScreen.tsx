@@ -33,7 +33,7 @@ import {
 } from "@anthill/workflow";
 import { type Workflow } from "@anthill/workflow-schema";
 import type { PendingRun } from "@anthill/live";
-import { revisionDigest } from "@anthill/workflow-exchange";
+import { handoverOpens, revisionDigest } from "@anthill/workflow-exchange";
 
 import { SAVED_LINGER_MS, type SaveStatus } from "./save-status.js";
 import { AgentEditor } from "./AgentLibrary.js";
@@ -241,21 +241,6 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    * ever one started from the workflow that is open.
    */
   const watched = mostRelevant(runsFor(liveRuns, workflow?.id));
-
-  /**
-   * The one run still owed an announcement.
-   *
-   * Gated on a confirmed match and nothing weaker: a modal takes the author
-   * off what they were doing, and "a session here might be yours" is not worth
-   * that. Everything less certain stays in the chip, where a reader goes
-   * looking rather than being pulled.
-   */
-  const [announcing, setAnnouncing] = useState<PendingRun | null>(null);
-  useEffect(() => {
-    if (!watched || !shouldAnnounce(watched)) return;
-    markAnnounced(watched.anthillRunId);
-    setAnnouncing(watched);
-  }, [watched]);
 
   /** Open one agent in the inspector, remembering the step it came from. */
   const editAgent = useCallback(
@@ -563,6 +548,59 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    * this app: another session binds a revision and nothing tells us.
    */
   const exchange = useExchange(workflow?.id ?? "", path, dirty);
+
+  /**
+   * Whether this handover was made to be watched rather than edited (ANT-118).
+   *
+   * `watch` is what the user asked the harness for when they wanted to see the
+   * work happen: the harness wrote the graph itself and is already doing the
+   * job, so there is no version of it for them to settle and no reason to open
+   * a canvas they were not invited to change. Read through `handoverOpens`,
+   * never compared to a literal, so the two retired mode names fold into
+   * `design` in one place.
+   */
+  const opensLive = exchange.view !== undefined && handoverOpens(exchange.view.mode) === "live";
+
+  /**
+   * The one run still owed an announcement.
+   *
+   * Gated on a confirmed match and nothing weaker: a modal takes the author
+   * off what they were doing, and "a session here might be yours" is not worth
+   * that. Everything less certain stays in the chip, where a reader goes
+   * looking rather than being pulled.
+   *
+   * A `watch` handover is never announced, because the next effect is already
+   * taking the reader there. Asking "open the session?" of somebody who asked
+   * for nothing else is a dialog with one answer.
+   */
+  const [announcing, setAnnouncing] = useState<PendingRun | null>(null);
+  useEffect(() => {
+    if (!watched || opensLive || !shouldAnnounce(watched)) return;
+    markAnnounced(watched.anthillRunId);
+    setAnnouncing(watched);
+  }, [watched, opensLive]);
+
+  /**
+   * A `watch` handover goes to its session by itself.
+   *
+   * It cannot happen at the handover: a workflow arrives before anything has
+   * bound it, and a Live Session page with no run would be a page about
+   * nothing. So the canvas holds the graph for the second or two the harness
+   * takes to bind, and the moment a run for this workflow appears the page
+   * changes underneath it. That is the whole of "no editing step" — the user
+   * never has to find the indicator and click it.
+   *
+   * Once per run, and remembered: `Stop observing` and the page's own Back
+   * both put the reader on the canvas deliberately, and an effect that sent
+   * them straight back would make those two buttons unusable.
+   */
+  const sentToLive = useRef<string | null>(null);
+  useEffect(() => {
+    if (!opensLive || !watched || sentToLive.current === watched.anthillRunId) return;
+    sentToLive.current = watched.anthillRunId;
+    markAnnounced(watched.anthillRunId);
+    setLiveRun(watched);
+  }, [opensLive, watched]);
 
   if (!workflow) {
     if (fromPrompt) {

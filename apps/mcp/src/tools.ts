@@ -91,7 +91,7 @@ which one, and nothing is stored.`,
           .unknown()
           .optional()
           .describe(
-            'What the user asked for, recorded and not enforced. "approval-gate" once held work back until they marked a revision ready in Anthill; it no longer does, because nothing here can stop a harness working and withholding the revision withheld only the run record. Either value is accepted and stored. What decides whether work starts is asking the user and waiting for their answer.',
+            'Which of the two things the user asked for. "design" means they want a workflow of their own: Anthill opens it in the editor, and they read, change and save it. "watch" means they want to see the work happen: you composed the graph yourself and are already doing the work, so Anthill opens the Live Session and there is no editing step. It chooses which screen the handover lands on and holds no work back — nothing here can stop a harness working, and what decides whether work starts is the user telling you to. The older names "show-and-go" and "approval-gate" are still accepted and both read as "design".',
           ),
         source: z
           .object({

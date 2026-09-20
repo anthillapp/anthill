@@ -13,7 +13,7 @@
 import type { Workflow, WorkflowRun, NodeRun } from "@anthill/workflow-schema";
 import type { AgentModels, InterpreterId } from "@anthill/workflow";
 import type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun } from "@anthill/live";
-import type { ExchangeSource, ExchangeProblem, RevisionState } from "@anthill/workflow-exchange";
+import type { ExchangeSource, ExchangeProblem, HandoverMode, RevisionState } from "@anthill/workflow-exchange";
 
 export type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun };
 
@@ -293,6 +293,16 @@ export type SaveWorkflowRequest = {
 export type ExchangeView = {
   workflowId: string;
   source: ExchangeSource;
+  /**
+   * Which of the two things the user asked the harness for.
+   *
+   * Read from the handover's identity, which is written once, so it says what
+   * they wanted at the moment they asked and not what the document has become
+   * since. `handoverOpens` turns it into the screen this handover belongs on;
+   * nothing here compares it to a literal, because the two legacy modes have
+   * to fold into `design` in exactly one place.
+   */
+  mode: HandoverMode;
   /** What is true of the head revision — the one the editor has open. */
   state: RevisionState;
   revision: number;

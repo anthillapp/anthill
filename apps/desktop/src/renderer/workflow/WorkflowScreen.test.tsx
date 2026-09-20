@@ -769,6 +769,7 @@ describe("a handover being saved", () => {
         revision: 1,
         digest: "sha256:abc",
         state: "ready_for_agent" as const,
+        mode: "design" as const,
         source: { harness: "claude-code" as const, sessionId: "s1", taskText: "Fix the crash" },
         problems: [],
         bindings: [],
@@ -820,6 +821,108 @@ describe("a handover being saved", () => {
         }),
       ),
     );
+  });
+});
+
+/**
+ * A handover the user asked to watch rather than to edit (ANT-118).
+ *
+ * `/anthill:workflow watch` is the user saying they want to see the work
+ * happen, not compose it: the harness wrote the graph itself and is already
+ * doing the job. There is nothing on the canvas for them to settle, so the
+ * canvas is not where they should be left — and finding the presence chip and
+ * clicking it is exactly the step the command exists to remove.
+ *
+ * The switch cannot happen when the workflow arrives, because nothing has
+ * bound it yet and a Live Session page with no run is a page about nothing. So
+ * these pin the moment it can happen: as soon as a run for this workflow is
+ * observed.
+ */
+describe("a handover the user asked to watch", () => {
+  const WATCHED: Workflow = {
+    id: "workflow-2",
+    name: "Watched",
+    version: "1",
+    target: "claude-code",
+    brief: { goal: "Fix the crash", doneCriteria: ["Tests pass"] },
+    nodes: [
+      { id: "start", name: "Start", type: "start", config: {} },
+      { id: "end", name: "End", type: "end", config: {} },
+    ],
+    edges: [{ id: "a", source: "start", target: "end" }],
+    metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION, agents: [] } },
+  };
+
+  const PATH = "/data/exchange/workflows/workflow-2/workflow.json";
+
+  const run: PendingRun = {
+    anthillRunId: "ANT-22223333",
+    correlationNonce: "bb22cc",
+    workflowId: "workflow-2",
+    selectedCli: "claude-code",
+    promptVersion: "1",
+    bootstrapPromptHash: "hash",
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 600_000).toISOString(),
+    state: "detected_live",
+    detectedSessionId: "sess-2",
+    confidence: "strong",
+    evidenceChannel: "claude-code:transcript",
+    lastObservedAt: new Date().toISOString(),
+  };
+
+  function open(mode: "watch" | "design", runs: PendingRun[]) {
+    const api = stubApi();
+    Object.assign(api, {
+      openWorkflow: vi.fn(async () => ({
+        ok: true as const,
+        opened: { workflow: WATCHED, path: PATH },
+      })),
+      exchangeRead: vi.fn(async () => ({
+        workflowId: "workflow-2",
+        revision: 1,
+        digest: "sha256:abc",
+        state: "bound" as const,
+        mode,
+        source: { harness: "claude-code" as const, sessionId: "s2", taskText: "Fix the crash" },
+        problems: [],
+        bindings: [{ runId: run.anthillRunId, revision: 1 }],
+      })),
+    });
+    api.liveSnapshot.mockResolvedValue({ runs, capabilities: [] });
+    render(
+      <WorkflowScreen
+        onExit={() => undefined}
+        onSettings={() => undefined}
+        start={{ kind: "open", path: PATH }}
+      />,
+    );
+    return api;
+  }
+
+  it("opens the live session without anybody clicking anything", async () => {
+    open("watch", [run]);
+    await screen.findByText("Anthill is observing, not running");
+    // And not behind a dialog asking whether to go where they already are.
+    expect(screen.queryByRole("button", { name: /Open session/i })).toBeNull();
+  });
+
+  it("stays on the canvas for a handover the user is meant to read", async () => {
+    open("design", [run]);
+    // The same run, the same graph: the mode is the only difference.
+    await screen.findByRole("button", { name: "Save" });
+    expect(screen.queryByText("Anthill is observing, not running")).toBeNull();
+  });
+
+  it("lets the reader leave the session and stay left", async () => {
+    open("watch", [run]);
+    await screen.findByText("Anthill is observing, not running");
+    fireEvent.click(await screen.findByTitle("Back to the workflow"));
+
+    await screen.findByRole("button", { name: "Save" });
+    // A second of the snapshot poll's worth of chances to drag them back.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(screen.queryByText("Anthill is observing, not running")).toBeNull();
   });
 });
 

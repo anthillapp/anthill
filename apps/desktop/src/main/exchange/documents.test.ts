@@ -71,6 +71,21 @@ it("does not hold a stored approval-gate handover back", async () => {
   expect(await store.eligibleRevision(workflow.id)).toMatchObject({ eligible: true });
 });
 
+/**
+ * The mode reaches the renderer, which is the only thing it decides (ANT-118).
+ *
+ * It is read from the identity rather than from the document, so it says what
+ * the user asked the harness for at the handover and not what the graph has
+ * become since. The screen turns it into editor-or-live; this only has to get
+ * it there unchanged, including for the two names that predate the pair.
+ */
+it("carries the handover's own mode through to the view", async () => {
+  for (const mode of ["design", "watch", "show-and-go", "approval-gate"] as const) {
+    const { store, path, workflow } = await fixture(mode);
+    expect((await readExchangeView(store, path, workflow.id))?.mode).toBe(mode);
+  }
+});
+
 it("preserves a saved working copy on an interrupted or repeated display", async () => {
   const { store, path, workflow } = await fixture();
   await saveExchangeCopy(store, path, { ...workflow, name: "Keep my work" });

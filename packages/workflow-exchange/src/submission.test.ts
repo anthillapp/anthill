@@ -12,7 +12,7 @@ import { HARNESS_TARGETS } from "@anthill/workflow-schema";
 import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow";
 import { describe, expect, it } from "vitest";
 
-import { EXCHANGE_PROBLEM_CODES, EXCHANGE_VERSION, SESSION_ID_MAX_LENGTH } from "./contracts.js";
+import { EXCHANGE_PROBLEM_CODES, EXCHANGE_VERSION, SESSION_ID_MAX_LENGTH, handoverOpens } from "./contracts.js";
 import {
   checkExchangeVersion,
   checkSessionId,
@@ -262,10 +262,28 @@ describe("readSubmission", () => {
     }
   });
 
-  it("accepts both handover modes and nothing else", () => {
+  it("accepts the two commands, the two retired names, and nothing else", () => {
+    expect(readSubmission(handover({ mode: "design" })).ok).toBe(true);
+    expect(readSubmission(handover({ mode: "watch" })).ok).toBe(true);
+    // Every handover already on disk carries one of these two. A value that
+    // stopped parsing would make those records unreadable, for no gain.
     expect(readSubmission(handover({ mode: "show-and-go" })).ok).toBe(true);
     expect(readSubmission(handover({ mode: "approval-gate" })).ok).toBe(true);
     expect(readSubmission(handover({ mode: "APPROVAL-GATE" })).ok).toBe(false);
+    expect(readSubmission(handover({ mode: "review" })).ok).toBe(false);
+  });
+
+  /*
+   * The whole of what `mode` decides, in one place, so the legacy pair cannot
+   * quietly start meaning something new. Only `watch` skips the canvas, and a
+   * handover written before these two words existed was one the user was meant
+   * to look at.
+   */
+  it("sends only a watch handover to the live session", () => {
+    expect(handoverOpens("watch")).toBe("live");
+    expect(handoverOpens("design")).toBe("editor");
+    expect(handoverOpens("show-and-go")).toBe("editor");
+    expect(handoverOpens("approval-gate")).toBe("editor");
   });
 
   it("refuses a session id it could not carry unchanged, and says which field", () => {

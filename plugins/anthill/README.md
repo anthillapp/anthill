@@ -10,8 +10,8 @@ Verified against **Claude Code 2.1.261** (desktop app 2.2553.1) and **Anthill
 
 ## What it gives you
 
-* `/anthill:workflow` — one skill, taking `design`, `review`, `status`, `resume`
-  or `doctor` plus a task or a workflow id. It is listed as `anthill:workflow`,
+* `/anthill:workflow` — one skill, taking `design` or `watch` plus the task.
+  It is listed as `anthill:workflow`,
   and a session with no other skill of that name also answers to the short
   `/workflow` — the namespaced spelling is the one that cannot be taken by
   somebody else's plugin.
@@ -69,8 +69,9 @@ point the server at it explicitly by adding arguments in `.mcp.json`:
 ```
 
 Getting this wrong is quiet rather than loud: the server stores every handover
-happily while the app watches a directory nothing arrives in. `/anthill:workflow doctor`
-prints the directory the server is actually serving.
+happily while the app watches a directory nothing arrives in. Every refusal
+from the server names the directory it is actually serving, which is how you
+find out you have two.
 
 ## Scopes
 
@@ -85,27 +86,33 @@ to them and works the same under each.
 ## Using it
 
 ```
-/anthill:workflow design Add retry-once to the checkout flow and show the plan
-/anthill:workflow review Rework the importer, but let me read the steps first
-/anthill:workflow status  workflow-checkout-rework
-/anthill:workflow resume  workflow-checkout-rework
-/anthill:workflow doctor
+/anthill:workflow design Add retry-once to the checkout flow, let me read it first
+/anthill:workflow watch  Rework the importer — show me the work as it happens
 ```
 
-`design` hands the work over and asks whether to start. `review` does the same
-and says plainly that it is waiting, because you asked to read first. **Neither
-starts work until you answer**, and the difference between them is what the
-session says to you rather than anything Anthill enforces.
+Two commands, and the difference is whose workflow it is.
 
-Before either of them drafts anything, it asks you about the project and
-location, scope, constraints, success criteria and the decisions already made.
-If you gave those details in your request it summarises them back for you to
-confirm rather than making you type them twice. A partial answer gets a
-follow-up question, not an invented requirement, and an empty folder is an
-observation rather than permission to create a project there.
+**`design`** — the workflow is yours. Claude asks what it does not know, drafts
+the plan and stops. Anthill opens it on the canvas, you change what you want,
+press **Save** and tell the session to start. It works from what you saved.
 
-There is nothing to approve. When the plan looks right, press **Save** and tell
-the session to start — it works from what you saved.
+Before it drafts anything, it asks you about the project and location, scope,
+constraints, success criteria and the decisions already made. If you gave those
+details in your request it summarises them back for you to confirm rather than
+making you type them twice. A partial answer gets a follow-up question, not an
+invented requirement, and an empty folder is an observation rather than
+permission to create a project there.
+
+**`watch`** — the workflow is Claude's, and you want to see the work happen. It
+writes the graph from your task, hands it over and starts: no questions, no
+waiting for you. Anthill opens the **Live Session** rather than the editor,
+because there is nothing there for you to settle — the command itself was the
+go-ahead. What you watch is the session's own progress reports moving through
+the graph it wrote.
+
+`create` and `display` are accepted as aliases for the two. With no command,
+Claude reads the request; when that is genuinely ambiguous it asks, because the
+difference is whether you get to write the plan.
 
 Save is greyed out while the workflow has problems, and says how many. That is
 the one thing stopping a session being handed a graph it cannot follow: a
@@ -159,7 +166,8 @@ once is not retried for fifteen minutes. Fix the cause, then start a new session
 `~/.claude/mcp-needs-auth-cache.json`.
 
 **`no_such_workflow` for an id you just made.** Almost always the data
-directory: the server is writing somewhere the app is not reading. `/anthill:workflow doctor`.
+directory: the server is writing somewhere the app is not reading. The refusal
+names the directory the server is serving; compare it with the app's.
 
 **Progress does not appear in Anthill.** The `anthill` CLI writes the reports;
 check it is on the path. Without it the work still happens, and the diagram just

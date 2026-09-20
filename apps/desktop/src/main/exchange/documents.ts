@@ -49,7 +49,7 @@ export async function readExchangeView(store: ExchangeStore, path: string, workf
   const problems = [...stored.problems, ...checkCompleteness(head.workflow, identity.source)];
   const bound = stored.bindings.some((binding) => binding.revision === head.revision);
   return {
-    workflowId, source: identity.source,
+    workflowId, source: identity.source, mode: identity.mode,
     revision: head.revision, digest: head.digest,
     // Three states, and none of them is about permission. `draft` now means
     // one thing only — the graph does not compile into a prompt yet — where it

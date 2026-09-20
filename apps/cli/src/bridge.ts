@@ -160,7 +160,17 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   }
   const exportGrants = new FolderGrants();
   const workflowFiles = new FileGrants();
-  if (workspace) await exportGrants.grant(workspace);
+  // A workspace that is not there is not a reason to refuse to start. The
+  // server is already listening and the instance lock already taken by the
+  // time this runs, so throwing here left a bound port, a held lock and a raw
+  // ENOENT where master had simply started and refused the export. The rest of
+  // the bridge already degrades around an unreadable workspace — the recents
+  // are still offered — and export refuses on its own, by name.
+  if (workspace) {
+    await exportGrants.grant(workspace).catch(() => {
+      console.warn(`Anthill: the workspace ${workspace} could not be read. Exporting and new saves are unavailable until it exists.`);
+    });
+  }
 
   // The lazy singletons, created on first use and kept out of `services`:
   // nothing about observing for a session should be able to stop a Workflow

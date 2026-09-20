@@ -152,6 +152,28 @@ function history(): Promise<RunServices> {
     .catch((error) => { historyLoading = undefined; throw error; });
   return historyLoading;
 }
+/**
+ * The legacy history, when there is one to read.
+ *
+ * A store that will not open is the same fact, from the page's side, as a
+ * store that is not there: there is no snapshot for this run either way. It
+ * did not used to be — `history()` rethrows, the rejection crossed to the
+ * renderer, and `LiveSessionPage` awaits `getRun` *before* falling back to the
+ * open workflow, so a machine with an old `runs.db` and a native binding
+ * Electron could not load answered every manually pasted session with an error
+ * box and a Retry that re-ran the same failing open. Editing and passive
+ * observation do not depend on this database; saying so is this function.
+ *
+ * The failure is still reported once, and `history()` clears its own cache on
+ * the way out, so a store that becomes readable later is opened later.
+ */
+async function historyIfReadable(): Promise<RunServices | undefined> {
+  if (!existsSync(join(app.getPath("userData"), "runs", "runs.db"))) return undefined;
+  return history().catch((error) => {
+    console.error("Anthill could not open its legacy run history:", error);
+    return undefined;
+  });
+}
 /** Folders a dialog handed out in this session; see `safe-write.ts`. */
 const grants = new FolderGrants();
 const workflowFiles = new FileGrants();
@@ -807,10 +829,9 @@ function handle(
 function registerIpcHandlers(): void {
   // Legacy history is read-only. Removing the runner must not remove the
   // snapshot lookup used by the manual copy-paste Live Session page.
-  handle(IpcChannel.runList, async () => existsSync(join(app.getPath("userData"), "runs", "runs.db"))
-    ? (await history()).store.listRuns() : []);
-  handle(IpcChannel.runGet, async (_event, runId: string) => existsSync(join(app.getPath("userData"), "runs", "runs.db"))
-    ? (await history()).store.getRun(runId) : undefined);
+  handle(IpcChannel.runList, async () => (await historyIfReadable())?.store.listRuns() ?? []);
+  handle(IpcChannel.runGet, async (_event, runId: string) =>
+    (await historyIfReadable())?.store.getRun(runId));
   handle(
     IpcChannel.appCapabilities,
     async (): Promise<IpcCapabilities> => ({

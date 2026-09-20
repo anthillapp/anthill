@@ -129,6 +129,31 @@ describe("loading what was left behind", () => {
  * the file is only ever a complete snapshot, never a truncated one.
  */
 describe("writes racing each other", () => {
+  it("does not restore another failed write during concurrent durable updates", async () => {
+    const original = run("ANT-ONE");
+    const { path, store } = await storeAt([original]);
+    await store.load(NOW);
+    await rm(path);
+    await mkdir(path);
+    const results = await Promise.allSettled([
+      store.put(run("ANT-ONE", { state: "detected_live", detectedSessionId: "first" }), true),
+      store.put(run("ANT-ONE", { state: "completed", detectedSessionId: "second" }), true),
+    ]);
+    expect(results.every((result) => result.status === "rejected")).toBe(true);
+    expect(store.find("ANT-ONE")).toEqual(original);
+  });
+
+  it("does not claim cancellation when removing the persisted run fails", async () => {
+    const { path, store } = await storeAt([run("ANT-ONE")]);
+    await store.load(NOW);
+    await rm(path);
+    await mkdir(path);
+    await expect(store.remove("ANT-ONE", true)).rejects.toThrow();
+    expect(store.find("ANT-ONE")).toBeDefined();
+    await rm(path, { recursive: true });
+    await store.remove("ANT-ONE", true);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual([]);
+  });
   it("refuses an undurable registration, rolls it back, and allows a later retry", async () => {
     const { path, store } = await storeAt();
     await store.load(NOW);

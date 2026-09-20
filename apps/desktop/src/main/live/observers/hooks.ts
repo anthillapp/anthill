@@ -40,7 +40,8 @@ import { join } from "node:path";
 import { TIMING, parseStepMarkers, type Evidence, type MarkerCli, type PendingRun } from "@anthill/live";
 
 import type { ObservationEventDraft, PollResult } from "./types.js";
-import { newCursor, readNewLines, type TailCursor } from "./tail.js";
+import { newCursor, readRotatingLines, type TailCursor } from "./tail.js";
+import { minimalHookPayload } from "../hook-payload.js";
 
 export const HOOK_LOG = join(homedir(), ".anthill", "live-hooks", "events.jsonl");
 
@@ -203,7 +204,7 @@ export class HookLogObserver {
       this.background.set(run.anthillRunId, delegated);
     }
 
-    const chunk = await readNewLines(this.path, cursor);
+    const chunk = await readRotatingLines(this.path, cursor);
     // A log that has not grown can still be saying something: a tool that
     // opened before this poll and has not closed is work in flight now, and so
     // is a delegation the session last reported as still running.
@@ -219,7 +220,7 @@ export class HookLogObserver {
         continue;
       }
 
-      const data = isRecord(row.data) ? row.data : undefined;
+      const data = isRecord(row.data) ? minimalHookPayload(row.data) : undefined;
       if (!data) continue;
       if (str(data.session_id) !== run.detectedSessionId) continue;
       this.covered.add(run.anthillRunId);

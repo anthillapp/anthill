@@ -17,7 +17,7 @@
  */
 
 import type { Workflow } from "@anthill/workflow-schema";
-import { compile, type CompileResult } from "@anthill/workflow";
+import { compile, executableBlocks, type CompileResult } from "@anthill/workflow";
 
 import { cliInstruction, echoInstruction, renderMarker, type RunMarker } from "./marker.js";
 
@@ -52,9 +52,14 @@ export type BootstrapOptions = {
  * told about.
  */
 export function workflowSteps(workflow: Workflow): { id: string; name: string }[] {
-  return workflow.nodes
-    .filter((node) => node.type !== "start" && node.type !== "end")
-    .map((node) => ({ id: node.id, name: node.name }));
+  // The order the compiled prompt uses, not the order the blocks were drawn
+  // in. These were different lists of the same blocks: the prompt numbered
+  // them by a walk from the start block, this numbered them by their position
+  // in `workflow.nodes`, and a graph is very often not drawn in the order it
+  // runs. Both carried the id, so a report was never about the wrong block —
+  // but "step 1" in the prompt and the first entry in the list the agent was
+  // told to report against could be two different steps (ANT-101).
+  return executableBlocks(workflow).map((node) => ({ id: node.id, name: node.name }));
 }
 
 export function buildBootstrapPrompt(

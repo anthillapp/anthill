@@ -12,7 +12,7 @@
  * interrupting because it could not read its own record.
  */
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 /** Bumped when the file's shape changes. A version this one cannot read is defaulted. */
@@ -88,31 +88,39 @@ export class SettingsStore {
    * setting cannot erase another it has never heard of.
    */
   async write(patch: Partial<Settings>): Promise<Settings> {
-    const current = await this.read();
-    this.settings = { ...current, ...patch };
-    await this.flush();
-    return { ...this.settings };
+    const written = this.writing.then(async () => {
+      const next = { ...await this.read(), ...patch };
+      await this.persist(JSON.stringify({ version: SETTINGS_VERSION, settings: next } satisfies Stored, null, 2));
+      // Publish only durable settings. Serializing the entire update also
+      // prevents a failed earlier write from rolling back a later success.
+      this.settings = next;
+      return { ...next };
+    });
+    this.writing = written.then(() => undefined, () => undefined);
+    return written;
   }
 
-  private async flush(): Promise<void> {
-    const snapshot = JSON.stringify(
-      { version: SETTINGS_VERSION, settings: this.settings ?? DEFAULT_SETTINGS } satisfies Stored,
-      null,
-      2,
-    );
-    this.writing = this.writing.then(() => this.persist(snapshot));
-    await this.writing;
-  }
-
+  /**
+   * One write: whole file to a temp name, then rename over.
+   *
+   * A failure is raised rather than swallowed. It used to be caught here on
+   * the grounds that losing a preference is better than taking the app down —
+   * true, and the wrong place to act on it. The catch made `write` return the
+   * new settings as though they were stored, so a switch the disk had refused
+   * stayed on until the next launch and then quietly went back (ANT-97).
+   *
+   * Nothing is taken down: the caller reports it, and the switch stays where
+   * the user actually left it.
+   */
   private async persist(snapshot: string): Promise<void> {
+    await mkdir(dirname(this.path), { recursive: true });
+    this.writeSeq += 1;
+    const temp = `${this.path}.${process.pid}.${this.writeSeq}.tmp`;
     try {
-      await mkdir(dirname(this.path), { recursive: true });
-      this.writeSeq += 1;
-      const temp = `${this.path}.${process.pid}.${this.writeSeq}.tmp`;
       await writeFile(temp, snapshot, "utf8");
       await rename(temp, this.path);
-    } catch {
-      // Losing a preference is better than taking the app down for it.
+    } finally {
+      await rm(temp, { force: true }).catch(() => undefined);
     }
   }
 }

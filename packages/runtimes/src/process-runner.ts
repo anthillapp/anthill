@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 
 /**
  * Minimal structural shapes for a spawned process. Deliberately narrower than
@@ -66,6 +67,44 @@ export interface RunProcessOptions {
   onOutput?: (stream: "stdout" | "stderr", chunk: string) => void;
 }
 
+/**
+ * How much of a child's output is kept in memory, per stream.
+ *
+ * Generous for anything a caller here reads — a version banner, a JSON answer,
+ * an error — and small enough that a runaway child cannot exhaust the process.
+ */
+export const MAX_CAPTURED_OUTPUT = 1024 * 1024;
+
+/** The marker left in place of what was dropped. Said, never silent. */
+const TRUNCATION_NOTE = "\n[Anthill kept the first 1 MB of this output and stopped recording it.]";
+
+/**
+ * Append while there is room, and say so once when there is not.
+ *
+ * The beginning is kept rather than the end: what the callers here read — a
+ * version, a first error, a JSON document — is at the start, and a tail would
+ * throw away the part they need.
+ */
+function capture(): (addition: string) => string {
+  let text = "";
+  let bytes = 0;
+  let truncated = false;
+  return (addition) => {
+    if (truncated) return text;
+    const size = Buffer.byteLength(addition);
+    const room = MAX_CAPTURED_OUTPUT - bytes;
+    if (size <= room) {
+      bytes += size;
+      text += addition;
+    } else {
+      // Keep whole UTF-8 characters, including at an exactly filled boundary.
+      text += new StringDecoder("utf8").write(Buffer.from(addition).subarray(0, room)) + TRUNCATION_NOTE;
+      truncated = true;
+    }
+    return text;
+  };
+}
+
 export interface ProcessOutcome {
   exitCode: number | null;
   stdout: string;
@@ -102,6 +141,8 @@ export function runProcess(options: RunProcessOptions): Promise<ProcessOutcome> 
   return new Promise<ProcessOutcome>((resolve) => {
     let stdout = "";
     let stderr = "";
+    const keepStdout = capture();
+    const keepStderr = capture();
     let timedOut = false;
     let cancelled = false;
     let settled = false;
@@ -164,14 +205,27 @@ export function runProcess(options: RunProcessOptions): Promise<ProcessOutcome> 
 
     child.stdout?.setEncoding?.("utf8");
     child.stderr?.setEncoding?.("utf8");
+    /*
+     * What is kept is bounded; what is streamed is not.
+     *
+     * These two strings grew for as long as the child wrote, and every caller
+     * in the app shares them: CLI detection, model probes, hook verification,
+     * drafting. A child that writes steadily and is never read — a progress
+     * bar, a compiler on a large tree — could take the main process with it
+     * (ANT-99).
+     *
+     * The cap is on the *retained* copy only. `onOutput` still sees every
+     * chunk, because a caller streaming output is already deciding for itself
+     * what to keep.
+     */
     child.stdout?.on("data", (chunk: unknown) => {
       const text = toText(chunk);
-      stdout += text;
+      stdout = keepStdout(text);
       onOutput?.("stdout", text);
     });
     child.stderr?.on("data", (chunk: unknown) => {
       const text = toText(chunk);
-      stderr += text;
+      stderr = keepStderr(text);
       onOutput?.("stderr", text);
     });
 

@@ -39,6 +39,7 @@ export class PendingRunStore {
    * with the newest state.
    */
   private writing: Promise<void> = Promise.resolve();
+  private mutations: Promise<void> = Promise.resolve();
   /** Distinguishes this writer's temp file from a concurrent process's. */
   private writeSeq = 0;
 
@@ -111,6 +112,14 @@ export class PendingRunStore {
   }
 
   async put(run: PendingRun, requireDurable = false): Promise<void> {
+    if (requireDurable) return this.mutate(async () => {
+      await this.load(run.createdAt);
+      await this.putRecord(run, true);
+    });
+    return this.putRecord(run, false);
+  }
+
+  private async putRecord(run: PendingRun, requireDurable: boolean): Promise<void> {
     const index = this.runs.findIndex((item) => item.anthillRunId === run.anthillRunId);
     const previous = index >= 0 ? this.runs[index] : undefined;
     if (index >= 0) this.runs[index] = run;
@@ -127,10 +136,23 @@ export class PendingRunStore {
     }
   }
 
-  async remove(runId: string): Promise<void> {
+  async remove(runId: string, requireDurable = false): Promise<void> {
+    if (requireDurable) return this.mutate(async () => {
+      if (this.loading) await this.loading;
+      const previous = this.runs;
+      this.runs = previous.filter((run) => run.anthillRunId !== runId);
+      try { await this.save(true); }
+      catch (error) { this.runs = previous; throw error; }
+    });
     if (!this.loaded) this.forgotten.add(runId);
     this.runs = this.runs.filter((run) => run.anthillRunId !== runId);
     await this.save();
+  }
+
+  private mutate(action: () => Promise<void>): Promise<void> {
+    const result = this.mutations.then(action);
+    this.mutations = result.catch(() => undefined);
+    return result;
   }
 
   /**

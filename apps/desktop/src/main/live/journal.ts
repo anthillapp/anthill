@@ -20,10 +20,11 @@
  * last line costs one event instead of the log.
  */
 
-import { appendFile, mkdir, readFile, rm } from "node:fs/promises";
+import { constants } from "node:fs";
+import { mkdir, open, rm } from "node:fs/promises";
 import { join } from "node:path";
 
-import { eventFingerprint, type ObservationEvent } from "@anthill/live";
+import { eventFingerprint, isRunId, type ObservationEvent } from "@anthill/live";
 
 import type { ObservationEventDraft } from "./observers/types.js";
 
@@ -31,11 +32,24 @@ export class ObservationJournal {
   /** Events already on disk, per run, so a reopened run continues its numbering. */
   private readonly loaded = new Map<string, ObservationEvent[]>();
   private readonly fingerprints = new Map<string, Set<string>>();
+  private writing: Promise<void> = Promise.resolve();
 
   constructor(private readonly directory: string) {}
 
-  private file(runId: string): string {
-    return join(this.directory, `${runId}.jsonl`);
+  /**
+   * The log for one run, or nothing when the id is not one of ours.
+   *
+   * A run id arrives here from the renderer — `liveCancel` carries one — and
+   * becomes a file name. `../../something` addressed a file outside this
+   * directory, and `forget` deletes what this resolves to, so a traversal id
+   * deleted somebody else's `.jsonl` (ANT-96).
+   *
+   * The id is refused rather than repaired. Replacing bad characters would
+   * give two different ids one file, and a session would then read and delete
+   * another's record — a quieter bug than the one being fixed.
+   */
+  private file(runId: string): string | undefined {
+    return isRunId(runId) ? join(this.directory, `${runId}.jsonl`) : undefined;
   }
 
   /** Everything recorded for a run, oldest first. */
@@ -43,7 +57,16 @@ export class ObservationJournal {
     const cached = this.loaded.get(runId);
     if (cached) return cached;
 
-    const text = await readFile(this.file(runId), "utf8").catch(() => "");
+    const path = this.file(runId);
+    if (!path) return [];
+    let text = "";
+    try {
+      const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try { text = await handle.readFile("utf8"); }
+      finally { await handle.close(); }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
     const events: ObservationEvent[] = [];
     const seen = new Set<string>();
     for (const line of text.split("\n")) {
@@ -76,17 +99,31 @@ export class ObservationJournal {
    * there is anything worth telling the renderer about.
    */
   async append(runId: string, drafts: readonly ObservationEventDraft[]): Promise<ObservationEvent[]> {
+    const result = this.writing.then(() => this.appendBatch(runId, drafts));
+    this.writing = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  private async appendBatch(runId: string, drafts: readonly ObservationEventDraft[]): Promise<ObservationEvent[]> {
     if (drafts.length === 0) return [];
+    // Checked before any work rather than at the write: an id with no file of
+    // ours behind it should not be given a sequence number either.
+    const path = this.file(runId);
+    if (!path) return [];
 
     const events = await this.read(runId);
     const seen = this.fingerprints.get(runId) ?? new Set<string>();
     const recordedAt = new Date().toISOString();
     const added: ObservationEvent[] = [];
+    // Held apart from `seen`, which is the cached set itself: marking a
+    // fingerprint there before the write means a failed write still leaves the
+    // event recorded as already handled, which is the bug being fixed.
+    const marked = new Set<string>();
 
     for (const draft of drafts) {
       const fingerprint = eventFingerprint({ ...draft, runId });
-      if (seen.has(fingerprint)) continue;
-      seen.add(fingerprint);
+      if (seen.has(fingerprint) || marked.has(fingerprint)) continue;
+      marked.add(fingerprint);
 
       const event: ObservationEvent = {
         ...draft,
@@ -98,16 +135,31 @@ export class ObservationJournal {
     }
     if (added.length === 0) return [];
 
+    /*
+     * The file first, and the memory of it only if that worked.
+     *
+     * These were the other way round, with the write's failure swallowed: a
+     * full disk or a permissions error left the events pushed into the cache
+     * and their fingerprints marked seen, so the log had no record of them and
+     * nothing would ever write them again — the next poll saw the same
+     * transcript lines and skipped them as already recorded. The page showed
+     * them until the app closed and could not show them afterwards (ANT-97).
+     *
+     * A failure is raised so the service rewinds its observer cursors before
+     * retrying. Otherwise their offsets have already consumed this batch.
+     */
+    await mkdir(this.directory, { recursive: true });
+    const handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW, 0o600);
+    try {
+      // Separate a partial last record left by an interrupted append from the
+      // retried batch. Complete duplicates are removed by fingerprint on read.
+      await handle.writeFile("\n" + added.map((event) => JSON.stringify(event)).join("\n") + "\n", "utf8");
+      await handle.sync();
+    } finally { await handle.close(); }
+
     events.push(...added);
+    for (const fingerprint of marked) seen.add(fingerprint);
     this.fingerprints.set(runId, seen);
-
-    await mkdir(this.directory, { recursive: true }).catch(() => undefined);
-    await appendFile(
-      this.file(runId),
-      added.map((event) => JSON.stringify(event)).join("\n") + "\n",
-      "utf8",
-    ).catch(() => undefined); // Losing a line is better than taking the app down.
-
     return added;
   }
 
@@ -128,8 +180,13 @@ export class ObservationJournal {
 
   /** Drop a run's log entirely — used when the user stops observing it. */
   async forget(runId: string): Promise<void> {
-    this.loaded.delete(runId);
-    this.fingerprints.delete(runId);
-    await rm(this.file(runId), { force: true }).catch(() => undefined);
+    const result = this.writing.then(async () => {
+      const path = this.file(runId);
+      if (path) await rm(path, { force: true });
+      this.loaded.delete(runId);
+      this.fingerprints.delete(runId);
+    });
+    this.writing = result.catch(() => undefined);
+    return result;
   }
 }

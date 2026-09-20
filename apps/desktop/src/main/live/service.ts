@@ -72,6 +72,7 @@ export const RECOVERY_POLL_MS = 30_000;
 export type LiveSessionSnapshot = {
   runs: PendingRun[];
   capabilities: ObserverCapabilities[];
+  storageError?: string;
 };
 
 export type StartObservationInput = {
@@ -114,6 +115,7 @@ export class LiveSessionService {
   private readonly announced: AnnouncedSteps = new Map();
   /** Sessions already noted as carrying a bound run's marker, per run. */
   private readonly mismatched = new Map<string, Set<string>>();
+  private readonly storageErrors = new Map<string, string>();
 
   constructor(
     private readonly store: PendingRunStore,
@@ -180,6 +182,7 @@ export class LiveSessionService {
     return {
       runs: this.store.all().filter(isVisible),
       capabilities: this.capabilities,
+      ...(this.storageErrors.size ? { storageError: [...this.storageErrors.values()][0] } : {}),
     };
   }
 
@@ -214,10 +217,16 @@ export class LiveSessionService {
    *
    * Called before the text reaches the clipboard, so the record exists whatever
    * happens next — including the app closing between the copy and the paste.
+   *
+   * Which is exactly why the write has to be durable. That sentence was the
+   * whole promise and the write did not keep it: a failure was swallowed, the
+   * run sat in memory, Copy Prompt reported success, and the observation the
+   * user had been told about was gone at the next launch (ANT-97). Raising
+   * here means the copy is refused rather than the record being lost.
    */
   async startObservation(input: StartObservationInput): Promise<LiveSessionSnapshot> {
     const run = createPendingRun({ ...input, now: this.now() });
-    await this.store.put(run);
+    await this.store.put(run, true);
     this.schedule();
     // Look immediately, and wait for it: a prompt copied a moment ago may
     // already have produced a session, and the caller should be told about it
@@ -236,7 +245,8 @@ export class LiveSessionService {
    * it and no business ending it. The record is dropped and the indicator goes.
    */
   async cancelObservation(runId: string): Promise<LiveSessionSnapshot> {
-    await this.store.remove(runId);
+    await this.store.remove(runId, true);
+    this.storageErrors.delete(runId);
     this.forget(runId);
     // The log goes with the run: the user asked Anthill to stop keeping this.
     await this.journal.forget(runId);
@@ -257,7 +267,7 @@ export class LiveSessionService {
     if (!reopened) return this.snapshot();
 
     this.forget(runId);
-    await this.store.put(reopened);
+    await this.store.put(reopened, true);
     this.schedule();
     // Look now, and wait for it: the author pressed a button that says
     // "look", and the answer should be in the response, not in a push later.
@@ -268,7 +278,7 @@ export class LiveSessionService {
   /** Hide a settled run without forgetting it was there. */
   async dismiss(runId: string): Promise<LiveSessionSnapshot> {
     const run = this.store.find(runId);
-    if (run) await this.store.put({ ...run, dismissedAt: this.now() });
+    if (run) await this.store.put({ ...run, dismissedAt: this.now() }, true);
     // Put away is put away: a dismissed run is not looked at again, so there
     // is no reason to remember where its records were read to.
     this.forget(runId);
@@ -317,20 +327,24 @@ export class LiveSessionService {
 
       let changed = false;
       for (const run of open) {
-        const next = await this.advance(run, now);
-        if (next !== run) {
-          await this.store.put(next);
-          this.rememberEnding(run, next);
+        try {
+          const next = await this.advance(run, now);
+          if (!this.store.find(run.anthillRunId)) continue;
+          if (next !== run) {
+            await this.store.put(next, true);
+            this.rememberEnding(run, next);
+            changed = true;
+            // Lost runs retain their cursor for recovery; settled runs do not.
+            if (!isOpen(next) && !isRecoverable(next, now)) this.forget(next.anthillRunId);
+          }
+          if (this.storageErrors.delete(run.anthillRunId)) changed = true;
+        } catch (error) {
+          this.retryAfterStorageFailure(run, error);
           changed = true;
-          // A run closed as lost keeps the observers' places in its records:
-          // it is looked at again below, and re-reading the whole record on
-          // each look would be the price of forgetting. Anything else that
-          // closed is done with.
-          if (!isOpen(next) && !isRecoverable(next, now)) this.forget(next.anthillRunId);
         }
       }
 
-      if (lost.length > 0 && Date.parse(now) - this.recoveryLookedAt >= RECOVERY_POLL_MS) {
+      if (lost.length > 0 && (this.storageErrors.size > 0 || Date.parse(now) - this.recoveryLookedAt >= RECOVERY_POLL_MS)) {
         this.recoveryLookedAt = Date.parse(now);
         for (const run of lost) {
           if (!isRecoverable(run, now)) {
@@ -338,10 +352,17 @@ export class LiveSessionService {
             this.forget(run.anthillRunId);
             continue;
           }
-          const next = await this.recover(run, now);
-          if (next !== run) {
-            await this.store.put(next);
-            this.rememberEnding(run, next);
+          try {
+            const next = await this.recover(run, now);
+            if (!this.store.find(run.anthillRunId)) continue;
+            if (next !== run) {
+              await this.store.put(next, true);
+              this.rememberEnding(run, next);
+              changed = true;
+            }
+            if (this.storageErrors.delete(run.anthillRunId)) changed = true;
+          } catch (error) {
+            this.retryAfterStorageFailure(run, error);
             changed = true;
           }
         }
@@ -351,6 +372,18 @@ export class LiveSessionService {
     } finally {
       this.polling = false;
     }
+  }
+
+  private retryAfterStorageFailure(run: PendingRun, error: unknown): void {
+    if (!this.store.find(run.anthillRunId)) return;
+    // The sources are replayable; the journal deduplicates already persisted
+    // events. Keep notification history so a disk retry cannot notify twice.
+    for (const observer of Object.values(this.observers)) observer.forget(run.anthillRunId);
+    this.hooks.forget(run.anthillRunId);
+    this.reports.forget(run.anthillRunId);
+    this.mismatched.delete(run.anthillRunId);
+    this.sessionLookups.delete(run.anthillRunId);
+    this.storageErrors.set(run.anthillRunId, `Anthill could not save observed activity. Retrying automatically. The external session is unchanged. ${String(error)}`);
   }
 
   /**
@@ -595,7 +628,7 @@ export class LiveSessionService {
     run: PendingRun,
     drafts: ObservationEventDraft[],
   ): Promise<ObservationEvent[]> {
-    if (drafts.length === 0) return [];
+    if (drafts.length === 0 || !this.store.find(run.anthillRunId)) return [];
     const added = await this.journal.append(run.anthillRunId, drafts);
     if (added.length === 0) return [];
     this.publishEvents(run.anthillRunId, await this.journal.tail(run.anthillRunId));

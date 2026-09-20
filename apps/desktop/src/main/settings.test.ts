@@ -7,7 +7,7 @@
  * interrupting because it could not read its own record.
  */
 
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,6 +24,12 @@ beforeEach(async () => {
 });
 
 describe("the preferences", () => {
+  it("applies concurrent patches to the latest durable settings", async () => {
+    const store = new SettingsStore(path);
+    await Promise.all([store.write({ stepNotifications: true }), store.write({})]);
+    expect(await store.read()).toEqual({ stepNotifications: true });
+    expect(await new SettingsStore(path).read()).toEqual({ stepNotifications: true });
+  });
   it("are the documented defaults on a machine that has never set any", async () => {
     const store = new SettingsStore(join(dir, "never-written.json"));
     expect(await store.read()).toEqual(DEFAULT_SETTINGS);
@@ -90,5 +96,60 @@ describe("a record this Anthill cannot read", () => {
     const written = JSON.parse(await readFile(path, "utf8")) as { version: number };
     expect(written.version).toBe(SETTINGS_VERSION);
     expect(await new SettingsStore(path).read()).toEqual({ stepNotifications: true });
+  });
+});
+
+/**
+ * A preference the disk refused (ANT-97).
+ *
+ * `persist` used to catch and discard, so `write` answered with the new
+ * settings as though they were stored. The switch looked accepted until the
+ * next launch and then quietly went back.
+ */
+describe("a write the disk refuses", () => {
+  it("says so, rather than answering with settings it did not store", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "anthill-settings-ro-"));
+    const store = new SettingsStore(join(dir, "nested", "settings.json"));
+    await store.write({ stepNotifications: true });
+    await chmod(join(dir, "nested"), 0o500);
+
+    await expect(store.write({ stepNotifications: false })).rejects.toThrow();
+
+    await chmod(join(dir, "nested"), 0o700);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("keeps in memory what is on disk, so the next read is not a lie", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "anthill-settings-ro-"));
+    const store = new SettingsStore(join(dir, "nested", "settings.json"));
+    await store.write({ stepNotifications: true });
+    await chmod(join(dir, "nested"), 0o500);
+
+    await store.write({ stepNotifications: false }).catch(() => undefined);
+
+    // Not the value that was refused: what a reader gets has to be what a
+    // restart would give them.
+    expect((await store.read()).stepNotifications).toBe(true);
+
+    await chmod(join(dir, "nested"), 0o700);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("does not leave the write chain broken for every later write", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "anthill-settings-ro-"));
+    const nested = join(dir, "nested");
+    const store = new SettingsStore(join(nested, "settings.json"));
+    await store.write({ stepNotifications: true });
+    await chmod(nested, 0o500);
+    await store.write({ stepNotifications: false }).catch(() => undefined);
+
+    // The failure is reported once. A rejected promise left in the chain would
+    // make every later write fail for a reason already dealt with.
+    await chmod(nested, 0o700);
+    await expect(store.write({ stepNotifications: false })).resolves.toMatchObject({
+      stepNotifications: false,
+    });
+
+    await rm(dir, { recursive: true, force: true });
   });
 });

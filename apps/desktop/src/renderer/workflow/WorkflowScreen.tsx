@@ -191,6 +191,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    * the page never loses what it was showing.
    */
   const [liveRuns, setLiveRuns] = useState<PendingRun[]>([]);
+  const [liveStorageError, setLiveStorageError] = useState<string>();
 
   useEffect(() => {
     let live = true;
@@ -201,7 +202,10 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     void window.anthill
       .liveSnapshot()
       .then((snapshot) => {
-        if (live) setLiveRuns(snapshot.runs);
+        if (live) {
+          setLiveRuns(snapshot.runs);
+          setLiveStorageError(snapshot.storageError);
+        }
       })
       .catch(() => {
         // An older main process does not serve this channel. The indicator
@@ -212,6 +216,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     try {
       off = window.anthill.onLiveSnapshot((snapshot) => {
         setLiveRuns(snapshot.runs);
+        setLiveStorageError(snapshot.storageError);
         setLiveRun((current) => {
           if (!current) return current;
           const next = snapshot.runs.find(
@@ -658,6 +663,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
       <LiveSessionPage
         workflow={workflow}
         run={liveRun}
+        storageError={liveStorageError}
         {...(liveObservation ? { observation: liveObservation } : {})}
         onBack={() => setLiveRun(null)}
         onStopObserving={(runId) => {

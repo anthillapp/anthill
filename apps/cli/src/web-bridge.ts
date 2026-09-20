@@ -8,7 +8,6 @@ import {
   OPEN_WORKFLOW_CHANNEL,
   SAVE_WORKFLOW_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
-  RUN_EVENT_CHANNEL,
   type AnthillApi,
   type ApprovalResponse,
   type ExportWorkflowRequest,
@@ -172,9 +171,6 @@ export function installWebBridge(): Promise<AnthillApi> {
       contract: IPC_CONTRACT,
       capabilities: () => invoke(IpcChannel.appCapabilities),
       relaunch: () => invoke(IpcChannel.appRelaunch),
-      selectWorkspace: () => invoke(IpcChannel.workspaceSelect),
-      workspaceStatus: (rootPath: string) =>
-        invoke(IpcChannel.workspaceStatus, rootPath),
       openWorkflow: (path?: string) => invoke(IpcChannel.workflowOpen, path),
       pendingWorkflowOpen: () => invoke(IpcChannel.workflowPendingOpen),
       workflowOpened: (path) => invoke(IpcChannel.workflowOpened, path),
@@ -188,12 +184,8 @@ export function installWebBridge(): Promise<AnthillApi> {
         invoke(IpcChannel.workflowSave, request),
       onSaveWorkflow: (listener: () => void) =>
         onChannel(SAVE_WORKFLOW_CHANNEL, () => listener()),
-      detectRuntimes: () => invoke(IpcChannel.runtimesDetect),
-      startRun: (request: StartRunRequest) => invoke(IpcChannel.runStart, request),
       listRuns: () => invoke(IpcChannel.runList),
       getRun: (runId: string) => invoke(IpcChannel.runGet, runId),
-      respondToApproval: (response: ApprovalResponse) =>
-        invoke(IpcChannel.approvalRespond, response),
       exportWorkflow: (request: ExportWorkflowRequest) =>
         invoke(IpcChannel.workflowExport, request),
       setWorkflowDirty: (dirty: boolean) =>
@@ -248,10 +240,6 @@ export function installWebBridge(): Promise<AnthillApi> {
         invoke(IpcChannel.liveSetupInstall, harness),
       liveSetupDisable: (harness: MarkerCli) =>
         invoke(IpcChannel.liveSetupDisable, harness),
-      onRunEvent: (listener: (event: RunEvent) => void) =>
-        onChannel(RUN_EVENT_CHANNEL, (payload) =>
-          listener(payload as RunEvent),
-        ),
     } as AnthillApi;
 
     // `installWebBridge` resolves once the socket is open and `window.anthill`

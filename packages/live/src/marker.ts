@@ -54,6 +54,25 @@ export function newRunId(random: () => string = defaultRandom): string {
   return `ANT-${random().slice(0, 8).toUpperCase()}`;
 }
 
+/**
+ * Whether a string is a run id this Anthill minted.
+ *
+ * Beside `newRunId` so the shape has one definition: a checker that drifted
+ * from the minter would start refusing this app's own runs, which is the worst
+ * way for it to fail.
+ *
+ * It **rejects** rather than repairing, and that is the point. A run id becomes
+ * a file name in the observation journal, so `../../…` once addressed a file
+ * outside it — and cancelling an observation deletes that file. Sanitising
+ * would have been the obvious fix and the wrong one: mapping bad characters to
+ * `_` gives two different ids the same journal, and one session then reads and
+ * deletes another's record. An id that is not this shape did not come from
+ * here, and the honest answer to it is no.
+ */
+export function isRunId(value: unknown): value is string {
+  return typeof value === "string" && /^ANT-[A-Z0-9]{1,32}$/.test(value);
+}
+
 export function newNonce(random: () => string = defaultRandom): string {
   return random().slice(0, 6).toLowerCase();
 }

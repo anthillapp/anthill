@@ -227,6 +227,23 @@ button.primary:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.14);
 }
 
+/* The same treatment for an ordinary toolbar button — Save on a handover
+   whose graph does not compile. Blocked rather than disabled for the same
+   reason: a button nobody can click cannot say why, and the reason is the
+   whole point of stopping them (ANT-116). */
+.topbar button.is-blocked:not(.primary),
+.subbar button.is-blocked:not(.primary) {
+  color: var(--on-dark-dim);
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: not-allowed;
+}
+
+.topbar button.is-blocked:not(.primary):hover,
+.subbar button.is-blocked:not(.primary):hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .icon-button {
   width: 30px;
   height: 30px;

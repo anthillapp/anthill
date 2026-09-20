@@ -177,20 +177,27 @@ Go on to `get_ready_revision` and bind.
 
 Two ways, and the user picks:
 
-**They edit it in Anthill.** Say, in as many words, that you will not know they
-have finished unless they tell you — Anthill has no way to reach this session,
-so their edits go into the workflow and nothing reaches you. Ask them to say
-when they are done. There is nothing for them to save: Anthill writes a
-handover down as they change it.
+**They edit it in Anthill.** Tell them the two things they need:
+
+> When it looks right, press **Save** in Anthill, then tell me.
+
+Say both halves. Saving is what records the version you will work from — until
+they press it, their changes are on their screen and nowhere else. And telling
+you is the only way you find out, because Anthill has no way to reach this
+session.
+
+If **Save** is greyed out, the graph has problems and Anthill will say how
+many. That is deliberate: saving a workflow that does not compile would hand
+you a plan you cannot follow. They fix the problems, then save.
 
 Then, when they come back — whatever they say — call `get_workflow` before you
-do anything else. A higher revision number means they changed something: say
-which revision you can now see, confirm that is what they want worked on, and
-only then bind. If the number has not moved, say so rather than assuming they
-changed their mind — they may have looked and left it alone, or their change
-may not have been written, and the two are worth telling apart. Never bind the
-revision you submitted after they have told you they were going to change it;
-read what is there now.
+do anything else. A higher revision number means they saved: say which revision
+you can now see, confirm that is what they want worked on, and only then bind.
+If the number has not moved, say so rather than assuming they changed their
+mind — they may have looked and left it alone, or they may have edited and not
+pressed Save, and the two are worth telling apart. Never bind the revision you
+submitted after they have told you they were going to change it; read what is
+there now.
 
 **They ask you to change it.** `revise_workflow` takes the workflow id and the
 whole document as it should now read — not a description of the change, and not

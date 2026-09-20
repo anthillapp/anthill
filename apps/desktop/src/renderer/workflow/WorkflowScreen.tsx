@@ -84,17 +84,6 @@ export type WorkflowScreenProps = {
     | { kind: "open"; path?: string; live?: PendingRun; deliveryId?: number };
 };
 
-/**
- * How long a handover waits after the last edit before writing itself down.
- *
- * Long enough that a burst of typing is one write rather than twenty, short
- * enough that a reader who changes something and immediately tells their
- * session to start is not racing it. The window losing focus writes at once
- * and does not wait for this.
- */
-const AUTOSAVE_MS = 600;
-
-
 export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProps) {
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   /**
@@ -569,52 +558,6 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    * this app: another session binds a revision and nothing tells us.
    */
   const exchange = useExchange(workflow?.id ?? "", path, dirty);
-
-  /**
-   * A handed-over workflow writes itself down.
-   *
-   * There used to be a second act between editing a handover and being able to
-   * hand it back: the user saved, and then pressed `Ready for agent`. The
-   * button is gone, and with it the reason the user had to think about saving
-   * at all — a handover's file is inside the exchange, it was put there by
-   * something other than them, and the session asking them to read it is
-   * waiting on their answer rather than on their keystrokes.
-   *
-   * Only a handover. An ordinary workflow is the author's file in the author's
-   * place, and writing to it on a timer is not this ticket's business.
-   *
-   * `save` is reached through a ref so a keystroke does not resubscribe: read
-   * directly, this would close over the save that existed when the timer was
-   * armed and write the workflow as it stood then.
-   */
-  const autosave = useRef(save);
-  autosave.current = save;
-  const handedOver = exchange.view !== undefined;
-  useEffect(() => {
-    if (!handedOver || !dirty) return;
-    const timer = window.setTimeout(() => void autosave.current(), AUTOSAVE_MS);
-    return () => window.clearTimeout(timer);
-    // `workflow` is in here to restart the wait on every edit rather than
-    // write in the middle of one.
-  }, [handedOver, dirty, workflow]);
-
-  /**
-   * And writes itself down at once when the window loses focus.
-   *
-   * This is the moment the debounce would otherwise lose. The user reads the
-   * graph, changes something, and switches to the terminal to tell the session
-   * to start — and the harness asks for the revision to work from within a
-   * second of that. Waiting out the timer there would hand it the graph from
-   * before the edit, which is exactly the surprise autosave exists to remove.
-   */
-  const dirtyNow = useRef(dirty);
-  dirtyNow.current = dirty;
-  useEffect(() => {
-    if (!handedOver) return;
-    const flush = () => { if (dirtyNow.current) void autosave.current(); };
-    window.addEventListener("blur", flush);
-    return () => window.removeEventListener("blur", flush);
-  }, [handedOver]);
 
   if (!workflow) {
     if (fromPrompt) {

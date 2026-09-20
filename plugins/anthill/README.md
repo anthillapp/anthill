@@ -104,9 +104,13 @@ confirm rather than making you type them twice. A partial answer gets a
 follow-up question, not an invented requirement, and an empty folder is an
 observation rather than permission to create a project there.
 
-Your edits are written down as you make them. There is nothing to approve and
-nothing to save: when you have finished reading, tell the session to start and
-it works from what is on your canvas.
+There is nothing to approve. When the plan looks right, press **Save** and tell
+the session to start — it works from what you saved.
+
+Save is greyed out while the workflow has problems, and says how many. That is
+the one thing stopping a session being handed a graph it cannot follow: a
+handover has no other way to record a version, so nothing broken is ever
+recorded.
 
 There was a **Ready for agent** button here. It looked like it held work back
 and did not — the plugin has no hooks, so withholding a revision withheld

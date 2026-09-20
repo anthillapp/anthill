@@ -354,6 +354,18 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
 
     case "working": {
       if (run.detectedSessionId && run.detectedSessionId !== evidence.sessionId) return run;
+      // The same rule `activity` has, for the same reason: only work that
+      // *started* after the finish disproves it. A call still open from before
+      // the session said it was done is a record nothing closed, not work that
+      // is happening — and taking it as a revival is how a run the harness had
+      // explicitly reported finished went back to "still working" (ANT-119).
+      if (
+        run.state === "completed" &&
+        run.lastObservedAt &&
+        Date.parse(evidence.since) <= Date.parse(run.lastObservedAt)
+      ) {
+        return run;
+      }
       // Only for a session already being followed. A run still waiting for its
       // first match is not made live by a tool call it has not tied to itself.
       if (

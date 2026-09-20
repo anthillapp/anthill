@@ -151,6 +151,16 @@ export function echoInstruction(
     );
   }
 
+  // The counterpart of `anthill done`. A prompt that could say which step it
+  // was on but never that it had stopped left Anthill only the silence rule to
+  // end on — five minutes after the last word, and later than that whenever
+  // anything else was still claiming work (ANT-119).
+  lines.push(
+    "",
+    "Once the work is finished, print one more line, exactly:",
+    "",
+    `    ${DONE_TOKEN} ${marker.runId} ${marker.nonce}`,
+  );
   lines.push("", "Ignore this section entirely if you cannot print such lines.");
   return lines.join("\n");
 }
@@ -233,6 +243,23 @@ export function parseStepMarkers(
   const found: string[] = [];
   for (const match of text.matchAll(pattern)) found.push(match[1]);
   return found;
+}
+
+export const DONE_TOKEN = "ANTHILL-DONE";
+
+/**
+ * Whether a piece of recorded text says the work is finished.
+ *
+ * The marker-line counterpart of `anthill done`. Without it, a prompt that
+ * reports by printing lines had a way to say which step it was on and no way
+ * to say it had stopped — so the only ending Anthill could reach was the one
+ * it infers from silence, five minutes after the last word, and a stale claim
+ * from any other channel could hold that off indefinitely (ANT-119). Both
+ * halves of the marker are required, for the same reason as everywhere else:
+ * a bare token would match a prompt copied some other day.
+ */
+export function parseDoneMarker(text: string, marker: Pick<RunMarker, "runId" | "nonce">): boolean {
+  return new RegExp(`${DONE_TOKEN}\\s+${escape(marker.runId)}\\s+${escape(marker.nonce)}\\b`).test(text);
 }
 
 function escape(value: string): string {

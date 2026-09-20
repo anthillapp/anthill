@@ -7,8 +7,11 @@ import {
   newNonce,
   newRunId,
   parseMarker,
+  parseDoneMarker,
   parseStepMarkers,
   renderMarker,
+  DONE_TOKEN,
+  echoInstruction,
   textCarriesMarker,
   type RunMarker,
 } from "./marker.js";
@@ -88,6 +91,38 @@ describe("step markers", () => {
   it("finds the marker inside surrounding prose", () => {
     const text = "I'll start now.\n\n    ANTHILL-STEP ANT-1A2B3C4D 9f8e7d review\n\nReading the diff.";
     expect(parseStepMarkers(text, marker)).toEqual(["review"]);
+  });
+});
+
+/**
+ * The marker-line form of `anthill done`.
+ *
+ * ANT-119. A prompt reporting by printed lines could say which step it was on
+ * and never that it had stopped, so the only ending Anthill could reach was
+ * the one it infers from five minutes of silence — and one stale claim of
+ * work from any other channel held that off for half an hour.
+ */
+describe("the done marker", () => {
+  it("reads the agent's own word that it finished", () => {
+    expect(parseDoneMarker("All steps complete.\n\n    ANTHILL-DONE ANT-1A2B3C4D 9f8e7d\n", marker)).toBe(true);
+  });
+
+  it("needs both halves, like every other marker", () => {
+    expect(parseDoneMarker("ANTHILL-DONE ANT-OTHER 9f8e7d", marker)).toBe(false);
+    expect(parseDoneMarker("ANTHILL-DONE ANT-1A2B3C4D 000000", marker)).toBe(false);
+    expect(parseDoneMarker("ANTHILL-DONE ANT-1A2B3C4D", marker)).toBe(false);
+  });
+
+  it("is not confused by a step line, which shares the prefix", () => {
+    expect(parseDoneMarker("ANTHILL-STEP ANT-1A2B3C4D 9f8e7d review", marker)).toBe(false);
+  });
+
+  it("is asked for by the printed-line instruction, with both halves", () => {
+    const text = echoInstruction(marker, [{ id: "review", name: "Review" }]);
+    expect(text).toContain(`${DONE_TOKEN} ${marker.runId} ${marker.nonce}`);
+    // After the step ids, before the opt-out: an ending is the last thing asked for.
+    expect(text.indexOf(DONE_TOKEN)).toBeGreaterThan(text.indexOf("`review`"));
+    expect(text.indexOf(DONE_TOKEN)).toBeLessThan(text.indexOf("Ignore this section"));
   });
 });
 

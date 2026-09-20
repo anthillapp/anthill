@@ -37,7 +37,7 @@ import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { TIMING, parseStepMarkers, type Evidence, type MarkerCli, type PendingRun } from "@anthill/live";
+import { TIMING, parseDoneMarker, parseStepMarkers, type Evidence, type MarkerCli, type PendingRun } from "@anthill/live";
 
 import type { ObservationEventDraft, PollResult } from "./types.js";
 import { newCursor, readRotatingLines, type TailCursor } from "./tail.js";
@@ -211,6 +211,8 @@ export class HookLogObserver {
     if (!chunk.grew) return { evidence: this.stillWorking(inFlight, delegated, sessionId, now), events: [] };
 
     const events: ObservationEventDraft[] = [];
+    /** The session saying it is over, if this read contained that. */
+    let ended: { at: string; cli: MarkerCli; detail: string } | undefined;
     for (const line of chunk.lines) {
       if (!line.startsWith("{")) continue;
       let row: Record<string, unknown>;
@@ -268,6 +270,35 @@ export class HookLogObserver {
         else if (name === "PostToolUse") inFlight.delete(useId);
       }
 
+      /*
+        A turn that ended took its tool calls with it.
+
+        The comment above `IN_FLIGHT_TTL_MS` is right that nothing retracts a
+        `PreToolUse` — and wrong that the session never says so. A `Stop` is
+        the agent handing control back, and an agent cannot do that with a
+        foreground tool still waiting on a result; whatever opened before it
+        has either closed or never will. The case that found this was a
+        subagent's `Bash` whose `PostToolUse` never landed, written under the
+        parent's session id: one line, and the run it belonged to was shown
+        working for the whole thirty minutes the TTL allows, thirty-four
+        minutes after the session had actually finished — because each poll's
+        "still working" moved the clock the settle rule reads, so the five
+        quiet minutes it needs never accrued (ANT-119).
+
+        Only calls from before the stop are closed. Lines interleave, and a
+        call the *next* turn opened is not this turn's to end.
+      */
+      if (name === "Stop" || name === "SessionEnd") {
+        for (const [id, call] of inFlight) if (call.at <= at) inFlight.delete(id);
+      }
+      // A session that has ended has nothing outstanding, whatever its last
+      // record listed, and it is the one thing this channel can settle a run
+      // on outright: the silence after it is not a tool running.
+      if (name === "SessionEnd") {
+        delegated.clear();
+        ended = { at, cli, detail: "The session ended." };
+      }
+
       const base: ObservationEventDraft = {
         at,
         cli,
@@ -309,6 +340,15 @@ export class HookLogObserver {
         for (const blockId of announced) {
           events.push({ ...base, kind: "step.marker", title: "Step announced", detail: blockId, blockId });
         }
+        // The agent's own word that it finished — the marker-line form of
+        // `anthill done` — read off the same message. It outranks any silence
+        // rule: nothing has to be waited out once the harness has said so.
+        if (parseDoneMarker(str(data.last_assistant_message) ?? "", {
+          runId: run.anthillRunId,
+          nonce: run.correlationNonce,
+        })) {
+          ended = { at, cli, detail: "The harness reported the work as finished." };
+        }
         events.push(base);
         continue;
       }
@@ -325,6 +365,15 @@ export class HookLogObserver {
     if (newest && (!already || newest > already)) {
       this.reportedAt.set(run.anthillRunId, newest);
       evidence.push({ kind: "activity", sessionId, at: newest });
+    }
+    if (ended) {
+      evidence.push({
+        kind: "completed",
+        sessionId,
+        channel: `${ended.cli}:hook`,
+        at: ended.at,
+        detail: ended.detail,
+      });
     }
     return {
       evidence: [...evidence, ...this.stillWorking(inFlight, delegated, sessionId, now)],
@@ -404,6 +453,21 @@ export class HookLogObserver {
    */
   watching(runId: string): boolean {
     return this.covered.has(runId);
+  }
+
+  /**
+   * Whether this log is holding a claim that work is outstanding for a run:
+   * a call opened and not closed, or a delegation the session last listed as
+   * running — either still young enough to be believed.
+   *
+   * The same records `stillWorking` reports from, asked without reporting,
+   * so the transcript can decline to infer an ending from silence that this
+   * channel says is a tool running or a delegate working (ANT-119).
+   */
+  waiting(runId: string, now: string): boolean {
+    for (const call of this.open.get(runId)?.values() ?? []) if (!this.tooOld(call.at, now)) return true;
+    for (const task of this.background.get(runId)?.values() ?? []) if (!this.tooOld(task.since, now)) return true;
+    return false;
   }
 
   /** Whether a record has gone uncorroborated for longer than it is believed. */

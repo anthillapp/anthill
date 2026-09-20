@@ -28,6 +28,13 @@ describe("reducing a hook payload", () => {
       .toEqual({ last_assistant_message: "ANTHILL-STEP ANT-ABC123 abc123 develop-step" });
   });
 
+  it("keeps the done marker too, which is how a printed-line prompt says it finished", () => {
+    // ANT-119: a Stop carrying this is the hooks channel's way to settle a run
+    // outright, so the handler must not throw it away with the prose.
+    expect(minimalHookPayload({ last_assistant_message: `Finished.\n\nANTHILL-DONE ANT-ABC123 abc123\n${"trailing prose ".repeat(50)}` }))
+      .toEqual({ last_assistant_message: "ANTHILL-DONE ANT-ABC123 abc123" });
+  });
+
   it("does not fall back to raw Bash commands when no description is supplied", () => {
     expect(minimalHookPayload({ tool_name: "Bash", tool_input: { command: "echo personal-data > output.txt" } }))
       .toEqual({ tool_name: "Bash" });

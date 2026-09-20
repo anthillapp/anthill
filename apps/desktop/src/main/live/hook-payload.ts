@@ -125,10 +125,13 @@ export function minimalHookPayload(data: unknown): Record<string, unknown> {
   const message = clean(data.message);
   if (message) out.message = message;
 
-  // Keep only complete announcements, wherever they occur in the message.
-  // Truncating prose first loses markers beyond the first 200 characters.
+  // Keep only complete announcements, wherever they occur in the message:
+  // which step the agent is on, and that it has finished. Truncating prose
+  // first loses markers beyond the first 200 characters.
   if (typeof data.last_assistant_message === "string") {
-    const markers = data.last_assistant_message.matchAll(/\bANTHILL-STEP\s+(ANT-[A-Z0-9]+)\s+([a-z0-9]+)\s+([A-Za-z0-9_.:-]+)/g);
+    const markers = data.last_assistant_message.matchAll(
+      /\bANTHILL-(?:STEP\s+ANT-[A-Z0-9]+\s+[a-z0-9]+\s+[A-Za-z0-9_.:-]+|DONE\s+ANT-[A-Z0-9]+\s+[a-z0-9]+)/g,
+    );
     const kept: string[] = [];
     for (const match of markers) {
       kept.push(match[0]);

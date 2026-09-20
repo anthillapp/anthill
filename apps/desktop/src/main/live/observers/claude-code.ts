@@ -32,6 +32,7 @@ import {
   TIMING,
   boundSessionId,
   messageExcerpt,
+  parseDoneMarker,
   parseStepMarkers,
   textCarriesMarker,
   type Evidence,
@@ -159,6 +160,15 @@ type FileState = {
    */
   dispatched: boolean;
   lastStopReason?: string;
+  /**
+   * When the agent printed the done marker, if it has.
+   *
+   * The harness's own word that the work is finished — the marker-line form
+   * of `anthill done`. It ends the run outright, where a terminal stop reason
+   * only starts a five-minute wait that anything still claiming work can hold
+   * off (ANT-119).
+   */
+  doneAt?: string;
   lastActivityAt?: string;
   /**
    * Assistant message ids whose usage has been taken.
@@ -417,6 +427,18 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
         With no hooks on this run the transcript is alone again, nothing can
         retract the handover, and the sticky flag remains the honest answer.
       */
+      // Said outright, so nothing is inferred and nothing is waited out. A
+      // delegate's transcript still cannot settle the session (ANT-54).
+      if (!state.settled && !state.delegate && state.doneAt) {
+        state.settled = true;
+        evidence.push({
+          kind: "completed",
+          sessionId,
+          channel: CHANNEL,
+          at: state.doneAt,
+          detail: "The harness reported the work as finished.",
+        });
+      }
       const handedOff =
         state.awaiting.size > 0 || (state.dispatched && !context?.hooksWatching);
       if (
@@ -427,6 +449,12 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
         // to settle it.
         !state.delegate &&
         !handedOff &&
+        // Silence is not an ending while the hook log is holding a claim of
+        // work — a call still open, a delegation still listed. This ending
+        // used to be inferred regardless and then taken back by that claim on
+        // the same poll, which gave the right answer by accident and could not
+        // tell a maintained claim from a stale one (ANT-119).
+        !context?.hooksWaiting &&
         state.lastStopReason &&
         TERMINAL_STOP.has(state.lastStopReason) &&
         quietFor > SETTLE_MS
@@ -677,6 +705,7 @@ function scan(
               blockId,
             });
           }
+          if (parseDoneMarker(text, marker)) state.doneAt = at;
           // What the agent actually said. A message whose whole content was the
           // step marker leaves nothing behind and produces no card, which is
           // right: the announcement is already its own event.

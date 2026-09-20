@@ -40,13 +40,39 @@ const places = (workflow: Workflow) =>
   new Map(workflow.nodes.map((node) => [node.id, node.position]));
 
 describe("drawing a handover across renders", () => {
-  it("leaves every block where it was when a later render brings a changed graph", () => {
+  /**
+   * A drawing nobody has touched follows the graph (ANT-117).
+   *
+   * Keeping every block where it was is right when the author put it there,
+   * and wrong when nothing on screen was their choice: the added block landed
+   * past the end block, and the edge into `end` ran back underneath it.
+   */
+  it("lays an untouched drawing out again when a later render brings a changed graph", () => {
     const { result, rerender } = renderHook((workflow: Workflow) => useDisplayLayout(workflow), {
       initialProps: chain(),
     });
-    const before = places(result.current);
 
     rerender(grown());
+
+    const at = places(result.current);
+    const x = (id: string) => at.get(id)?.x ?? 0;
+    // The end block is last in the graph, so it is last on the canvas.
+    const ids = grown().nodes.map((node) => node.id).filter((id) => id !== "end");
+    for (const id of ids) expect(x("end"), `end vs ${id}`).toBeGreaterThan(x(id));
+  });
+
+  it("leaves every block where it was once the author has placed anything", () => {
+    const authored = (source: Workflow) => {
+      const next = { ...source, nodes: source.nodes.map((node) => ({ ...node })) };
+      next.nodes[0].position = { x: 0, y: 0 };
+      return next;
+    };
+    const { result, rerender } = renderHook((workflow: Workflow) => useDisplayLayout(workflow), {
+      initialProps: authored(chain()),
+    });
+    const before = places(result.current);
+
+    rerender(authored(grown()));
 
     for (const [id, at] of before) {
       expect(places(result.current).get(id)).toEqual(at);

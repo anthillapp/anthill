@@ -48,6 +48,37 @@ export function withDisplayLayout(workflow: Workflow, remembered?: Map<string, P
   const drawn = remembered ?? new Map<string, Point>();
   const unplaced = workflow.nodes.filter((node) => !node.position && !drawn.has(node.id));
 
+  /*
+   * Nothing on screen is the author's arrangement.
+   *
+   * The banding below keeps a block where it was drawn, because re-laying-out
+   * on every addition moves blocks somebody is looking at. That is right when
+   * they chose where those blocks go. When they did not — a handover carries
+   * no positions, and every coordinate came from this module — banding buys
+   * nothing and costs the drawing its meaning: the new block lands past the
+   * end block, so the edge into `end` runs right to left and passes underneath
+   * it (ANT-117).
+   *
+   * So a drawing nobody has touched is laid out again from the graph. Nothing
+   * the author decided moves, because they decided nothing.
+   */
+  const authored = workflow.nodes.some((node) => node.position);
+  if (!authored && unplaced.length > 0) {
+    const fresh = layoutWorkflow(workflow);
+    drawn.clear();
+    for (const node of workflow.nodes) {
+      const at = fresh.get(node.id);
+      if (at) drawn.set(node.id, at);
+    }
+    return {
+      ...workflow,
+      nodes: workflow.nodes.map((node) => {
+        const at = drawn.get(node.id);
+        return at ? { ...node, position: at } : node;
+      }),
+    };
+  }
+
   if (unplaced.length > 0) {
     // Remembered positions count towards the band as well as authored ones: a
     // block added later has to land beside the drawing as it stands, and most

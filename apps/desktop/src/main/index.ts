@@ -8,8 +8,8 @@
  */
 
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
-import { dirname, join, resolve, sep } from "node:path";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 
 import { parseWorkflow } from "@anthill/workflow-schema";
@@ -44,6 +44,7 @@ import {
   type SaveWorkflowResult,
 } from "../shared/ipc.js";
 import { createServices, type RunServices } from "./services.js";
+import { destinationInside, FolderGrants } from "./safe-write.js";
 import { detectInterpreters, runDraft, signInToInterpreter } from "./interpreters.js";
 import { readCodexModels } from "./codex-models.js";
 import { readPiModels } from "./pi-models.js";
@@ -144,6 +145,8 @@ function chooseDataDirectory(): string {
 
 let mainWindow: BrowserWindow | null = null;
 let services: RunServices | null = null;
+/** Folders a dialog handed out in this session; see `safe-write.ts`. */
+const grants = new FolderGrants();
 
 /**
  * Whether the page has asked for its pending workflow yet.
@@ -984,7 +987,10 @@ function registerIpcHandlers(): void {
       properties: ["openDirectory", "createDirectory"],
     });
     if (result.canceled || result.filePaths.length === 0) return null;
-    return resolve(result.filePaths[0]);
+    // The dialog is the consent, and this is where it is written down. The
+    // renderer keeps the folder and passes it back to export later, so main
+    // has to be able to say that a root it is handed came from here.
+    return grants.grant(result.filePaths[0]);
   });
 
   // Opens the author's terminal on the CLI's own login command. Anthill never
@@ -1170,8 +1176,17 @@ function registerIpcHandlers(): void {
       // A root the author has already chosen is not asked for again. The
       // dialog is the consent; asking on every copy would turn a decision into
       // a chore, and a chore into a step that gets skipped.
-      let chosen = request.root;
-      if (!chosen) {
+      let root: string;
+      if (request.root) {
+        // A root that arrives from the renderer is only as good as the dialog
+        // it came from. One this process never handed out is refused rather
+        // than written to, whatever it points at.
+        const granted = await grants.resolveGranted(request.root);
+        if (!granted) {
+          return { ok: false, error: "That folder was not chosen in this session. Choose it again." };
+        }
+        root = granted;
+      } else {
         const result = await dialog.showOpenDialog({
           title: "Choose the repository to write the workflow into",
           properties: ["openDirectory", "createDirectory"],
@@ -1179,10 +1194,9 @@ function registerIpcHandlers(): void {
         if (result.canceled || result.filePaths.length === 0) {
           return { ok: false, cancelled: true };
         }
-        chosen = result.filePaths[0];
+        root = await grants.grant(result.filePaths[0]);
       }
 
-      const root = resolve(chosen);
       const written: string[] = [];
 
       try {
@@ -1191,16 +1205,21 @@ function registerIpcHandlers(): void {
           entries.push({ path: "anthill-prompt.md", content: request.prompt });
         }
 
+        // Every destination is checked before anything is written. A refusal
+        // half way through would leave some of a workflow's files in the
+        // folder and the rest somewhere the user cannot see.
+        const destinations: { path: string; content: string; relative: string }[] = [];
         for (const file of entries) {
-          const destination = resolve(root, file.path);
-          // Generated paths are ours, but never let a crafted workflow write
-          // outside the folder the user actually chose.
-          if (destination !== root && !destination.startsWith(root + sep)) {
-            return { ok: false, error: `Refusing to write outside the chosen folder: ${file.path}` };
+          const destination = await destinationInside(root, file.path);
+          if (!destination.ok) {
+            return { ok: false, error: `Refusing to write outside the chosen folder: ${destination.reason}` };
           }
-          await mkdir(dirname(destination), { recursive: true });
-          await writeFile(destination, file.content, "utf8");
-          written.push(file.path);
+          destinations.push({ path: destination.path, content: file.content, relative: file.path });
+        }
+
+        for (const file of destinations) {
+          await writeFile(file.path, file.content, "utf8");
+          written.push(file.relative);
         }
         return { ok: true, directory: root, written };
       } catch (error) {

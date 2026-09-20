@@ -23,7 +23,7 @@
 import { appendFile, mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 
-import { eventFingerprint, type ObservationEvent } from "@anthill/live";
+import { eventFingerprint, isRunId, type ObservationEvent } from "@anthill/live";
 
 import type { ObservationEventDraft } from "./observers/types.js";
 
@@ -34,8 +34,20 @@ export class ObservationJournal {
 
   constructor(private readonly directory: string) {}
 
-  private file(runId: string): string {
-    return join(this.directory, `${runId}.jsonl`);
+  /**
+   * The log for one run, or nothing when the id is not one of ours.
+   *
+   * A run id arrives here from the renderer — `liveCancel` carries one — and
+   * becomes a file name. `../../something` addressed a file outside this
+   * directory, and `forget` deletes what this resolves to, so a traversal id
+   * deleted somebody else's `.jsonl` (ANT-96).
+   *
+   * The id is refused rather than repaired. Replacing bad characters would
+   * give two different ids one file, and a session would then read and delete
+   * another's record — a quieter bug than the one being fixed.
+   */
+  private file(runId: string): string | undefined {
+    return isRunId(runId) ? join(this.directory, `${runId}.jsonl`) : undefined;
   }
 
   /** Everything recorded for a run, oldest first. */
@@ -43,7 +55,9 @@ export class ObservationJournal {
     const cached = this.loaded.get(runId);
     if (cached) return cached;
 
-    const text = await readFile(this.file(runId), "utf8").catch(() => "");
+    const path = this.file(runId);
+    if (!path) return [];
+    const text = await readFile(path, "utf8").catch(() => "");
     const events: ObservationEvent[] = [];
     const seen = new Set<string>();
     for (const line of text.split("\n")) {
@@ -77,6 +91,10 @@ export class ObservationJournal {
    */
   async append(runId: string, drafts: readonly ObservationEventDraft[]): Promise<ObservationEvent[]> {
     if (drafts.length === 0) return [];
+    // Checked before any work rather than at the write: an id with no file of
+    // ours behind it should not be given a sequence number either.
+    const path = this.file(runId);
+    if (!path) return [];
 
     const events = await this.read(runId);
     const seen = this.fingerprints.get(runId) ?? new Set<string>();
@@ -103,7 +121,7 @@ export class ObservationJournal {
 
     await mkdir(this.directory, { recursive: true }).catch(() => undefined);
     await appendFile(
-      this.file(runId),
+      path,
       added.map((event) => JSON.stringify(event)).join("\n") + "\n",
       "utf8",
     ).catch(() => undefined); // Losing a line is better than taking the app down.
@@ -130,6 +148,9 @@ export class ObservationJournal {
   async forget(runId: string): Promise<void> {
     this.loaded.delete(runId);
     this.fingerprints.delete(runId);
-    await rm(this.file(runId), { force: true }).catch(() => undefined);
+    // An unrecognised id deletes nothing. There is no file of ours it could
+    // name, and the one it would have named belongs to somebody else.
+    const path = this.file(runId);
+    if (path) await rm(path, { force: true }).catch(() => undefined);
   }
 }

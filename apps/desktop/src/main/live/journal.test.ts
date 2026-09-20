@@ -7,10 +7,12 @@
  * evidence of anything.
  */
 
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+
+import { isRunId } from "@anthill/live";
 
 import { ObservationJournal } from "./journal.js";
 import type { ObservationEventDraft } from "./observers/types.js";
@@ -196,5 +198,78 @@ describe("how much of a run the page is given", () => {
     expect(events).toHaveLength(10);
     // The newest ten, not the oldest.
     expect(events.at(-1)?.seq).toBe(1500);
+  });
+});
+
+/**
+ * A run id becomes a file name, so an id that is not ours must not address a
+ * file (ANT-96).
+ *
+ * `liveCancel` carries a run id from the renderer to `forget`, which deletes
+ * what the id resolves to. Before this, `../../something` resolved outside the
+ * journal directory and was deleted.
+ */
+describe("a run id that did not come from Anthill", () => {
+  const ESCAPES = [
+    "../escaped",
+    "../../escaped",
+    "ANT-1/../../escaped",
+    "/etc/anthill",
+    "ANT-1/nested",
+    "ant-lowercase",
+    "NOTANT-12345678",
+    "",
+    "ANT-",
+  ];
+
+  it("is not a run id", () => {
+    for (const value of ESCAPES) expect(isRunId(value), value).toBe(false);
+    expect(isRunId("ANT-ABC12345")).toBe(true);
+  });
+
+  it("deletes nothing outside the journal directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "anthill-journal-escape-"));
+    const outside = join(root, "escaped.jsonl");
+    await writeFile(outside, "someone else's record\n");
+    const journal = new ObservationJournal(join(root, "journal"));
+
+    for (const value of ESCAPES) await journal.forget(value);
+
+    // The file is still there, with its contents intact.
+    expect(await readFile(outside, "utf8")).toBe("someone else's record\n");
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("reads and writes nothing under an id that is not ours", async () => {
+    const root = await mkdtemp(join(tmpdir(), "anthill-journal-escape-"));
+    const journal = new ObservationJournal(join(root, "journal"));
+
+    for (const value of ESCAPES) {
+      const added = await journal.append(value, [
+        { at: new Date().toISOString(), cli: "claude-code", source: "anthill",
+          kind: "notification", channel: "test", title: "should not be written" },
+      ]);
+      expect(added, value).toEqual([]);
+      expect(await journal.read(value), value).toEqual([]);
+    }
+
+    // Nothing was created for any of them, not even an empty directory entry.
+    const listed = await readdir(join(root, "journal")).catch(() => []);
+    expect(listed).toEqual([]);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("still records a run id that is ours", async () => {
+    const root = await mkdtemp(join(tmpdir(), "anthill-journal-ok-"));
+    const journal = new ObservationJournal(join(root, "journal"));
+
+    const added = await journal.append("ANT-ABC12345", [
+      { at: new Date().toISOString(), cli: "claude-code", source: "anthill",
+        kind: "notification", channel: "test", title: "kept" },
+    ]);
+
+    expect(added).toHaveLength(1);
+    expect(await journal.read("ANT-ABC12345")).toHaveLength(1);
+    await rm(root, { recursive: true, force: true });
   });
 });

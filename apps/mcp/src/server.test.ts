@@ -26,7 +26,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-exchange";
-import { CLAUDE_DRAFT_CLARIFICATION, SERVER_INSTRUCTIONS } from "./instructions.js";
+import { DRAFT_CLARIFICATION, SERVER_INSTRUCTIONS } from "./instructions.js";
 
 /** The compiled server, which is what a harness is configured to run. */
 const SERVER = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "server.js");
@@ -135,8 +135,8 @@ describe("the built server over stdio", () => {
     const listed = await session.request("tools/list");
     const tools = listed.result?.tools as { name: string; description: string }[];
     const create = tools.find((tool) => tool.name === "create_workflow_draft")!;
-    expect(create.description).toContain(CLAUDE_DRAFT_CLARIFICATION);
-    expect(SERVER_INSTRUCTIONS).toContain(CLAUDE_DRAFT_CLARIFICATION);
+    expect(create.description).toContain(DRAFT_CLARIFICATION);
+    expect(SERVER_INSTRUCTIONS).toContain(DRAFT_CLARIFICATION);
     // This is host guidance, not a claimed conversation-attestation mechanism.
     // Existing create/bind protocol tests still accept the unchanged contract.
   }, 20_000);

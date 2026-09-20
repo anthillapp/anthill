@@ -14,11 +14,16 @@
  * is what that tool takes and returns.
  */
 
-/** Shared by initialize and tool discovery so neither entry point skips the gate. */
-export const CLAUDE_DRAFT_CLARIFICATION = `For every new Claude Code handover, ask the user before create_workflow_draft:
+/**
+ * Shared by initialize and tool discovery so neither entry point skips it.
+ *
+ * Not named for a harness: Codex reads these instructions too, and the reason
+ * to ask before drafting has nothing to do with which tool is asking.
+ */
+export const DRAFT_CLARIFICATION = `For every new handover, ask the user before create_workflow_draft:
 confirm the project/directory and scope, constraints and what must be preserved,
 success criteria, and decisions already made or explicitly delegated to you.
-This applies to both show-and-go and approval-gate. If the request already gives
+If the request already gives
 the answers, summarize them and ask for confirmation rather than repeating the
 questions. Wait for the user's actual answers or confirmation; when asking in
 chat, finish your turn without submitting. A partial reply requires follow-up
@@ -28,7 +33,8 @@ directory. Read-only environment findings are not user decisions. Schema
 validation cannot establish that the user agreed. Preserve the original request
 and the user's clarification answers in source.taskText and the workflow brief.
 Status reads, unchanged retries and resuming an agreed scope do not require a
-new questionnaire. Post-display approval is separate from pre-draft clarification.`;
+new questionnaire. Asking whether to start, once the workflow is on screen, is
+a separate question from these and does not replace them.`;
 
 export const SERVER_INSTRUCTIONS = `These tools store a workflow locally for Anthill and queue desktop display or
 observation requests. Queueing is not acknowledgement: this server cannot confirm
@@ -38,7 +44,7 @@ Anthill starts nothing and drives nothing. You keep doing the work; Anthill can 
 
 The sequence, once per handover:
 
-0. ${CLAUDE_DRAFT_CLARIFICATION}
+0. ${DRAFT_CLARIFICATION}
 
 1. create_workflow_draft — submit the workflow. An incomplete handover is refused
    without reserving its identity. Ask the returned questions, correct the

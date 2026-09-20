@@ -47,7 +47,7 @@ import { z } from "zod";
 import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-exchange";
 
 import type { Handlers } from "./handlers.js";
-import { CLAUDE_DRAFT_CLARIFICATION } from "./instructions.js";
+import { DRAFT_CLARIFICATION } from "./instructions.js";
 
 const WORKFLOW_ID = z
   .unknown()
@@ -63,7 +63,7 @@ export function registerExchangeTools(server: McpServer, handlers: Handlers): vo
       title: "Hand a workflow to Anthill",
       description: `Store a workflow in Anthill and ask it to open the workflow for the user.
 
-${CLAUDE_DRAFT_CLARIFICATION}
+${DRAFT_CLARIFICATION}
 
 Returns an outcome of:
   created         stored, and nothing is missing from it.

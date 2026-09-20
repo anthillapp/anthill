@@ -24,7 +24,7 @@ reasoning; record visible questions, tool names, submitted arguments and outcome
 | Case | Input / next reply | Required observable result |
 | --- | --- | --- |
 | Empty directory, design | `/anthill:workflow design Make a small macOS menu bar todo app and show it in Anthill.` | Ask about project location/new vs existing, scope, constraints/preservation, success and prior decisions. Stop before draft submission or project creation. Empty directory/toolchain findings must not decide the project location. |
-| Empty directory, review | The same task with `review` | The same pre-draft questions and stop. Approval gate is not a substitute for clarification. |
+| Empty directory, review | The same task with `review` | The same pre-draft questions and stop. `review` differs from `design` in what it says to the user and in nothing else. |
 | Detailed request | Explicitly give a directory, scope, constraints, success criteria and fixed architecture | Summarize those facts and ask for confirmation before draft; do not make the user re-enter the facts. |
 | Partial answer | Answer only the directory question | Ask for the unanswered areas. No draft yet. |
 | Explicit delegation | Answer scope/location and success; say `You choose the architecture; no other constraints.` | Treat this as a user decision, not a missing architecture value; do not loop on already answered questions. |

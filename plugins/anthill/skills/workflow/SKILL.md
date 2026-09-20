@@ -71,8 +71,8 @@ damage than an admitted gap.
    have to rewrite.
 
 2. **Ask before drafting. Every new handover needs the user's answers.** This
-   applies to both `design` and `review`, including show-and-go. Before building
-   or calling `create_workflow_draft`, ask a short batch of questions covering:
+   applies to `design` and `review` alike. Before building or calling
+   `create_workflow_draft`, ask a short batch of questions covering:
 
    * **Project and scope:** which project/directory to use, whether this is new
      work or a change to an existing project, and what is in or out of scope.
@@ -102,10 +102,14 @@ damage than an admitted gap.
    ones instead of inventing answers. Keep the confirmed answers in the brief's
    context, constraints and done criteria, with delegated choices identified.
 
-   This is the gate for a **new draft**, not a questionnaire to repeat on every
+   This is what a **new draft** needs, not a questionnaire to repeat on every
    `status`, `doctor`, unchanged retry or `resume` of the same agreed scope.
-   Materially new scope needs its own clarification. The approval after display
-   below is a separate decision and does not replace this conversation.
+   Materially new scope needs its own clarification.
+
+   Asking whether to start, once the workflow is on their screen, is a separate
+   question and comes later. It does not replace this conversation, and this
+   conversation does not stand in for it: one settles what the plan is, the
+   other settles whether to act on it.
 
 3. **Build the document.** The shape is in
    [reference/workflow-format.md](reference/workflow-format.md). Read it; it is

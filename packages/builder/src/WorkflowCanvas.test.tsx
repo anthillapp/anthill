@@ -746,7 +746,14 @@ describe("a workflow handed over without positions", () => {
       return { id, left: block.style.left, top: block.style.top };
     });
 
-  it("leaves the blocks already on screen where they are when one is added", () => {
+  /**
+   * A handover carries no positions, so nothing on screen is the author's
+   * arrangement and the drawing follows the graph (ANT-117).
+   *
+   * Keeping the blocks where they were put the added one past the end block,
+   * and the edge into `end` then ran right to left underneath it.
+   */
+  it("lays the drawing out again when a block is added to an untouched handover", () => {
     const props = {
       onChange: vi.fn<(next: Workflow) => void>(),
       selection: NO_SELECTION as WorkflowSelection,
@@ -755,14 +762,20 @@ describe("a workflow handed over without positions", () => {
       onLinkingChange: vi.fn<(linking: LinkingState) => void>(),
     };
     const view = render(<WorkflowCanvas {...props} workflow={handover()} />);
-    const before = boxes();
 
     const grown = handover();
     grown.nodes.push({ id: "c", type: "agent", name: "Check", config: {} });
     grown.edges.push({ id: "e4", source: "b", target: "c" });
+    grown.edges = grown.edges.filter((edge) => !(edge.source === "b" && edge.target === "end"));
+    grown.edges.push({ id: "e5", source: "c", target: "end" });
     view.rerender(<WorkflowCanvas {...props} workflow={grown} />);
 
-    expect(boxes()).toEqual(before);
     expect(screen.getByTestId("workflow-block-c")).toBeInTheDocument();
+    const left = (id: string) =>
+      parseFloat(screen.getByTestId(`workflow-block-${id}`).style.left);
+    // `end` is last in the graph, so it is last on the canvas — and the edge
+    // into it therefore runs forwards rather than back under it.
+    expect(left("end")).toBeGreaterThan(left("c"));
+    expect(left("c")).toBeGreaterThan(left("b"));
   });
 });

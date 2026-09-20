@@ -48,20 +48,54 @@ describe("remembering where a handover was drawn", () => {
     return next;
   }
 
-  it("leaves a block where it was when the graph around it changes", () => {
+  /**
+   * A drawing nobody has touched is laid out again from the graph (ANT-117).
+   *
+   * Keeping every block where it was is right when the author put it there.
+   * When they did not — a handover carries no positions, and every coordinate
+   * came from this module — it costs the drawing its meaning: the added block
+   * landed past the end block, so the edge into `end` ran right to left and
+   * passed underneath it.
+   */
+  it("lays an untouched drawing out again, so the graph and the picture agree", () => {
     const drawn = new Map<string, Point>();
-    const before = withDisplayLayout(workflow(), drawn);
+    withDisplayLayout(workflow(), drawn);
     const after = withDisplayLayout(grown(), drawn);
 
-    for (const node of before.nodes) {
+    const x = (id: string) => after.nodes.find((node) => node.id === id)?.position?.x ?? 0;
+    // `end` is last in the graph, so it is last on the canvas.
+    expect(x("end")).toBeGreaterThan(x("check"));
+    expect(x("check")).toBeGreaterThan(x("read"));
+    expect(x("read")).toBeGreaterThan(x("start"));
+  });
+
+  it("leaves a block where it was once the author has placed anything", () => {
+    const drawn = new Map<string, Point>();
+    const placed = () => {
+      const next = grown();
+      // One authored position is enough: the arrangement is now theirs.
+      next.nodes[0].position = { x: 0, y: 0 };
+      return next;
+    };
+    const first = withDisplayLayout(placed(), drawn);
+    const after = withDisplayLayout(placed(), drawn);
+
+    for (const node of first.nodes) {
       expect(after.nodes.find((item) => item.id === node.id)?.position).toEqual(node.position);
     }
   });
 
   it("places a block added later clear of the ones already drawn", () => {
     const drawn = new Map<string, Point>();
-    const before = withDisplayLayout(workflow(), drawn);
-    const added = withDisplayLayout(grown(), drawn).nodes.find((node) => node.id === "check");
+    const authored = () => {
+      const next = workflow();
+      next.nodes[0].position = { x: 0, y: 0 };
+      return next;
+    };
+    const before = withDisplayLayout(authored(), drawn);
+    const grownAuthored = grown();
+    grownAuthored.nodes[0].position = { x: 0, y: 0 };
+    const added = withDisplayLayout(grownAuthored, drawn).nodes.find((node) => node.id === "check");
 
     const rightmost = Math.max(
       ...before.nodes.map((node) => blockRect(node).left + blockRect(node).w),

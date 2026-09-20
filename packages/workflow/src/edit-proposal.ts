@@ -353,7 +353,15 @@ function newId(workflow: Workflow, prefix: string, taken: Set<string>): string {
   return id;
 }
 
-const BLOCK_W = 190;
+/**
+ * How wide a step card is drawn, for deciding whether two would overlap.
+ *
+ * Kept in step with `STEP_SIZE.w` in `@anthill/builder` by hand: the builder
+ * depends on this package, so the number cannot come from there without
+ * turning the dependency round. It was 190 against a card drawn at 196, so two
+ * blocks 190 to 195 apart were judged not to clash and overlapped by six.
+ */
+const BLOCK_W = 196;
 const GAP = 90;
 /** Enough to clear a tall block and still read as the same column. */
 const ROW = 120;
@@ -458,16 +466,30 @@ export function applyEditProposal(workflow: Workflow, proposal: EditProposal): E
 
         // Beside its anchor, not a re-layout: the author's arrangement is
         // theirs, and a new block landing nearby is enough to be findable.
+        /*
+         * A position is only issued among other positions.
+         *
+         * A workflow handed over by a CLI carries none — a harness sends a
+         * graph, not a layout — and the canvas lays such a workflow out
+         * itself. Giving one block an explicit position there put it on top of
+         * the auto-laid-out rest, with the connections hidden underneath
+         * (ANT-117): `furthestRight` found nothing, the base fell back to
+         * {0,0}, and `freeSpot` cannot detect a clash with blocks that have
+         * nowhere to clash from.
+         *
+         * With no positions the new block gets none either, and the canvas
+         * places all of them together.
+         */
         const anchor = op.near ? nodeById(resolve(op.near) ?? "") : undefined;
         const base = anchor?.position ?? furthestRight(nodes);
-        const position = freeSpot({ x: base?.x ?? 0, y: base?.y ?? 0 }, nodes);
+        const position = base ? freeSpot(base, nodes) : undefined;
 
         const node: WorkflowNode = {
           id,
           type: op.blockType,
           name: op.name,
           config: withAgentRef(op.config) ?? (op.blockType === "agent" ? { actionKind: "agent-step" } : {}),
-          position,
+          ...(position ? { position } : {}),
         };
         nodes.push(node);
         changes.push({ kind: "block-added", id, name: op.name });

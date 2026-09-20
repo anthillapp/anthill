@@ -70,6 +70,10 @@ function readSetting(): InterpreterId | undefined {
 /** One readable line per change, for the proposal list. */
 export function describeChange(change: EditChange): string {
   switch (change.kind) {
+    case "agent-added":
+      // Named before it is accepted. An agent that appeared without being
+      // listed would be a change the author never agreed to (ANT-112).
+      return `Add an agent: ${change.name}`;
     case "block-added":
       return `Add a block: ${change.name}`;
     case "block-updated":
@@ -256,7 +260,14 @@ export function DescribeChangeAssistant({
       // A cancelled request leaves no turn: the author took it back, and a
       // record of a thing that never ran would be noise in the thread.
       if (!response.cancelled) {
-        setChat((current) => [...current, { kind: "failed", error: response.error }]);
+        setChat((current) => [
+          ...current,
+          {
+            kind: "failed",
+            error: response.error,
+            ...(response.signedOut ? { signedOut: response.signedOut } : {}),
+          },
+        ]);
       }
       return;
     }
@@ -406,9 +417,28 @@ export function DescribeChangeAssistant({
           }
           if (turn.kind === "failed") {
             return (
-              <p key={key} className="assistant-failed">
-                {turn.error}
-              </p>
+              <div key={key} className="assistant-failed">
+                <p>{turn.error}</p>
+                {/*
+                  The one failure here with a way out, so it is the one that
+                  offers it. Anthill cannot sign anyone in and does not see the
+                  credential — it opens the CLI's own login in a terminal, and
+                  the script it writes says so before it runs (ANT-111).
+
+                  The request the author typed is still in the box. After
+                  signing in they press Send again; nothing is cached and the
+                  CLI is spawned fresh, so no restart is needed.
+                */}
+                {turn.signedOut ? (
+                  <button
+                    type="button"
+                    className="assistant-signin"
+                    onClick={() => void window.anthill.signInToInterpreter(turn.signedOut as InterpreterId)}
+                  >
+                    Open the login in a terminal
+                  </button>
+                ) : null}
+              </div>
             );
           }
           if (turn.kind !== "proposal") return null;

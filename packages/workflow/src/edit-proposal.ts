@@ -31,11 +31,28 @@ import type { Workflow, WorkflowNode, WorkflowEdge } from "@anthill/workflow-sch
 import { WorkflowSchema } from "@anthill/workflow-schema";
 
 import { nextIdFor, rememberIds } from "./id-counter.js";
+import { addAgentProfile } from "./agents.js";
 
 /** The version this module writes and the only one it accepts. */
 export const EDIT_PROPOSAL_VERSION = 1;
 
 export type EditOp =
+  | {
+      /**
+       * Create an agent profile for this workflow.
+       *
+       * Without this the assistant could add an agent step and had no way to
+       * say who carries it out, so every one it added was born unassigned and
+       * the graph stopped validating — while the answer said "applied"
+       * (ANT-112).
+       */
+      op: "add-agent";
+      /** The proposal's own handle, so a block added after it can name it. */
+      ref: string;
+      name: string;
+      role?: string;
+      description?: string;
+    }
   | {
       op: "add-block";
       /** The proposal's own handle for the new block, so later ops and new
@@ -105,6 +122,7 @@ function str(value: unknown): string | undefined {
 }
 
 const OP_NAMES = new Set([
+  "add-agent",
   "add-block",
   "update-block",
   "remove-block",
@@ -148,6 +166,22 @@ function validateOp(value: unknown, index: number): { ok: true; op: EditOp } | {
   }
 
   switch (name) {
+    case "add-agent": {
+      const ref = str(value.ref);
+      const agentName = str(value.name);
+      if (!ref) return { ok: false, error: `${at} (add-agent) is missing its ref.` };
+      if (!agentName) return { ok: false, error: `${at} (add-agent) is missing its name.` };
+      return {
+        ok: true,
+        op: {
+          op: "add-agent",
+          ref,
+          name: agentName,
+          ...(str(value.role) ? { role: str(value.role) as string } : {}),
+          ...(str(value.description) ? { description: str(value.description) as string } : {}),
+        },
+      };
+    }
     case "add-block": {
       const ref = str(value.ref);
       const blockType = str(value.blockType);
@@ -293,6 +327,7 @@ export function parseEditProposal(text: string): EditParseResult {
 /* ------------------------------------------------------------------ */
 
 export type EditChange =
+  | { kind: "agent-added"; id: string; name: string }
   | { kind: "block-added"; id: string; name: string }
   | { kind: "block-updated"; id: string; name: string }
   | { kind: "block-removed"; id: string; name: string }
@@ -362,6 +397,14 @@ function freeSpot(
  * hand back a workflow this app would refuse to open.
  */
 export function applyEditProposal(workflow: Workflow, proposal: EditProposal): EditApplyResult {
+  /**
+   * The workflow as agents are added to it.
+   *
+   * Profiles live in `metadata`, not in `nodes`, so they are carried on their
+   * own and folded back in at the end. Nothing here mutates the input: each
+   * addition returns a new workflow.
+   */
+  let carrier = workflow;
   const nodes = workflow.nodes.map((node) => ({ ...node }));
   const edges = workflow.edges.map((edge) => ({ ...edge }));
   const changes: EditChange[] = [];
@@ -376,8 +419,36 @@ export function applyEditProposal(workflow: Workflow, proposal: EditProposal): E
 
   const nodeById = (id: string): WorkflowNode | undefined => nodes.find((node) => node.id === id);
 
+  /**
+   * A block config with its `agentId` resolved, when it names a ref.
+   *
+   * An agent added by this same proposal has no real id until it is applied,
+   * so the block that uses it names the ref instead — exactly as a connection
+   * names a ref for a block added beside it.
+   */
+  const withAgentRef = (config: Record<string, unknown> | undefined) => {
+    if (!config || typeof config.agentId !== "string") return config;
+    const resolved = refs.get(config.agentId);
+    return resolved ? { ...config, agentId: resolved } : config;
+  };
+
   for (const op of proposal.ops) {
     switch (op.op) {
+      case "add-agent": {
+        if (refs.has(op.ref) || nodeIds.has(op.ref)) {
+          return { ok: false, error: `The proposal reuses the ref "${op.ref}".` };
+        }
+        const added = addAgentProfile(carrier, {
+          name: op.name,
+          ...(op.role ? { role: op.role } : {}),
+          ...(op.description ? { description: op.description } : {}),
+        });
+        carrier = added.workflow;
+        refs.set(op.ref, added.agentId);
+        changes.push({ kind: "agent-added", id: added.agentId, name: op.name });
+        break;
+      }
+
       case "add-block": {
         if (refs.has(op.ref) || nodeIds.has(op.ref)) {
           return { ok: false, error: `The proposal reuses the ref "${op.ref}".` };
@@ -395,7 +466,7 @@ export function applyEditProposal(workflow: Workflow, proposal: EditProposal): E
           id,
           type: op.blockType,
           name: op.name,
-          config: op.config ?? (op.blockType === "agent" ? { actionKind: "agent-step" } : {}),
+          config: withAgentRef(op.config) ?? (op.blockType === "agent" ? { actionKind: "agent-step" } : {}),
           position,
         };
         nodes.push(node);
@@ -407,7 +478,7 @@ export function applyEditProposal(workflow: Workflow, proposal: EditProposal): E
         const node = nodeById(op.id);
         if (!node) return { ok: false, error: `There is no block "${op.id}" to update.` };
         if (op.name) node.name = op.name;
-        if (op.config) node.config = { ...node.config, ...op.config };
+        if (op.config) node.config = { ...node.config, ...withAgentRef(op.config) };
         changes.push({ kind: "block-updated", id: node.id, name: node.name });
         break;
       }
@@ -483,7 +554,7 @@ export function applyEditProposal(workflow: Workflow, proposal: EditProposal): E
   // Every id this application issued is remembered, so a block the author
   // deletes afterwards does not hand its number back out.
   const next: Workflow = rememberIds(
-    { ...workflow, nodes, edges },
+    { ...carrier, nodes, edges },
     ...nodes.map((node) => node.id),
     ...edges.map((edge) => edge.id),
   );

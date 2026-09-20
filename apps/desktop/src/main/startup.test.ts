@@ -20,6 +20,15 @@ import { expect, it } from "vitest";
 
 const main = readFileSync(resolve("src/main/index.ts"), "utf8");
 
+it("retains read-only history handlers without registering runner controls", () => {
+  expect(main).toContain("handle(IpcChannel.runGet,");
+  expect(main).toContain("handle(IpcChannel.runList,");
+  for (const channel of ["runStart", "runCancel", "approvalRespond"]) {
+    expect(main).not.toMatch(new RegExp(`handle\\(\\s*IpcChannel\\.${channel}\\b`));
+  }
+  expect(main.slice(main.indexOf("void app.whenReady()"))).not.toContain("createServices(");
+});
+
 it("installs the crash handlers before anything that can crash", () => {
   const handler = main.indexOf('process.on("uncaughtException"');
   const rejection = main.indexOf('process.on("unhandledRejection"');

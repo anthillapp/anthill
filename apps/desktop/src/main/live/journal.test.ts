@@ -7,10 +7,12 @@
  * evidence of anything.
  */
 
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+
+import { isRunId } from "@anthill/live";
 
 import { ObservationJournal } from "./journal.js";
 import type { ObservationEventDraft } from "./observers/types.js";
@@ -35,6 +37,31 @@ function draft(partial: Partial<ObservationEventDraft> = {}): ObservationEventDr
 }
 
 describe("the observation journal", () => {
+  it("continues after a torn last record without swallowing the next valid event", async () => {
+    const { journal: log, dir } = await journal();
+    await log.append("ANT-1", [draft()]);
+    const path = join(dir, "ANT-1.jsonl");
+    await writeFile(path, (await readFile(path, "utf8")) + '{"torn":');
+    const reopened = new ObservationJournal(dir);
+    await reopened.append("ANT-1", [draft({ toolUseId: "next" })]);
+    expect(await new ObservationJournal(dir).read("ANT-1")).toHaveLength(2);
+  });
+
+  it("rejects journal symlinks without reading or appending to the target", async () => {
+    const { journal: log, dir } = await journal();
+    const target = join(dir, "private.jsonl");
+    await writeFile(target, "private content");
+    await symlink(target, join(dir, "ANT-1.jsonl"));
+    await expect(log.read("ANT-1")).rejects.toThrow();
+    await expect(log.append("ANT-1", [draft()])).rejects.toThrow();
+    expect(await readFile(target, "utf8")).toBe("private content");
+  });
+
+  it("serializes simultaneous appends and assigns unique sequence numbers", async () => {
+    const { journal: log } = await journal();
+    await Promise.all([log.append("ANT-1", [draft()]), log.append("ANT-1", [draft(), draft({ toolUseId: "next" })])]);
+    expect((await log.read("ANT-1")).map((event) => event.seq)).toEqual([1, 2]);
+  });
   it("numbers events in the order they were appended", async () => {
     const { journal: log } = await journal();
     await log.append("ANT-1", [draft(), draft({ toolUseId: "toolu_2", title: "Read" })]);
@@ -196,5 +223,141 @@ describe("how much of a run the page is given", () => {
     expect(events).toHaveLength(10);
     // The newest ten, not the oldest.
     expect(events.at(-1)?.seq).toBe(1500);
+  });
+});
+
+/**
+ * A run id becomes a file name, so an id that is not ours must not address a
+ * file (ANT-96).
+ *
+ * `liveCancel` carries a run id from the renderer to `forget`, which deletes
+ * what the id resolves to. Before this, `../../something` resolved outside the
+ * journal directory and was deleted.
+ */
+describe("a run id that did not come from Anthill", () => {
+  const ESCAPES = [
+    "../escaped",
+    "../../escaped",
+    "ANT-1/../../escaped",
+    "/etc/anthill",
+    "ANT-1/nested",
+    "ant-lowercase",
+    "NOTANT-12345678",
+    "",
+    "ANT-",
+  ];
+
+  it("is not a run id", () => {
+    for (const value of ESCAPES) expect(isRunId(value), value).toBe(false);
+    expect(isRunId("ANT-ABC12345")).toBe(true);
+  });
+
+  it("deletes nothing outside the journal directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "anthill-journal-escape-"));
+    const outside = join(root, "escaped.jsonl");
+    await writeFile(outside, "someone else's record\n");
+    const journal = new ObservationJournal(join(root, "journal"));
+
+    for (const value of ESCAPES) await journal.forget(value);
+
+    // The file is still there, with its contents intact.
+    expect(await readFile(outside, "utf8")).toBe("someone else's record\n");
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("reads and writes nothing under an id that is not ours", async () => {
+    const root = await mkdtemp(join(tmpdir(), "anthill-journal-escape-"));
+    const journal = new ObservationJournal(join(root, "journal"));
+
+    for (const value of ESCAPES) {
+      const added = await journal.append(value, [
+        { at: new Date().toISOString(), cli: "claude-code", source: "anthill",
+          kind: "notification", channel: "test", title: "should not be written" },
+      ]);
+      expect(added, value).toEqual([]);
+      expect(await journal.read(value), value).toEqual([]);
+    }
+
+    // Nothing was created for any of them, not even an empty directory entry.
+    const listed = await readdir(join(root, "journal")).catch(() => []);
+    expect(listed).toEqual([]);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("still records a run id that is ours", async () => {
+    const root = await mkdtemp(join(tmpdir(), "anthill-journal-ok-"));
+    const journal = new ObservationJournal(join(root, "journal"));
+
+    const added = await journal.append("ANT-ABC12345", [
+      { at: new Date().toISOString(), cli: "claude-code", source: "anthill",
+        kind: "notification", channel: "test", title: "kept" },
+    ]);
+
+    expect(added).toHaveLength(1);
+    expect(await journal.read("ANT-ABC12345")).toHaveLength(1);
+    await rm(root, { recursive: true, force: true });
+  });
+});
+
+/**
+ * A write that did not happen must not be remembered as one that did (ANT-97).
+ *
+ * The cache and the fingerprint set used to advance before the append, and the
+ * append's failure was swallowed. A full disk or a read-only directory
+ * therefore lost the events twice over: they were not in the log, and the next
+ * poll — seeing the very same transcript lines — skipped them as already
+ * recorded.
+ */
+describe("an append that cannot reach the disk", () => {
+  const draft = (title: string): ObservationEventDraft => ({
+    at: new Date().toISOString(), cli: "claude-code", source: "anthill",
+    kind: "notification", channel: "test", title,
+  });
+
+  it("reports the failure, and lets the next poll try again", async () => {
+    const base = await mkdtemp(join(tmpdir(), "anthill-journal-ro-"));
+    const dir = join(base, "journal");
+    await mkdir(dir, { recursive: true });
+    const journal = new ObservationJournal(dir);
+
+    // A directory the process cannot write into is the shape of a permissions
+    // failure, and of a full disk as far as this code can tell them apart.
+    await chmod(dir, 0o500);
+    await expect(journal.append("ANT-ABC12345", [draft("first")])).rejects.toThrow();
+
+    // The retry is the point: nothing was marked seen, so the same event is
+    // still offered and now lands.
+    await chmod(dir, 0o700);
+    const accepted = await journal.append("ANT-ABC12345", [draft("first")]);
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0].title).toBe("first");
+
+    // And it is genuinely on disk, numbered from one.
+    const written = await readFile(join(dir, "ANT-ABC12345.jsonl"), "utf8");
+    expect(written.trim().split("\n")).toHaveLength(1);
+    expect(JSON.parse(written.trim()).seq).toBe(1);
+
+    await rm(base, { recursive: true, force: true });
+  });
+
+  it("leaves what was already recorded alone", async () => {
+    const base = await mkdtemp(join(tmpdir(), "anthill-journal-ro-"));
+    const dir = join(base, "journal");
+    await mkdir(dir, { recursive: true });
+    const journal = new ObservationJournal(dir);
+
+    await journal.append("ANT-ABC12345", [draft("kept")]);
+    // The file, not the directory: a read-only directory still allows an
+    // append to a file that already exists inside it.
+    const file = join(dir, "ANT-ABC12345.jsonl");
+    await chmod(file, 0o400);
+    await expect(journal.append("ANT-ABC12345", [draft("lost")])).rejects.toThrow();
+    await chmod(file, 0o600);
+
+    // The failed append neither removed the first event nor renumbered it.
+    const events = await journal.read("ANT-ABC12345");
+    expect(events.map((event) => event.title)).toEqual(["kept"]);
+
+    await rm(base, { recursive: true, force: true });
   });
 });

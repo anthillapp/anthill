@@ -172,6 +172,25 @@ export type DraftRunOptions = {
  * raw reply intact is what lets a malformed answer be shown to the author
  * instead of disappearing into an exception.
  */
+/**
+ * Whether a failure reads like an expired sign-in.
+ *
+ * A trigger for asking, never the answer. The wording belongs to the CLI, so
+ * this only decides whether it is worth spending a `status` call to find out.
+ */
+function looksLikeSignedOut(detail: string): boolean {
+  const text = detail.toLowerCase();
+  return (
+    text.includes("authenticate") ||
+    text.includes("unauthorized") ||
+    text.includes("not logged in") ||
+    text.includes("oauth") ||
+    text.includes("session expired") ||
+    text.includes("log in") ||
+    text.includes("login")
+  );
+}
+
 export async function runDraft(options: DraftRunOptions): Promise<PromptDraftResponse> {
   const item = interpreterDefinition(options.interpreterId);
   const command = describeInterpreterCommand(options.interpreterId);
@@ -232,6 +251,29 @@ export async function runDraft(options: DraftRunOptions): Promise<PromptDraftRes
     }
     if (outcome.exitCode !== 0) {
       const detail = outcome.stderr.trim() || outcome.stdout.trim();
+
+      /*
+       * One failure has a recovery, so it is named rather than relayed.
+       *
+       * An expired CLI sign-in came back as "exited with code 1: Failed to
+       * authenticate: OAuth session expired and could not be refreshed" — the
+       * CLI talking to itself, in a panel with no way forward (ANT-111).
+       *
+       * The wording is a hint and not the verdict: it belongs to the CLI and
+       * will change. What decides is `readSignedIn`, which asks the CLI
+       * non-interactively and reads the boolean it answers with. A failure for
+       * any other reason is reported as it always was, so a timeout or a bad
+       * prompt does not send the author to a login that cannot help.
+       */
+      if (looksLikeSignedOut(detail) && (await readSignedIn(item, options.spawnFn)) === false) {
+        return {
+          ok: false,
+          signedOut: item.id,
+          error: `Your ${item.label} sign-in has expired, so Anthill could not ask it anything. Anthill never sees your sign-in — this opens ${item.label}'s own login in a terminal.`,
+          command,
+        };
+      }
+
       return {
         ok: false,
         error: `${item.label} exited with code ${String(outcome.exitCode)}${detail ? `: ${detail}` : "."}`,

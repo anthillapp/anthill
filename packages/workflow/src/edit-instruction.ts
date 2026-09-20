@@ -34,9 +34,12 @@ const SHAPE = `{
   "version": ${EDIT_PROPOSAL_VERSION},
   "summary": "one sentence on what this change does",
   "ops": [
+    { "op": "add-agent", "ref": "qa", "name": "QA Engineer",
+      "role": "Drives the app and reports what it finds" },
     { "op": "add-block", "ref": "review", "blockType": "agent",
       "name": "Review the change",
-      "config": { "actionKind": "llm-review", "task": "what this step must do" },
+      "config": { "actionKind": "llm-review", "agentId": "agent-2",
+        "task": "what this step must do" },
       "near": "implement" },
     { "op": "update-block", "id": "implement", "name": "new name",
       "config": { "task": "replacement task text" } },
@@ -65,6 +68,20 @@ function describeWorkflow(workflow: Workflow, scope: EditScope): string {
   const lines: string[] = [];
   lines.push(`Workflow: ${workflow.name}`);
   if (workflow.brief?.goal) lines.push(`Goal: ${workflow.brief.goal}`);
+  lines.push("");
+  // Ids as well as names, because an operation addresses an agent by id and
+  // two agents may be called the same thing. Without this list the model had
+  // no id to assign and every agent step it added was born unassigned
+  // (ANT-112).
+  lines.push("Agents (id · name):");
+  if (agents.length === 0) {
+    lines.push("- none yet");
+  } else {
+    for (const agent of agents) {
+      const role = agent.role ? ` (${agent.role})` : "";
+      lines.push(`- ${agent.id} · ${agent.name}${role}`);
+    }
+  }
   lines.push("");
   lines.push("Blocks (id · type · name):");
   for (const node of workflow.nodes) {
@@ -154,6 +171,17 @@ export function buildEditInstruction(
     "- blockType is one of: agent, approval, condition. Start and end blocks",
     "  cannot be added or removed.",
     '- An agent block\'s config should carry "actionKind" and "task".',
+    "- An agent step needs an agent, and a step without one does not validate.",
+    '  Put the agent\'s id in the block config as "agentId". Use an id from the',
+    "  Agents list below when one of them fits.",
+    '- When none fits, add one with "add-agent" first, then name its "ref" as',
+    '  the new block\'s "agentId". Do not add an agent the request did not ask',
+    "  for, and do not add a second one that does the same job as an existing",
+    "  agent — reuse it instead. One agent can carry several steps.",
+    "- If the request asks for something you cannot do with these operations,",
+    "  do the part you can and say plainly in the summary what you did not do.",
+    "  A summary that reports only what was done, for a request that was half",
+    "  performed, is the one answer that must never be given.",
     "- If the request is not a graph edit, or cannot be done to this diagram,",
     '  reply with {"version": ' + String(EDIT_PROPOSAL_VERSION) + ', "summary": "why this cannot be done as asked", "ops": []}',
     "  and nothing else — an empty proposal is a refusal with a reason.",

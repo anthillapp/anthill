@@ -24,19 +24,14 @@ export type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun };
 export const IpcChannel = {
   appCapabilities: "app:capabilities",
   appRelaunch: "app:relaunch",
-  workspaceSelect: "workspace:select",
-  workspaceStatus: "workspace:status",
   workflowOpen: "workflow:open",
   workflowPendingOpen: "workflow:pending-open",
   workflowOpened: "workflow:opened",
   exchangeRead: "exchange:read",
   liveWorkflow: "live:workflow",
   workflowSave: "workflow:save",
-  runtimesDetect: "runtimes:detect",
-  runStart: "run:start",
   runList: "run:list",
   runGet: "run:get",
-  approvalRespond: "approval:respond",
   workflowExport: "workflow:export",
   workflowSetDirty: "workflow:set-dirty",
   recentsList: "recents:list",
@@ -129,9 +124,6 @@ export const LIVE_SESSION_CHANNELS: readonly string[] = [
   IpcChannel.liveEvents,
   IpcChannel.liveLookAgain,
 ];
-
-/** Push channel (main -> renderer). Carries every `RunEvent`. */
-export const RUN_EVENT_CHANNEL = "run:event";
 
 /** Push channel (main -> renderer). Coarse progress for one drafting run. */
 export const PROMPT_DRAFT_STAGE_CHANNEL = "prompt:draft-stage";
@@ -376,7 +368,19 @@ export type ExportWorkflowRequest = {
 
 export type ExportWorkflowResponse =
   | { ok: true; directory: string; written: string[] }
-  | { ok: false; error: string }
+  | {
+      ok: false;
+      error: string;
+      /**
+       * Whether the folder was put back as it was found.
+       *
+       * The difference the author has to act on. A rolled-back export is a
+       * thing that did not happen; one that could not be undone has left a
+       * mixture of old and new generated files in a folder they are about to
+       * use (ANT-100).
+       */
+      rolledBack?: boolean;
+    }
   | { ok: false; cancelled: true };
 
 /* ------------------------------------------------------------------ */
@@ -563,7 +567,26 @@ export type PromptDraftStage = "preparing" | "analyzing" | "replying";
 /** The CLI's raw reply. Parsing and validation happen in `@anthill/workflow`. */
 export type PromptDraftResponse =
   | { ok: true; reply: string; command: string }
-  | { ok: false; error: string; command: string; cancelled?: undefined }
+  | {
+      ok: false;
+      error: string;
+      command: string;
+      cancelled?: undefined;
+      /**
+       * The CLI's own sign-in has expired, and nothing else is wrong.
+       *
+       * Carried apart from `error` because it is the one failure with a
+       * recovery the app can offer: it opens the CLI's own login. Relaying the
+       * CLI's sentence and nothing else left the author reading
+       * "exited with code 1: Failed to authenticate" with no way forward
+       * (ANT-111).
+       *
+       * Set only when the CLI itself says so — `claude auth status` is asked,
+       * not guessed at from the wording, which belongs to the CLI and will
+       * change.
+       */
+      signedOut?: InterpreterId;
+    }
   /** The author cancelled. Not an error, and not shown as one. */
   | { ok: false; cancelled: true; command: string; error?: undefined };
 
@@ -588,6 +611,7 @@ export type LiveObserverCapabilities = {
 };
 
 export type LiveSnapshot = {
+  storageError?: string;
   /** Runs worth showing, newest first. */
   runs: PendingRun[];
   capabilities: LiveObserverCapabilities[];
@@ -702,8 +726,6 @@ export interface AnthillApi {
    * than waiting for something that is not coming.
    */
   relaunch(): Promise<boolean>;
-  selectWorkspace(): Promise<WorkspaceInfo | null>;
-  workspaceStatus(rootPath: string): Promise<WorkspaceStatus>;
   /** With a path, opens that workflow; without one, asks the author to pick. */
   openWorkflow(path?: string): Promise<OpenWorkflowResult>;
   /**
@@ -729,11 +751,8 @@ export interface AnthillApi {
   saveWorkflow(request: SaveWorkflowRequest): Promise<SaveWorkflowResult>;
   /** File ▸ Save, or ⌘S. Returns the unsubscribe. */
   onSaveWorkflow(listener: () => void): () => void;
-  detectRuntimes(): Promise<RuntimeInfo[]>;
-  startRun(request: StartRunRequest): Promise<StartRunResponse>;
   listRuns(): Promise<WorkflowRun[]>;
   getRun(runId: string): Promise<StoredRunView | undefined>;
-  respondToApproval(response: ApprovalResponse): Promise<void>;
   /** Ask the user for a folder, then write the generated workflow files into it. */
   exportWorkflow(request: ExportWorkflowRequest): Promise<ExportWorkflowResponse>;
   /**
@@ -809,9 +828,6 @@ export interface AnthillApi {
   cancelPromptDraft(): Promise<void>;
   /** Subscribe to drafting progress. Returns an unsubscribe function. */
   onPromptDraftStage(listener: (stage: PromptDraftStage) => void): () => void;
-  /** Subscribe to run events. Returns an unsubscribe function. */
-  onRunEvent(listener: (event: RunEvent) => void): () => void;
-
   /* Live session auto-detection */
 
   /**

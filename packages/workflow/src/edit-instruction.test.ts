@@ -188,3 +188,45 @@ describe("answering a question the interpreter asked", () => {
     );
   });
 });
+
+/**
+ * The model can only use what it is shown (ANT-112).
+ *
+ * The op list had nothing about agents and the `add-block` example carried no
+ * `agentId`, so every agent step the assistant added was born unassigned.
+ */
+describe("what the instruction says about agents", () => {
+  const instruction = () =>
+    buildEditInstruction(workflow, { kind: "none" }, "Add a QA step and an agent for it");
+
+  it("lists the agents the workflow has, with their ids", () => {
+    const text = instruction();
+    expect(text).toContain("Agents (id · name):");
+    expect(text).toContain("agent-1 · Developer");
+  });
+
+  it("says so plainly when there are none", () => {
+    const bare = { ...workflow, metadata: { workflow: { formatVersion: 4, agents: [] } } };
+    expect(buildEditInstruction(bare, { kind: "none" }, "Add a step")).toContain("- none yet");
+  });
+
+  it("offers an operation for creating one, and shows agentId on a block", () => {
+    const text = instruction();
+    expect(text).toContain('"op": "add-agent"');
+    expect(text).toContain('"agentId"');
+  });
+
+  it("tells it to reuse an agent rather than inventing a second of the same", () => {
+    expect(instruction()).toContain("reuse it instead");
+  });
+
+  /**
+   * The failure that was worse than the missing capability: a request half
+   * performed, reported as done.
+   */
+  it("forbids reporting only what was done for a request half performed", () => {
+    const text = instruction();
+    expect(text).toContain("say plainly in the summary what you did not do");
+    expect(text).toContain("must never be given");
+  });
+});

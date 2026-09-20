@@ -6012,6 +6012,28 @@ button.state-chip {
   color: var(--accent-700);
 }
 
+.assistant-failed p {
+  margin: 0;
+}
+
+/* The recovery, under the reason it is offered for. Quiet: Anthill is not
+   signing anyone in, it is opening the CLI's own login (ANT-111). */
+.assistant-signin {
+  margin-top: 9px;
+  padding: 6px 12px;
+  border: 1px solid var(--accent-300);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--accent-700);
+  cursor: pointer;
+}
+
+.assistant-signin:hover {
+  background: var(--accent-100);
+}
+
 /* A question is waiting on the author, which is a different thing from a
    refusal and from a fault — so it is drawn like the thing it is: full-strength
    ink on paper, with the amber edge this app already uses for "waiting on you".

@@ -70,6 +70,15 @@ afterEach(() => {
 });
 
 describe("what the indicator shows", () => {
+  it("reports a journal write failure rather than silently showing normal live status", async () => {
+    const detail = "Anthill could not save observed activity. Retrying automatically. The external session is unchanged.";
+    stub({ runs: [run({ state: "detected_live" })], capabilities: [], storageError: detail });
+    render(<LiveIndicator workflowId="w1" />);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Activity not saved");
+    expect(alert.title).toBe(detail);
+    expect(screen.queryByRole("button", { name: /Stop session|Start|Run/ })).toBeNull();
+  });
   it("shows nothing at all when no prompt has been copied", async () => {
     await show([]);
     expect(screen.queryByRole("button")).toBeNull();

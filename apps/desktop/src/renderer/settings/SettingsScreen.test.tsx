@@ -249,3 +249,28 @@ describe("about", () => {
     expect(within(group).getByText(__ANTHILL_VERSION__)).toBeTruthy();
   });
 });
+
+/**
+ * A preference the disk refused (ANT-97).
+ *
+ * Main used to swallow the write failure and answer with the new settings, so
+ * a switch the disk had rejected looked accepted until the next launch and
+ * then quietly went back. Main now raises; this is the screen's half.
+ */
+it("says a preference was not saved, and leaves the switch where it is", async () => {
+  const api = stub();
+  api.settingsWrite = vi.fn(async () => {
+    throw new Error("ENOSPC: no space left on device");
+  });
+  const theSwitch = () => screen.getByRole("switch");
+  show();
+  await waitFor(() => expect(theSwitch().getAttribute("aria-checked")).toBe("false"));
+
+  fireEvent.click(theSwitch());
+
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("not saved");
+  expect(alert.textContent).toContain("ENOSPC");
+  // The switch reports storage, not intent.
+  expect(theSwitch().getAttribute("aria-checked")).toBe("false");
+});

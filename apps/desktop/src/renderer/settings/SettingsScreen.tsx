@@ -181,6 +181,8 @@ function NotificationsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [busy, setBusy] = useState(false);
   const [probe, setProbe] = useState<NotificationProbe | null>(null);
+  /** A preference the disk refused. Cleared by the next attempt. */
+  const [unsaved, setUnsaved] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -201,6 +203,7 @@ function NotificationsPage() {
 
   const set = useCallback(async (next: boolean) => {
     setBusy(true);
+    setUnsaved(null);
     try {
       setSettings(
         await window.anthill.settingsWrite({ stepNotifications: next }),
@@ -208,9 +211,11 @@ function NotificationsPage() {
       // The permission row is about to appear or disappear with the switch; a
       // result from before that is about a question nobody is asking now.
       setProbe(null);
-    } catch {
-      // Leave the switch where it was rather than showing a state that was
-      // not stored.
+    } catch (error) {
+      // The switch stays where it was, because that is what is stored — and
+      // saying so is the point. Leaving it silent meant a preference the disk
+      // had refused looked accepted until the next launch (ANT-97).
+      setUnsaved(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
@@ -235,6 +240,19 @@ function NotificationsPage() {
             onChange={(next) => void set(next)}
           />
         </SettingRow>
+
+        {/* Outside the `on` block below, deliberately: a write the disk
+            refuses leaves the switch off, which is precisely when that block
+            is not rendered. */}
+        {unsaved ? (
+          <p className="set-result" role="alert">
+            <i aria-hidden="true" />
+            <span>
+              This preference was not saved. The switch shows what is stored,
+              which is what it was before. {unsaved}
+            </span>
+          </p>
+        ) : null}
 
         {/* Only while the switch is on: permission is meaningless when nothing
             would be sent, and a row about it would be a question nobody asked. */}
@@ -341,7 +359,18 @@ function ObservationPage() {
 
       <SettingGroup
         title="Hooks"
-        footer="Anthill reads event metadata only — no transcript, no file contents, and none of the model's reasoning."
+        footer={
+          <>
+            Anthill reads event metadata only — no transcript, no file
+            contents, and none of the model&rsquo;s reasoning. A hook writes
+            down which tool ran, when, and what it was aimed at; the command
+            itself, the contents it wrote and the answer it got are not kept,
+            and anything that looks like a credential is replaced before the
+            line is written. The log lives in{" "}
+            <strong>~/.anthill/live-hooks</strong>, rolls over at 8&nbsp;MB and
+            keeps one previous file. Nothing here is ever sent anywhere.
+          </>
+        }
       >
         {available.length === 0 ? (
           <SettingRow

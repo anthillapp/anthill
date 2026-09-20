@@ -79,8 +79,17 @@ function outgoingEdges(workflow: Workflow, nodeId: string): WorkflowEdge[] {
 /**
  * Breadth-first from the start block. Each node appears once, so a loop back to
  * an earlier block is rendered as "return to step N" rather than duplicating it.
+ *
+ * **This is the canonical order**, and the only one. The prompt numbers steps
+ * from it, and so must anything else that numbers or lists them — see
+ * `executableBlocks`.
+ *
+ * Deterministic for a given document: the queue takes each node's outgoing
+ * edges in the order the document lists them, so a branch's arms are visited
+ * in the order they were drawn. Two documents that differ only in edge order
+ * are two different documents, and they compile to two different promptings.
  */
-function orderNodes(workflow: Workflow): WorkflowNode[] {
+export function orderNodes(workflow: Workflow): WorkflowNode[] {
   const byId = new Map(workflow.nodes.map((node) => [node.id, node]));
   const start = workflow.nodes.find((node) => node.type === "start");
   if (!start) return [];
@@ -700,4 +709,22 @@ export function compile(workflow: Workflow): CompileResult {
   }
 
   return { prompt: buildPrompt(workflow, harness, ordered), files, warnings };
+}
+
+/**
+ * The blocks a session is told to work through, in the order it is told to.
+ *
+ * `start` and `end` are the graph's own bookends rather than work, so they are
+ * not steps and are not announced.
+ *
+ * This exists because two places disagreed. The compiled prompt numbered steps
+ * by this walk, and the marker instructions listed them in `workflow.nodes`
+ * array order — which is creation order, and a graph is very often not drawn
+ * in the order it runs. Both carried the block id, so nothing was ever wrong
+ * about *which* block a report named; what differed was the sequence the
+ * agent was reading, so "step 1" in the prompt and the first entry in the list
+ * it was told to report against could be two different blocks (ANT-101).
+ */
+export function executableBlocks(workflow: Workflow): WorkflowNode[] {
+  return orderNodes(workflow).filter((node) => node.type !== "start" && node.type !== "end");
 }

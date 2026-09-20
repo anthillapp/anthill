@@ -1,7 +1,7 @@
 ---
 name: workflow
 description: Use when the user wants the work of this session laid out as a workflow in Anthill — "show this in Anthill", "plan this out in Anthill", "/anthill:workflow design …" — or wants to pick a handed-over workflow back up, or check where one stands. Covers handing a task over as a reviewable graph, asking the questions that make it complete, binding a run to the graph the user settled on, and reporting progress against it. Not for work that is not going to be done in this session.
-version: 0.7.2
+version: 0.7.3
 user-invocable: true
 argument-hint: "[design|review · status|resume · doctor] [task or workflow id]"
 ---

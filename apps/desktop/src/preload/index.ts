@@ -18,10 +18,8 @@ import {
   OPEN_WORKFLOW_CHANNEL,
   SAVE_WORKFLOW_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
-  RUN_EVENT_CHANNEL,
   type AnthillApi,
   type AppSettings,
-  type ApprovalResponse,
   type ExportWorkflowRequest,
   type LiveObserveRequest,
   type ObservationEvent,
@@ -29,9 +27,7 @@ import {
   type MarkerCli,
   type PromptDraftRequest,
   type PromptDraftStage,
-  type RunEvent,
   type SaveWorkflowRequest,
-  type StartRunRequest,
 } from "../shared/ipc.js";
 
 const api: AnthillApi = {
@@ -40,9 +36,6 @@ const api: AnthillApi = {
   contract: IPC_CONTRACT,
   capabilities: () => ipcRenderer.invoke(IpcChannel.appCapabilities),
   relaunch: () => ipcRenderer.invoke(IpcChannel.appRelaunch),
-  selectWorkspace: () => ipcRenderer.invoke(IpcChannel.workspaceSelect),
-  workspaceStatus: (rootPath: string) =>
-    ipcRenderer.invoke(IpcChannel.workspaceStatus, rootPath),
   openWorkflow: (path?: string) => ipcRenderer.invoke(IpcChannel.workflowOpen, path),
   pendingWorkflowOpen: () => ipcRenderer.invoke(IpcChannel.workflowPendingOpen),
   workflowOpened: (path, id, outcome) => ipcRenderer.invoke(IpcChannel.workflowOpened, path, id, outcome),
@@ -55,13 +48,8 @@ const api: AnthillApi = {
   },
   saveWorkflow: (request: SaveWorkflowRequest) =>
     ipcRenderer.invoke(IpcChannel.workflowSave, request),
-  detectRuntimes: () => ipcRenderer.invoke(IpcChannel.runtimesDetect),
-  startRun: (request: StartRunRequest) =>
-    ipcRenderer.invoke(IpcChannel.runStart, request),
   listRuns: () => ipcRenderer.invoke(IpcChannel.runList),
   getRun: (runId: string) => ipcRenderer.invoke(IpcChannel.runGet, runId),
-  respondToApproval: (response: ApprovalResponse) =>
-    ipcRenderer.invoke(IpcChannel.approvalRespond, response),
   exportWorkflow: (request: ExportWorkflowRequest) =>
     ipcRenderer.invoke(IpcChannel.workflowExport, request),
   setWorkflowDirty: (dirty: boolean) =>
@@ -142,13 +130,6 @@ const api: AnthillApi = {
     ipcRenderer.invoke(IpcChannel.liveSetupInstall, harness),
   liveSetupDisable: (harness: MarkerCli) =>
     ipcRenderer.invoke(IpcChannel.liveSetupDisable, harness),
-  onRunEvent: (listener: (event: RunEvent) => void) => {
-    const handler = (_event: unknown, payload: RunEvent) => listener(payload);
-    ipcRenderer.on(RUN_EVENT_CHANNEL, handler);
-    return () => {
-      ipcRenderer.removeListener(RUN_EVENT_CHANNEL, handler);
-    };
-  },
 };
 
 /**

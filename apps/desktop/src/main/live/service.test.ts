@@ -7,9 +7,9 @@
  * millisecond.
  */
 
-import { appendFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { TIMING, type PendingRun } from "@anthill/live";
@@ -160,6 +160,29 @@ function only(snapshot: LiveSessionSnapshot): PendingRun {
   expect(snapshot.runs).toHaveLength(1);
   return snapshot.runs[0];
 }
+
+it("replays consumed source events after the journal becomes writable again", async () => {
+  const h = await harness();
+  await h.service.start();
+  await h.service.startObservation(observeRequest);
+  const journalDirectory = join(dirname(h.storePath), "observations");
+  await writeFile(journalDirectory, "block directory creation");
+  await writeTranscript(h.claudeRoot, "retry-session", { stopReason: "end_turn" });
+  h.setNow("2026-08-29T10:00:10.000Z");
+  try {
+    await h.service.poll();
+    expect(h.service.snapshot().storageError).toContain("Retrying");
+    expect(only(h.service.snapshot()).state).toBe("pending_after_copy");
+    await rm(journalDirectory);
+    await h.service.poll();
+    expect(h.service.snapshot().storageError).toBeUndefined();
+    expect(only(h.service.snapshot()).detectedSessionId).toBe("retry-session");
+    expect((await h.service.events(RUN_ID)).length).toBeGreaterThan(0);
+    const count = (await h.service.events(RUN_ID)).length;
+    await h.service.poll();
+    expect(await h.service.events(RUN_ID)).toHaveLength(count);
+  } finally { h.service.stop(); }
+});
 
 describe("external revision bindings", () => {
   const input = {

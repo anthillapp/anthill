@@ -8,15 +8,10 @@
  */
 
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
-import { dirname, join, resolve, sep } from "node:path";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 
-import {
-  captureGitStatus,
-  hasUncommittedChanges,
-  selectWorkspace,
-} from "@anthill/workspace";
 import { parseWorkflow } from "@anthill/workflow-schema";
 import { checkWorkflowCompatibility, migrateWorkflow } from "@anthill/workflow";
 import { ExchangeStore } from "@anthill/exchange-store";
@@ -33,9 +28,7 @@ import {
   OPEN_WORKFLOW_CHANNEL,
   SAVE_WORKFLOW_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
-  RUN_EVENT_CHANNEL,
   type AppSettings,
-  type ApprovalResponse,
   type IpcCapabilities,
   type LiveObserveRequest,
   type ExportWorkflowRequest,
@@ -47,15 +40,11 @@ import {
   type PromptDraftRequest,
   type PromptDraftResponse,
   type OpenWorkflowResult,
-  type RunEvent,
   type SaveWorkflowRequest,
   type SaveWorkflowResult,
-  type StartRunRequest,
-  type StartRunResponse,
-  type WorkspaceInfo,
-  type WorkspaceStatus,
 } from "../shared/ipc.js";
-import { createServices, detectRuntimes, startRun, type RunServices } from "./services.js";
+import { createServices, type RunServices } from "./services.js";
+import { destinationInside, FileGrants, FolderGrants, writeAllOrNothing } from "./safe-write.js";
 import { detectInterpreters, runDraft, signInToInterpreter } from "./interpreters.js";
 import { readCodexModels } from "./codex-models.js";
 import { readPiModels } from "./pi-models.js";
@@ -156,6 +145,16 @@ function chooseDataDirectory(): string {
 
 let mainWindow: BrowserWindow | null = null;
 let services: RunServices | null = null;
+let historyLoading: Promise<RunServices> | undefined;
+function history(): Promise<RunServices> {
+  historyLoading ??= createServices(join(app.getPath("userData"), "runs"), electronSqliteBinding())
+    .then((opened) => (services = opened))
+    .catch((error) => { historyLoading = undefined; throw error; });
+  return historyLoading;
+}
+/** Folders a dialog handed out in this session; see `safe-write.ts`. */
+const grants = new FolderGrants();
+const workflowFiles = new FileGrants();
 
 /**
  * Whether the page has asked for its pending workflow yet.
@@ -414,13 +413,6 @@ function liveSetupService(): ObservationSetupService {
   return liveSetup;
 }
 
-/** Broadcast a run event to the renderer, if a window is still open. */
-function emitRunEvent(event: RunEvent): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(RUN_EVENT_CHANNEL, event);
-  }
-}
-
 /**
  * Where the application icon is, whether this is a dev run or a packaged one.
  *
@@ -604,6 +596,7 @@ async function openWorkflowAt(path: string): Promise<OpenWorkflowResult> {
     ];
 
     const workflow = parseWorkflow(migration.workflow);
+    await workflowFiles.grant(path);
     await rememberRecent(path);
     return {
       ok: true,
@@ -812,6 +805,12 @@ function handle(
 }
 
 function registerIpcHandlers(): void {
+  // Legacy history is read-only. Removing the runner must not remove the
+  // snapshot lookup used by the manual copy-paste Live Session page.
+  handle(IpcChannel.runList, async () => existsSync(join(app.getPath("userData"), "runs", "runs.db"))
+    ? (await history()).store.listRuns() : []);
+  handle(IpcChannel.runGet, async (_event, runId: string) => existsSync(join(app.getPath("userData"), "runs", "runs.db"))
+    ? (await history()).store.getRun(runId) : undefined);
   handle(
     IpcChannel.appCapabilities,
     async (): Promise<IpcCapabilities> => ({
@@ -845,41 +844,15 @@ function registerIpcHandlers(): void {
     return true;
   });
 
-  handle(IpcChannel.workspaceSelect, async (): Promise<WorkspaceInfo | null> => {
-    const result = await dialog.showOpenDialog({
-      title: "Select a repository or working directory",
-      properties: ["openDirectory", "createDirectory"],
-    });
-    if (result.canceled || result.filePaths.length === 0) return null;
-
-    const context = await selectWorkspace(result.filePaths[0]);
-    return {
-      rootPath: context.rootPath,
-      activePath: context.activePath,
-      mode: context.mode,
-      git: context.git
-        ? { repositoryRoot: context.git.repositoryRoot, branch: context.git.branch }
-        : undefined,
-    };
-  });
-
-  handle(
-    IpcChannel.workspaceStatus,
-    async (_event, rootPath: string): Promise<WorkspaceStatus> => {
-      const status = await captureGitStatus(rootPath);
-      return { status, dirty: hasUncommittedChanges(status) };
-    },
-  );
-
   handle(
     IpcChannel.workflowOpen,
     async (_event, requested?: string): Promise<OpenWorkflowResult> => {
-      // A path means the author picked a workflow from the launch window's list, so
-      // there is nothing to ask them.
-      if (requested) return openWorkflowAt(requested);
+      if (requested && (await workflowFiles.has(requested) ||
+          (await listRecents()).some((item) => item.path === requested))) return openWorkflowAt(requested);
 
       const result = await dialog.showOpenDialog({
         title: "Open workflow",
+        ...(requested ? { defaultPath: requested } : {}),
         // Matching on the bare ".json" suffix, so a file saved by any earlier
         // build shows up here whatever double suffix it used — nothing about
         // opening needs to change when the write side emits a new one.
@@ -913,6 +886,9 @@ function registerIpcHandlers(): void {
   handle(
     IpcChannel.workflowSave,
     async (_event, request: SaveWorkflowRequest): Promise<SaveWorkflowResult> => {
+      // A renderer-provided path is not consent to overwrite an arbitrary
+      // file. Unknown destinations must go through the native save dialog.
+      if (request.path && !await workflowFiles.has(request.path)) request = { ...request, path: undefined };
       // What the last successful save left behind, read from the file itself
       // rather than tracked alongside it — see ./save-destination.ts.
       const saved: SavedRecord = request.path
@@ -961,8 +937,12 @@ function registerIpcHandlers(): void {
         if (await exchangeDestination(exchange(), path, request.workflow.id)) {
           await saveExchangeCopy(exchange(), path, request.workflow);
         } else {
-          await writeFile(path, `${JSON.stringify(request.workflow, null, 2)}\n`, "utf8");
+          const safe = await destinationInside(dirname(path), basename(path));
+          if (!safe.ok) throw new Error(safe.reason);
+          const written = await writeAllOrNothing([{ path: safe.path, relative: basename(path), content: `${JSON.stringify(request.workflow, null, 2)}\n` }]);
+          if (!written.ok) throw new Error(written.error);
         }
+        await workflowFiles.grant(path);
       } catch (error) {
         // Reported rather than thrown, so the editor can say what went wrong
         // and keep the unsaved work rather than losing the answer in a
@@ -977,49 +957,6 @@ function registerIpcHandlers(): void {
       await rememberRecent(path);
 
       return { kind: "saved", path };
-    },
-  );
-
-  handle(IpcChannel.runtimesDetect, async () => {
-    if (!services) return [];
-    return detectRuntimes(services.runtimes);
-  });
-
-  handle(
-    IpcChannel.runStart,
-    async (_event, request: StartRunRequest): Promise<StartRunResponse> => {
-      if (!services) return { ok: false, error: "Run services are not ready yet." };
-      try {
-        const runId = await startRun(
-          services,
-          request.workflow as Workflow,
-          request.workspacePath,
-          emitRunEvent,
-        );
-        return { ok: true, runId };
-      } catch (error) {
-        return {
-          ok: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
-    },
-  );
-
-  handle(IpcChannel.runList, async () => {
-    if (!services) return [];
-    return services.store.listRuns();
-  });
-
-  handle(IpcChannel.runGet, async (_event, runId: string) => {
-    if (!services) return undefined;
-    return services.store.getRun(runId);
-  });
-
-  handle(
-    IpcChannel.approvalRespond,
-    async (_event, response: ApprovalResponse): Promise<void> => {
-      services?.approvals.respond(response.runId, response.nodeId, response.decision);
     },
   );
 
@@ -1072,7 +1009,10 @@ function registerIpcHandlers(): void {
       properties: ["openDirectory", "createDirectory"],
     });
     if (result.canceled || result.filePaths.length === 0) return null;
-    return resolve(result.filePaths[0]);
+    // The dialog is the consent, and this is where it is written down. The
+    // renderer keeps the folder and passes it back to export later, so main
+    // has to be able to say that a root it is handed came from here.
+    return grants.grant(result.filePaths[0]);
   });
 
   // Opens the author's terminal on the CLI's own login command. Anthill never
@@ -1258,8 +1198,17 @@ function registerIpcHandlers(): void {
       // A root the author has already chosen is not asked for again. The
       // dialog is the consent; asking on every copy would turn a decision into
       // a chore, and a chore into a step that gets skipped.
-      let chosen = request.root;
-      if (!chosen) {
+      let root: string;
+      if (request.root) {
+        // A root that arrives from the renderer is only as good as the dialog
+        // it came from. One this process never handed out is refused rather
+        // than written to, whatever it points at.
+        const granted = await grants.resolveGranted(request.root);
+        if (!granted) {
+          return { ok: false, error: "That folder was not chosen in this session. Choose it again." };
+        }
+        root = granted;
+      } else {
         const result = await dialog.showOpenDialog({
           title: "Choose the repository to write the workflow into",
           properties: ["openDirectory", "createDirectory"],
@@ -1267,11 +1216,8 @@ function registerIpcHandlers(): void {
         if (result.canceled || result.filePaths.length === 0) {
           return { ok: false, cancelled: true };
         }
-        chosen = result.filePaths[0];
+        root = await grants.grant(result.filePaths[0]);
       }
-
-      const root = resolve(chosen);
-      const written: string[] = [];
 
       try {
         const entries = [...request.files];
@@ -1279,18 +1225,32 @@ function registerIpcHandlers(): void {
           entries.push({ path: "anthill-prompt.md", content: request.prompt });
         }
 
+        // Every destination is checked before anything is written. A refusal
+        // half way through would leave some of a workflow's files in the
+        // folder and the rest somewhere the user cannot see.
+        const destinations: { path: string; content: string; relative: string }[] = [];
         for (const file of entries) {
-          const destination = resolve(root, file.path);
-          // Generated paths are ours, but never let a crafted workflow write
-          // outside the folder the user actually chose.
-          if (destination !== root && !destination.startsWith(root + sep)) {
-            return { ok: false, error: `Refusing to write outside the chosen folder: ${file.path}` };
+          const destination = await destinationInside(root, file.path);
+          if (!destination.ok) {
+            return { ok: false, error: `Refusing to write outside the chosen folder: ${destination.reason}` };
           }
-          await mkdir(dirname(destination), { recursive: true });
-          await writeFile(destination, file.content, "utf8");
-          written.push(file.path);
+          destinations.push({ path: destination.path, content: file.content, relative: file.path });
         }
-        return { ok: true, directory: root, written };
+
+        // All of them or none: a failure part way through used to leave some
+        // of the new agent files beside some of the old, matching no version
+        // of the workflow (ANT-100).
+        const outcome = await writeAllOrNothing(destinations);
+        if (!outcome.ok) {
+          return {
+            ok: false,
+            rolledBack: outcome.rolledBack,
+            error: outcome.rolledBack
+              ? `${outcome.error} The folder is as it was.`
+              : `${outcome.error} Some files may have been replaced — check ${root} before using it.`,
+          };
+        }
+        return { ok: true, directory: root, written: outcome.written };
       } catch (error) {
         return {
           ok: false,
@@ -1396,9 +1356,7 @@ function applyMenu(): void {
 void app.whenReady().then(async () => {
   if (app.isPackaged) app.setAsDefaultProtocolClient("anthill");
   else if (process.argv[1]) app.setAsDefaultProtocolClient("anthill", process.execPath, [resolve(process.argv[1])]);
-  // Register handlers and show the window BEFORE opening the run store, so a
-  // storage failure surfaces as a visible error instead of an app that starts
-  // with no window and no message.
+  // History is opened lazily; the editor does not depend on the legacy store.
   applyAppIcon();
   applyMenu();
   setRecentsPaths({ userData: app.getPath("userData"), home: app.getPath("home") });
@@ -1413,25 +1371,9 @@ void app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 
-  try {
-    services = await createServices(
-      join(app.getPath("userData"), "runs"),
-      emitRunEvent,
-      electronSqliteBinding(),
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("Failed to initialize run services:", error);
-    dialog.showErrorBox(
-      "Anthill could not start its run store",
-      `Workflows cannot be executed until this is resolved.\n\n${message}`,
-    );
-  }
 });
 
 app.on("window-all-closed", () => {
-  // Unblock any run parked on an approval so the engine can unwind cleanly.
-  services?.approvals.abandonAll("The application is shutting down.");
   if (process.platform !== "darwin") app.quit();
 });
 
@@ -1439,6 +1381,5 @@ app.on("window-all-closed", () => {
 app.on("will-quit", () => {
   inbox?.stop();
   live?.stop();
-  services?.approvals.abandonAll("The application is shutting down.");
   void services?.store.close?.();
 });

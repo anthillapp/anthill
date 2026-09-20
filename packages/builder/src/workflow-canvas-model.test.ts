@@ -3,11 +3,15 @@ import type { Workflow } from "@anthill/workflow-schema";
 import { addOutput } from "@anthill/workflow";
 
 import { PORT_OFFSET } from "./geometry";
+import type { WorkflowNode } from "@anthill/workflow-schema";
+
 import {
   OUTCOME_STYLES,
+  PILL_MAX,
   PILL_SIZE,
   STEP_SIZE,
   blockColor,
+  blockSize,
   SNAP_RADIUS,
   blockRect,
   buildCanvasModel,
@@ -360,5 +364,68 @@ describe("ports and the direction of their work", () => {
     };
     const rework = portsOf(moved, "b").find((path) => path.output.kind === "rework");
     expect(rework?.geometry.from.side).toBe("right");
+  });
+});
+
+/**
+ * A control pill holds the name the author gave it (ANT-113).
+ *
+ * Start and End take any name the inspector allows, and the shape never
+ * followed: "Ready for the PR" wrapped to three cramped lines inside 108×40.
+ */
+describe("how large a control pill is", () => {
+  const pill = (name: string) =>
+    blockSize({ id: "end", name, type: "end", config: {} } as WorkflowNode);
+
+  it("leaves a short name exactly as it was", () => {
+    for (const name of ["Start", "End", "Done", "Ship"]) {
+      expect(pill(name), name).toEqual(PILL_SIZE);
+    }
+  });
+
+  it("grows wider for a name that does not fit", () => {
+    const grown = pill("Ready for the PR");
+    expect(grown.w).toBeGreaterThan(PILL_SIZE.w);
+    // Wider first: one line is still enough at this length.
+    expect(grown.h).toBe(PILL_SIZE.h);
+  });
+
+  it("grows taller only once it is as wide as it may get", () => {
+    const long = pill("Ready for the PR once every reviewer has signed it off");
+    expect(long.w).toBe(PILL_MAX.w);
+    expect(long.h).toBe(PILL_MAX.h);
+  });
+
+  it("never grows past its ceiling, however long the name", () => {
+    const absurd = pill("x".repeat(500));
+    expect(absurd.w).toBe(PILL_MAX.w);
+    expect(absurd.h).toBe(PILL_MAX.h);
+  });
+
+  it("is monotonic: a longer name is never a smaller pill", () => {
+    let previous = 0;
+    for (let length = 1; length <= 60; length += 1) {
+      const { w } = pill("x".repeat(length));
+      expect(w).toBeGreaterThanOrEqual(previous);
+      previous = w;
+    }
+  });
+
+  /**
+   * The reason this lives in `blockSize` and not in the component: layout, the
+   * canvas extent, edge anchoring and hit-testing all read it, and a pill that
+   * reports one size and draws another puts the arrows in the wrong place.
+   */
+  it("is what blockRect measures, so an edge meets the grown pill", () => {
+    const node = { id: "end", name: "Ready for the PR", type: "end", config: {} } as WorkflowNode;
+    const size = blockSize(node);
+    const rect = blockRect({ ...node, position: { x: 100, y: 100 } } as WorkflowNode);
+    expect(rect.w).toBe(size.w);
+    expect(rect.h).toBe(size.h);
+  });
+
+  it("still gives a step card its own fixed size", () => {
+    const step = { id: "s", name: "A very long step name indeed", type: "agent", config: {} } as WorkflowNode;
+    expect(blockSize(step)).toEqual(STEP_SIZE);
   });
 });

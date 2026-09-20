@@ -418,3 +418,68 @@ describe("opening the way back in", () => {
     expect(outcome.error).toContain("no application");
   });
 });
+
+/**
+ * An expired CLI sign-in is the one failure with a way out, so it is named
+ * rather than relayed (ANT-111).
+ *
+ * It used to come back as "exited with code 1: Failed to authenticate: OAuth
+ * session expired and could not be refreshed" — the CLI talking to itself, in
+ * a panel with no button and no explanation.
+ */
+describe("a CLI whose sign-in has expired", () => {
+  const instruction = "Add a step.";
+  const EXPIRED = "Failed to authenticate: OAuth session expired and could not be refreshed";
+
+  it("says the sign-in expired, and which CLI it was", async () => {
+    const { spawnFn } = fakeSpawn([
+      { stdout: "1.0" },                                        // detect
+      { stderr: EXPIRED, exitCode: 1 },                         // the draft
+      { stdout: JSON.stringify({ loggedIn: false }) },          // auth status
+    ]);
+
+    const result = await runDraft({ interpreterId: "claude-code", instruction, spawnFn });
+
+    expect(result).toMatchObject({ ok: false, signedOut: "claude-code" });
+    if (!result.ok && result.error) {
+      expect(result.error).toContain("sign-in has expired");
+      // Anthill cannot sign anyone in, and says so where the author decides.
+      expect(result.error).toContain("never sees your sign-in");
+      expect(result.error).not.toContain("exited with code");
+    }
+  });
+
+  /**
+   * The wording belongs to the CLI and will change, so it is a trigger for
+   * asking and never the verdict. Here the message looks like an auth failure
+   * and the CLI says it is signed in — which means something else is wrong.
+   */
+  it("does not claim a sign-in expired when the CLI says it has not", async () => {
+    const { spawnFn } = fakeSpawn([
+      { stdout: "1.0" },
+      { stderr: "could not authenticate with the proxy", exitCode: 1 },
+      { stdout: JSON.stringify({ loggedIn: true }) },
+    ]);
+
+    const result = await runDraft({ interpreterId: "claude-code", instruction, spawnFn });
+
+    expect(result).toMatchObject({ ok: false });
+    expect(result).not.toHaveProperty("signedOut");
+    if (!result.ok && result.error) expect(result.error).toContain("exited with code");
+  });
+
+  it("leaves an ordinary failure exactly as it was, and asks nothing", async () => {
+    const { spawnFn, calls } = fakeSpawn([
+      { stdout: "1.0" },
+      { stderr: "the prompt was too long", exitCode: 1 },
+    ]);
+
+    const result = await runDraft({ interpreterId: "claude-code", instruction, spawnFn });
+
+    expect(result).not.toHaveProperty("signedOut");
+    if (!result.ok && result.error) expect(result.error).toContain("the prompt was too long");
+    // No status call: a failure that does not look like one is not worth a
+    // second process.
+    expect(calls).toHaveLength(2);
+  });
+});

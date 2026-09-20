@@ -160,9 +160,50 @@ describe("WorkflowSchema / parseWorkflow", () => {
     }
   });
 
-  it("strips unknown top-level keys instead of failing", () => {
+  /**
+   * A field this build does not know about survives being opened (ANT-103).
+   *
+   * It used to be stripped, so the next Save wrote the document back without
+   * it — silently, and permanently. Rejecting the file instead would make a
+   * document that opens everywhere else unopenable here over a field nobody
+   * needs to read.
+   */
+  it("keeps unknown top-level keys instead of dropping them", () => {
     const workflow = parseWorkflow({ ...minimalWorkflow, bogus: true });
-    expect("bogus" in workflow).toBe(false);
+    expect((workflow as Record<string, unknown>).bogus).toBe(true);
+  });
+
+  it("keeps unknown keys nested inside a node or an edge", () => {
+    const workflow = parseWorkflow({
+      ...minimalWorkflow,
+      nodes: minimalWorkflow.nodes.map((node) => ({ ...node, vendorHint: { colour: "red" } })),
+      edges: minimalWorkflow.edges.map((edge) => ({ ...edge, vendorLabel: "later" })),
+    });
+    const [node] = workflow.nodes as unknown as Record<string, unknown>[];
+    const [edge] = workflow.edges as unknown as Record<string, unknown>[];
+    expect(node.vendorHint).toEqual({ colour: "red" });
+    expect(edge.vendorLabel).toBe("later");
+  });
+
+  it("round-trips a document with extra fields unchanged", () => {
+    const extended = {
+      ...minimalWorkflow,
+      bogus: true,
+      nodes: minimalWorkflow.nodes.map((node) => ({ ...node, vendorHint: 1 })),
+    };
+    // Open, then save, then open again: what a user does without thinking
+    // about it, and where the loss used to happen.
+    const once = parseWorkflow(extended);
+    const twice = parseWorkflow(JSON.parse(JSON.stringify(once)));
+    expect(twice).toEqual(once);
+    expect((twice as Record<string, unknown>).bogus).toBe(true);
+  });
+
+  it("still refuses a document whose known fields are wrong", () => {
+    // Keeping what it does not recognise is not the same as accepting
+    // anything: every known field is validated exactly as before.
+    expect(() => parseWorkflow({ ...minimalWorkflow, extra: true, nodes: "not an array" }))
+      .toThrow(SchemaValidationError);
   });
 
   it("safeParse reports success for valid input", () => {

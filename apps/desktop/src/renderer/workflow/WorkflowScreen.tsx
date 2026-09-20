@@ -191,6 +191,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    * the page never loses what it was showing.
    */
   const [liveRuns, setLiveRuns] = useState<PendingRun[]>([]);
+  const [liveStorageError, setLiveStorageError] = useState<string>();
 
   useEffect(() => {
     let live = true;
@@ -201,7 +202,10 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     void window.anthill
       .liveSnapshot()
       .then((snapshot) => {
-        if (live) setLiveRuns(snapshot.runs);
+        if (live) {
+          setLiveRuns(snapshot.runs);
+          setLiveStorageError(snapshot.storageError);
+        }
       })
       .catch(() => {
         // An older main process does not serve this channel. The indicator
@@ -212,6 +216,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     try {
       off = window.anthill.onLiveSnapshot((snapshot) => {
         setLiveRuns(snapshot.runs);
+        setLiveStorageError(snapshot.storageError);
         setLiveRun((current) => {
           if (!current) return current;
           const next = snapshot.runs.find(
@@ -603,7 +608,26 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   const outputCount = workflow.edges.length;
 
   /** Follow a problem to the thing it is about. */
+  /**
+   * Take the author to a problem — in whichever mode they are in.
+   *
+   * The assistant replaces the inspector rather than sitting beside it, so
+   * while it is open a selection has nowhere to be shown. This set the
+   * selection anyway and the click did nothing at all: the popover closed and
+   * the author was left where they started (ANT-114).
+   *
+   * So it speaks the mode's own verb. With the assistant open a canvas click
+   * *mentions* a block rather than selecting one, and this now does the same:
+   * the block joins the mentions, so whatever the author types next is already
+   * about it. Which is also how they hand the problem to the assistant.
+   */
   const goToProblem = (target: ProblemTarget) => {
+    if (describing) {
+      setMentions((current) =>
+        current.includes(target.nodeId) ? current : [...current, target.nodeId],
+      );
+      return;
+    }
     setSelectedAgent(undefined);
     setAgentReturn(undefined);
     if (target.kind === "block") setSelection({ kind: "block", nodeId: target.nodeId });
@@ -658,6 +682,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
       <LiveSessionPage
         workflow={workflow}
         run={liveRun}
+        storageError={liveStorageError}
         {...(liveObservation ? { observation: liveObservation } : {})}
         onBack={() => setLiveRun(null)}
         onStopObserving={(runId) => {

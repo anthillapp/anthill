@@ -569,9 +569,12 @@ describe("placing a block the assistant adds", () => {
   it("avoids the arranged blocks when only some of them are", () => {
     const mixed = {
       ...workflow(),
+      // Dropping the key makes the two halves different types, and the union
+      // then has no `position` to read below. A node without one is a node —
+      // the schema has it optional — so the array says so.
       nodes: workflow().nodes.map((node, at) =>
         at % 2 === 0 ? node : (({ position: _drop, ...rest }) => rest)(node),
-      ),
+      ) as ReturnType<typeof workflow>["nodes"],
     };
 
     const added = applyTo(mixed);

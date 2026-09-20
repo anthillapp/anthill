@@ -92,7 +92,13 @@ export const IpcChannel = {
  * different question — and it is harder to see, because both sides still have
  * the channel and nothing rejects.
  */
-export const IPC_CONTRACT = 19;
+/*
+ * 20: the runner's five request channels and its push channel went, the export
+ * receipt gained `rolledBack`, and the live snapshot gained `storageError`.
+ * The number stayed at 19 through all of it, which is the one thing this
+ * constant exists not to do.
+ */
+export const IPC_CONTRACT = 20;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */

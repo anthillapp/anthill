@@ -161,12 +161,6 @@ export function LiveIndicator({ workflowId, onOpenSession }: LiveIndicatorProps 
 
   if (!run) return null;
 
-  if (snapshot?.storageError) return (
-    <div className="live-indicator" role="alert" title={snapshot.storageError}>
-      <span className="live-chip tone-bad">Activity not saved. Retrying.</span>
-    </div>
-  );
-
   const tone = TONE[run.state];
   /** Live splits into receiving and quiet, which the raw state cannot say. */
   const presence = presenceKey(run, now);
@@ -176,6 +170,19 @@ export function LiveIndicator({ workflowId, onOpenSession }: LiveIndicatorProps 
 
   return (
     <div className="live-indicator" ref={anchor}>
+      {/*
+        Beside the chip, never instead of it.
+        This warning used to return early, taking the chip, the popover and
+        its Stop observing and Dismiss with it — so a journal Anthill could
+        not write left the header with nothing but the bad news and no way to
+        act on it, for every workflow at once, and for good when the failure
+        was a permanent one.
+      */}
+      {snapshot?.storageError ? (
+        <span className="live-chip tone-bad" role="alert" title={snapshot.storageError}>
+          Activity not saved. Retrying.
+        </span>
+      ) : null}
       <PresenceChip
         run={run}
         presence={presence}

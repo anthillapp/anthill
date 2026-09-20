@@ -20,12 +20,26 @@ import { expect, it } from "vitest";
 
 const main = readFileSync(resolve("src/main/index.ts"), "utf8");
 
+/*
+ * The names here are the ones ANT-95 actually removed. The list used to guard
+ * `runCancel`, which was never a channel, while leaving out `runtimesDetect`,
+ * `workspaceSelect` and `workspaceStatus`, which were three of the five that
+ * went — so re-registering any of those would have walked straight past it.
+ */
 it("retains read-only history handlers without registering runner controls", () => {
   expect(main).toContain("handle(IpcChannel.runGet,");
   expect(main).toContain("handle(IpcChannel.runList,");
-  for (const channel of ["runStart", "runCancel", "approvalRespond"]) {
-    expect(main).not.toMatch(new RegExp(`handle\\(\\s*IpcChannel\\.${channel}\\b`));
+  for (const channel of [
+    "runStart",
+    "approvalRespond",
+    "runtimesDetect",
+    "workspaceSelect",
+    "workspaceStatus",
+  ]) {
+    expect(main, channel).not.toMatch(new RegExp(`handle\\(\\s*IpcChannel\\.${channel}\\b`));
   }
+  // The push channel the renderer subscribed to, which no object lists.
+  expect(main).not.toMatch(/webContents\.send\(\s*RUN_EVENT/);
   expect(main.slice(main.indexOf("void app.whenReady()"))).not.toContain("createServices(");
 });
 

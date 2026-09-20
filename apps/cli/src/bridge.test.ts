@@ -39,6 +39,23 @@ describe("privileged CLI bridge boundaries", () => {
     expect(await readdir(userData).catch(() => [])).not.toContain("runs");
   });
 
+  /**
+   * A store that will not open is the same fact, from the page's side, as no
+   * store at all. It used to be a rejection instead, and `LiveSessionPage`
+   * asks for the snapshot before falling back to the open workflow — so a
+   * corrupt `runs.db`, or a native binding this build cannot load, replaced
+   * every manually pasted Live Session with an error and a Retry that re-ran
+   * the same failing open.
+   */
+  it("answers like an absent store when the legacy one cannot be opened", async () => {
+    const { bridge, userData } = await fixture();
+    await mkdir(join(userData, "runs"), { recursive: true });
+    await writeFile(join(userData, "runs", "runs.db"), "not a database, not even close", "utf8");
+
+    expect(await bridge.api.getRun("whatever")).toBeUndefined();
+    expect(await bridge.api.listRuns()).toEqual([]);
+  });
+
   it("rejects arbitrary roots and symlink escapes without writing outside the workspace", async () => {
     const { bridge, workspace, outside } = await fixture();
     const files = [{ path: "file.md", content: "generated" }];

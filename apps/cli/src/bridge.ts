@@ -138,9 +138,39 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     });
     return historyLoading;
   }
+  /**
+   * The legacy history, when there is one that opens.
+   *
+   * From the page's side a store that will not open — a corrupt file, a
+   * native binding this build cannot load — is the same fact as no store at
+   * all: there is no snapshot for the run either way. It did not use to be:
+   * the rejection crossed to the renderer, and `LiveSessionPage` asks for the
+   * snapshot *before* falling back to the open workflow, so a manually pasted
+   * session drew an error and a Retry that re-ran the same failing open.
+   *
+   * Reported once, and `history()` clears its own cache on the way out, so a
+   * store that becomes readable later is opened later.
+   */
+  async function historyIfReadable(): Promise<RunServices | undefined> {
+    if (!existsSync(join(paths.userData, "runs", "runs.db"))) return undefined;
+    return history().catch((error) => {
+      console.warn("Anthill: the legacy run history could not be opened:", error);
+      return undefined;
+    });
+  }
   const exportGrants = new FolderGrants();
   const workflowFiles = new FileGrants();
-  if (workspace) await exportGrants.grant(workspace);
+  // A workspace that is not there is not a reason to refuse to start. The
+  // server is already listening and the instance lock already taken by the
+  // time this runs, so throwing here left a bound port, a held lock and a raw
+  // ENOENT where master had simply started and refused the export. The rest of
+  // the bridge already degrades around an unreadable workspace — the recents
+  // are still offered — and export refuses on its own, by name.
+  if (workspace) {
+    await exportGrants.grant(workspace).catch(() => {
+      console.warn(`Anthill: the workspace ${workspace} could not be read. Exporting and new saves are unavailable until it exists.`);
+    });
+  }
 
   // The lazy singletons, created on first use and kept out of `services`:
   // nothing about observing for a session should be able to stop a Workflow
@@ -371,15 +401,10 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     }
   });
 
-  register(IpcChannel.runList, async () => {
-    if (!existsSync(join(paths.userData, "runs", "runs.db"))) return [];
-    return (await history()).store.listRuns();
-  });
+  register(IpcChannel.runList, async () => (await historyIfReadable())?.store.listRuns() ?? []);
 
-  register(IpcChannel.runGet, async (args) => {
-    if (!existsSync(join(paths.userData, "runs", "runs.db"))) return undefined;
-    return (await history()).store.getRun(String(args[0]));
-  });
+  register(IpcChannel.runGet, async (args) =>
+    (await historyIfReadable())?.store.getRun(String(args[0])));
 
   register(IpcChannel.recentsList, async () => listRecents());
   register(IpcChannel.recentsForget, async (args) => forgetRecent(String(args[0])));

@@ -77,7 +77,30 @@ describe("what the indicator shows", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Activity not saved");
     expect(alert.title).toBe(detail);
-    expect(screen.queryByRole("button", { name: /Stop session|Start|Run/ })).toBeNull();
+  });
+
+  /**
+   * The warning used to replace the chip, which took away the only route from
+   * the header to the session page and the only Stop observing and Dismiss
+   * there are — for every workflow at once, since one run's failure is what
+   * the snapshot carries, and for as long as the failure lasted. A permanent
+   * one, a journal path a symlink makes unwritable, left the header inert.
+   */
+  it.each([
+    ["detected_live", /Stop observing/],
+    ["completed", /Dismiss/],
+  ] as const)("keeps the chip, and its %s action, while it says so", async (state, action) => {
+    cleanup();
+    stub({
+      runs: [run({ state })],
+      capabilities: [],
+      storageError: "Anthill could not save observed activity.",
+    });
+    render(<LiveIndicator workflowId="w1" />);
+    await screen.findByRole("alert");
+
+    fireEvent.click(screen.getByRole("button"));
+    expect(await screen.findByRole("button", { name: action })).toBeTruthy();
   });
   it("shows nothing at all when no prompt has been copied", async () => {
     await show([]);

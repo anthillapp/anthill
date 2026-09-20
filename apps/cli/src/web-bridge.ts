@@ -179,8 +179,6 @@ export function installWebBridge(): Promise<AnthillApi> {
       pendingWorkflowOpen: () => invoke(IpcChannel.workflowPendingOpen),
       workflowOpened: (path) => invoke(IpcChannel.workflowOpened, path),
       exchangeRead: (path, id) => invoke(IpcChannel.exchangeRead, path, id),
-      exchangeReady: (request) => invoke(IpcChannel.exchangeReady, request),
-      exchangeRevoke: (request) => invoke(IpcChannel.exchangeRevoke, request),
       liveWorkflow: (runId) => invoke(IpcChannel.liveWorkflow, runId),
       // One payload per push, and no delivery id to carry: see the note beside
       // the same method in the Electron-side bridge.

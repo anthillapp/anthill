@@ -1,3 +1,13 @@
+/**
+ * What the toolbar and the notice card say about a handover.
+ *
+ * These used to be mostly about a button: when `Ready for agent` appeared and
+ * what blocked it. The button is gone, so what is pinned here is what is left
+ * — that the pill tells a binding apart from a live session, that a run which
+ * has already taken a copy of the graph is said out loud, and that none of it
+ * asks the user for permission.
+ */
+
 import { expect, it } from "vitest";
 import type { PendingRun } from "@anthill/live";
 import type { ExchangeView } from "../../shared/ipc.js";
@@ -7,8 +17,7 @@ const view: ExchangeView = {
   workflowId: "w",
   revision: 1,
   digest: "d1",
-  mode: "approval-gate",
-  state: "draft",
+  state: "ready_for_agent",
   source: { harness: "claude-code", sessionId: "s1", taskText: "The user's own words" },
   problems: [],
   bindings: [],
@@ -17,114 +26,101 @@ const view: ExchangeView = {
 function model(over: Partial<ExchangeView> = {}, input: Partial<HandoverInput> = {}) {
   return handoverModel({
     view: { ...view, ...over },
-    dirty: false,
-    matches: true,
     problemCount: 0,
     runs: [],
     ...input,
   });
 }
 
-it("offers the approval only where the decision can be made", () => {
-  expect(model().primary?.label).toBe("Ready for agent");
-  // Show-and-go has no gate to open, and an approved head has nothing left to
-  // decide. A button in either place would offer a decision that is not there.
-  expect(model({ mode: "show-and-go" }).primary).toBeUndefined();
-  expect(model({ state: "ready_for_agent" }).primary).toBeUndefined();
-  expect(model({ state: "bound", bindings: [{ runId: "r", revision: 1 }] }).primary).toBeUndefined();
+const liveRun = (runId: string): PendingRun =>
+  ({ anthillRunId: runId, state: "detected_live" }) as unknown as PendingRun;
+
+it("has no button to press, whatever state the handover is in", () => {
+  for (const state of ["draft", "ready_for_agent", "bound"] as const) {
+    expect(model({ state })).not.toHaveProperty("primary");
+  }
 });
 
-it("blocks the approval with a reason rather than removing it", () => {
-  const stale = model({}, { matches: false });
-  expect(stale.primary?.label).toBe("Ready for agent");
-  expect(stale.primary?.blocked).toContain("Save them, then approve revision 1");
-
-  /*
-   * Dirty alone does not block, and that is the point of keeping the two
-   * claims apart: an edit that was undone leaves the document unwritten and
-   * its content identical to the revision the exchange holds, and refusing
-   * there would refuse an approval of exactly what is on screen.
-   */
-  expect(model({}, { dirty: true }).primary?.blocked).toBeUndefined();
-
-  expect(model({}, { problemCount: 1 }).primary?.blocked).toBe(
-    "1 problem in the workflow blocks approval. Open the problems list and fix it first.",
-  );
-  expect(model({}, { problemCount: 3 }).primary?.blocked).toBe(
-    "3 problems in the workflow block approval. Open the problems list and fix them first.",
-  );
+it("says a complete revision is ready without claiming anybody approved it", () => {
+  const { pill } = model();
+  expect(pill.label).toBe("Ready");
+  expect(`${pill.label} ${pill.title}`.toLowerCase()).not.toContain("approv");
 });
 
-/*
- * The distinction the design draws in two places at once, in words and in
- * colour. A binding is a revision being pinned — it happens before the session
- * has done anything, and often before one starts.
+it("calls a revision that does not compile a draft, and points at the problems", () => {
+  const { pill } = model({ state: "draft" }, { problemCount: 2 });
+  expect(pill.label).toBe("Draft");
+  expect(pill.title).toContain("problems list");
+});
+
+/**
+ * The claim this pill exists to keep honest.
+ *
+ * A binding is a revision being pinned. It happens before the session has done
+ * anything, and often before one starts, so calling it "running" would report
+ * a session alive on no evidence at all.
  */
-it("does not call a bound run a running one until its reports arrive", () => {
-  const bound = { state: "bound" as const, bindings: [{ runId: "r", revision: 2 }] };
-  const quiet = model(bound);
-  expect(quiet.pill).toMatchObject({ label: "Bound to revision 2", tone: "bound" });
-  expect(quiet.pill.title).toContain("not evidence that the external session is running");
+it("tells a binding apart from a session that is actually reporting", () => {
+  const bound = { state: "bound" as const, bindings: [{ runId: "ANT-1", revision: 2 }] };
 
-  const live = model(bound, {
-    runs: [{ anthillRunId: "r", state: "detected_live" } as unknown as PendingRun],
+  const pinned = model(bound);
+  expect(pinned.pill.label).toBe("Bound to revision 2");
+  expect(pinned.pill.title).toContain("not evidence");
+
+  const live = model(bound, { runs: [liveRun("ANT-1")] });
+  expect(live.pill.label).toBe("Running revision 2");
+});
+
+it("says a session is working from an older revision than the canvas", () => {
+  const { notice } = model({
+    revision: 3,
+    state: "ready_for_agent",
+    bindings: [{ runId: "ANT-1", revision: 1 }],
   });
-  expect(live.pill).toMatchObject({ label: "Running revision 2", tone: "running" });
+  expect(notice?.tone).toBe("warning");
+  expect(notice?.text).toContain("revision 1");
+  expect(notice?.text).toContain("revision 3");
+  expect(notice?.text).toContain("only to future sessions");
 });
 
-it("names the two readies apart", () => {
-  expect(model({ state: "ready_for_agent" }).pill.label).toBe("Approved");
-  expect(model({ state: "ready_for_agent", mode: "show-and-go" }).pill.label).toBe("Ready");
-  expect(model({ mode: "show-and-go" }).pill.label).toBe("Draft");
-  expect(model().pill.label).toBe("Waiting for you");
+it("says a workflow that has been run keeps what it ran, even with no edits since", () => {
+  const { notice } = model({ state: "bound", bindings: [{ runId: "ANT-1", revision: 1 }] });
+  expect(notice?.text).toContain("already been run");
+  expect(notice?.text).toContain("only to future sessions");
 });
 
-/*
- * The case a panel once got wrong by promising more than the store had said.
- * Approve, edit, approve, edit, withdraw leaves the approval from two edits
- * ago standing, and a new run is given it the moment the newer is taken back —
- * immediately after the user acted to stop exactly that.
- */
-it("says what withdrawing a standing approval would leave behind", () => {
-  const alone = model({ revision: 2, approved: { revision: 1, withdrawable: true } });
-  expect(alone.notice?.text).toContain("this handover is left with nothing approved");
-  expect(alone.notice?.withdraw).toEqual({ revision: 1 });
-
-  const stacked = model({ revision: 3, approved: { revision: 2, withdrawable: true, below: 1 } });
-  expect(stacked.notice?.text).toContain("revision 1 — approved before it and never withdrawn");
-
-  // Under show-and-go an approval is not permission, so there is nothing a
-  // withdrawal would change and no control is offered.
-  const idle = model({ revision: 2, mode: "show-and-go", approved: { revision: 1, withdrawable: false } });
-  expect(idle.notice?.withdraw).toBeUndefined();
-});
-
-it("says that editing did not change what a bound session is doing", () => {
-  const diverged = model({
-    revision: 2,
-    state: "bound",
-    bindings: [{ runId: "r", revision: 1 }],
-  });
-  expect(diverged.notice?.text).toBe(
-    "Running revision 1 · your edits are revision 2. Editing did not change what the session is doing, and will not.",
-  );
-  expect(diverged.notice?.tone).toBe("warning");
-});
-
-/*
- * Red is reserved. A standing approval and diverged edits are situations, not
- * faults; only a write that did not happen is an error, and the sentence says
- * what did *not* happen rather than what went wrong.
- */
-it("reserves the red card for a write that did not land", () => {
-  const failed = model({}, { writeError: "EEXIST" });
-  expect(failed.notice?.tone).toBe("error");
-  expect(failed.notice?.text).toContain("Nothing was recorded; reload and try again");
-  expect(model({ revision: 2, approved: { revision: 1, withdrawable: true } }).notice?.tone).toBe("warning");
-});
-
-it("says nothing at all in the states that have nothing to say", () => {
+it("has nothing to say about a handover nobody has run", () => {
   expect(model().notice).toBeUndefined();
-  expect(model({ state: "ready_for_agent" }).notice).toBeUndefined();
-  expect(model({ state: "bound", bindings: [{ runId: "r", revision: 1 }] }).notice).toBeUndefined();
+});
+
+/**
+ * The one red in this feature, and the one state a person has to act on: the
+ * canvas and the exchange disagree, so what a session would be handed is not
+ * what is on screen.
+ */
+it("reports a save that did not land, above anything else", () => {
+  const { notice } = model(
+    { state: "bound", bindings: [{ runId: "ANT-1", revision: 1 }] },
+    { saveError: "EACCES: permission denied" },
+  );
+  expect(notice?.tone).toBe("error");
+  expect(notice?.text).toContain("EACCES: permission denied");
+  expect(notice?.text).toContain("not saved");
+  // It must not also claim nothing was lost from the canvas *and* leave the
+  // reader thinking the run notice was the important one.
+  expect(notice?.text).not.toContain("already been run");
+});
+
+it("never asks the user to authorise anything, in any state", () => {
+  for (const over of [
+    {},
+    { state: "draft" as const },
+    { state: "bound" as const, bindings: [{ runId: "ANT-1", revision: 1 }] },
+  ]) {
+    const { pill, notice } = model(over);
+    const prose = `${pill.label} ${pill.title} ${notice?.text ?? ""}`.toLowerCase();
+    for (const word of ["approve", "approval", "ready for agent", "withdraw", "authoris", "authoriz"]) {
+      expect(prose, `"${word}" in ${JSON.stringify(over)}`).not.toContain(word);
+    }
+  }
 });

@@ -8647,19 +8647,15 @@ button.presence-chip {
   cursor: pointer;
 }
 
-/* Only the state that asks something of the reader is coloured; the states
-   that merely report stay quiet. */
+/* Four tones, none of which asks the reader for permission: the states that
+   merely report stay quiet, and green means the graph is workable rather than
+   that anybody signed anything off. */
 .wf-toolbar .wf-pill-handover.is-draft,
 .wf-toolbar .wf-pill-handover.is-bound { background: rgba(255, 255, 255, 0.09); color: var(--ink-quiet); }
 .wf-toolbar .wf-pill-handover.is-draft i,
 .wf-toolbar .wf-pill-handover.is-bound i { background: var(--on-dark-dimmer); }
 
-.wf-toolbar .wf-pill-handover.is-waiting { background: rgba(216, 162, 26, 0.18); color: #e8c675; }
-.wf-toolbar .wf-pill-handover.is-waiting i { background: #d8a21a; }
-
-.wf-toolbar .wf-pill-handover.is-approved,
 .wf-toolbar .wf-pill-handover.is-ready { background: rgba(47, 143, 95, 0.18); color: #a9e0bd; }
-.wf-toolbar .wf-pill-handover.is-approved i,
 .wf-toolbar .wf-pill-handover.is-ready i { background: #2f8f5f; }
 
 /* Running is the same blue that means running on the canvas and in the
@@ -8668,38 +8664,7 @@ button.presence-chip {
 .wf-toolbar .wf-pill-handover.is-running { background: rgba(86, 174, 224, 0.18); color: #bcdcf1; }
 .wf-toolbar .wf-pill-handover.is-running i { background: #56aee0; }
 
-/* The primary slot. For a handover, Prompt is not merely redundant — it mints
-   a fresh run id and registers a second, unrelated run from the same
-   workflow. The slot holds the decision the person actually has, when they
-   have one. */
-.wf-toolbar .wf-primary {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  flex: none;
-  padding: 8px 15px;
-  border: 0;
-  border-radius: var(--radius-control);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-  background: var(--accent);
-  color: #fff;
-  cursor: pointer;
-}
-.wf-toolbar .wf-primary:hover { background: var(--accent-600); }
-
-/* Blocked, not hidden. A grey button with no reason teaches nothing — the
-   reason is in the title and, at length, in the notice card. */
-.wf-toolbar .wf-primary[aria-disabled="true"] {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--on-dark-dim);
-  cursor: not-allowed;
-}
-.wf-toolbar .wf-primary[aria-disabled="true"]:hover { background: rgba(255, 255, 255, 0.1); }
-
-/* The notice card. Three conditions need a sentence and cannot be a pill. It
+/* The notice card. Two conditions need a sentence and cannot be a pill. It
    floats over the canvas rather than sitting in the layout: the exchange is
    re-read on a timer, so a card can appear while nobody is interacting, and
    the canvas must not jump under the reader's cursor when it does. It is
@@ -8745,19 +8710,6 @@ button.presence-chip {
 .wf-notice.is-error { border-color: var(--accent-300); border-left-color: var(--accent); background: var(--accent-100); }
 .wf-notice.is-error p { color: var(--accent-700); }
 .wf-notice.is-error i { background: var(--accent); }
-
-.wf-notice button {
-  padding: 6px 12px;
-  flex: none;
-  border: 1px solid #e0d6bb;
-  border-radius: var(--radius-control);
-  background: var(--surface);
-  font: inherit;
-  font-size: 12.5px;
-  white-space: nowrap;
-  cursor: pointer;
-  color: #8a6a08;
-}
 
 /* The provenance popover: the original task, read once to check the same job
    was understood. Portalled, because the top bar clips its overflow. */

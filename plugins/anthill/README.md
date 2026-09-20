@@ -1,7 +1,7 @@
 # The Anthill plugin for Claude Code
 
 Hands the work of a Claude Code session to Anthill as a workflow you can read,
-edit and approve, then reports progress against the revision you approved.
+edit, then reports progress against the graph you settled on.
 
 Anthill runs nothing. Claude Code does the work; Anthill draws it and watches.
 
@@ -86,15 +86,25 @@ to them and works the same under each.
 
 ```
 /anthill:workflow design Add retry-once to the checkout flow and show the plan
-/anthill:workflow review Rework the importer, but let me approve the steps first
+/anthill:workflow review Rework the importer, but let me read the steps first
 /anthill:workflow status  workflow-checkout-rework
 /anthill:workflow resume  workflow-checkout-rework
 /anthill:workflow doctor
 ```
 
-`design` hands the work over and gets on with it. `review` waits for you to mark
-a revision **Ready for agent** in Anthill first. With no argument the skill reads
-the request and asks when it genuinely cannot tell.
+`design` hands the work over and asks whether to start. `review` does the same
+and says plainly that it is waiting, because you asked to read first. **Neither
+starts work until you answer**, and the difference between them is what the
+session says to you rather than anything Anthill enforces.
+
+Your edits are written down as you make them. There is nothing to approve and
+nothing to save: when you have finished reading, tell the session to start and
+it works from what is on your canvas.
+
+There was a **Ready for agent** button here. It looked like it held work back
+and did not — the plugin has no hooks, so withholding a revision withheld
+Anthill's record of the run and not the work — while asking you to say twice
+what you had already said once.
 
 ## Updating, disabling, uninstalling
 
@@ -143,8 +153,8 @@ does not move.
 No Anthill API, no additional model key, no shell or filesystem tools, no
 network listener. The tools write into Anthill's local exchange directory
 and read it back, and nothing else. Your reasoning is not collected: what
-crosses the boundary is the task in your own words, the workflow, approval state
-and run metadata.
+crosses the boundary is the task in your own words, the workflow and run
+metadata.
 
 The manual path — compile a prompt in Anthill, paste it in yourself — is
 untouched and still works.

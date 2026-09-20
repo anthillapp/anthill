@@ -11,6 +11,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PendingRun } from "@anthill/live";
+import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-exchange";
+import type { Workflow } from "@anthill/workflow-schema";
 
 import type { SaveWorkflowResult } from "../../shared/ipc.js";
 import { WorkflowScreen } from "./WorkflowScreen.js";
@@ -38,6 +40,10 @@ function stubApi() {
     listRecentPlans: vi.fn(async () => []),
     setWorkflowDirty: vi.fn(async () => undefined),
     liveSnapshot: vi.fn(async (): Promise<Snapshot> => ({ runs: [], capabilities: [] })),
+    // The live page draws a run from the snapshot its record kept rather than
+    // from the open canvas. These tests open a run the store knows nothing
+    // about, which is the case that falls back to what is on screen.
+    getRun: vi.fn(async () => undefined),
     liveObserve: vi.fn(async (input: { workflowId?: string }): Promise<Snapshot> => {
       observedWorkflowId = input.workflowId;
       return { runs: [], capabilities: [] };
@@ -722,5 +728,122 @@ describe("saving from the keyboard", () => {
     await act(async () => {
       land({ kind: "saved", path: "/tmp/w.workflow.json" });
     });
+  });
+});
+
+/**
+ * A handed-over workflow writes itself down.
+ *
+ * There used to be a second act between editing a handover and being able to
+ * hand it back: save, then press `Ready for agent`. The button is gone, and
+ * with it the reason the user had to think about saving at all — the file is
+ * inside the exchange, something other than them put it there, and the session
+ * that handed it over is waiting on their answer rather than their keystrokes.
+ *
+ * Only a handover. An ordinary workflow is the author's file in the author's
+ * own place, and writing to it on a timer is not this feature's business.
+ */
+describe("a handover saving itself", () => {
+  const HANDOVER: Workflow = {
+    id: "workflow-1",
+    name: "Handed over",
+    version: "1",
+    target: "claude-code",
+    brief: { goal: "Fix the crash", doneCriteria: ["Tests pass"] },
+    nodes: [
+      { id: "start", name: "Start", type: "start", config: {} },
+      { id: "end", name: "End", type: "end", config: {} },
+    ],
+    edges: [{ id: "a", source: "start", target: "end" }],
+    metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION, agents: [] } },
+  };
+
+  const PATH = "/data/exchange/workflows/workflow-1/workflow.json";
+
+  function openHandover(over: Record<string, unknown> = {}) {
+    const api = stubApi();
+    Object.assign(api, {
+      openWorkflow: vi.fn(async () => ({
+        ok: true as const,
+        opened: { workflow: HANDOVER, path: PATH },
+      })),
+      exchangeRead: vi.fn(async () => ({
+        workflowId: "workflow-1",
+        revision: 1,
+        digest: "sha256:abc",
+        state: "ready_for_agent" as const,
+        source: { harness: "claude-code" as const, sessionId: "s1", taskText: "Fix the crash" },
+        problems: [],
+        bindings: [],
+      })),
+      ...over,
+    });
+    render(
+      <WorkflowScreen
+        onExit={() => undefined}
+        onSettings={() => undefined}
+        start={{ kind: "open", path: PATH }}
+      />,
+    );
+    return api as unknown as { saveWorkflow: ReturnType<typeof vi.fn> };
+  }
+
+  async function rename(to: string) {
+    const name = await waitFor(() => {
+      const found = document.querySelector(".topbar input") as HTMLInputElement | null;
+      if (!found) throw new Error("no name field yet");
+      return found;
+    });
+    fireEvent.change(name, { target: { value: to } });
+  }
+
+  it("writes an edit down without anybody pressing anything", async () => {
+    const api = openHandover();
+    await rename("Renamed by the reader");
+
+    await waitFor(
+      () => expect(api.saveWorkflow).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: PATH,
+          workflow: expect.objectContaining({ name: "Renamed by the reader" }),
+        }),
+      ),
+      { timeout: 3000 },
+    );
+  });
+
+  /*
+   * The moment the debounce would otherwise lose: the reader changes
+   * something and switches to their terminal to tell the session to start.
+   * The harness asks for the revision to work from within a second of that,
+   * so waiting out the timer would hand it the graph from before the edit.
+   */
+  it("writes at once when the window loses focus, without waiting out the pause", async () => {
+    const api = openHandover();
+    await rename("Changed just before switching away");
+    expect(api.saveWorkflow).not.toHaveBeenCalled();
+
+    await act(async () => {
+      window.dispatchEvent(new Event("blur"));
+    });
+
+    await waitFor(() => expect(api.saveWorkflow).toHaveBeenCalledTimes(1));
+  });
+
+  it("leaves a workflow nobody handed over to its author", async () => {
+    const api = stubApi();
+    render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />);
+    const template = await screen.findByText(/Implement, test, fix/);
+    fireEvent.click(template.closest("button") as HTMLElement);
+    await screen.findByRole("button", { name: "Prompt" });
+
+    await rename("An ordinary workflow");
+    await act(async () => {
+      window.dispatchEvent(new Event("blur"));
+    });
+
+    // 1.5s is well past the pause a handover waits out.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(api.saveWorkflow).not.toHaveBeenCalled();
   });
 });

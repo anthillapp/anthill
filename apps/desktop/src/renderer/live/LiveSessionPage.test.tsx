@@ -103,6 +103,11 @@ function stub(events: ObservationEvent[], over: Record<string, unknown> = {}) {
     onLiveEvents: vi.fn(() => () => undefined),
     liveCancel: vi.fn(async () => ({ runs: [], capabilities: [] })),
     liveLookAgain: vi.fn(async () => ({ runs: [], capabilities: [] })),
+    // An ordinary run is drawn from the snapshot its run record kept, not from
+    // whatever the editor has open. A store with no record of it is the one
+    // case that falls back, so the default here answers with nothing and the
+    // tests that care about the snapshot override it.
+    getRun: vi.fn(async () => undefined),
     ...over,
   };
   (window as unknown as { anthill: unknown }).anthill = api;
@@ -116,6 +121,39 @@ it("draws the bound revision, not later editor changes with the same workflow id
   await screen.findByText("Bound revision");
   expect(document.body.textContent).toContain("Make the change");
   expect(document.body.textContent).not.toContain("NEW EDIT");
+});
+
+/**
+ * The same guarantee for a run that never went through the exchange.
+ *
+ * A Live Session is evidence of what the agent was asked to follow, so editing
+ * the workflow afterwards must not redraw a session that has already run. The
+ * run store has kept a snapshot from the moment the run started all along;
+ * this page was drawing the open canvas instead, so a rename in the editor
+ * renamed the steps of a finished session.
+ */
+it("draws an ordinary run from the snapshot it started from, not the open canvas", async () => {
+  const started = { ...workflow, nodes: workflow.nodes.map((node) => ({ ...node, name: "AS IT RAN" })) };
+  stub([], { getRun: vi.fn(async () => ({ snapshot: started })) });
+  const edited = { ...workflow, nodes: workflow.nodes.map((node) => ({ ...node, name: "EDITED SINCE" })) };
+
+  render(<LiveSessionPage workflow={edited} run={run()} onBack={() => undefined} onStopObserving={() => undefined} />);
+
+  await screen.findAllByText("AS IT RAN");
+  expect(document.body.textContent).not.toContain("EDITED SINCE");
+});
+
+/*
+ * The gap between starting a run and its record landing. Nobody has had time
+ * to edit anything in it, so the open workflow is the one it started from —
+ * which is true here and would not be a moment later.
+ */
+it("falls back to the open workflow only while the run has no stored snapshot", async () => {
+  stub([], { getRun: vi.fn(async () => undefined) });
+
+  render(<LiveSessionPage workflow={workflow} run={run()} onBack={() => undefined} onStopObserving={() => undefined} />);
+
+  await screen.findByText("Make the change");
 });
 
 it("never substitutes an edited graph when the immutable revision cannot be read", async () => {

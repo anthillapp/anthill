@@ -82,6 +82,6 @@ describe("@anthill/workflow-exchange", () => {
     const retry = readSubmission(JSON.parse(JSON.stringify(HANDOVER)));
     expect(retry.ok && revisionDigest(retry.submission.workflow)).toBe(digest);
 
-    expect(describeState("draft", submission.mode).label).toBe("Waiting for you");
+    expect(describeState("draft").label).toBe("Draft");
   });
 });

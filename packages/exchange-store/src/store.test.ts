@@ -443,227 +443,8 @@ describe("addRevision", () => {
   });
 });
 
-describe("markReady", () => {
-  it("records the approval of one exact revision", async () => {
-    const store = await openStore();
-    await store.createWorkflow(submission({ mode: "approval-gate" }));
-
-    const ready = await store.markReady("workflow-1", 1);
-
-    expect(ready.outcome).toBe("ready");
-    expect(await store.readyRevision("workflow-1")).toBe(1);
-  });
-
-  it("keeps the first answer when the same revision is approved twice", async () => {
-    const store = await openStore();
-    await store.createWorkflow(submission({ mode: "approval-gate" }));
-    const first = await store.markReady("workflow-1", 1);
-
-    const again = await store.markReady("workflow-1", 1);
-
-    expect(again.outcome).toBe("already_ready");
-    expect(again.at).toBe(first.at);
-  });
-
-  it("will not approve a revision that does not exist", async () => {
-    const store = await openStore();
-    await store.createWorkflow(submission({ mode: "approval-gate" }));
-
-    expect((await store.markReady("workflow-1", 4)).outcome).toBe("no_such_revision");
-    expect((await store.markReady("workflow-9", 1)).outcome).toBe("no_such_workflow");
-  });
-});
-
-/*
- * Taking an approval back.
- *
- * Readiness never carries to the next revision, which left an approved
- * revision 1 standing — and bindable — after the user had edited well past it,
- * with nothing they could do about it but approve something newer. The
- * withdrawal is a second record rather than the deletion of the first, so what
- * these pin down is mostly that nothing was removed: the approval is still on
- * disk, the run that already holds the revision is still bound to it, and it
- * is only what a *new* run may be given that changed.
- */
-describe("revokeReady", () => {
-  it("puts the gate back to waiting, and leaves the approval on disk", async () => {
-    const store = await openStore();
-    await store.createWorkflow(submission({ mode: "approval-gate" }));
-    await store.markReady("workflow-1", 1);
-
-    const withdrawn = await store.revokeReady("workflow-1", 1);
-
-    expect(withdrawn.outcome).toBe("revoked");
-    expect(await store.readyRevision("workflow-1")).toBeUndefined();
-    expect(await store.eligibleRevision("workflow-1")).toMatchObject({
-      eligible: false,
-      reason: "awaiting_approval",
-    });
-    // Both records, because a withdrawal is a thing that happened rather than
-    // a thing that stopped having happened.
-    const listing = await readdir(join(store.root, "workflows/workflow-1/revisions"));
-    expect(listing).toContain("0001.ready");
-    expect(listing).toContain("0001.revoked");
-    expect((await store.readWorkflow("workflow-1"))?.revoked).toEqual([1]);
-  });
-
-  it("refuses a bind naming the revision the user withdrew", async () => {
-    const store = await openStore();
-    await store.createWorkflow(submission({ mode: "approval-gate" }));
-    await store.markReady("workflow-1", 1);
-    await store.revokeReady("workflow-1", 1);
-
-    const bound = await store.bind("workflow-1", 1, { runId: "ANT-LATE", nonce: "abc" });
-
-    expect(bound.outcome).toBe("not_eligible");
-    expect(bound.reason).toBe("awaiting_approval");
-    expect(await store.readBinding("workflow-1", "ANT-LATE")).toBeUndefined();
-  });
-
-  it("leaves a run that already holds the revision bound to it", async () => {
-    const store = await openStore();
-    await store.createWorkflow(submission({ mode: "approval-gate" }));
-    await store.markReady("workflow-1", 1);
-    await store.bind("workflow-1", 1, { runId: "ANT-EARLY", nonce: "abc" });
-
-    await store.revokeReady("workflow-1", 1);
-
-    // Withdrawing an approval decides what a new run may be given. The work
-    // already under way is not something this store could stop even if it
-    // wanted to, and a binding that quietly went missing would only cost the
-    // user the page that shows them what is running.
-    const binding = await store.readBinding("workflow-1", "ANT-EARLY");
-    expect(binding?.revision).toBe(1);
-    expect((await store.readWorkflow("workflow-1"))?.bindings).toHaveLength(1);
-    expect((await store.readRevision("workflow-1", 1))?.workflow.name).toBe("Ship the fix");
-  });
-
-  it("makes the revision the user approves next the eligible one", async () => {
-    const store = await openStore();
-    await store.createWorkflow(submission({ mode: "approval-gate" }));
-    await store.markReady("workflow-1", 1);
-    await store.addRevision("workflow-1", completeWorkflow({ name: "Edited" }), "user");
-    await store.revokeReady("workflow-1", 1);
-
-    expect((await store.markReady("workflow-1", 2)).outcome).toBe("ready");
-
-    expect(await store.readyRevision("workflow-1")).toBe(2);
-    expect(await store.eligibleRevision("workflow-1")).toMatchObject({
-      eligible: true,
-      revision: { revision: 2 },
-    });
-  });
-
-  /*
-   * Withdrawing does not always leave nothing approved, and the store says so
-   * before it happens. Approving twice with an edit between them leaves two
-   * markers standing; taking the newer one back hands the gate to the older,
-   * which is content the user has edited past twice. That is the store working
-   * as designed — an approval nobody withdrew is still an approval — so what
-   * has to be right is that the answer is available to ask for, rather than
-   * inferred by whoever is about to offer the user the button.
-   */
-  it("hands the gate to the approval underneath, and names it before it happens", async () => {
-    const store = await openStore();
-    await store.createWorkflow(submission({ mode: "approval-gate" }));
-    await store.markReady("workflow-1", 1);
-    await store.addRevision("workflow-1", completeWorkflow({ name: "Second thoughts" }), "user");
-    await store.markReady("workflow-1", 2);
-    await store.addRevision("workflow-1", completeWorkflow({ name: "Third thoughts" }), "user");
-
-    expect(await store.readWorkflow("workflow-1")).toMatchObject({
-      ready: { revision: 2 }, readyBelow: { revision: 1 },
-    });
-
-    await store.revokeReady("workflow-1", 2);
-
-    expect(await store.readyRevision("workflow-1")).toBe(1);
-    expect(await store.eligibleRevision("workflow-1")).toMatchObject({
-      eligible: true,
-      revision: { revision: 1 },
-    });
-    // And nothing under that one, so withdrawing it would leave the handover
-    // with nothing approved after all.
-    expect((await store.readWorkflow("workflow-1"))?.readyBelow).toBeUndefined();
-  });
-
-  it("will not let a damaged approval underneath disturb the one that stands", async () => {
-    const store = await openStore();
-    await store.createWorkflow(submission({ mode: "approval-gate" }));
-    await store.markReady("workflow-1", 1);
-    await store.addRevision("workflow-1", completeWorkflow({ name: "Second thoughts" }), "user");
-    await store.markReady("workflow-1", 2);
-    await writeFile(join(store.root, "workflows/workflow-1/revisions/0001.ready"), "{bad");
-
-    // Nothing below the standing approval decides anything, so a record that
-    // cannot be read down there is not a problem with this workflow: reporting
-    // it would make the whole thing unreadable and refuse revision 2, which is
-    // readable, current and approved.
-    const stored = await store.readWorkflow("workflow-1");
-    expect(stored?.problems).toEqual([]);
-    expect(stored?.ready?.revision).toBe(2);
-    expect(stored?.readyBelow).toBeUndefined();
-    expect(await store.eligibleRevision("workflow-1")).toMatchObject({
-      eligible: true,
-      revision: { revision: 2 },
-    });
-  });
-
-  it("will not withdraw an approval nobody made", async () => {
-    const store = await openStore();
-    await store.createWorkflow(submission({ mode: "approval-gate" }));
-    await store.addRevision("workflow-1", completeWorkflow({ name: "Edited" }), "user");
-
-    const unapproved = await store.revokeReady("workflow-1", 2);
-
-    expect(unapproved.outcome).toBe("conflict");
-    expect(codes(unapproved.problems)).toEqual([
-      EXCHANGE_STORE_PROBLEM_CODES.STORE_REVISION_NOT_APPROVED,
-    ]);
-    expect((await store.markReady("workflow-1", 2)).outcome).toBe("ready");
-    expect((await store.revokeReady("workflow-1", 4)).outcome).toBe("no_such_revision");
-    expect((await store.revokeReady("workflow-9", 1)).outcome).toBe("no_such_workflow");
-  });
-
-  it("will not approve a revision the user has withdrawn", async () => {
-    const store = await openStore();
-    await store.createWorkflow(submission({ mode: "approval-gate" }));
-    await store.markReady("workflow-1", 1);
-    await store.revokeReady("workflow-1", 1);
-
-    const again = await store.markReady("workflow-1", 1);
-
-    // Two records disagreeing about one revision is what a store that only
-    // ever creates files exists to prevent, and an approval that outranked a
-    // withdrawal would be one. The way forward is the next revision.
-    expect(again.outcome).toBe("conflict");
-    expect(codes(again.problems)).toEqual([EXCHANGE_STORE_PROBLEM_CODES.STORE_REVISION_REVOKED]);
-    expect(await store.readyRevision("workflow-1")).toBeUndefined();
-  });
-
-  it("tells a second writer the approval is already withdrawn, not that they disagree", async () => {
-    const root = await dataDir();
-    // Two clocks, because two writers have two, and the second one arriving is
-    // answered from the record the first wrote rather than from its own time.
-    const first = new ExchangeStore(root, ticking());
-    const second = new ExchangeStore(root, ticking(Date.parse("2026-10-01T09:00:00.000Z")));
-    await first.createWorkflow(submission({ mode: "approval-gate" }));
-    await first.markReady("workflow-1", 1);
-
-    const [a, b] = await Promise.all([
-      first.revokeReady("workflow-1", 1),
-      second.revokeReady("workflow-1", 1),
-    ]);
-
-    expect([a.outcome, b.outcome].sort()).toEqual(["already_revoked", "revoked"]);
-    expect(a.at).toBe(b.at);
-    expect(a.problems).toBeUndefined();
-    expect(b.problems).toBeUndefined();
-  });
-});
-
 describe("eligibleRevision", () => {
-  it("makes the head revision eligible under show-and-go", async () => {
+  it("makes the head revision eligible", async () => {
     const store = await openStore();
     await store.createWorkflow(submission());
     await store.addRevision("workflow-1", completeWorkflow({ name: "Later" }), "user");
@@ -693,29 +474,19 @@ describe("eligibleRevision", () => {
     }
   });
 
-  it("waits for the user under approval-gate, and never falls back to the head", async () => {
+  // `approval-gate` is metadata a harness may still submit, and it used to
+  // decide which revision came back. A stored handover carrying it opens and
+  // works exactly like any other rather than waiting for an approval nothing
+  // can now record.
+  it("does not wait for an approval when a stored handover still says approval-gate", async () => {
     const store = await openStore();
     await store.createWorkflow(submission({ mode: "approval-gate" }));
-
-    const waiting = await store.eligibleRevision("workflow-1");
-
-    expect(waiting.eligible).toBe(false);
-    if (!waiting.eligible) expect(waiting.reason).toBe("awaiting_approval");
-  });
-
-  it("does not let an approval of revision 1 carry to revision 2", async () => {
-    const store = await openStore();
-    await store.createWorkflow(submission({ mode: "approval-gate" }));
-    await store.markReady("workflow-1", 1);
-    await store.addRevision("workflow-1", completeWorkflow({ name: "Edited after approval" }), "user");
+    await store.addRevision("workflow-1", completeWorkflow({ name: "Edited" }), "user");
 
     const eligible = await store.eligibleRevision("workflow-1");
 
     expect(eligible.eligible).toBe(true);
-    // The approval belongs to the revision the user read, not to whatever the
-    // workflow has become since.
-    if (eligible.eligible) expect(eligible.revision.revision).toBe(1);
-    expect(await store.readyRevision("workflow-1")).toBe(1);
+    if (eligible.eligible) expect(eligible.revision.revision).toBe(2);
   });
 
   it("says there is no such workflow rather than answering about nothing", async () => {
@@ -799,31 +570,20 @@ describe("bind", () => {
     expect(collision.binding).toBeUndefined();
   });
 
-  it("refuses a revision the mode does not make eligible", async () => {
+  // The user edited past what the harness was about to bind. Binding it would
+  // start work on a graph nobody is looking at any more.
+  it("refuses a revision the user has edited past", async () => {
     const store = await openStore();
-    await store.createWorkflow(submission({ mode: "approval-gate" }));
-    await store.markReady("workflow-1", 1);
-    await store.addRevision("workflow-1", completeWorkflow({ name: "Unapproved" }), "user");
+    await store.createWorkflow(submission());
+    await store.addRevision("workflow-1", completeWorkflow({ name: "Edited" }), "user");
 
-    const early = await store.bind("workflow-1", 2, { runId: "ANT-22222222", nonce: "def456" });
+    const stale = await store.bind("workflow-1", 1, { runId: "ANT-22222222", nonce: "def456" });
 
-    expect(early.outcome).toBe("not_eligible");
-    expect(codes(early.problems)).toEqual([
+    expect(stale.outcome).toBe("not_eligible");
+    expect(codes(stale.problems)).toEqual([
       EXCHANGE_STORE_PROBLEM_CODES.STORE_REVISION_NOT_ELIGIBLE,
     ]);
     expect(await store.readBinding("workflow-1", "ANT-22222222")).toBeUndefined();
-  });
-
-  it("refuses to bind anything while the gate is shut", async () => {
-    const store = await openStore();
-    await store.createWorkflow(submission({ mode: "approval-gate" }));
-
-    const early = await store.bind("workflow-1", 1, { runId: "ANT-22222222", nonce: "def456" });
-
-    expect(early.outcome).toBe("not_eligible");
-    expect(codes(early.problems)).toEqual([
-      EXCHANGE_STORE_PROBLEM_CODES.STORE_AWAITING_APPROVAL,
-    ]);
   });
 
   it("calls a bound revision bound when it is asked about again", async () => {
@@ -862,18 +622,6 @@ describe("an id that lands in another workflow's directory", () => {
 
     expect(await store.readWorkflow("a:b")).toBeUndefined();
     expect((await store.readWorkflow("a/b"))?.head?.revision).toBe(1);
-  });
-
-  it("refuses to approve a revision that belongs to the other one", async () => {
-    const store = await storeHolding("a/b");
-
-    const ready = await store.markReady("a:b", 1);
-
-    expect(ready.outcome).toBe("no_such_workflow");
-    expect(codes(ready.problems)).toEqual([
-      EXCHANGE_STORE_PROBLEM_CODES.STORE_WORKFLOW_ID_TAKEN,
-    ]);
-    expect(await store.readyRevision("a/b")).toBeUndefined();
   });
 
   it("refuses to bind a revision that belongs to the other one", async () => {
@@ -1101,63 +849,21 @@ describe("the digest", () => {
 });
 
 describe("ANT-86 integrity and recovery regressions", () => {
-  it.each(["{bad", JSON.stringify({ version: 999, revision: 1, approved: false })])(
-    "never treats an unreadable approval as consent: %s", async (text) => {
-      const store = await openStore();
-      await store.createWorkflow(submission({ mode: "approval-gate" }));
-      await writeFile(join(store.root, "workflows/workflow-1/revisions/0001.ready"), text);
-      expect(await store.eligibleRevision("workflow-1")).toMatchObject({ eligible: false, reason: "unreadable" });
-      expect((await store.markReady("workflow-1", 1)).outcome).toBe("conflict");
-    });
-
-  it("rejects approval body/address mismatch and malformed optional digest", async () => {
+  it("keeps a revision and a binding written by the previous workflow format", async () => {
     const store = await openStore();
     await store.createWorkflow(submission({ mode: "approval-gate" }));
-    await store.addRevision("workflow-1", completeWorkflow({ name: "Unapproved" }), "user");
-    await store.markReady("workflow-1", 1);
-    const path = join(store.root, "workflows/workflow-1/revisions/0001.ready");
-    const approval = JSON.parse(await readFile(path, "utf8"));
-    for (const change of [{ revision: 2 }, { workflowId: "other" }, { digest: 42 }, { digest: "0".repeat(16) }]) {
-      await writeFile(path, JSON.stringify({ ...approval, ...change }));
-      expect((await store.eligibleRevision("workflow-1")).eligible).toBe(false);
-    }
-  });
-
-  it("rejects altered content, record identity and future workflow format", async () => {
-    const store = await openStore();
-    await store.createWorkflow(submission());
-    const path = join(store.root, "workflows/workflow-1/revisions/0001.json");
-    const original = JSON.parse(await readFile(path, "utf8"));
-    const changed = structuredClone(original);
-    changed.workflow.nodes[1].config.task = "Changed without approval";
-    const future = structuredClone(original);
-    future.workflow.metadata.workflow.formatVersion = 999;
-    future.digest = revisionDigest(future.workflow);
-    for (const value of [changed, { ...original, revision: 9 }, future,
-      { ...original, workflow: { ...original.workflow, id: "other" }, digest: revisionDigest({ ...original.workflow, id: "other" }) }]) {
-      await writeFile(path, JSON.stringify(value));
-      expect((await store.eligibleRevision("workflow-1")).eligible).toBe(false);
-      expect(await store.readRevision("workflow-1", 1)).toBeUndefined();
-    }
-  });
-
-  it("keeps a revision, an approval and a binding written by the previous workflow format", async () => {
-    const store = await openStore();
-    await store.createWorkflow(submission({ mode: "approval-gate" }));
-    await store.markReady("workflow-1", 1);
     await store.bind("workflow-1", 1, { runId: "ANT-OLD", nonce: "abc" });
 
     // Age every record to the format before this one, which is what an
     // upgraded Anthill finds on disk: the bytes were written by the build that
-    // came before it, and the first format bump used to make all three
-    // unreadable at once — the handover, the user's approval of it, and the
-    // run that was already working from it.
+    // came before it, and the first format bump used to make both unreadable
+    // at once — the handover and the run already working from it.
     const snapshot = join(store.root, "workflows/workflow-1/revisions/0001.json");
     const aged = JSON.parse(await readFile(snapshot, "utf8"));
     aged.workflow.metadata.workflow.formatVersion = WORKFLOW_FORMAT_VERSION - 1;
     aged.digest = revisionDigest(aged.workflow);
     await writeFile(snapshot, JSON.stringify(aged));
-    for (const name of ["revisions/0001.ready", "bindings/ANT-OLD.json"]) {
+    for (const name of ["bindings/ANT-OLD.json"]) {
       const path = join(store.root, "workflows/workflow-1", name);
       const record = JSON.parse(await readFile(path, "utf8"));
       await writeFile(path, JSON.stringify({ ...record, digest: aged.digest }));
@@ -1167,9 +873,7 @@ describe("ANT-86 integrity and recovery regressions", () => {
     expect(stored?.problems).toEqual([]);
     expect(stored?.head?.revision).toBe(1);
     expect(stored?.head?.digest).toBe(aged.digest);
-    expect(stored?.ready?.revision).toBe(1);
     expect(stored?.bindings.map((binding) => binding.runId)).toEqual(["ANT-OLD"]);
-    expect(await store.readyRevision("workflow-1")).toBe(1);
     expect(await store.readBinding("workflow-1", "ANT-OLD")).toBeDefined();
     expect(await store.eligibleRevision("workflow-1")).toMatchObject({
       eligible: true, revision: { revision: 1, digest: aged.digest },
@@ -1210,7 +914,6 @@ describe("ANT-86 integrity and recovery regressions", () => {
     await store.bind("a/b", 1, { runId: "ANT-A", nonce: "abc" });
     expect(await store.readRevision("a:b", 1)).toBeUndefined();
     expect(await store.readBinding("a:b", "ANT-A")).toBeUndefined();
-    expect(await store.readyRevision("a:b")).toBeUndefined();
   });
 
   it("keeps bind retries stable after an edit and rejects a changed session", async () => {

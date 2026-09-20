@@ -436,10 +436,9 @@ describe("get_workflow", () => {
     expect(textOf(result)).not.toContain("anthill://");
   });
 
-  it("reports identity, head, readiness, bindings and mode", async () => {
-    const { handlers, store } = await openTools();
+  it("reports identity, head, bindings and mode", async () => {
+    const { handlers } = await openTools();
     await handlers.createWorkflowDraft(draftInput({ mode: "approval-gate" }));
-    await store.markReady("workflow-1", 1);
     await handlers.bindRun(bindInput());
 
     const answer = answerOf(await handlers.getWorkflow({ workflowId: "workflow-1" }));
@@ -449,7 +448,6 @@ describe("get_workflow", () => {
     expect(answer.source).toMatchObject({ harness: "claude-code", sessionId: "session-abc" });
     expect(answer.head).toMatchObject({ revision: 1, by: "harness" });
     expect(answer.revisions).toEqual([1]);
-    expect(answer.ready).toMatchObject({ revision: 1 });
     expect(answer.bindings).toHaveLength(1);
     expect(answer.eligible).toBe(true);
     expect(answer.state).toBe("bound");
@@ -483,33 +481,34 @@ describe("get_ready_revision", () => {
     expect(textOf(result)).toContain("bind_run");
   });
 
-  it("holds the gate shut until the user approves, and never waits", async () => {
-    const { handlers, store } = await openTools();
+  // `approval-gate` is metadata a stored handover may still carry. It used to
+  // hold this answer back until the user had approved something; nothing can
+  // record an approval now, so a handover carrying it is workable like any
+  // other rather than waiting for ever.
+  it("does not wait for an approval when a handover still says approval-gate", async () => {
+    const { handlers } = await openTools();
     await handlers.createWorkflowDraft(draftInput({ mode: "approval-gate" }));
-
-    const waiting = answerOf(await handlers.getReadyRevision({ workflowId: "workflow-1" }));
-    expect(waiting.outcome).toBe("not_ready");
-    expect(waiting.reason).toBe("awaiting_approval");
-
-    await store.markReady("workflow-1", 1);
-
-    const opened = answerOf(await handlers.getReadyRevision({ workflowId: "workflow-1" }));
-    expect(opened.outcome).toBe("ready");
-    expect(opened.revision).toBe(1);
-    expect(opened.state).toBe("ready_for_agent");
-  });
-
-  it("returns the revision the user approved, not the one they have since written", async () => {
-    const { handlers, store } = await openTools();
-    await handlers.createWorkflowDraft(draftInput({ mode: "approval-gate" }));
-    await store.markReady("workflow-1", 1);
-    await store.addRevision("workflow-1", completeWorkflow({ name: "Renamed" }), "user");
 
     const answer = answerOf(await handlers.getReadyRevision({ workflowId: "workflow-1" }));
 
     expect(answer.outcome).toBe("ready");
     expect(answer.revision).toBe(1);
-    expect((answer.workflow as Workflow).name).toBe("Ship the fix");
+    expect(answer.state).toBe("ready_for_agent");
+  });
+
+  // The user edits, and what comes back is what they are looking at. Under the
+  // gate this answered with the revision they had approved instead, which was
+  // the older one the moment they touched anything.
+  it("returns what the user has written, not what the harness submitted", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    await store.addRevision("workflow-1", completeWorkflow({ name: "Renamed" }), "user");
+
+    const answer = answerOf(await handlers.getReadyRevision({ workflowId: "workflow-1" }));
+
+    expect(answer.outcome).toBe("ready");
+    expect(answer.revision).toBe(2);
+    expect((answer.workflow as Workflow).name).toBe("Renamed");
   });
 
   it("says the workflow is not there rather than telling the caller to wait for it", async () => {
@@ -529,9 +528,13 @@ describe("get_ready_revision", () => {
     expect(answer.url).toBeUndefined();
   });
 
-  it("tells the caller to come back where the user is the one who can open the gate", async () => {
-    const { handlers } = await openTools();
-    await handlers.createWorkflowDraft(draftInput({ mode: "approval-gate" }));
+  // One refusal is still the user's to clear, and it is about the graph rather
+  // than about permission: questions nobody has answered. The caller is told to
+  // come back, and given the link to the thing the user has to look at.
+  it("tells the caller to come back where the user is the one who can clear it", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    await store.addRevision("workflow-1", completeWorkflow({ brief: { goal: "Make it better." } }), "user");
 
     const waiting = await handlers.getReadyRevision({ workflowId: "workflow-1" });
 
@@ -735,19 +738,37 @@ describe("bind_run", () => {
     expect(textOf(result)).toContain("anthill run ANT-RUN1 n1");
   });
 
-  it("refuses to bind behind a gate the user has not opened, and creates nothing", async () => {
+  // Nothing has to be approved first. This is the change: a handover that is
+  // complete is bindable the moment it is stored, whatever `mode` it carries,
+  // because the decision to start is the user's answer in the conversation and
+  // was never anything this server held.
+  it("binds a stored handover without an approval, whatever mode it carries", async () => {
     const { handlers, store } = await openTools();
     await handlers.createWorkflowDraft(draftInput({ mode: "approval-gate" }));
 
     const answer = answerOf(await handlers.bindRun(bindInput()));
 
+    expect(answer.outcome).toBe("bound");
+    expect(answer.revision).toBe(1);
+
+    const stored = await store.readWorkflow("workflow-1");
+    expect(stored?.bindings.map((binding) => binding.revision)).toEqual([1]);
+  });
+
+  // The graph is still judged, and that refusal is not the gate under another
+  // name: it says the diagram cannot be compiled into a prompt.
+  it("refuses to bind a revision that does not validate, and creates nothing", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    await store.addRevision("workflow-1", completeWorkflow({ brief: { goal: "Make it better." } }), "user");
+
+    const answer = answerOf(await handlers.bindRun(bindInput({ revision: 2 })));
+
     expect(answer.outcome).toBe("not_ready");
-    expect(answer.reason).toBe("awaiting_approval");
     expect(answer.runId).toBeUndefined();
 
     const stored = await store.readWorkflow("workflow-1");
     expect(stored?.bindings).toEqual([]);
-    expect((await inbox(store)).map((drop) => drop.kind)).toEqual(["display"]);
   });
 
   it("refuses a revision the user has edited past, and names both numbers", async () => {

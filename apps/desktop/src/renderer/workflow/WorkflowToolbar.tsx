@@ -114,9 +114,6 @@ function StepButton({
 export type ToolbarHandover = {
   model: HandoverModel;
   source: ExchangeSource;
-  /** Record the approval. Called only when the button is not blocked. */
-  onApprove: () => void;
-  busy: boolean;
 };
 
 export type WorkflowToolbarProps = {
@@ -274,26 +271,11 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
       <button onClick={props.onSave}>Save</button>
 
       {handover ? (
-        /* Blocked, not hidden. A grey button with no reason teaches nothing,
-           so the reason is in the title and at length in the notice card. The
-           sentence about what pressing it does *not* do is in the title too,
-           where somebody about to press it will see it. */
-        handover.model.primary ? (
-          <button
-            className="wf-primary"
-            aria-disabled={Boolean(handover.model.primary.blocked) || handover.busy}
-            onClick={() => {
-              if (handover.model.primary?.blocked || handover.busy) return;
-              handover.onApprove();
-            }}
-            title={
-              handover.model.primary.blocked ??
-              "Records your decision only. Anthill does not start or control the external session."
-            }
-          >
-            {handover.busy ? "Recording…" : handover.model.primary.label}
-          </button>
-        ) : null
+        /* Nothing. A handover's primary slot held `Ready for agent`, which
+           recorded a decision the user had already given the session in
+           conversation and could not hold any work back. The pill reports
+           where the handover stands; there is nothing here to press. */
+        null
       ) : (
         /* Not `disabled`: a button that cannot be clicked cannot say where to
            go instead. It looks unavailable and takes the author to the

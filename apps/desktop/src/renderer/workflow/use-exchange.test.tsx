@@ -1,6 +1,16 @@
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+/**
+ * The one read of the exchange the whole workflow screen shares.
+ *
+ * This hook used to write as well: `approve` and `withdraw`, and most of these
+ * tests were about the shapes those two sent. Both went with the approval
+ * gate, so what is pinned now is the reading — that it does not read without
+ * a file to read against, that a save brings the view back up to date, and
+ * that a read which threw is shown rather than leaving a stale handover up.
+ */
+
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { ExchangeReadyResult, ExchangeView } from "../../shared/ipc.js";
+import type { ExchangeView } from "../../shared/ipc.js";
 import { useExchange } from "./use-exchange.js";
 
 afterEach(cleanup);
@@ -9,19 +19,14 @@ const view: ExchangeView = {
   workflowId: "w",
   revision: 3,
   digest: "sha256:abc",
-  mode: "approval-gate",
-  state: "draft",
+  state: "ready_for_agent",
   source: { harness: "claude-code", sessionId: "s1", taskText: "The user's own words" },
   problems: [],
   bindings: [],
 };
 
-function api(over: Partial<ExchangeView> = {}, ready?: ExchangeReadyResult) {
-  const methods = {
-    exchangeRead: vi.fn(async () => ({ ...view, ...over })),
-    exchangeReady: vi.fn(async (): Promise<ExchangeReadyResult> => ready ?? { ok: true }),
-    exchangeRevoke: vi.fn(async (): Promise<ExchangeReadyResult> => ready ?? { ok: true }),
-  };
+function api(over: Partial<ExchangeView> = {}) {
+  const methods = { exchangeRead: vi.fn(async () => ({ ...view, ...over })) };
   (window as unknown as { anthill: unknown }).anthill = methods;
   return methods;
 }
@@ -32,62 +37,39 @@ it("reads nothing until the workflow has a file to be read against", async () =>
   await waitFor(() => expect(methods.exchangeRead).not.toHaveBeenCalled());
 });
 
-it("names the revision and digest it read when it records an approval", async () => {
+it("reads the handover the open file belongs to", async () => {
   const methods = api();
-  const { result } = renderHook(() => useExchange("w", "/tmp/workflow.json", false));
-  await waitFor(() => expect(result.current.view).toBeTruthy());
-  await act(async () => {
-    await result.current.approve(view.revision, view.digest);
-  });
-  expect(methods.exchangeReady).toHaveBeenCalledWith({
-    path: "/tmp/workflow.json",
-    workflowId: "w",
-    revision: 3,
-    digest: "sha256:abc",
-  });
+  const { result } = renderHook(() => useExchange("w", "/tmp/workflow.json"));
+  await waitFor(() => expect(result.current.view).toMatchObject({ revision: 3 }));
+  expect(methods.exchangeRead).toHaveBeenCalledWith("/tmp/workflow.json", "w");
 });
 
-/*
- * Withdrawing carries no digest, unlike approving: the revision being taken
- * back is usually not the one the editor has open — that is the whole
- * situation it answers — so there is no head content to check it against.
+/**
+ * A save is what the third argument is for.
+ *
+ * Autosave writes a new revision, and the view describing the old one would
+ * then be a revision behind on the screen the user is looking at.
  */
-it("withdraws by revision alone", async () => {
+it("reads again when the save state changes", async () => {
   const methods = api();
-  const { result } = renderHook(() => useExchange("w", "/tmp/workflow.json", false));
-  await waitFor(() => expect(result.current.view).toBeTruthy());
-  await act(async () => {
-    await result.current.withdraw(1);
-  });
-  expect(methods.exchangeRevoke).toHaveBeenCalledWith({
-    path: "/tmp/workflow.json",
-    workflowId: "w",
-    revision: 1,
-  });
-});
-
-/*
- * A refusal is surfaced rather than swallowed, and it is not a read failure:
- * the screen turns it into the one red card in this feature, which says what
- * did *not* happen.
- */
-it("keeps a refused write where the screen can say nothing was recorded", async () => {
-  api({}, { ok: false, error: "the exchange file changed while Anthill was writing" });
-  const { result } = renderHook(() => useExchange("w", "/tmp/workflow.json", false));
-  await waitFor(() => expect(result.current.view).toBeTruthy());
-  await act(async () => {
-    await result.current.approve(3, "sha256:abc");
-  });
-  expect(result.current.error).toContain("changed while Anthill was writing");
-});
-
-it("re-reads the exchange after a decision, rather than assuming it landed", async () => {
-  const methods = api();
-  const { result } = renderHook(() => useExchange("w", "/tmp/workflow.json", false));
+  const { result, rerender } = renderHook(
+    ({ dirty }: { dirty: boolean }) => useExchange("w", "/tmp/workflow.json", dirty),
+    { initialProps: { dirty: true } },
+  );
   await waitFor(() => expect(result.current.view).toBeTruthy());
   const before = methods.exchangeRead.mock.calls.length;
-  await act(async () => {
-    await result.current.approve(3, "sha256:abc");
-  });
+
+  rerender({ dirty: false });
+
   await waitFor(() => expect(methods.exchangeRead.mock.calls.length).toBeGreaterThan(before));
+});
+
+it("surfaces a read that threw rather than showing a stale handover", async () => {
+  const methods = { exchangeRead: vi.fn(async () => { throw new Error("the exchange directory disappeared"); }) };
+  (window as unknown as { anthill: unknown }).anthill = methods;
+
+  const { result } = renderHook(() => useExchange("w", "/tmp/workflow.json"));
+
+  await waitFor(() => expect(result.current.error).toContain("exchange directory disappeared"));
+  expect(result.current.view).toBeUndefined();
 });

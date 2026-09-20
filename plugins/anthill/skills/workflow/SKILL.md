@@ -1,6 +1,6 @@
 ---
 name: workflow
-description: Use when the user wants the work of this session laid out as a workflow in Anthill — "show this in Anthill", "plan this out in Anthill", "/anthill:workflow design …" — or wants to pick a handed-over workflow back up, check where one stands, or approve one before work starts. Covers handing a task over as a reviewable graph, asking the questions that make it complete, binding a run to the revision the user approved, and reporting progress against it. Not for work that is not going to be done in this session.
+description: Use when the user wants the work of this session laid out as a workflow in Anthill — "show this in Anthill", "plan this out in Anthill", "/anthill:workflow design …" — or wants to pick a handed-over workflow back up, or check where one stands. Covers handing a task over as a reviewable graph, asking the questions that make it complete, binding a run to the graph the user settled on, and reporting progress against it. Not for work that is not going to be done in this session.
 version: 0.7.1
 user-invocable: true
 argument-hint: "[design|review · status|resume · doctor] [task or workflow id]"
@@ -8,7 +8,7 @@ argument-hint: "[design|review · status|resume · doctor] [task or workflow id]
 
 Anthill is a desktop app that draws the work of a coding session as a diagram and
 follows along. This skill hands it the work of *this* session: you describe the
-task as a workflow, Anthill shows it to the user, they edit and approve it, and
+task as a workflow, Anthill shows it to the user, they read and edit it, and
 then you do the work and say which step you are on.
 
 Anthill does not run anything. It does not start you, stop you, or tell you what
@@ -18,16 +18,16 @@ should suggest otherwise to the user.
 ## What the argument means
 
 * `design <task>` — hand the task over, then ask the user whether to start.
-* `review <task>` — hand it over and wait for them to mark a revision ready in
-  Anthill, so their decision is recorded rather than only spoken.
+* `review <task>` — the same, said differently: hand it over and make plain
+  that you are waiting, because they asked to read it before anything happens.
 * `status [<workflow id>]` — where a handover stands.
 * `resume <workflow id>` — pick a handover back up in a new session.
 * `doctor` — check that Anthill and its tools are reachable.
 
 With no argument, read the request: "show me this in Anthill and do it" is
 `design`; "let me look at it first", "check with me before you start" is
-`review`. When it is genuinely unclear, ask — the difference is whether work
-starts without them.
+`review`. The two differ in what you say to the user, and in nothing else:
+**neither starts work before they answer.**
 
 ## Before anything else
 
@@ -115,12 +115,16 @@ The workflow is now in front of the user. **Do not begin the work until they hav
 said to.** Ask, in your own words, whether the plan is right or something should
 change, and say where the workflow is so they can read it.
 
-This holds in both modes. The mode decides where the answer is recorded, not
-whether it is needed: under **approval gate** Anthill will not hand you a
-revision until the user marks one ready in the app, so their yes is written
-down; under **show-and-go** nothing stops you, so their yes is only what they
-said to you. Neither is a reason to start without asking. A workflow the user
-has not agreed to is a plan you wrote for yourself.
+**Nothing in Anthill enforces this, and nothing ever did.** There was a mode
+that appeared to: the approval gate withheld the revision until the user
+pressed a button in the app. It withheld the run record and not the work —
+this plugin has no hooks, and the server writes files rather than holding a
+lock on your repository — while making the user do twice what they had already
+done once by answering you. It is gone.
+
+So what stops you is this instruction and nothing else, which makes it worth
+more rather than less. A workflow the user has not agreed to is a plan you
+wrote for yourself.
 
 Then **finish your turn** and wait. Anthill cannot interrupt this session — it
 has no way to reach you, by design — so nothing arrives to tell you they are
@@ -136,16 +140,18 @@ Two ways, and the user picks:
 
 **They edit it in Anthill.** Say, in as many words, that you will not know they
 have finished unless they tell you — Anthill has no way to reach this session,
-so saving changes the workflow and nothing reaches you. Ask them to say when
-they are done.
+so their edits go into the workflow and nothing reaches you. Ask them to say
+when they are done. There is nothing for them to save: Anthill writes a
+handover down as they change it.
 
 Then, when they come back — whatever they say — call `get_workflow` before you
-do anything else. A higher revision number means they saved: say which revision
-you can now see, confirm that is what they want worked on, and only then bind.
-If the number has not moved, say so rather than assuming they changed their
-mind: a save that did not land is worth knowing about, and they may simply have
-forgotten to press it. Never bind the revision you submitted after they have
-told you they were going to change it; read what is there now.
+do anything else. A higher revision number means they changed something: say
+which revision you can now see, confirm that is what they want worked on, and
+only then bind. If the number has not moved, say so rather than assuming they
+changed their mind — they may have looked and left it alone, or their change
+may not have been written, and the two are worth telling apart. Never bind the
+revision you submitted after they have told you they were going to change it;
+read what is there now.
 
 **They ask you to change it.** `revise_workflow` takes the workflow id and the
 whole document as it should now read — not a description of the change, and not
@@ -153,7 +159,7 @@ just the part that moved. Anthill stores it as a new revision and asks the app
 to show it, so they are reading what you wrote rather than what they had.
 
 Then **ask again**. A revision you wrote is not a revision they agreed to, and
-writing one and binding it is approving your own work. Say what you changed, and
+writing one and binding it is agreeing with yourself. Say what you changed, and
 let them answer.
 
 Two things that are not errors: `unchanged` means Anthill already held exactly
@@ -162,8 +168,8 @@ already made themselves. And a workflow with a run bound to it can still be
 revised; the run stays on the revision it bound, so nothing shifts under work
 already under way.
 
-Never resubmit under a new id to get around a refusal. That leaves two workflows
-where the user meant one, and the second is one nobody approved.
+Never resubmit under a new id to get around a refusal. That leaves two
+workflows where the user meant one, and the second is one they never saw.
 
 ## Starting the work
 
@@ -171,13 +177,15 @@ where the user meant one, and the second is one nobody approved.
 content — **which may not be what you submitted, because the user can edit it.**
 Work from what it returns, not from what you sent.
 
-Under **show-and-go** it is ready as soon as the workflow is complete. Under
-**approval gate** it stays `not_ready` until the user approves a revision.
+What comes back is the latest revision, which is whatever the user last left
+on their canvas — Anthill writes their edits down as they make them, so there
+is nothing for them to save and nothing for you to wait on. It is `not_ready`
+only when the graph itself cannot be compiled into a prompt, and the questions
+to put to the user come back with it.
 
-> **Never poll it.** It answers immediately and it never waits for anybody. Under
-> the approval gate, say what Anthill is waiting for, finish your turn, and ask
-> again when the user says they are done. A loop here burns the session doing
-> nothing while the user reads.
+> **Never poll it.** It answers immediately and it never waits for anybody.
+> What you wait for is the user's answer, not this call, and you wait for that
+> by finishing your turn. A loop here burns the session doing nothing.
 
 `no_such_workflow` is not a slower `not_ready` — nothing of that id was handed to
 this Anthill, and waiting will not change it. Check the id.

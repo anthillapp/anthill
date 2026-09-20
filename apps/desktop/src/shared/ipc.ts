@@ -13,7 +13,7 @@
 import type { Workflow, WorkflowRun, NodeRun } from "@anthill/workflow-schema";
 import type { AgentModels, InterpreterId } from "@anthill/workflow";
 import type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun } from "@anthill/live";
-import type { ExchangeSource, ExchangeProblem, HandoverMode, RevisionState } from "@anthill/workflow-exchange";
+import type { ExchangeSource, ExchangeProblem, RevisionState } from "@anthill/workflow-exchange";
 
 export type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun };
 
@@ -30,8 +30,6 @@ export const IpcChannel = {
   workflowPendingOpen: "workflow:pending-open",
   workflowOpened: "workflow:opened",
   exchangeRead: "exchange:read",
-  exchangeReady: "exchange:ready",
-  exchangeRevoke: "exchange:revoke",
   liveWorkflow: "live:workflow",
   workflowSave: "workflow:save",
   runtimesDetect: "runtimes:detect",
@@ -303,62 +301,13 @@ export type SaveWorkflowRequest = {
 export type ExchangeView = {
   workflowId: string;
   source: ExchangeSource;
-  mode: HandoverMode;
   /** What is true of the head revision — the one the editor has open. */
   state: RevisionState;
   revision: number;
   digest: string;
-  /**
-   * The revision an approval still stands on, when one does.
-   *
-   * Reported separately from `state`, and not only when the two agree. Under
-   * an approval gate, approving revision 1 and then editing leaves the head at
-   * revision 2 with nothing approving it — which `state` correctly calls a
-   * draft — while the approval of revision 1 is untouched and is still what a
-   * new run would be given. Saying only "draft" told the user nothing was
-   * authorised while something was.
-   */
-  approved?: {
-    revision: number;
-    at?: string;
-    /**
-     * Whether taking it back would change what an agent may be given.
-     *
-     * Only an approval gate turns an approval into permission, so only there
-     * does withdrawing one mean anything: under show-and-go the head revision
-     * is eligible however this reads, and a control offered there would
-     * promise an effect it does not have. Decided here rather than in the
-     * page, because the store is where the rule lives and a page that
-     * re-derived it would eventually derive it differently.
-     */
-    withdrawable: boolean;
-    /**
-     * The revision an approval would fall back to if this one were withdrawn.
-     *
-     * Absent when withdrawing this one leaves nothing approved, which is the
-     * case the page used to describe as if it were the only one. Approving
-     * twice with an edit between them leaves two approvals standing, and the
-     * older one becomes what an agent may take the moment the newer is taken
-     * back. Carried here rather than worked out in the page, because the store
-     * is what will act on it.
-     */
-    below?: number;
-  };
   problems: ExchangeProblem[];
   bindings: { runId: string; revision: number }[];
 };
-export type ExchangeReadyRequest = { path: string; workflowId: string; revision: number; digest: string };
-/**
- * Taking an approval back, named by the revision it stands on.
- *
- * No digest, unlike approving: the revision being withdrawn is usually not the
- * one the editor has open — that is the whole situation this answers — so
- * there is no head content to check the request against. What is checked is
- * that the revision named is the approval the page was showing when the user
- * decided, so a stale panel cannot withdraw one they never saw.
- */
-export type ExchangeRevokeRequest = { path: string; workflowId: string; revision: number };
-export type ExchangeReadyResult = { ok: true } | { ok: false; error: string };
 export type BoundWorkflowResult =
   | { ok: true; workflow: Workflow; revision: number; digest: string }
   | { ok: false; error: string };
@@ -767,8 +716,6 @@ export interface AnthillApi {
   pendingWorkflowOpen(): Promise<string | undefined>;
   workflowOpened(path: string, deliveryId?: number, outcome?: "shown" | "declined" | "confirming" | "opening"): Promise<void>;
   exchangeRead(path: string, workflowId: string): Promise<ExchangeView | undefined>;
-  exchangeReady(request: ExchangeReadyRequest): Promise<ExchangeReadyResult>;
-  exchangeRevoke(request: ExchangeRevokeRequest): Promise<ExchangeReadyResult>;
   liveWorkflow(runId: string): Promise<BoundWorkflowResult>;
   /**
    * A workflow a harness handed over while the page was up. Returns the

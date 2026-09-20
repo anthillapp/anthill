@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 
 /**
  * Minimal structural shapes for a spawned process. Deliberately narrower than
@@ -84,11 +85,24 @@ const TRUNCATION_NOTE = "\n[Anthill kept the first 1 MB of this output and stopp
  * version, a first error, a JSON document — is at the start, and a tail would
  * throw away the part they need.
  */
-function keep(current: string, addition: string): string {
-  if (current.length >= MAX_CAPTURED_OUTPUT) return current;
-  const next = current + addition;
-  if (next.length <= MAX_CAPTURED_OUTPUT) return next;
-  return next.slice(0, MAX_CAPTURED_OUTPUT) + TRUNCATION_NOTE;
+function capture(): (addition: string) => string {
+  let text = "";
+  let bytes = 0;
+  let truncated = false;
+  return (addition) => {
+    if (truncated) return text;
+    const size = Buffer.byteLength(addition);
+    const room = MAX_CAPTURED_OUTPUT - bytes;
+    if (size <= room) {
+      bytes += size;
+      text += addition;
+    } else {
+      // Keep whole UTF-8 characters, including at an exactly filled boundary.
+      text += new StringDecoder("utf8").write(Buffer.from(addition).subarray(0, room)) + TRUNCATION_NOTE;
+      truncated = true;
+    }
+    return text;
+  };
 }
 
 export interface ProcessOutcome {
@@ -127,6 +141,8 @@ export function runProcess(options: RunProcessOptions): Promise<ProcessOutcome> 
   return new Promise<ProcessOutcome>((resolve) => {
     let stdout = "";
     let stderr = "";
+    const keepStdout = capture();
+    const keepStderr = capture();
     let timedOut = false;
     let cancelled = false;
     let settled = false;
@@ -204,12 +220,12 @@ export function runProcess(options: RunProcessOptions): Promise<ProcessOutcome> 
      */
     child.stdout?.on("data", (chunk: unknown) => {
       const text = toText(chunk);
-      stdout = keep(stdout, text);
+      stdout = keepStdout(text);
       onOutput?.("stdout", text);
     });
     child.stderr?.on("data", (chunk: unknown) => {
       const text = toText(chunk);
-      stderr = keep(stderr, text);
+      stderr = keepStderr(text);
       onOutput?.("stderr", text);
     });
 

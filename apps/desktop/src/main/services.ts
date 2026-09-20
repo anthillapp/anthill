@@ -9,8 +9,8 @@
  * mounted — so it was a capability with no product behind it and a wide
  * surface (ANT-95). The optional runner is ANT-52 and is not this.
  *
- * The store stays, and is not runner-only: it holds the run history the launch
- * window lists and the workflow snapshot each Live Session is drawn from.
+ * The store stays for legacy history and snapshots. Current passive session
+ * events and launch-window outcomes have their own stores.
  */
 
 import { createRunStore, type RunStore } from "@anthill/run-store";
@@ -21,15 +21,14 @@ import { createRunStore, type RunStore } from "@anthill/run-store";
  *
  * It also held a list of agent runtimes and an approval gate, because the
  * process could execute a workflow. It cannot now (ANT-95) — but the store is
- * not runner-only and never was: it holds the run history the launch window
- * lists, and the snapshot each Live Session is drawn from.
+ * retained solely to read legacy run records and snapshots.
  */
 export type RunServices = {
   store: RunStore;
 };
 
 /**
- * Open the run store. Call once at startup.
+ * Open the legacy run store lazily when history is requested.
  *
  * `nativeBinding` points at the Electron-ABI build of better-sqlite3 produced
  * by `scripts/fetch-electron-sqlite.mjs` — the copy npm installs is compiled

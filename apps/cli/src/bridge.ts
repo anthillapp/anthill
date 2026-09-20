@@ -33,6 +33,7 @@ import {
   type MarkerCli,
 } from "../../desktop/src/shared/ipc.js";
 import { createServices, type RunServices } from "../../desktop/src/main/services.js";
+import { destinationInside, FileGrants, FolderGrants, writeAllOrNothing } from "../../desktop/src/main/safe-write.js";
 import {
   detectInterpreters,
   runDraft,
@@ -128,16 +129,18 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   // the user actually has (the desktop does the same at startup).
   void adoptUserPath().catch(() => false);
 
-  // The run services (the run store, the runtime detection, the approval gate).
-  // A storage failure is surfaced, not swallowed: the channels answer with an
-  // error rather than the app starting with a silently broken run store.
-  let services: RunServices | null = null;
-  let servicesError: string | undefined;
-  try {
-    services = await createServices(join(paths.userData, "runs"));
-  } catch (error) {
-    servicesError = error instanceof Error ? error.message : String(error);
+  // Only legacy history uses this store, never drafting or passive observation.
+  let historyLoading: Promise<RunServices> | undefined;
+  function history(): Promise<RunServices> {
+    historyLoading ??= createServices(join(paths.userData, "runs")).catch((error) => {
+      historyLoading = undefined;
+      throw error;
+    });
+    return historyLoading;
   }
+  const exportGrants = new FolderGrants();
+  const workflowFiles = new FileGrants();
+  if (workspace) await exportGrants.grant(workspace);
 
   // The lazy singletons, created on first use and kept out of `services`:
   // nothing about observing for a session should be able to stop a Workflow
@@ -234,6 +237,9 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   register(IpcChannel.workflowOpen, async (args) => {
     const requested = args[0];
     if (typeof requested === "string" && requested) {
+      if (!await workflowFiles.has(requested) && !(await openWorkflowCandidates()).includes(requested)) {
+        return { ok: false as const, error: "Choose a workflow from the configured workspace or recent files." };
+      }
       return openWorkflowAt(requested);
     }
     // No path: the desktop shows a file dialog. The CLI has no dialog to show,
@@ -293,7 +299,10 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
 
   register(IpcChannel.workflowSave, async (args) => {
     const request = args[0] as SaveWorkflowRequest;
-    const { readFile, writeFile, access } = await import("node:fs/promises");
+    if (request.path && !await workflowFiles.has(request.path)) {
+      return { kind: "failed" as const, error: "Open this workflow before saving changes to its file." };
+    }
+    const { readFile, access } = await import("node:fs/promises");
     // What the last successful save left behind, read from the file itself.
     const saved: SavedRecord = request.path
       ? await readFile(request.path, "utf8").then(
@@ -347,11 +356,11 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
       path = destination.path;
     }
     try {
-      await writeFile(
-        path,
-        `${JSON.stringify(request.workflow, null, 2)}\n`,
-        "utf8",
-      );
+      const safe = await destinationInside(dirname(path), basename(path));
+      if (!safe.ok) throw new Error(safe.reason);
+      const written = await writeAllOrNothing([{ path: safe.path, relative: basename(path), content: `${JSON.stringify(request.workflow, null, 2)}\n` }]);
+      if (!written.ok) throw new Error(written.error);
+      await workflowFiles.grant(path);
       await rememberRecent(path);
       return { kind: "saved" as const, path };
     } catch (error) {
@@ -363,13 +372,13 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   });
 
   register(IpcChannel.runList, async () => {
-    if (!services) return [];
-    return services.store.listRuns();
+    if (!existsSync(join(paths.userData, "runs", "runs.db"))) return [];
+    return (await history()).store.listRuns();
   });
 
   register(IpcChannel.runGet, async (args) => {
-    if (!services) return undefined;
-    return services.store.getRun(String(args[0]));
+    if (!existsSync(join(paths.userData, "runs", "runs.db"))) return undefined;
+    return (await history()).store.getRun(String(args[0]));
   });
 
   register(IpcChannel.recentsList, async () => listRecents());
@@ -518,32 +527,24 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     const request = args[0] as ExportWorkflowRequest;
     // A root the author has already chosen is not asked for again; otherwise
     // the CLI's `--workspace` is the repository, or there is none to write into.
-    let chosen = request.root ?? (workspace ? resolve(workspace) : undefined);
+    const chosen = request.root ?? (workspace ? resolve(workspace) : undefined);
     if (!chosen) return { ok: false as const, cancelled: true as const };
 
-    const root = resolve(chosen);
-    const written: string[] = [];
+    const root = await exportGrants.resolveGranted(chosen);
+    if (!root) return { ok: false as const, error: "Export is limited to the configured workspace." };
     try {
-      const { mkdir, writeFile } = await import("node:fs/promises");
-      const { dirname, sep } = await import("node:path");
       const entries = [...request.files];
       if (request.prompt) {
         entries.push({ path: "anthill-prompt.md", content: request.prompt });
       }
+      const files = [];
       for (const file of entries) {
-        const destination = resolve(root, file.path);
-        // Never let a crafted workflow write outside the folder chosen.
-        if (destination !== root && !destination.startsWith(root + sep)) {
-          return {
-            ok: false as const,
-            error: `Refusing to write outside the chosen folder: ${file.path}`,
-          };
-        }
-        await mkdir(dirname(destination), { recursive: true });
-        await writeFile(destination, file.content, "utf8");
-        written.push(file.path);
+        const destination = await destinationInside(root, file.path);
+        if (!destination.ok) return { ok: false as const, error: destination.reason };
+        files.push({ path: destination.path, relative: file.path, content: file.content });
       }
-      return { ok: true as const, directory: root, written };
+      const result = await writeAllOrNothing(files);
+      return result.ok ? { ...result, directory: root } : result;
     } catch (error) {
       return {
         ok: false as const,
@@ -579,6 +580,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
       ];
 
       const workflow = parseWorkflow(migration.workflow);
+      await workflowFiles.grant(path);
       await rememberRecent(path);
       return {
         ok: true as const,
@@ -736,6 +738,8 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     close: async () => {
       draftAbort?.abort();
       draftAbort = undefined;
+      live?.stop();
+      if (historyLoading) await historyLoading.then((opened) => opened.store.close?.()).catch(() => undefined);
       subscribers.clear();
     },
   };

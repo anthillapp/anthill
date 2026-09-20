@@ -326,6 +326,26 @@ describe("hooks that were installed and do not run", () => {
     expect(calls.slice(before).some((call) => call.command === "/bin/sh")).toBe(false);
   });
 
+  it.each(["executable", "handler", "event", "swapped event"])("does not probe a config with a substituted %s", async (field) => {
+    const p = await paths();
+    const { spawnFn, calls } = fakeSpawn([...versions, { exitCode: 0 }]);
+    const service = new ObservationSetupService(p, spawnFn);
+    await service.install("claude-code");
+    const config = JSON.parse(await readFile(p.claudeConfigPath, "utf8"));
+    const groups = Object.values(config.hooks) as { hooks: { command: string }[] }[][];
+    // Alter a later entry, not just the command chosen for the one probe.
+    const hook = groups[groups.length - 1][0].hooks[0];
+    hook.command = field === "executable" ? hook.command.replace(p.execPath, "/tmp/untrusted-program")
+      : field === "handler" ? hook.command.replace(p.hookHandlerPath, "/tmp/untrusted-handler.js")
+      : hook.command.replace(/\S+$/, field === "swapped event" ? "PreToolUse" : "InvalidEvent");
+    await writeFile(p.claudeConfigPath, JSON.stringify(config));
+    const before = calls.length;
+    const status = (await service.status()).harnesses.find((item) => item.id === "claude-code");
+    expect(status?.hookInstalled).toBe(false);
+    expect(status?.hookProblem).toContain("No config command was run");
+    expect(calls.slice(before).every((call) => call.args[0] === "--version")).toBe(true);
+  });
+
   it("says nothing about a harness that was never enabled", async () => {
     const p = await paths();
     const { spawnFn, calls } = fakeSpawn(versions);

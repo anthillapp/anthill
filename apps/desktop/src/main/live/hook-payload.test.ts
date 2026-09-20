@@ -18,6 +18,20 @@ import { minimalHookPayload, redactSecrets } from "./hook-payload.js";
 const serialised = (value: unknown) => JSON.stringify(value);
 
 describe("reducing a hook payload", () => {
+  it("keeps background task identity and liveness without its prompt", () => {
+    expect(minimalHookPayload({ background_tasks: [{ id: "agent-1", status: "running", prompt: "private", description: "Review" }] }))
+      .toEqual({ background_tasks: [{ id: "agent-1", status: "running", description: "Review" }] });
+  });
+
+  it("keeps complete step markers after long prose without keeping the prose", () => {
+    expect(minimalHookPayload({ last_assistant_message: `${"private prose ".repeat(200)}\nANTHILL-STEP ANT-ABC123 abc123 develop-step` }))
+      .toEqual({ last_assistant_message: "ANTHILL-STEP ANT-ABC123 abc123 develop-step" });
+  });
+
+  it("does not fall back to raw Bash commands when no description is supplied", () => {
+    expect(minimalHookPayload({ tool_name: "Bash", tool_input: { command: "echo personal-data > output.txt" } }))
+      .toEqual({ tool_name: "Bash" });
+  });
   it("keeps the identifiers the observer reads", () => {
     const out = minimalHookPayload({
       session_id: "0c379b26-8ece-41b7-a710-500b442055ed",

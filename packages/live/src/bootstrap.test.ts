@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Workflow } from "@anthill/workflow-schema";
 
-import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-schema";
+import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow";
 
 import { buildBootstrapPrompt, workflowSteps } from "./bootstrap.js";
 import { parseMarker, textCarriesMarker, type RunMarker } from "./marker.js";

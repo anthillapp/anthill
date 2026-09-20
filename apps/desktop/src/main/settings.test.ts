@@ -24,6 +24,12 @@ beforeEach(async () => {
 });
 
 describe("the preferences", () => {
+  it("applies concurrent patches to the latest durable settings", async () => {
+    const store = new SettingsStore(path);
+    await Promise.all([store.write({ stepNotifications: true }), store.write({})]);
+    expect(await store.read()).toEqual({ stepNotifications: true });
+    expect(await new SettingsStore(path).read()).toEqual({ stepNotifications: true });
+  });
   it("are the documented defaults on a machine that has never set any", async () => {
     const store = new SettingsStore(join(dir, "never-written.json"));
     expect(await store.read()).toEqual(DEFAULT_SETTINGS);

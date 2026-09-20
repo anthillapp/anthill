@@ -29,7 +29,7 @@
 import { open, stat } from "node:fs/promises";
 
 /** How far into a file an observer has read. Bytes, always. */
-export type TailCursor = { bytes: number };
+export type TailCursor = { bytes: number; identity?: string; discardingLine?: boolean };
 
 export type TailChunk = {
   /** Complete lines gained since the last read, blank ones dropped. */
@@ -74,6 +74,23 @@ export function newCursor(): TailCursor {
   return { bytes: 0 };
 }
 
+/** Drain the retained old hook log before crossing a rotation boundary. */
+export async function readRotatingLines(path: string, cursor: TailCursor): Promise<TailChunk> {
+  const previous = await stat(`${path}.1`).catch(() => undefined);
+  const current = await stat(path).catch(() => undefined);
+  const identity = (info: NonNullable<typeof previous>) => `${info.dev}:${info.ino}`;
+  if (previous && (cursor.identity === undefined ||
+      (identity(previous) === cursor.identity && (!current || identity(current) !== cursor.identity)))) {
+    const old = await readNewLines(`${path}.1`, cursor);
+    if (cursor.bytes < previous.size && (old.grew || old.skippedBytes)) return old;
+    // A partial final line cannot be finished once the file has rotated.
+    const next = await readNewLines(path, cursor);
+    return { lines: [...old.lines, ...next.lines], grew: old.grew || next.grew,
+      ...((old.skippedBytes || next.skippedBytes) ? { skippedBytes: (old.skippedBytes ?? 0) + (next.skippedBytes ?? 0) } : {}) };
+  }
+  return readNewLines(path, cursor);
+}
+
 /**
  * Read whatever complete lines a file has gained, advancing the cursor.
  *
@@ -81,20 +98,36 @@ export function newCursor(): TailCursor {
  * so the new content is read rather than skipped.
  */
 export async function readNewLines(path: string, cursor: TailCursor): Promise<TailChunk> {
-  const info = await stat(path).catch(() => undefined);
-  if (!info) return NOTHING;
-  if (info.size < cursor.bytes) cursor.bytes = 0;
-  if (info.size === cursor.bytes) return NOTHING;
-
   const handle = await open(path, "r").catch(() => undefined);
   if (!handle) return NOTHING;
 
   try {
+    const info = await handle.stat();
+    const identity = `${info.dev}:${info.ino}`;
+    if ((cursor.identity !== undefined && cursor.identity !== identity) || info.size < cursor.bytes) {
+      cursor.bytes = 0;
+      cursor.discardingLine = false;
+    }
+    cursor.identity = identity;
+    if (info.size === cursor.bytes) return NOTHING;
     const remaining = info.size - cursor.bytes;
     const length = Math.min(remaining, MAX_CHUNK_BYTES);
     const buffer = Buffer.allocUnsafe(length);
     const { bytesRead } = await handle.read(buffer, 0, length, cursor.bytes);
     const chunk = buffer.subarray(0, bytesRead);
+
+    // A capped read can stop halfway through an oversized record. Its suffix
+    // is not a new JSONL record, even if it happens to look like valid JSON.
+    let start = 0;
+    if (cursor.discardingLine) {
+      const first = chunk.indexOf(NEWLINE);
+      if (first < 0) {
+        cursor.bytes += bytesRead;
+        return { lines: [], grew: false, skippedBytes: bytesRead };
+      }
+      start = first + 1;
+      cursor.discardingLine = false;
+    }
 
     // Stop at the last complete line. What follows it is still being written.
     const end = chunk.lastIndexOf(NEWLINE);
@@ -111,6 +144,7 @@ export async function readNewLines(path: string, cursor: TailCursor): Promise<Ta
        */
       if (bytesRead >= MAX_CHUNK_BYTES) {
         cursor.bytes += bytesRead;
+        cursor.discardingLine = true;
         return { lines: [], grew: false, skippedBytes: bytesRead };
       }
       return NOTHING;
@@ -118,11 +152,11 @@ export async function readNewLines(path: string, cursor: TailCursor): Promise<Ta
 
     cursor.bytes += end + 1;
     const lines = chunk
-      .subarray(0, end + 1)
+      .subarray(start, end + 1)
       .toString("utf8")
       .split("\n")
       .filter((line) => line.length > 0);
-    return { lines, grew: lines.length > 0 };
+    return { lines, grew: lines.length > 0, ...(start ? { skippedBytes: start } : {}) };
   } catch {
     return NOTHING;
   } finally {

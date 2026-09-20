@@ -88,31 +88,16 @@ export class SettingsStore {
    * setting cannot erase another it has never heard of.
    */
   async write(patch: Partial<Settings>): Promise<Settings> {
-    const current = await this.read();
-    this.settings = { ...current, ...patch };
-    try {
-      await this.flush();
-    } catch (error) {
-      // What is held in memory is what is on disk, or the next reader of
-      // `read()` answers with a preference that was never stored.
-      this.settings = current;
-      throw error;
-    }
-    return { ...this.settings };
-  }
-
-  private async flush(): Promise<void> {
-    const snapshot = JSON.stringify(
-      { version: SETTINGS_VERSION, settings: this.settings ?? DEFAULT_SETTINGS } satisfies Stored,
-      null,
-      2,
-    );
-    // The chain has to survive a failure: `this.writing` is what the next
-    // write queues behind, and leaving a rejected promise there would make
-    // every later write fail for a reason that has already been reported.
-    const written = this.writing.then(() => this.persist(snapshot));
-    this.writing = written.catch(() => undefined);
-    await written;
+    const written = this.writing.then(async () => {
+      const next = { ...await this.read(), ...patch };
+      await this.persist(JSON.stringify({ version: SETTINGS_VERSION, settings: next } satisfies Stored, null, 2));
+      // Publish only durable settings. Serializing the entire update also
+      // prevents a failed earlier write from rolling back a later success.
+      this.settings = next;
+      return { ...next };
+    });
+    this.writing = written.then(() => undefined, () => undefined);
+    return written;
   }
 
   /**

@@ -161,6 +161,12 @@ export function LiveIndicator({ workflowId, onOpenSession }: LiveIndicatorProps 
 
   if (!run) return null;
 
+  if (snapshot?.storageError) return (
+    <div className="live-indicator" role="alert" title={snapshot.storageError}>
+      <span className="live-chip tone-bad">Activity not saved. Retrying.</span>
+    </div>
+  );
+
   const tone = TONE[run.state];
   /** Live splits into receiving and quiet, which the raw state cannot say. */
   const presence = presenceKey(run, now);

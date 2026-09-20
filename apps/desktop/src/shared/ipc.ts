@@ -592,6 +592,7 @@ export type LiveObserverCapabilities = {
 };
 
 export type LiveSnapshot = {
+  storageError?: string;
   /** Runs worth showing, newest first. */
   runs: PendingRun[];
   capabilities: LiveObserverCapabilities[];

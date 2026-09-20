@@ -54,6 +54,7 @@ import { RestartRequired } from "./RestartRequired.js";
 import { RUN_STATE } from "./run-state.js";
 
 export type LiveSessionPageProps = {
+  storageError?: string;
   workflow: Workflow;
   run: PendingRun;
   onBack: () => void;
@@ -156,6 +157,7 @@ function LiveSessionContent({
   onBack,
   onStopObserving,
   observation,
+  storageError,
 }: LiveSessionPageProps) {
   const now = useNow();
   const [events, setEvents] = useState<ObservationEvent[]>([]);
@@ -708,6 +710,8 @@ function LiveSessionContent({
                 that nothing happened. {feed.detail}
               </p>
             ) : null}
+
+            {storageError ? <p className="live-feed-problem" role="alert">{storageError}</p> : null}
 
             {feed.kind === "unobservable" ? (
               <p className="live-feed-problem" role="alert">

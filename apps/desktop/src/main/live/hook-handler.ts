@@ -15,7 +15,8 @@
  * the rest unexamined.
  */
 
-import { mkdir, appendFile, rename, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { mkdir, open, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -97,23 +98,24 @@ async function main(): Promise<void> {
   const path = logPath();
   await mkdir(dirname(path), { recursive: true });
   await rotate(path);
-  await appendFile(
-    path,
-    `${JSON.stringify({
-      source: "anthill-observation-hook",
-      harness,
-      eventType,
-      recordedAt: new Date().toISOString(),
-      data: minimalHookPayload(data),
-    })}\n`,
-    "utf8",
-  );
+  const handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW, 0o600);
+  try {
+    await handle.writeFile(
+      `${JSON.stringify({
+        source: "anthill-observation-hook",
+        harness,
+        eventType,
+        recordedAt: new Date().toISOString(),
+        data: minimalHookPayload(data),
+      })}\n`,
+      "utf8",
+    );
+  } finally { await handle.close(); }
 }
 
-main()
-  .catch(() => {
-    // Hooks must never block or break the user's CLI session.
-  })
-  .finally(() => process.exit(0));
+// Real hooks never interrupt the CLI. Anthill's own probe must report a failed
+// write, otherwise an unwritable destination would be certified as working.
+const failureCode = process.env.ANTHILL_OBSERVATION_PROBE === "1" ? 1 : 0;
+main().then(() => process.exit(0), () => process.exit(failureCode));
 
-setTimeout(() => process.exit(0), 2_500).unref?.();
+setTimeout(() => process.exit(failureCode), 2_500).unref?.();

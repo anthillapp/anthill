@@ -8,8 +8,8 @@
  */
 
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
-import { join, resolve } from "node:path";
-import { readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 
 import { parseWorkflow } from "@anthill/workflow-schema";
@@ -44,7 +44,7 @@ import {
   type SaveWorkflowResult,
 } from "../shared/ipc.js";
 import { createServices, type RunServices } from "./services.js";
-import { destinationInside, FolderGrants, writeAllOrNothing } from "./safe-write.js";
+import { destinationInside, FileGrants, FolderGrants, writeAllOrNothing } from "./safe-write.js";
 import { detectInterpreters, runDraft, signInToInterpreter } from "./interpreters.js";
 import { readCodexModels } from "./codex-models.js";
 import { readPiModels } from "./pi-models.js";
@@ -145,8 +145,16 @@ function chooseDataDirectory(): string {
 
 let mainWindow: BrowserWindow | null = null;
 let services: RunServices | null = null;
+let historyLoading: Promise<RunServices> | undefined;
+function history(): Promise<RunServices> {
+  historyLoading ??= createServices(join(app.getPath("userData"), "runs"), electronSqliteBinding())
+    .then((opened) => (services = opened))
+    .catch((error) => { historyLoading = undefined; throw error; });
+  return historyLoading;
+}
 /** Folders a dialog handed out in this session; see `safe-write.ts`. */
 const grants = new FolderGrants();
+const workflowFiles = new FileGrants();
 
 /**
  * Whether the page has asked for its pending workflow yet.
@@ -588,6 +596,7 @@ async function openWorkflowAt(path: string): Promise<OpenWorkflowResult> {
     ];
 
     const workflow = parseWorkflow(migration.workflow);
+    await workflowFiles.grant(path);
     await rememberRecent(path);
     return {
       ok: true,
@@ -796,6 +805,12 @@ function handle(
 }
 
 function registerIpcHandlers(): void {
+  // Legacy history is read-only. Removing the runner must not remove the
+  // snapshot lookup used by the manual copy-paste Live Session page.
+  handle(IpcChannel.runList, async () => existsSync(join(app.getPath("userData"), "runs", "runs.db"))
+    ? (await history()).store.listRuns() : []);
+  handle(IpcChannel.runGet, async (_event, runId: string) => existsSync(join(app.getPath("userData"), "runs", "runs.db"))
+    ? (await history()).store.getRun(runId) : undefined);
   handle(
     IpcChannel.appCapabilities,
     async (): Promise<IpcCapabilities> => ({
@@ -832,12 +847,12 @@ function registerIpcHandlers(): void {
   handle(
     IpcChannel.workflowOpen,
     async (_event, requested?: string): Promise<OpenWorkflowResult> => {
-      // A path means the author picked a workflow from the launch window's list, so
-      // there is nothing to ask them.
-      if (requested) return openWorkflowAt(requested);
+      if (requested && (await workflowFiles.has(requested) ||
+          (await listRecents()).some((item) => item.path === requested))) return openWorkflowAt(requested);
 
       const result = await dialog.showOpenDialog({
         title: "Open workflow",
+        ...(requested ? { defaultPath: requested } : {}),
         // Matching on the bare ".json" suffix, so a file saved by any earlier
         // build shows up here whatever double suffix it used — nothing about
         // opening needs to change when the write side emits a new one.
@@ -871,6 +886,9 @@ function registerIpcHandlers(): void {
   handle(
     IpcChannel.workflowSave,
     async (_event, request: SaveWorkflowRequest): Promise<SaveWorkflowResult> => {
+      // A renderer-provided path is not consent to overwrite an arbitrary
+      // file. Unknown destinations must go through the native save dialog.
+      if (request.path && !await workflowFiles.has(request.path)) request = { ...request, path: undefined };
       // What the last successful save left behind, read from the file itself
       // rather than tracked alongside it — see ./save-destination.ts.
       const saved: SavedRecord = request.path
@@ -919,8 +937,12 @@ function registerIpcHandlers(): void {
         if (await exchangeDestination(exchange(), path, request.workflow.id)) {
           await saveExchangeCopy(exchange(), path, request.workflow);
         } else {
-          await writeFile(path, `${JSON.stringify(request.workflow, null, 2)}\n`, "utf8");
+          const safe = await destinationInside(dirname(path), basename(path));
+          if (!safe.ok) throw new Error(safe.reason);
+          const written = await writeAllOrNothing([{ path: safe.path, relative: basename(path), content: `${JSON.stringify(request.workflow, null, 2)}\n` }]);
+          if (!written.ok) throw new Error(written.error);
         }
+        await workflowFiles.grant(path);
       } catch (error) {
         // Reported rather than thrown, so the editor can say what went wrong
         // and keep the unsaved work rather than losing the answer in a
@@ -1334,9 +1356,7 @@ function applyMenu(): void {
 void app.whenReady().then(async () => {
   if (app.isPackaged) app.setAsDefaultProtocolClient("anthill");
   else if (process.argv[1]) app.setAsDefaultProtocolClient("anthill", process.execPath, [resolve(process.argv[1])]);
-  // Register handlers and show the window BEFORE opening the run store, so a
-  // storage failure surfaces as a visible error instead of an app that starts
-  // with no window and no message.
+  // History is opened lazily; the editor does not depend on the legacy store.
   applyAppIcon();
   applyMenu();
   setRecentsPaths({ userData: app.getPath("userData"), home: app.getPath("home") });
@@ -1351,19 +1371,6 @@ void app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 
-  try {
-    services = await createServices(
-      join(app.getPath("userData"), "runs"),
-      electronSqliteBinding(),
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("Failed to initialize run services:", error);
-    dialog.showErrorBox(
-      "Anthill could not start its run store",
-      `Workflows cannot be executed until this is resolved.\n\n${message}`,
-    );
-  }
 });
 
 app.on("window-all-closed", () => {

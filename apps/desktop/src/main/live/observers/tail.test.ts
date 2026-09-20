@@ -6,12 +6,12 @@
  * turn-completion record that landed mid-write was read past and lost.
  */
 
-import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { newCursor, readNewLines } from "./tail.js";
+import { newCursor, readNewLines, readRotatingLines } from "./tail.js";
 
 async function scratch(): Promise<string> {
   return join(await mkdtemp(join(tmpdir(), "anthill-tail-")), "log.jsonl");
@@ -89,6 +89,35 @@ describe("reading the new end of a growing file", () => {
  * size of its entire transcript.
  */
 describe("a file larger than one read", () => {
+  it("drains unread events from the old hook log before reading its replacement", async () => {
+    const path = await scratch();
+    await writeFile(path, '{"first":true}\n');
+    const cursor = newCursor();
+    await readRotatingLines(path, cursor);
+    await appendFile(path, '{"unread":true}\n');
+    await rename(path, `${path}.1`);
+    await writeFile(path, '{"new":true}\n');
+    expect((await readRotatingLines(path, cursor)).lines).toEqual(['{"unread":true}', '{"new":true}']);
+    expect((await readRotatingLines(path, cursor)).lines).toEqual([]);
+    expect((await readRotatingLines(path, newCursor())).lines).toEqual(['{"first":true}', '{"unread":true}', '{"new":true}']);
+  });
+  it("does not parse the suffix of an oversized line as a separate event", async () => {
+    const path = await scratch();
+    await writeFile(path, `${"x".repeat(4 * 1024 * 1024)}{"fake":true}\n{"real":true}\n`);
+    const cursor = newCursor();
+    await readNewLines(path, cursor);
+    expect((await readNewLines(path, cursor)).lines).toEqual(['{"real":true}']);
+  });
+
+  it("reads a replacement even when its length did not shrink", async () => {
+    const path = await scratch();
+    await writeFile(path, '{"old":true}\n');
+    const cursor = newCursor();
+    await readNewLines(path, cursor);
+    await writeFile(`${path}.next`, '{"new":true}\n');
+    await rename(`${path}.next`, path);
+    expect((await readNewLines(path, cursor)).lines).toEqual(['{"new":true}']);
+  });
   it("catches up across several reads rather than allocating it all at once", async () => {
     const dir = await mkdtemp(join(tmpdir(), "anthill-tail-big-"));
     const path = join(dir, "big.jsonl");

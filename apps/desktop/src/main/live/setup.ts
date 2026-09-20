@@ -200,8 +200,15 @@ export class ObservationSetupService {
     const entriesPresent = hasEveryAnthillHook(config, def) && existsSync(hookHandlerPath);
     // Only worth probing when there is something to probe: a run costs a
     // process, and "not installed" is already the honest answer.
+    const commands = anthillCommands(config, def);
+    const untrusted = commands.some(({ command, event }) =>
+      !this.trustedHook(command, id) || parseHookCommand(command)?.event !== event);
     const problem = entriesPresent
-      ? await this.probeHook(anthillCommands(config, def)[0])
+      ? untrusted
+        ? commands.some(({ command }) => parseHookCommand(command)?.runnable === false)
+          ? "The hook interpreter depends on PATH. Re-enable observation to use Anthill's absolute path."
+          : "The hook config names a different executable, handler or event. Re-enable observation to repair Anthill's entries. No config command was run."
+        : await this.probeHook(commands[0]?.command)
       : undefined;
     // Asked only when there is an install to describe: a harness with no
     // entries has nothing to have fired.
@@ -250,6 +257,14 @@ export class ObservationSetupService {
     return this.paths.execPath ?? process.execPath;
   }
 
+  private trustedHook(command: string, harness?: HookHarness): boolean {
+    const parsed = parseHookCommand(command);
+    return Boolean(parsed && parsed.runnable &&
+      parsed.execPath === this.execPath() && parsed.handlerPath === this.hookHandlerPath() &&
+      isHookHarnessId(parsed.harness) && (!harness || parsed.harness === harness) &&
+      (HARNESS[parsed.harness].events as readonly string[]).includes(parsed.event));
+  }
+
   /**
    * Run the hook once, exactly as written, and say what went wrong if it will
    * not run.
@@ -260,12 +275,9 @@ export class ObservationSetupService {
    * harness's PATH. Entries prove the install wrote them; only running the
    * thing proves the harness can run it.
    *
-   * So the probe runs *the command in the config*, not the command Anthill
-   * would write today, and runs it through a shell because that is how a
-   * harness invokes a hook. Anything else would verify a different thing than
-   * the one that fires: an install written by an older version, naming an
-   * interpreter that has since moved, has to fail this check — that is the
-   * whole case it exists for.
+   * Only a configured command matching this installation's interpreter and
+   * handler can be probed, without a shell. Older or altered commands require
+   * explicit repair; checking settings must never execute arbitrary programs.
    *
    * It writes to a temporary log rather than the real one, so it exercises the
    * handler's actual job — parse, open, append — without putting a fake event
@@ -298,12 +310,13 @@ export class ObservationSetupService {
     if (!parsed.runnable) {
       return "The hook command finds its interpreter through PATH, which the harness may not share with Anthill. Re-enable observation to rewrite the entries with an absolute path.";
     }
+    if (!this.trustedHook(command)) return "The configured hook is not the handler shipped with this Anthill. Re-enable observation to repair it.";
     const log = join(tmpdir(), `anthill-hook-probe-${process.pid}-${Date.now()}.jsonl`);
     try {
       const outcome = await runProcess({
         command: parsed.execPath,
         args: [parsed.handlerPath, OWNER_MARKER, parsed.harness, parsed.event],
-        env: { ELECTRON_RUN_AS_NODE: "1", ANTHILL_LIVE_HOOK_LOG: log },
+        env: { ELECTRON_RUN_AS_NODE: "1", ANTHILL_LIVE_HOOK_LOG: log, ANTHILL_OBSERVATION_PROBE: "1" },
         stdinPayload: "{}",
         timeoutMs: 10_000,
         ...(this.spawnFn ? { spawnFn: this.spawnFn } : {}),
@@ -338,33 +351,16 @@ export class ObservationSetupService {
    * same period, so the log and the handler were both plainly fine. Only the
    * harness was not calling it, and the card said Enabled throughout.
    *
-   * The tail is read first, and usually answers. A harness that fired a moment
-   * ago is the ordinary case and is near the end; only a harness that has
-   * never fired needs the whole file, because that is the one conclusion no
-   * shortcut from the end can reach (ANT-99). The whole file is itself bounded
-   * now — the log rotates — so the fallback has a size rather than a hope.
+   * Search bounded windows, including the retained rotated file. Older
+   * versions left unbounded logs, so even the fallback must have a byte cap.
    */
   private async lastHookEvent(harness: HookHarness): Promise<string | undefined> {
     const marker = `"harness":"${harness}"`;
     const fromTail = await this.searchTail(marker);
     if (fromTail) return fromTail;
 
-    const text = await readFile(this.hookLogPath(), "utf8").catch(() => "");
-    if (!text) return undefined;
-    const lines = text.split("\n");
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
-      const line = lines[index];
-      if (!line.includes(marker)) continue;
-      try {
-        const row = JSON.parse(line) as { recordedAt?: unknown };
-        if (typeof row.recordedAt === "string") return row.recordedAt;
-      } catch {
-        // A line the app was killed halfway through writing. Keep looking
-        // back rather than reporting a time this cannot read.
-        continue;
-      }
-    }
-    return undefined;
+    return await this.searchTail(marker, 8 * 1024 * 1024) ??
+      await this.searchTail(marker, 8 * 1024 * 1024, `${this.hookLogPath()}.1`);
   }
 
   /**
@@ -373,13 +369,12 @@ export class ObservationSetupService {
    * The first line of the window is dropped: a read that starts mid-file
    * almost certainly starts mid-line, and half a JSON object is not a record.
    */
-  private async searchTail(marker: string): Promise<string | undefined> {
-    const path = this.hookLogPath();
+  private async searchTail(marker: string, limit = TAIL_WINDOW_BYTES, path = this.hookLogPath()): Promise<string | undefined> {
     const handle = await open(path, "r").catch(() => undefined);
     if (!handle) return undefined;
     try {
       const { size } = await handle.stat();
-      const window = Math.min(size, TAIL_WINDOW_BYTES);
+      const window = Math.min(size, limit);
       if (window === 0) return undefined;
       const buffer = Buffer.allocUnsafe(window);
       const { bytesRead } = await handle.read(buffer, 0, window, size - window);
@@ -631,21 +626,21 @@ export function parseHookCommand(command: string): ParsedHookCommand | undefined
 }
 
 /** The commands Anthill's own entries currently carry — what actually fires. */
-function anthillCommands(config: Record<string, unknown>, def: HarnessDefinition): string[] {
+function anthillCommands(config: Record<string, unknown>, def: HarnessDefinition): { command: string; event: string }[] {
   const hooks = isRecord(config.hooks) ? config.hooks : {};
-  const out: string[] = [];
+  const out: { command: string; event: string }[] = [];
   for (const event of def.events) {
     for (const entry of entriesFor(hooks[event])) {
       // Ownership is the shape of the command, not a substring of it. An
       // entry carrying the marker in a comment is somebody else's line that
       // mentions us, and running it was the bug (ANT-102).
       if (typeof entry.command === "string" && parseHookCommand(entry.command)) {
-        out.push(entry.command);
+        out.push({ command: entry.command, event });
         continue;
       }
       for (const hook of Array.isArray(entry.hooks) ? entry.hooks : []) {
         if (isRecord(hook) && typeof hook.command === "string" && hook.command.includes(OWNER_MARKER)) {
-          out.push(hook.command);
+          out.push({ command: hook.command, event });
         }
       }
     }

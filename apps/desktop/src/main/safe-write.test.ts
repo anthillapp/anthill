@@ -61,6 +61,13 @@ describe("choosing where a generated file goes", () => {
     if (!result.ok) expect(result.reason).toContain("resolves outside");
   });
 
+  it("does not create directories outside the grant before refusing a linked ancestor", async () => {
+    const { root, outside } = await sandbox();
+    await symlink(outside, join(root, "agents"), "dir");
+    expect((await destinationInside(root, "agents/new/nested/dev.md")).ok).toBe(false);
+    await expect(lstat(join(outside, "new"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("refuses to write through a link left at the destination itself", async () => {
     const { root, outside } = await sandbox();
     const target = join(outside, "target.md");
@@ -193,7 +200,7 @@ describe("exporting all of the files or none of them", () => {
     await expect(readFile(join(root, "created.md"), "utf8")).rejects.toThrow();
   });
 
-  it("says so when the rollback itself could not be done", async () => {
+  it("does not report rollback failure when preflight rejected a directory", async () => {
     const { root } = await sandbox();
     const nested = join(root, "nested");
     await mkdir(nested);
@@ -203,8 +210,7 @@ describe("exporting all of the files or none of them", () => {
       { path: join(nested, "b.md"), content: "new b\n", relative: "nested/b.md" },
     ];
 
-    // The first write lands, the second cannot, and the directory is then made
-    // read-only so putting the first one back cannot happen either.
+    // The directory is rejected before any destination is replaced.
     await mkdir(files[1].path);
     const result = await writeAllOrNothing([
       files[0],
@@ -213,6 +219,7 @@ describe("exporting all of the files or none of them", () => {
     ]);
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(typeof result.rolledBack).toBe("boolean");
+    if (!result.ok) expect(result.rolledBack).toBe(true);
+    expect(await readFile(files[0].path, "utf8")).toBe("old a\n");
   });
 });

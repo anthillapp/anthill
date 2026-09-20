@@ -91,7 +91,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function target(toolName: string | undefined, input: unknown): Record<string, unknown> {
   if (!isRecord(input)) return {};
   if (toolName === "Bash") {
-    const value = clean(input.description) ?? clean(input.command);
+    const value = clean(input.description);
     return value ? { description: value } : {};
   }
   const path = clean(input.file_path) ?? clean(input.path) ?? clean(input.notebook_path);
@@ -103,11 +103,8 @@ function target(toolName: string | undefined, input: unknown): Record<string, un
 /**
  * A hook payload reduced to what passive observation needs.
  *
- * `last_assistant_message` is the one piece of the session's own text kept,
- * and only because step reporting is read out of it: a run says which block it
- * has reached by writing a marker into that message. It is redacted and
- * truncated like everything else here, but it is assistant text, and that is
- * a narrowing rather than a removal.
+ * Only complete step markers are kept from `last_assistant_message`. The
+ * surrounding prose is not needed for hook-based progress.
  */
 export function minimalHookPayload(data: unknown): Record<string, unknown> {
   if (!isRecord(data)) return {};
@@ -128,8 +125,17 @@ export function minimalHookPayload(data: unknown): Record<string, unknown> {
   const message = clean(data.message);
   if (message) out.message = message;
 
-  const assistant = clean(data.last_assistant_message);
-  if (assistant) out.last_assistant_message = assistant;
+  // Keep only complete announcements, wherever they occur in the message.
+  // Truncating prose first loses markers beyond the first 200 characters.
+  if (typeof data.last_assistant_message === "string") {
+    const markers = data.last_assistant_message.matchAll(/\bANTHILL-STEP\s+(ANT-[A-Z0-9]+)\s+([a-z0-9]+)\s+([A-Za-z0-9_.:-]+)/g);
+    const kept: string[] = [];
+    for (const match of markers) {
+      kept.push(match[0]);
+      if (kept.length === 100) break;
+    }
+    out.last_assistant_message = kept.join("\n");
+  }
 
   const reduced = target(toolName, data.tool_input);
   if (Object.keys(reduced).length > 0) out.tool_input = reduced;
@@ -138,7 +144,11 @@ export function minimalHookPayload(data: unknown): Record<string, unknown> {
     out.background_tasks = data.background_tasks.slice(0, 50).map((task) => {
       if (!isRecord(task)) return {};
       const description = clean(task.description);
-      return description ? { description } : {};
+      return {
+        ...(typeof task.id === "string" ? { id: task.id.slice(0, MAX_VALUE) } : {}),
+        ...(typeof task.status === "string" ? { status: task.status.slice(0, MAX_VALUE) } : {}),
+        ...(description ? { description } : {}),
+      };
     });
   }
 

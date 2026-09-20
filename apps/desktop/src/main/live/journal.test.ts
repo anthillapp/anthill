@@ -7,7 +7,7 @@
  * evidence of anything.
  */
 
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -37,6 +37,31 @@ function draft(partial: Partial<ObservationEventDraft> = {}): ObservationEventDr
 }
 
 describe("the observation journal", () => {
+  it("continues after a torn last record without swallowing the next valid event", async () => {
+    const { journal: log, dir } = await journal();
+    await log.append("ANT-1", [draft()]);
+    const path = join(dir, "ANT-1.jsonl");
+    await writeFile(path, (await readFile(path, "utf8")) + '{"torn":');
+    const reopened = new ObservationJournal(dir);
+    await reopened.append("ANT-1", [draft({ toolUseId: "next" })]);
+    expect(await new ObservationJournal(dir).read("ANT-1")).toHaveLength(2);
+  });
+
+  it("rejects journal symlinks without reading or appending to the target", async () => {
+    const { journal: log, dir } = await journal();
+    const target = join(dir, "private.jsonl");
+    await writeFile(target, "private content");
+    await symlink(target, join(dir, "ANT-1.jsonl"));
+    await expect(log.read("ANT-1")).rejects.toThrow();
+    await expect(log.append("ANT-1", [draft()])).rejects.toThrow();
+    expect(await readFile(target, "utf8")).toBe("private content");
+  });
+
+  it("serializes simultaneous appends and assigns unique sequence numbers", async () => {
+    const { journal: log } = await journal();
+    await Promise.all([log.append("ANT-1", [draft()]), log.append("ANT-1", [draft(), draft({ toolUseId: "next" })])]);
+    expect((await log.read("ANT-1")).map((event) => event.seq)).toEqual([1, 2]);
+  });
   it("numbers events in the order they were appended", async () => {
     const { journal: log } = await journal();
     await log.append("ANT-1", [draft(), draft({ toolUseId: "toolu_2", title: "Read" })]);
@@ -289,7 +314,7 @@ describe("an append that cannot reach the disk", () => {
     kind: "notification", channel: "test", title,
   });
 
-  it("reports nothing added, and lets the next poll try again", async () => {
+  it("reports the failure, and lets the next poll try again", async () => {
     const base = await mkdtemp(join(tmpdir(), "anthill-journal-ro-"));
     const dir = join(base, "journal");
     await mkdir(dir, { recursive: true });
@@ -298,8 +323,7 @@ describe("an append that cannot reach the disk", () => {
     // A directory the process cannot write into is the shape of a permissions
     // failure, and of a full disk as far as this code can tell them apart.
     await chmod(dir, 0o500);
-    const refused = await journal.append("ANT-ABC12345", [draft("first")]);
-    expect(refused).toEqual([]);
+    await expect(journal.append("ANT-ABC12345", [draft("first")])).rejects.toThrow();
 
     // The retry is the point: nothing was marked seen, so the same event is
     // still offered and now lands.
@@ -327,7 +351,7 @@ describe("an append that cannot reach the disk", () => {
     // append to a file that already exists inside it.
     const file = join(dir, "ANT-ABC12345.jsonl");
     await chmod(file, 0o400);
-    await journal.append("ANT-ABC12345", [draft("lost")]);
+    await expect(journal.append("ANT-ABC12345", [draft("lost")])).rejects.toThrow();
     await chmod(file, 0o600);
 
     // The failed append neither removed the first event nor renumbered it.

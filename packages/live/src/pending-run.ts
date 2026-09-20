@@ -57,7 +57,13 @@ export type PendingRun = {
    */
   steps?: RunStep[];
   /** Pinned handover identity. A binding is not evidence of live activity. */
-  exchange?: { revision: number; digest: string; sessionId?: string };
+  exchange?: {
+    revision: number;
+    digest: string;
+    sessionId?: string;
+    /** CLI identity explicitly resolved from Claude desktop's local session metadata. */
+    resolvedSessionId?: string;
+  };
   promptVersion: string;
   selectedCli: MarkerCli;
   createdAt: string;
@@ -240,6 +246,13 @@ export function createPendingRun(input: NewRunInput): PendingRun {
 /* Transitions                                                         */
 /* ------------------------------------------------------------------ */
 
+/** The original handover stays intact even when its desktop id resolves to a CLI id. */
+export function boundSessionId(run: PendingRun): string | undefined {
+  if (!run.exchange?.sessionId) return undefined;
+  return (run.selectedCli === "claude-code" ? run.exchange.resolvedSessionId : undefined)
+    ?? run.exchange.sessionId;
+}
+
 /**
  * Push a matched run's window out, measuring it from this evidence.
  *
@@ -259,7 +272,8 @@ function windowFrom(run: PendingRun, at: string): string {
  * state the run is in.
  */
 export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
-  if (run.exchange?.sessionId && "sessionId" in evidence && evidence.sessionId !== run.exchange.sessionId) return run;
+  const pinned = boundSessionId(run);
+  if (pinned && "sessionId" in evidence && evidence.sessionId !== pinned) return run;
   // A recorded failure is the tool's own word and stands. "Completed" is
   // Anthill's inference from a quiet turn, and a session that writes again has
   // just disproved it — so activity, and only activity, can take it back.
@@ -362,6 +376,9 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
 
     case "activity": {
       if (run.detectedSessionId && run.detectedSessionId !== evidence.sessionId) return run;
+      // Channels are polled separately. An older CLI report must not undo the
+      // freshness already established by a newer transcript or hook record.
+      if (run.lastObservedAt && Date.parse(evidence.at) < Date.parse(run.lastObservedAt)) return run;
       // Only work done *after* the finish disproves it. An observer that
       // re-reports the same moment is describing the turn that already ended,
       // and taking that as a revival is how a finished run gets stuck looking

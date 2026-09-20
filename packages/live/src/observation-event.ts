@@ -149,7 +149,9 @@ export type ObservationEvent = {
 export function eventFingerprint(event: Omit<ObservationEvent, "seq" | "recordedAt">): string {
   return [
     event.channel,
-    event.sessionId ?? "-",
+    // Reports identify the run, not a vendor session. Resolving a host id
+    // must not replay those reports as new step passes after restart.
+    event.channel === "anthill:report" ? event.runId : event.sessionId ?? "-",
     event.kind,
     event.at,
     event.toolUseId ?? event.blockId ?? event.title,

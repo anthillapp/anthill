@@ -166,7 +166,7 @@ export function readSubmission(value: unknown): ReadSubmissionResult {
         value.mode,
         "mode",
         anyOf(HANDOVER_MODES),
-        "Show-and-go lets the work begin as soon as the workflow validates; approval-gate waits until the user has marked a revision ready.",
+        "Which of the two things the user asked for: \"design\" if they want a workflow of their own, which Anthill opens in the editor for them to read and change, or \"watch\" if they want to see the work happen, which opens the Live Session instead. It chooses a screen; it holds no work back. \"show-and-go\" and \"approval-gate\" are the older names and are still accepted; both read as \"design\".",
       ),
     );
   }

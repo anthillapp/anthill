@@ -28,6 +28,7 @@ export {
   EXCHANGE_VERSION,
   HANDOVER_MODES,
   SESSION_ID_MAX_LENGTH,
+  handoverOpens,
   isHandoverMode,
   isSessionId,
   isSourceHarness,
@@ -36,6 +37,7 @@ export {
   type ExchangeProblemCode,
   type ExchangeSource,
   type HandoverMode,
+  type HandoverOpens,
   type RevisionState,
   type SourceHarness,
 } from "./contracts.js";

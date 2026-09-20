@@ -18,6 +18,7 @@ const view: ExchangeView = {
   revision: 1,
   digest: "d1",
   state: "ready_for_agent",
+  mode: "design",
   source: { harness: "claude-code", sessionId: "s1", taskText: "The user's own words" },
   problems: [],
   bindings: [],

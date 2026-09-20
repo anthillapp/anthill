@@ -80,31 +80,51 @@ export type ExchangeSource = {
 };
 
 /**
- * What the harness said it intended when it handed the workflow over.
+ * Which of the two things the user asked for when they handed the workflow over.
  *
- * **Recorded, and enforced nowhere.** It used to decide which revision
- * `eligibleRevision` handed back: `approval-gate` withheld everything until
- * the user marked one ready, `show-and-go` gave out the head. The gate was
- * removed because it did not do what its name promised — nothing in this
- * system has a hook on a harness, so withholding a revision withheld Anthill's
- * record of the run and not the work — while costing the user a second act
- * after the answer they had already given in conversation.
+ * `design` — they want a workflow of their own. Anthill opens the editor, they
+ * read it, change it and save it, and the session waits for them to say so.
  *
- * It stays in the contract because it is written into every handover already
- * on disk and a harness may still submit it, and removing it would be a format
- * change that made those records unreadable for no gain. Read it as a note
- * about what the harness meant, never as a condition on anything.
+ * `watch` — they want to see the work happen. The harness composed the graph
+ * itself and is already doing the work; there is nothing here for the user to
+ * settle, so Anthill opens the Live Session instead of the canvas.
  *
- * What decides whether work starts is the user's answer to the session that
- * asked them. That lives in their conversation, which is the only place it
- * ever really lived.
+ * **It decides a screen and nothing else.** It is not a gate and cannot be
+ * one: nothing in this system has a hook on a harness, so an Anthill that
+ * withheld a revision would withhold its own record of the run and not the
+ * work. That was `approval-gate`, and it is gone. What decides whether work
+ * starts is the user's answer to the session that asked them, which lives in
+ * their conversation and only ever lived there.
+ *
+ * `show-and-go` and `approval-gate` stay in the union because they are written
+ * into every handover already on disk, and a value that no longer parses would
+ * make those records unreadable for no gain. Both read as `design`: an old
+ * handover was one the user was meant to look at. Use `handoverOpens` rather
+ * than comparing this field, so the legacy pair is folded in one place.
  */
-export type HandoverMode = "show-and-go" | "approval-gate";
+export type HandoverMode = "design" | "watch" | "show-and-go" | "approval-gate";
 
 export const HANDOVER_MODES = [
+  "design",
+  "watch",
   "show-and-go",
   "approval-gate",
 ] as const satisfies readonly HandoverMode[];
+
+/** Which screen a handover in this mode belongs on. */
+export type HandoverOpens = "editor" | "live";
+
+/**
+ * The screen a handover opens on, with the legacy modes folded in.
+ *
+ * Only `watch` goes to the Live Session. Everything else — including a
+ * handover from before these two words existed — opens the editor, because
+ * sending an old record somewhere new would change what a stored handover
+ * means after the fact.
+ */
+export function handoverOpens(mode: HandoverMode): HandoverOpens {
+  return mode === "watch" ? "live" : "editor";
+}
 
 /**
  * One handover, as it exists once it has been read.

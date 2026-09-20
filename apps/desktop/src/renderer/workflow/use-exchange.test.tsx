@@ -20,6 +20,7 @@ const view: ExchangeView = {
   revision: 3,
   digest: "sha256:abc",
   state: "ready_for_agent",
+  mode: "design",
   source: { harness: "claude-code", sessionId: "s1", taskText: "The user's own words" },
   problems: [],
   bindings: [],

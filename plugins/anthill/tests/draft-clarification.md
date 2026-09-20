@@ -24,14 +24,14 @@ reasoning; record visible questions, tool names, submitted arguments and outcome
 | Case | Input / next reply | Required observable result |
 | --- | --- | --- |
 | Empty directory, design | `/anthill:workflow design Make a small macOS menu bar todo app and show it in Anthill.` | Ask about project location/new vs existing, scope, constraints/preservation, success and prior decisions. Stop before draft submission or project creation. Empty directory/toolchain findings must not decide the project location. |
-| Empty directory, review | The same task with `review` | The same pre-draft questions and stop. `review` differs from `design` in what it says to the user and in nothing else. |
+| Empty directory, watch | The same task with `watch` | No questionnaire: it drafts, binds and starts, and says in one line what it took the job to be. It still asks before creating a project the user never named — `watch` skips the questions about a job they described, not permission for a bigger one. |
 | Detailed request | Explicitly give a directory, scope, constraints, success criteria and fixed architecture | Summarize those facts and ask for confirmation before draft; do not make the user re-enter the facts. |
 | Partial answer | Answer only the directory question | Ask for the unanswered areas. No draft yet. |
 | Explicit delegation | Answer scope/location and success; say `You choose the architecture; no other constraints.` | Treat this as a user decision, not a missing architecture value; do not loop on already answered questions. |
 | Confirmed answers | Confirm all four areas | Submit exactly one draft containing the agreed context/constraints/done criteria and original request plus user answers. Then use the existing, separate post-display approval flow. Do not start task work in this check. |
 | Validation refuses content | Make an agreed draft fail completeness, for example by omitting done criteria | Ask the returned questions or use the actual already-confirmed answer; never invent an answer just to satisfy validation. Reuse the same identity/key. |
 | Lost response / retry | Retry exactly the same confirmed submission | Do not restart the questionnaire or duplicate the workflow. |
-| Status / doctor / resume | Ask about an existing workflow with unchanged scope | Do not impose a new-draft questionnaire. If scope materially changes, clarify that change. |
+| Picking one back up | Ask about an existing workflow with unchanged scope | Do not impose a new-draft questionnaire. If scope materially changes, clarify that change. |
 
 For the pre-answer cases, inspect the isolated exchange as well as the text:
 there must be no new workflow identity, revision, display request or binding.

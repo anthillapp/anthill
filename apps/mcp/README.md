@@ -78,6 +78,13 @@ exchange directory — not the app, which it cannot reach and does not speak for
    Anthill shows it back to them so they can see whether the same job was
    understood — so quote them rather than paraphrasing.
 
+   `mode` is the command the user ran: `design`, which opens the workflow on
+   the canvas for them to read and change, or `watch`, which opens the Live
+   Session because the harness wrote the graph itself and is already working.
+   It decides a screen and nothing else. `show-and-go` and `approval-gate` are
+   the retired names, still accepted because every handover on disk carries one
+   of them, and both read as `design`.
+
 2. **`get_ready_revision`** takes the workflow id and answers `ready`,
    `not_ready`, `no_such_workflow` or `invalid`. **It never blocks**, and there
    is no approval for it to block on. It used to: a `mode` of `approval-gate`

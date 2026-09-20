@@ -6,7 +6,7 @@
  * marked as Anthill-owned.
  */
 
-import { copyFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -21,6 +21,12 @@ import type {
 } from "../../shared/ipc.js";
 
 const OWNER_MARKER = "anthill-observation-hook";
+
+/**
+ * How much of the end of the hook log a status check reads before giving up
+ * and reading it all. Large enough to hold a busy session's recent records.
+ */
+const TAIL_WINDOW_BYTES = 256 * 1024;
 
 const HARNESS = {
   "claude-code": {
@@ -332,14 +338,19 @@ export class ObservationSetupService {
    * same period, so the log and the handler were both plainly fine. Only the
    * harness was not calling it, and the card said Enabled throughout.
    *
-   * The log is a line per event and is read whole: it is the only place the
-   * answer lives, and a harness that has never fired is exactly the case where
-   * no shortcut from the end of the file can stop early.
+   * The tail is read first, and usually answers. A harness that fired a moment
+   * ago is the ordinary case and is near the end; only a harness that has
+   * never fired needs the whole file, because that is the one conclusion no
+   * shortcut from the end can reach (ANT-99). The whole file is itself bounded
+   * now — the log rotates — so the fallback has a size rather than a hope.
    */
   private async lastHookEvent(harness: HookHarness): Promise<string | undefined> {
+    const marker = `"harness":"${harness}"`;
+    const fromTail = await this.searchTail(marker);
+    if (fromTail) return fromTail;
+
     const text = await readFile(this.hookLogPath(), "utf8").catch(() => "");
     if (!text) return undefined;
-    const marker = `"harness":"${harness}"`;
     const lines = text.split("\n");
     for (let index = lines.length - 1; index >= 0; index -= 1) {
       const line = lines[index];
@@ -354,6 +365,41 @@ export class ObservationSetupService {
       }
     }
     return undefined;
+  }
+
+  /**
+   * The newest matching record in the last stretch of the log, if it is there.
+   *
+   * The first line of the window is dropped: a read that starts mid-file
+   * almost certainly starts mid-line, and half a JSON object is not a record.
+   */
+  private async searchTail(marker: string): Promise<string | undefined> {
+    const path = this.hookLogPath();
+    const handle = await open(path, "r").catch(() => undefined);
+    if (!handle) return undefined;
+    try {
+      const { size } = await handle.stat();
+      const window = Math.min(size, TAIL_WINDOW_BYTES);
+      if (window === 0) return undefined;
+      const buffer = Buffer.allocUnsafe(window);
+      const { bytesRead } = await handle.read(buffer, 0, window, size - window);
+      const lines = buffer.subarray(0, bytesRead).toString("utf8").split("\n");
+      if (window < size) lines.shift();
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        if (!lines[index].includes(marker)) continue;
+        try {
+          const row = JSON.parse(lines[index]) as { recordedAt?: unknown };
+          if (typeof row.recordedAt === "string") return row.recordedAt;
+        } catch {
+          continue;
+        }
+      }
+      return undefined;
+    } catch {
+      return undefined;
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
   }
 
   private prefsPath(): string {

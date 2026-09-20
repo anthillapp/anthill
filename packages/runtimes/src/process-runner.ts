@@ -66,6 +66,31 @@ export interface RunProcessOptions {
   onOutput?: (stream: "stdout" | "stderr", chunk: string) => void;
 }
 
+/**
+ * How much of a child's output is kept in memory, per stream.
+ *
+ * Generous for anything a caller here reads — a version banner, a JSON answer,
+ * an error — and small enough that a runaway child cannot exhaust the process.
+ */
+export const MAX_CAPTURED_OUTPUT = 1024 * 1024;
+
+/** The marker left in place of what was dropped. Said, never silent. */
+const TRUNCATION_NOTE = "\n[Anthill kept the first 1 MB of this output and stopped recording it.]";
+
+/**
+ * Append while there is room, and say so once when there is not.
+ *
+ * The beginning is kept rather than the end: what the callers here read — a
+ * version, a first error, a JSON document — is at the start, and a tail would
+ * throw away the part they need.
+ */
+function keep(current: string, addition: string): string {
+  if (current.length >= MAX_CAPTURED_OUTPUT) return current;
+  const next = current + addition;
+  if (next.length <= MAX_CAPTURED_OUTPUT) return next;
+  return next.slice(0, MAX_CAPTURED_OUTPUT) + TRUNCATION_NOTE;
+}
+
 export interface ProcessOutcome {
   exitCode: number | null;
   stdout: string;
@@ -164,14 +189,27 @@ export function runProcess(options: RunProcessOptions): Promise<ProcessOutcome> 
 
     child.stdout?.setEncoding?.("utf8");
     child.stderr?.setEncoding?.("utf8");
+    /*
+     * What is kept is bounded; what is streamed is not.
+     *
+     * These two strings grew for as long as the child wrote, and every caller
+     * in the app shares them: CLI detection, model probes, hook verification,
+     * drafting. A child that writes steadily and is never read — a progress
+     * bar, a compiler on a large tree — could take the main process with it
+     * (ANT-99).
+     *
+     * The cap is on the *retained* copy only. `onOutput` still sees every
+     * chunk, because a caller streaming output is already deciding for itself
+     * what to keep.
+     */
     child.stdout?.on("data", (chunk: unknown) => {
       const text = toText(chunk);
-      stdout += text;
+      stdout = keep(stdout, text);
       onOutput?.("stdout", text);
     });
     child.stderr?.on("data", (chunk: unknown) => {
       const text = toText(chunk);
-      stderr += text;
+      stderr = keep(stderr, text);
       onOutput?.("stderr", text);
     });
 

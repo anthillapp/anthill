@@ -31,6 +31,15 @@ import { minimalHookPayload } from "./hook-payload.js";
  */
 const MAX_LOG_BYTES = 8 * 1024 * 1024;
 
+/**
+ * The most of a hook payload that is read.
+ *
+ * Far more than the fields kept need, and far less than a large tool response.
+ * A payload past this is truncated, so it stops being JSON and lands as
+ * unparseable — which is already handled, and which drops it.
+ */
+const MAX_STDIN_CHARS = 1024 * 1024;
+
 /** Roll the log over when it has grown past its bound. Never fails the hook. */
 async function rotate(path: string): Promise<void> {
   try {
@@ -53,9 +62,30 @@ function logPath(): string {
 }
 
 async function main(): Promise<void> {
+  /*
+   * Bounded, because this is somebody else's process.
+   *
+   * A hook runs inside the user's CLI session with whatever that session hands
+   * it. A payload carrying a large tool response was concatenated without
+   * limit here, so a noisy call allocated it twice — once as stdin and once as
+   * the parsed object (ANT-99). Nothing kept past `minimalHookPayload` is
+   * anywhere near this size, so reading further could only cost memory.
+   *
+   * Stdin keeps being drained after the cap. A hook that stops reading gives
+   * the CLI a broken pipe, and blocking the user's session is the one thing
+   * this must never do.
+   */
   let input = "";
+  let capped = false;
   process.stdin.setEncoding("utf8");
-  for await (const chunk of process.stdin) input += chunk;
+  for await (const chunk of process.stdin) {
+    if (capped) continue;
+    input += chunk;
+    if (input.length > MAX_STDIN_CHARS) {
+      input = input.slice(0, MAX_STDIN_CHARS);
+      capped = true;
+    }
+  }
 
   let data: unknown = input;
   try {

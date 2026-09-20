@@ -138,6 +138,7 @@ export {
 export {
   WorkflowCompileError,
   compile,
+  executableBlocks,
   type CompileResult,
   type GeneratedFile,
 } from "./compile.js";

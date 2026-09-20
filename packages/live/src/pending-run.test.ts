@@ -61,6 +61,27 @@ describe("creating a pending run", () => {
 });
 
 describe("evidence", () => {
+  it("does not move last seen backwards when an older channel reports afterward", () => {
+    const matched = applyEvidence(run(), strongMatch);
+    const fresh = applyEvidence(matched, { kind: "activity", sessionId: "sess-1", at: later(10 * 60_000) });
+    const next = applyEvidence(fresh, { kind: "activity", sessionId: "sess-1", channel: "anthill:report", at: later(10_000) });
+    expect(next).toBe(fresh);
+    expect(hasGoneQuiet(next, later(10 * 60_000 + 1000))).toBe(false);
+  });
+
+  it("pins a resolved Claude CLI identity without changing the original handover", () => {
+    const bound = run({
+      exchange: { revision: 1, digest: "abc", sessionId: "desktop-id", resolvedSessionId: "sess-1" },
+      detectedSessionId: "sess-1",
+    });
+    expect(applyEvidence(bound, strongMatch).state).toBe("detected_live");
+    for (const sessionId of ["desktop-id", "unrelated"]) {
+      expect(applyEvidence(bound, { ...strongMatch, sessionId })).toBe(bound);
+    }
+    expect(bound.exchange?.sessionId).toBe("desktop-id");
+    expect(applyEvidence({ ...bound, selectedCli: "codex" }, strongMatch).state).toBe("pending_after_copy");
+  });
+
   it("goes live on a marker found in a record the tool wrote", () => {
     const next = applyEvidence(run(), strongMatch);
     expect(next.state).toBe("detected_live");

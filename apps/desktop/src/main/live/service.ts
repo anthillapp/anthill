@@ -25,6 +25,7 @@ import {
   CLI_LABEL,
   TIMING,
   applyEvidence,
+  boundSessionId,
   createPendingRun,
   expireIfStale,
   hasGoneQuiet,
@@ -53,6 +54,7 @@ import type {
 } from "./observers/types.js";
 import { ObservationJournal } from "./journal.js";
 import { PendingRunStore } from "./store.js";
+import { claudeDesktopSessionsRoot, resolveClaudeSession } from "./claude-session.js";
 
 /** How often open runs are looked at. Fast enough to feel automatic. */
 const POLL_MS = 2_000;
@@ -87,6 +89,7 @@ export type StartObservationInput = {
 /** Where each CLI keeps its records. Overridable so the service is testable. */
 export type ObservationRoots = {
   claudeRoot?: string;
+  claudeDesktopRoot?: string;
   codexRoot?: string;
   piRoot?: string;
   hookLogPath?: string;
@@ -99,6 +102,9 @@ export class LiveSessionService {
   private readonly hooks: HookLogObserver;
   private readonly reports: CliReportObserver;
   private readonly journal: ObservationJournal;
+  private readonly claudeDesktopRoot: string | undefined;
+  private readonly sessionLookups = new Map<string, number>();
+  private readonly sessionsSeen = new Set<string>();
   private timer: NodeJS.Timeout | undefined;
   private capabilities: ObserverCapabilities[] = [];
   private polling = false;
@@ -134,6 +140,8 @@ export class LiveSessionService {
      */
     private readonly onSettled: (run: PendingRun) => void = () => undefined,
   ) {
+    // An injected transcript root must never fall through to the user's metadata.
+    this.claudeDesktopRoot = roots.claudeDesktopRoot ?? (roots.claudeRoot ? undefined : claudeDesktopSessionsRoot());
     this.observers = {
       "claude-code": roots.claudeRoot
         ? new ClaudeCodeObserver(roots.claudeRoot)
@@ -274,6 +282,8 @@ export class LiveSessionService {
     this.reports.forget(runId);
     forgetAnnounced(this.announced, runId);
     this.mismatched.delete(runId);
+    this.sessionsSeen.delete(runId);
+    this.sessionLookups.delete(runId);
   }
 
   /** Tell everyone what is now true, and hand the same thing back. */
@@ -358,6 +368,7 @@ export class LiveSessionService {
   }
 
   private async advance(run: PendingRun, now: string): Promise<PendingRun> {
+    run = await this.resolveSession(run, now);
     const { evidence, drafts } = await this.read(run, now);
     const added = await this.record(run, drafts);
 
@@ -381,10 +392,39 @@ export class LiveSessionService {
    * Anthill was not claiming to watch is still a step the session announced.
    */
   private async recover(run: PendingRun, now: string): Promise<PendingRun> {
+    run = await this.resolveSession(run, now);
     const { evidence, drafts } = await this.read(run, now);
     const added = await this.record(run, drafts);
     const next = resumeFromEvidence(run, evidence, now) ?? run;
     this.offerNotices(next, added);
+    return next;
+  }
+
+  /** Repair a host-id handover only through Claude's explicit local mapping. */
+  private async resolveSession(run: PendingRun, now: string): Promise<PendingRun> {
+    if (run.selectedCli !== "claude-code" || !run.exchange?.sessionId ||
+        run.exchange.resolvedSessionId || !this.claudeDesktopRoot) return run;
+    const last = this.sessionLookups.get(run.anthillRunId);
+    if (last !== undefined && Date.parse(now) - last < RECOVERY_POLL_MS) return run;
+    this.sessionLookups.set(run.anthillRunId, Date.parse(now));
+    const resolved = await resolveClaudeSession(this.claudeDesktopRoot, run.exchange.sessionId);
+    if (!resolved || resolved === run.exchange.sessionId) return run;
+    // Re-read hooks/transcripts skipped under the old id, but do not replay
+    // reported steps or reset the user's notification history.
+    for (const observer of Object.values(this.observers)) observer.forget(run.anthillRunId);
+    this.hooks.forget(run.anthillRunId);
+    this.sessionsSeen.delete(run.anthillRunId);
+    const next = {
+      ...run,
+      exchange: { ...run.exchange, resolvedSessionId: resolved },
+      detectedSessionId: resolved,
+    };
+    await this.record(next, [{
+      at: now, cli: run.selectedCli, source: "anthill", kind: "notification",
+      channel: "exchange:session-resolution", sessionId: resolved,
+      title: "Claude desktop session resolved to its CLI session",
+      detail: `Claude's local session metadata maps ${run.exchange.sessionId} to ${resolved}. The original handover is unchanged; Anthill observes the CLI session's records.`,
+    }]);
     return next;
   }
 
@@ -403,6 +443,11 @@ export class LiveSessionService {
       });
       evidence = result.evidence;
       drafts = result.events;
+      const pinned = boundSessionId(run);
+      if (pinned && (drafts.some((item) => item.sessionId === pinned) ||
+          evidence.some((item) => "sessionId" in item && item.sessionId === pinned))) {
+        this.sessionsSeen.add(run.anthillRunId);
+      }
     } catch {
       // A scan that fails is not evidence of anything about the session.
       evidence = [];
@@ -431,7 +476,7 @@ export class LiveSessionService {
 
     // A plugin binds an explicit session, unlike discovery from a pasted
     // marker. A copied marker in a second transcript must not move that binding.
-    const sessionId = run.exchange?.sessionId;
+    const sessionId = boundSessionId(run);
     if (sessionId) {
       const conflicts = new Set(evidence.flatMap((item) => item.kind === "ambiguous" ? item.sessionIds :
         "sessionId" in item && item.sessionId !== sessionId ? [item.sessionId] : []));
@@ -450,12 +495,13 @@ export class LiveSessionService {
         one nobody reads by the time it is right.
       */
       const found = drafts.some((item) => item.sessionId === sessionId && item.channel !== "anthill:report");
+      if (found) this.sessionsSeen.add(run.anthillRunId);
       const overdue = Date.parse(now) - Date.parse(run.createdAt) > TIMING.activityTtlMs;
       evidence = evidence.filter((item) => (!("sessionId" in item) || item.sessionId === sessionId) && item.kind !== "ambiguous");
       drafts = [
         ...drafts.filter((item) => item.sessionId === sessionId),
         ...this.noteMismatch(run, sessionId, conflicts, now),
-        ...(found || !overdue ? [] : this.noteUnseen(run, sessionId, now)),
+        ...(this.sessionsSeen.has(run.anthillRunId) || !overdue ? [] : this.noteUnseen(run, sessionId, now)),
       ];
     }
     // Observers with no transcript support must not shorten the report window.

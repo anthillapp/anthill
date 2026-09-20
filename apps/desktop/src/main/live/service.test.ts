@@ -25,6 +25,7 @@ type Harness = {
   service: LiveSessionService;
   store: PendingRunStore;
   claudeRoot: string;
+  claudeDesktopRoot: string;
   hookLogPath: string;
   reportLogPath: string;
   storePath: string;
@@ -39,6 +40,7 @@ type Harness = {
 async function harness(startAt = "2026-08-29T10:00:00.000Z"): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), "anthill-service-"));
   const claudeRoot = join(dir, "claude");
+  const claudeDesktopRoot = join(dir, "claude-desktop");
   await mkdir(claudeRoot, { recursive: true });
 
   const storePath = join(dir, "live-sessions.json");
@@ -56,6 +58,7 @@ async function harness(startAt = "2026-08-29T10:00:00.000Z"): Promise<Harness> {
     () => now,
     {
       claudeRoot,
+      claudeDesktopRoot,
       codexRoot: join(dir, "codex"),
       journalDir: join(dir, "observations"),
       hookLogPath,
@@ -76,6 +79,7 @@ async function harness(startAt = "2026-08-29T10:00:00.000Z"): Promise<Harness> {
     service,
     store,
     claudeRoot,
+    claudeDesktopRoot,
     hookLogPath,
     reportLogPath,
     storePath,
@@ -163,6 +167,148 @@ describe("external revision bindings", () => {
     exchange: { revision: 1, digest: "abcd1234", sessionId: "bound-session" },
     steps: [{ id: "fix", name: "Fix" }],
   };
+  const hostId = "11111111-1111-4111-8111-111111111111";
+  const cliId = "22222222-2222-4222-8222-222222222222";
+  async function desktopMapping(root: string, sessionId = cliId) {
+    const directory = join(root, "account", "organization");
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, `local_${hostId}.json`), JSON.stringify({
+      sessionId: `local_${hostId}`, cliSessionId: sessionId,
+    }));
+  }
+
+  it("resolves a desktop host id and keeps receiving real messages and tools without step reports", async () => {
+    const h = await harness();
+    await desktopMapping(h.claudeDesktopRoot);
+    await h.service.registerBinding({ ...input, exchange: { ...input.exchange, sessionId: hostId } });
+    await writeTranscript(h.claudeRoot, cliId, { marked: false });
+    const transcript = join(h.claudeRoot, "-tmp-scratch", `${cliId}.jsonl`);
+    const say = async (at: string) => appendFile(transcript, JSON.stringify({
+      type: "assistant", sessionId: cliId, timestamp: at,
+      message: { content: [
+        { type: "thinking", thinking: "PRIVATE_REASONING_MUST_NOT_APPEAR" },
+        { type: "text", text: "Checking the menu bar implementation." },
+        { type: "tool_use", name: "Read", id: at, input: { file_path: "/tmp/Menu.swift" } },
+      ] },
+    }) + "\n");
+    await say("2026-08-29T10:00:07.000Z");
+    h.setNow("2026-08-29T10:00:08.000Z");
+    await h.service.poll();
+    expect(only(h.service.snapshot())).toMatchObject({
+      state: "detected_live", detectedSessionId: cliId,
+      exchange: { sessionId: hostId, resolvedSessionId: cliId },
+    });
+    for (let minute = 1; minute <= 7; minute++) {
+      const at = `2026-08-29T10:0${minute}:07.000Z`;
+      await say(at);
+      h.setNow(at);
+      await h.service.poll();
+    }
+    h.setNow("2026-08-29T10:07:09.000Z");
+    await h.service.poll(); // An empty poll does not mean the transcript never existed.
+    const events = await h.service.events(RUN_ID);
+    expect(events.filter((event) => event.kind === "message")).toHaveLength(8);
+    expect(events.filter((event) => event.kind === "tool.start")).toHaveLength(8);
+    expect(events.filter((event) => event.channel === "exchange:session-mismatch")).toEqual([]);
+    expect(JSON.stringify(events)).not.toContain("PRIVATE_REASONING");
+    expect(only(h.service.snapshot())).toMatchObject({ state: "detected_live", lastObservedAt: "2026-08-29T10:07:07.000Z" });
+    expect(JSON.parse(await readFile(h.storePath, "utf8"))[0].exchange).toMatchObject({ sessionId: hostId, resolvedSessionId: cliId });
+    h.service.stop();
+  });
+
+  it("does not claim activity from mapping alone or retarget a pinned resolution", async () => {
+    const h = await harness();
+    await desktopMapping(h.claudeDesktopRoot);
+    await h.service.registerBinding({ ...input, exchange: { ...input.exchange, sessionId: hostId } });
+    await h.service.poll();
+    expect(only(h.service.snapshot())).toMatchObject({ state: "pending_after_copy", detectedSessionId: cliId });
+    expect(only(h.service.snapshot()).lastObservedAt).toBeUndefined();
+    await desktopMapping(h.claudeDesktopRoot, "33333333-3333-4333-8333-333333333333");
+    h.setNow("2026-08-29T10:06:00.000Z");
+    await h.service.poll();
+    expect(only(h.service.snapshot()).detectedSessionId).toBe(cliId);
+    expect((await h.service.events(RUN_ID)).filter((e) => e.channel === "exchange:session-resolution")).toHaveLength(1);
+    h.service.stop();
+  });
+
+  it("keeps fresh transcript activity when an older CLI report is read in the same poll", async () => {
+    const h = await harness();
+    await h.service.registerBinding(input);
+    await writeTranscript(h.claudeRoot, "bound-session", { marked: false });
+    await appendFile(join(h.claudeRoot, "-tmp-scratch", "bound-session.jsonl"), JSON.stringify({
+      type: "assistant", sessionId: "bound-session", timestamp: "2026-08-29T10:08:00.000Z",
+      message: { content: [{ type: "text", text: "Still implementing the menu." }] },
+    }) + "\n");
+    await mkdir(join(h.reportLogPath, ".."), { recursive: true });
+    await writeFile(h.reportLogPath, JSON.stringify({ version: 1, kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "fix", at: "2026-08-29T10:00:02.000Z" }) + "\n");
+    h.setNow("2026-08-29T10:08:01.000Z");
+    await h.service.poll();
+    expect(only(h.service.snapshot())).toMatchObject({ state: "detected_live", lastObservedAt: "2026-08-29T10:08:00.000Z" });
+    h.service.stop();
+  });
+
+  it("restores the resolved identity and deduplicates old reports after restart", async () => {
+    const h = await harness();
+    const binding = { ...input, exchange: { ...input.exchange, sessionId: hostId } };
+    await h.service.registerBinding(binding);
+    await mkdir(join(h.reportLogPath, ".."), { recursive: true });
+    await writeFile(h.reportLogPath, JSON.stringify({ version: 1, kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "fix", at: "2026-08-29T10:00:02.000Z" }) + "\n");
+    h.setNow("2026-08-29T10:00:03.000Z");
+    await h.service.poll();
+    await desktopMapping(h.claudeDesktopRoot);
+    await writeTranscript(h.claudeRoot, cliId, { marked: false });
+    h.setNow("2026-08-29T10:00:40.000Z");
+    await h.service.poll();
+    expect(await h.service.registerBinding(binding)).toBe(true);
+    h.service.stop();
+
+    const restored = new LiveSessionService(new PendingRunStore(h.storePath), () => {}, () => "2026-08-29T10:00:41.000Z", {
+      claudeRoot: h.claudeRoot, claudeDesktopRoot: join(h.claudeDesktopRoot, "no-longer-present"),
+      codexRoot: join(h.claudeRoot, "unused"), hookLogPath: h.hookLogPath,
+      reportLogPath: h.reportLogPath, journalDir: join(h.storePath, "..", "observations"),
+    });
+    await restored.start();
+    await restored.poll();
+    expect(only(restored.snapshot())).toMatchObject({ detectedSessionId: cliId, exchange: { sessionId: hostId, resolvedSessionId: cliId } });
+    expect((await restored.events(RUN_ID)).filter((e) => e.kind === "step.marker")).toHaveLength(1);
+    expect((await restored.events(RUN_ID)).filter((e) => e.channel === "exchange:session-resolution")).toHaveLength(1);
+    restored.stop();
+  });
+
+  it("recovers a lost host-id run when its mapped transcript and hooks appear", async () => {
+    const h = await harness();
+    await h.service.registerBinding({ ...input, exchange: { ...input.exchange, sessionId: hostId } });
+    h.setNow("2026-08-29T10:31:00.000Z");
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("observation_lost");
+    await desktopMapping(h.claudeDesktopRoot);
+    await writeTranscript(h.claudeRoot, cliId, { marked: false });
+    await appendFile(join(h.claudeRoot, "-tmp-scratch", `${cliId}.jsonl`), JSON.stringify({
+      type: "assistant", sessionId: cliId, timestamp: "2026-08-29T10:32:00.000Z",
+      message: { content: [{ type: "text", text: "Resuming the implementation." }] },
+    }) + "\n");
+    await hookLine(h.hookLogPath, cliId, "PreToolUse", "2026-08-29T10:32:01.000Z", "real-tool");
+    h.setNow("2026-08-29T10:32:02.000Z");
+    await h.service.poll();
+    expect(only(h.service.snapshot())).toMatchObject({ state: "detected_live", detectedSessionId: cliId });
+    const events = await h.service.events(RUN_ID);
+    expect(events.some((event) => event.detail === "Resuming the implementation.")).toBe(true);
+    expect(events.some((event) => event.source === "hook" && event.toolUseId === "real-tool")).toBe(true);
+    h.service.stop();
+  });
+
+  it("does not report an already observed session as unseen during a later empty poll", async () => {
+    const h = await harness();
+    await h.service.registerBinding(input);
+    await writeTranscript(h.claudeRoot, "bound-session", { marked: false });
+    h.setNow("2026-08-29T10:00:08.000Z");
+    await h.service.poll();
+    h.setNow("2026-08-29T10:06:00.000Z");
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("observation_lost");
+    expect((await h.service.events(RUN_ID)).filter((event) => event.channel === "exchange:session-mismatch")).toEqual([]);
+    h.service.stop();
+  });
   it("persists the session and snapshot identity without claiming live activity", async () => {
     const { service, storePath } = await harness();
     expect(await service.registerBinding(input)).toBe(true);

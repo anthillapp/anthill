@@ -30,6 +30,7 @@ import { join } from "node:path";
 
 import {
   TIMING,
+  boundSessionId,
   messageExcerpt,
   parseStepMarkers,
   textCarriesMarker,
@@ -266,7 +267,7 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
       Only the file whose records carry that id; being told which session it is
       does not say which file it is, and a project directory holds many.
     */
-    const named = run.exchange?.sessionId;
+    const named = boundSessionId(run);
     if (named) {
       for (const state of states.values()) {
         if (state.sessionId === named) state.matched = true;

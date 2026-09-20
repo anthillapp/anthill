@@ -59,6 +59,18 @@ describe("the observation journal", () => {
     expect(await log.read("ANT-1")).toHaveLength(2);
   });
 
+  it("does not replay CLI steps after a host id resolves and Anthill restarts", async () => {
+    const { journal: log, dir } = await journal();
+    const step = draft({ source: "anthill", channel: "anthill:report", kind: "step.marker", blockId: "fix", toolUseId: undefined, sessionId: "host-id" });
+    await log.append("ANT-1", [step]);
+    const reopened = new ObservationJournal(dir);
+    expect(await reopened.append("ANT-1", [{ ...step, sessionId: "cli-id" }])).toEqual([]);
+    expect(await reopened.read("ANT-1")).toHaveLength(1);
+    expect(await reopened.append("ANT-1", [{ ...step, sessionId: "cli-id", at: "2026-08-29T10:01:01.000Z" }])).toHaveLength(1);
+    // Vendor events still distinguish two actual sessions.
+    expect(await reopened.append("ANT-1", [draft({ sessionId: "one" }), draft({ sessionId: "two" })])).toHaveLength(2);
+  });
+
   it("survives a restart, continuing the numbering from the file", async () => {
     const { journal: log, dir } = await journal();
     await log.append("ANT-1", [draft()]);

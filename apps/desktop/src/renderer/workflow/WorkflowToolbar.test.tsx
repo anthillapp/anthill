@@ -77,6 +77,20 @@ it("offers no Prompt and no harness picker on a handover", () => {
   expect(source.getAttribute("title")).toContain("harness cannot be changed");
 });
 
+/*
+ * The padlock is the design's stroked icon, not the emoji. An emoji padlock is
+ * a colour glyph the installed font picks, so it ignored the button's colour
+ * and weight and came out a different size on every machine.
+ */
+it("draws the handover's lock instead of typing an emoji", () => {
+  draw({ handover: handover() });
+  const source = screen.getByRole("button", { name: /From Claude Code/ });
+  expect(source.textContent).not.toContain("\u{1F512}");
+  const lock = source.querySelector("svg.lock");
+  expect(lock).toBeTruthy();
+  expect(lock?.getAttribute("stroke")).toBe("currentColor");
+});
+
 /**
  * The primary slot is empty on a handover, in every state.
  *

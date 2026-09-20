@@ -1,6 +1,6 @@
 {
   "name": "@anthill/cli",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "private": true,
   "description": "Anthill on Linux: a CLI that opens the app as a web interface on 127.0.0.1.",
   "main": "out/cli/src/cli.js",

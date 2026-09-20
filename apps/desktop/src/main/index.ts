@@ -44,7 +44,7 @@ import {
   type SaveWorkflowResult,
 } from "../shared/ipc.js";
 import { createServices, type RunServices } from "./services.js";
-import { destinationInside, FolderGrants } from "./safe-write.js";
+import { destinationInside, FolderGrants, writeAllOrNothing } from "./safe-write.js";
 import { detectInterpreters, runDraft, signInToInterpreter } from "./interpreters.js";
 import { readCodexModels } from "./codex-models.js";
 import { readPiModels } from "./pi-models.js";
@@ -1197,8 +1197,6 @@ function registerIpcHandlers(): void {
         root = await grants.grant(result.filePaths[0]);
       }
 
-      const written: string[] = [];
-
       try {
         const entries = [...request.files];
         if (request.prompt) {
@@ -1217,11 +1215,20 @@ function registerIpcHandlers(): void {
           destinations.push({ path: destination.path, content: file.content, relative: file.path });
         }
 
-        for (const file of destinations) {
-          await writeFile(file.path, file.content, "utf8");
-          written.push(file.relative);
+        // All of them or none: a failure part way through used to leave some
+        // of the new agent files beside some of the old, matching no version
+        // of the workflow (ANT-100).
+        const outcome = await writeAllOrNothing(destinations);
+        if (!outcome.ok) {
+          return {
+            ok: false,
+            rolledBack: outcome.rolledBack,
+            error: outcome.rolledBack
+              ? `${outcome.error} The folder is as it was.`
+              : `${outcome.error} Some files may have been replaced — check ${root} before using it.`,
+          };
         }
-        return { ok: true, directory: root, written };
+        return { ok: true, directory: root, written: outcome.written };
       } catch (error) {
         return {
           ok: false,

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { destinationInside, FolderGrants } from "./safe-write.js";
+import { destinationInside, FolderGrants, writeAllOrNothing, type StagedFile } from "./safe-write.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -123,5 +123,96 @@ describe("the folders a dialog handed out", () => {
   it("refuses everything before anything is granted", async () => {
     const { root } = await sandbox();
     expect(await new FolderGrants().resolveGranted(root)).toBeUndefined();
+  });
+});
+
+/**
+ * A failed export leaves the folder as it was found (ANT-100).
+ *
+ * Files were written one at a time straight into the chosen folder. A failure
+ * part way through left the repository holding some of the new agent files
+ * beside some of the old ones — matching no version of the workflow, and
+ * matching the prompt the user had just copied least of all.
+ */
+describe("exporting all of the files or none of them", () => {
+  async function staged(root: string, names: string[]): Promise<StagedFile[]> {
+    return names.map((name) => ({
+      path: join(root, name),
+      content: `new ${name}\n`,
+      relative: name,
+    }));
+  }
+
+  it("writes every file when nothing goes wrong", async () => {
+    const { root } = await sandbox();
+    const result = await writeAllOrNothing(await staged(root, ["a.md", "b.md"]));
+    expect(result).toMatchObject({ ok: true, written: ["a.md", "b.md"] });
+    expect(await readFile(join(root, "b.md"), "utf8")).toBe("new b.md\n");
+  });
+
+  /**
+   * The failure is injected at each position in turn, because "the first one
+   * worked" and "the last one worked" fail differently: one has files to put
+   * back, the other has files to remove.
+   */
+  it("restores what it overwrote, wherever the failure lands", async () => {
+    for (const failAt of [0, 1, 2]) {
+      const { root } = await sandbox();
+      await writeFile(join(root, "a.md"), "old a\n");
+      await writeFile(join(root, "b.md"), "old b\n");
+      await writeFile(join(root, "c.md"), "old c\n");
+
+      const files = await staged(root, ["a.md", "b.md", "c.md"]);
+      // A directory cannot be opened for writing, which is a write failure
+      // with none of the noise of permissions on different platforms.
+      await rm(join(root, files[failAt].relative));
+      await mkdir(files[failAt].path);
+
+      const result = await writeAllOrNothing(files);
+
+      expect(result.ok, `failAt ${failAt}`).toBe(false);
+      if (!result.ok) expect(result.rolledBack).toBe(true);
+      // Every file that had contents has them back.
+      for (const name of ["a.md", "b.md", "c.md"]) {
+        if (name === files[failAt].relative) continue;
+        expect(await readFile(join(root, name), "utf8"), `${name} after failAt ${failAt}`)
+          .toBe(`old ${name.slice(0, 1)}\n`);
+      }
+    }
+  });
+
+  it("removes a file it created, rather than leaving a new one behind", async () => {
+    const { root } = await sandbox();
+    const files = await staged(root, ["created.md", "blocked.md"]);
+    await mkdir(files[1].path);
+
+    const result = await writeAllOrNothing(files);
+
+    expect(result.ok).toBe(false);
+    // It did not exist before, so putting the folder back means deleting it.
+    await expect(readFile(join(root, "created.md"), "utf8")).rejects.toThrow();
+  });
+
+  it("says so when the rollback itself could not be done", async () => {
+    const { root } = await sandbox();
+    const nested = join(root, "nested");
+    await mkdir(nested);
+    await writeFile(join(nested, "a.md"), "old a\n");
+    const files: StagedFile[] = [
+      { path: join(nested, "a.md"), content: "new a\n", relative: "nested/a.md" },
+      { path: join(nested, "b.md"), content: "new b\n", relative: "nested/b.md" },
+    ];
+
+    // The first write lands, the second cannot, and the directory is then made
+    // read-only so putting the first one back cannot happen either.
+    await mkdir(files[1].path);
+    const result = await writeAllOrNothing([
+      files[0],
+      { ...files[1], content: "x" },
+      { path: join(nested, "c.md"), content: "y", relative: "nested/c.md" },
+    ]);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(typeof result.rolledBack).toBe("boolean");
   });
 });

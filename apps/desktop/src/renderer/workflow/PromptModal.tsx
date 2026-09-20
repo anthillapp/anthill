@@ -148,6 +148,8 @@ export function PromptModal({
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  /** Whether a failed export left the folder as it was. See ANT-100. */
+  const [rolledBack, setRolledBack] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   /**
@@ -338,6 +340,7 @@ export function PromptModal({
           } else if (!("cancelled" in response)) {
             setPlacement("failed");
             setFailure(response.error);
+            setRolledBack(response.rolledBack !== false);
           }
         }
 
@@ -569,7 +572,9 @@ export function PromptModal({
                       {placement === "written"
                         ? `${files.length} agent ${files.length === 1 ? "file" : "files"} written`
                         : placement === "failed"
-                          ? "Could not write the agent files"
+                          ? rolledBack
+                            ? "No agent files were written"
+                            : "The agent files were left part-written"
                           : `${files.length} agent ${files.length === 1 ? "file" : "files"} will be written here`}
                     </p>
                     <code className="handover-path">{folder}</code>

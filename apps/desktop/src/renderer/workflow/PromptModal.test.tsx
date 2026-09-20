@@ -452,18 +452,39 @@ describe("writing the agent files", () => {
   });
 
   it("still copies when the write fails, and says what failed", async () => {
-    // A half-written folder is worth naming; withholding the prompt over it
-    // would leave the author with nothing at all.
+    // A failed export is worth naming; withholding the prompt over it would
+    // leave the author with nothing at all.
     const { api, order } = stub();
-    api.exportWorkflow.mockResolvedValueOnce({ ok: false, error: "disk full" });
+    api.exportWorkflow.mockResolvedValueOnce({ ok: false, error: "disk full", rolledBack: true });
     open();
     await toHandover();
     fireEvent.click(await copyButton());
 
     await waitFor(() => expect(order).toContain("clipboard"));
     expect(screen.getByText("disk full")).toBeTruthy();
-    expect(screen.getByText("Could not write the agent files")).toBeTruthy();
+    expect(screen.getByText("No agent files were written")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Try that folder again" })).toBeTruthy();
+  });
+
+  /**
+   * The distinction the author has to act on (ANT-100). A rolled-back export
+   * is a thing that did not happen; one that could not be undone has left a
+   * mixture of old and new files in the folder they are about to use.
+   */
+  it("tells a rolled-back export apart from one that could not be undone", async () => {
+    const { api, order } = stub();
+    api.exportWorkflow.mockResolvedValueOnce({
+      ok: false,
+      error: "disk full Some files may have been replaced",
+      rolledBack: false,
+    });
+    open();
+    await toHandover();
+    fireEvent.click(await copyButton());
+
+    await waitFor(() => expect(order).toContain("clipboard"));
+    expect(screen.getByText("The agent files were left part-written")).toBeTruthy();
+    expect(screen.queryByText("No agent files were written")).toBeNull();
   });
 
   it("lets the author copy without them, rather than refusing", async () => {

@@ -368,7 +368,19 @@ export type ExportWorkflowRequest = {
 
 export type ExportWorkflowResponse =
   | { ok: true; directory: string; written: string[] }
-  | { ok: false; error: string }
+  | {
+      ok: false;
+      error: string;
+      /**
+       * Whether the folder was put back as it was found.
+       *
+       * The difference the author has to act on. A rolled-back export is a
+       * thing that did not happen; one that could not be undone has left a
+       * mixture of old and new generated files in a folder they are about to
+       * use (ANT-100).
+       */
+      rolledBack?: boolean;
+    }
   | { ok: false; cancelled: true };
 
 /* ------------------------------------------------------------------ */

@@ -97,6 +97,13 @@ and says plainly that it is waiting, because you asked to read first. **Neither
 starts work until you answer**, and the difference between them is what the
 session says to you rather than anything Anthill enforces.
 
+Before either of them drafts anything, it asks you about the project and
+location, scope, constraints, success criteria and the decisions already made.
+If you gave those details in your request it summarises them back for you to
+confirm rather than making you type them twice. A partial answer gets a
+follow-up question, not an invented requirement, and an empty folder is an
+observation rather than permission to create a project there.
+
 Your edits are written down as you make them. There is nothing to approve and
 nothing to save: when you have finished reading, tell the session to start and
 it works from what is on your canvas.
@@ -105,6 +112,12 @@ There was a **Ready for agent** button here. It looked like it held work back
 and did not — the plugin has no hooks, so withholding a revision withheld
 Anthill's record of the run and not the work — while asking you to say twice
 what you had already said once.
+
+The MCP server validates what a workflow contains, not how it was arrived at.
+It cannot tell whether the caller really asked you anything, so the questions
+above are something the skill does rather than something the server enforces.
+See [pre-draft regression checks](tests/draft-clarification.md) for the cases
+that check it, including partial answers and unchanged retries.
 
 ## Updating, disabling, uninstalling
 

@@ -100,11 +100,15 @@ export class ObservationJournal {
     const seen = this.fingerprints.get(runId) ?? new Set<string>();
     const recordedAt = new Date().toISOString();
     const added: ObservationEvent[] = [];
+    // Held apart from `seen`, which is the cached set itself: marking a
+    // fingerprint there before the write means a failed write still leaves the
+    // event recorded as already handled, which is the bug being fixed.
+    const marked = new Set<string>();
 
     for (const draft of drafts) {
       const fingerprint = eventFingerprint({ ...draft, runId });
-      if (seen.has(fingerprint)) continue;
-      seen.add(fingerprint);
+      if (seen.has(fingerprint) || marked.has(fingerprint)) continue;
+      marked.add(fingerprint);
 
       const event: ObservationEvent = {
         ...draft,
@@ -116,16 +120,37 @@ export class ObservationJournal {
     }
     if (added.length === 0) return [];
 
+    /*
+     * The file first, and the memory of it only if that worked.
+     *
+     * These were the other way round, with the write's failure swallowed: a
+     * full disk or a permissions error left the events pushed into the cache
+     * and their fingerprints marked seen, so the log had no record of them and
+     * nothing would ever write them again — the next poll saw the same
+     * transcript lines and skipped them as already recorded. The page showed
+     * them until the app closed and could not show them afterwards (ANT-97).
+     *
+     * Failing leaves the run exactly as it was, so the next poll re-reads the
+     * same lines and tries again. An observer re-reading is the ordinary case
+     * here, not the exception, which is what makes a retry free.
+     */
+    try {
+      await mkdir(this.directory, { recursive: true });
+      await appendFile(
+        path,
+        added.map((event) => JSON.stringify(event)).join("\n") + "\n",
+        "utf8",
+      );
+    } catch {
+      // Not rethrown: a poll that cannot write is not a reason to take the app
+      // down, and the caller is told nothing was added rather than being told
+      // about events that are not in the log.
+      return [];
+    }
+
     events.push(...added);
+    for (const fingerprint of marked) seen.add(fingerprint);
     this.fingerprints.set(runId, seen);
-
-    await mkdir(this.directory, { recursive: true }).catch(() => undefined);
-    await appendFile(
-      path,
-      added.map((event) => JSON.stringify(event)).join("\n") + "\n",
-      "utf8",
-    ).catch(() => undefined); // Losing a line is better than taking the app down.
-
     return added;
   }
 

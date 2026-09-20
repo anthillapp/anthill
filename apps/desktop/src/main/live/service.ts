@@ -214,10 +214,16 @@ export class LiveSessionService {
    *
    * Called before the text reaches the clipboard, so the record exists whatever
    * happens next — including the app closing between the copy and the paste.
+   *
+   * Which is exactly why the write has to be durable. That sentence was the
+   * whole promise and the write did not keep it: a failure was swallowed, the
+   * run sat in memory, Copy Prompt reported success, and the observation the
+   * user had been told about was gone at the next launch (ANT-97). Raising
+   * here means the copy is refused rather than the record being lost.
    */
   async startObservation(input: StartObservationInput): Promise<LiveSessionSnapshot> {
     const run = createPendingRun({ ...input, now: this.now() });
-    await this.store.put(run);
+    await this.store.put(run, true);
     this.schedule();
     // Look immediately, and wait for it: a prompt copied a moment ago may
     // already have produced a session, and the caller should be told about it

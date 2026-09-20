@@ -60,7 +60,7 @@ export const WorkflowInputSchema = z.object({
   description: z.string().optional(),
   required: z.boolean().optional(),
   default: z.unknown().optional(),
-});
+}).passthrough();
 
 export const NodeTypeSchema = z.enum([
   "start",
@@ -74,7 +74,7 @@ export const NodeTypeSchema = z.enum([
 export const NodePositionSchema = z.object({
   x: z.number(),
   y: z.number(),
-});
+}).passthrough();
 
 export const WorkflowNodeSchema = z.object({
   id: nodeId,
@@ -82,7 +82,7 @@ export const WorkflowNodeSchema = z.object({
   name: z.string(),
   config: unknownRecord,
   position: NodePositionSchema.optional(),
-});
+}).passthrough();
 
 /** Edge conditions are free-form strings here; grammar is checked by `validateWorkflow`. */
 export const EdgeConditionSchema = z.string();
@@ -92,12 +92,12 @@ export const OutcomeKindSchema = z.enum(OUTCOME_KINDS);
 export const EdgeAnchorPointSchema = z.object({
   u: z.number(),
   v: z.number(),
-});
+}).passthrough();
 export const EdgeRoutingSchema = z.enum(EDGE_ROUTINGS);
 export const EdgeBendSchema = z.object({
   along: z.number(),
   across: z.number(),
-});
+}).passthrough();
 
 export const WorkflowEdgeSchema = z.object({
   id: nonEmptyString,
@@ -112,7 +112,7 @@ export const WorkflowEdgeSchema = z.object({
   bend: EdgeBendSchema.optional(),
   sourceHandle: EdgeAnchorSchema.optional(),
   targetHandle: EdgeAnchorSchema.optional(),
-});
+}).passthrough();
 
 export const HarnessTargetSchema = z.enum(HARNESS_TARGETS);
 
@@ -126,8 +126,31 @@ export const WorkflowBriefSchema = z.object({
   prohibitedActions: z.array(z.string()).optional(),
   finalAction: z.string().optional(),
   report: z.array(z.string()).optional(),
-});
+}).passthrough();
 
+/**
+ * A saved workflow keeps fields this build does not know about.
+ *
+ * Zod strips unknown keys by default, so opening a document written by a newer
+ * Anthill — or by anything else that added a field beside ours — dropped them
+ * silently, and the next Save wrote the document back without them. Nothing
+ * failed and nothing was said; the data was simply gone (ANT-103).
+ *
+ * Of the three ways out, this is the one that costs the user nothing.
+ * Rejecting the file would make a document that opens everywhere else
+ * unopenable here over a field nobody needs to read, and warning on every open
+ * would be a question about something the user did not do and cannot answer.
+ *
+ * `passthrough` keeps the extra keys on the parsed object, so they survive
+ * edit and save without this build ever having to understand them. It does not
+ * relax anything: every known field is validated exactly as before, and a
+ * document at a format version this build cannot read is still refused by the
+ * version check rather than by this.
+ *
+ * Applied to the schemas a *document* is made of, and not to run records or
+ * validation results — those are Anthill's own, written and read by this app,
+ * with nobody else to extend them.
+ */
 export const WorkflowSchema = z.object({
   id: nonEmptyString,
   name: z.string(),
@@ -139,7 +162,7 @@ export const WorkflowSchema = z.object({
   edges: z.array(WorkflowEdgeSchema),
   inputs: z.array(WorkflowInputSchema).optional(),
   metadata: unknownRecord.optional(),
-});
+}).passthrough();
 
 /* -------------------------------------------------------------------------- */
 /* Node configs                                                               */

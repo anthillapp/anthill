@@ -6,6 +6,9 @@
  * the page needs but never declares would put the silent failure straight back.
  */
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { IPC_CONTRACT, IpcChannel, LIVE_SESSION_CHANNELS } from "./ipc.js";
@@ -52,7 +55,22 @@ describe("the IPC contract", () => {
 describe("the runner that is not here", () => {
   const listed = Object.entries(IpcChannel);
 
+  /**
+   * Read as text, because the object was the wrong place to look.
+   *
+   * `run:event` was never an entry of `IpcChannel` — it was a standalone
+   * `RUN_EVENT_CHANNEL` export beside it — so a guard that walked the object
+   * could not see the push channel it named, and re-adding that channel
+   * exactly as it had been would have passed. Comments come out first: a
+   * guard nobody can write prose about is a guard nobody can explain.
+   */
   it("offers no channel that starts or executes anything", () => {
+    const source = readFileSync(resolve("src/shared/ipc.ts"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+    for (const forbidden of ["run:start", "run:cancel", "runtimes:detect", "approval:respond", "run:event"]) {
+      expect(source, forbidden).not.toContain(forbidden);
+    }
     for (const [name, channel] of listed) {
       for (const forbidden of ["run:start", "runtimes:detect", "approval:respond", "run:event"]) {
         expect(`${name} → ${channel}`).not.toContain(forbidden);

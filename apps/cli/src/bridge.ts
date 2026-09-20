@@ -2,11 +2,6 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { basename, dirname, join, resolve } from "node:path";
 
-import {
-  captureGitStatus,
-  hasUncommittedChanges,
-  selectWorkspace,
-} from "@anthill/workspace";
 import { parseWorkflow } from "@anthill/workflow-schema";
 import {
   checkWorkflowCompatibility,
@@ -19,7 +14,6 @@ import type { Workflow } from "@anthill/workflow-schema";
 import {
   IPC_CONTRACT,
   IpcChannel,
-  RUN_EVENT_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
   LIVE_SNAPSHOT_CHANNEL,
   LIVE_EVENTS_CHANNEL,
@@ -38,12 +32,7 @@ import {
   type GlobalAgentInput,
   type MarkerCli,
 } from "../../desktop/src/shared/ipc.js";
-import {
-  createServices,
-  detectRuntimes,
-  startRun,
-  type RunServices,
-} from "../../desktop/src/main/services.js";
+import { createServices, type RunServices } from "../../desktop/src/main/services.js";
 import {
   detectInterpreters,
   runDraft,
@@ -78,9 +67,8 @@ import { reportPath } from "./report.js";
  * `codex-models.ts`, `codex-capability.ts`, `agent-library.ts`, `live/*`),
  * and broadcasts the push channels over the WebSocket.
  *
- * Where the desktop uses dialogs, the CLI resolves from `--workspace` or
- * returns `null`/cancelled: `selectWorkspace`, `chooseRunFolder`, and the
- * folder-choose variants have no dialog to ask.
+ * Where the desktop uses dialogs, the CLI returns `null`/cancelled:
+ * `chooseRunFolder` and the folder-choose variants have no dialog to ask.
  *
  * The contract is shared, not copied: the channel names and the `AnthillApi`
  * shape come from `apps/desktop/src/shared/ipc.ts`, so a renderer written
@@ -146,9 +134,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   let services: RunServices | null = null;
   let servicesError: string | undefined;
   try {
-    services = await createServices(join(paths.userData, "runs"), (event) =>
-      push(RUN_EVENT_CHANNEL, event),
-    );
+    services = await createServices(join(paths.userData, "runs"));
   } catch (error) {
     servicesError = error instanceof Error ? error.message : String(error);
   }
@@ -235,20 +221,6 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   };
 
   // The dialog channels resolve from `--workspace` or return null/cancelled:
-  // there is no dialog to ask in the CLI.
-  const workspaceInfo = async (): Promise<WorkspaceInfo | null> => {
-    if (!workspace) return null;
-    const context = await selectWorkspace(resolve(workspace));
-    return {
-      rootPath: context.rootPath,
-      activePath: context.activePath,
-      mode: context.mode,
-      git: context.git
-        ? { repositoryRoot: context.git.repositoryRoot, branch: context.git.branch }
-        : undefined,
-    };
-  };
-
   register(IpcChannel.appCapabilities, async () => ({
     contract: IPC_CONTRACT,
     channels: [...registered],
@@ -258,13 +230,6 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   // No relaunch in the CLI: there is nothing to restart. Returning false lets
   // the renderer say "the restart did not happen" rather than waiting forever.
   register(IpcChannel.appRelaunch, async () => false);
-
-  register(IpcChannel.workspaceSelect, workspaceInfo);
-
-  register(IpcChannel.workspaceStatus, async (args) => {
-    const status = await captureGitStatus(String(args[0]));
-    return { status, dirty: hasUncommittedChanges(status) };
-  });
 
   register(IpcChannel.workflowOpen, async (args) => {
     const requested = args[0];
@@ -397,30 +362,6 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     }
   });
 
-  register(IpcChannel.runtimesDetect, async () => {
-    if (!services) return [];
-    return detectRuntimes(services.runtimes);
-  });
-
-  register(IpcChannel.runStart, async (args) => {
-    if (!services) return { ok: false, error: servicesError ?? "Run services are not ready yet." };
-    const request = args[0] as StartRunRequest;
-    try {
-      const runId = await startRun(
-        services,
-        request.workflow as Workflow,
-        request.workspacePath,
-        (event) => push(RUN_EVENT_CHANNEL, event),
-      );
-      return { ok: true, runId };
-    } catch (error) {
-      return {
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  });
-
   register(IpcChannel.runList, async () => {
     if (!services) return [];
     return services.store.listRuns();
@@ -429,11 +370,6 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   register(IpcChannel.runGet, async (args) => {
     if (!services) return undefined;
     return services.store.getRun(String(args[0]));
-  });
-
-  register(IpcChannel.approvalRespond, async (args) => {
-    const response = args[0] as ApprovalResponse;
-    services?.approvals.respond(response.runId, response.nodeId, response.decision);
   });
 
   register(IpcChannel.recentsList, async () => listRecents());
@@ -728,9 +664,6 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     contract: IPC_CONTRACT,
     capabilities: () => handle(IpcChannel.appCapabilities),
     relaunch: () => handle(IpcChannel.appRelaunch),
-    selectWorkspace: () => handle(IpcChannel.workspaceSelect),
-    workspaceStatus: (rootPath: string) =>
-      handle(IpcChannel.workspaceStatus, rootPath),
     openWorkflow: (path?: string) => handle(IpcChannel.workflowOpen, path),
     pendingWorkflowOpen: () => handle(IpcChannel.workflowPendingOpen),
     workflowOpened: (path, id, outcome) => handle(IpcChannel.workflowOpened, path, id, outcome),
@@ -746,13 +679,8 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
       handle(IpcChannel.workflowSave, request),
     onSaveWorkflow: (listener: () => void) =>
       on(SAVE_WORKFLOW_CHANNEL, () => listener()),
-    detectRuntimes: () => handle(IpcChannel.runtimesDetect),
-    startRun: (request: StartRunRequest) =>
-      handle(IpcChannel.runStart, request),
     listRuns: () => handle(IpcChannel.runList),
     getRun: (runId: string) => handle(IpcChannel.runGet, runId),
-    respondToApproval: (response: ApprovalResponse) =>
-      handle(IpcChannel.approvalRespond, response),
     exportWorkflow: (request: ExportWorkflowRequest) =>
       handle(IpcChannel.workflowExport, request),
     setWorkflowDirty: (dirty: boolean) =>
@@ -772,7 +700,6 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
       handle(IpcChannel.promptDraft, request),
     cancelPromptDraft: () => handle(IpcChannel.promptDraftCancel),
     onPromptDraftStage: (listener) => on(PROMPT_DRAFT_STAGE_CHANNEL, listener),
-    onRunEvent: (listener) => on(RUN_EVENT_CHANNEL, listener),
     liveObserve: (request: LiveObserveRequest) =>
       handle(IpcChannel.liveObserve, request),
     liveSnapshot: () => handle(IpcChannel.liveSnapshot),

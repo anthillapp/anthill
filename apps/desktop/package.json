@@ -2,7 +2,7 @@
   "name": "@anthill/desktop",
   "version": "0.7.2",
   "private": true,
-  "description": "Anthill desktop shell (Electron): visual workflow authoring plus local execution.",
+  "description": "Anthill desktop shell (Electron): visual workflow authoring, and passive observation of the sessions that do the work.",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev --watch",

@@ -24,19 +24,14 @@ export type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun };
 export const IpcChannel = {
   appCapabilities: "app:capabilities",
   appRelaunch: "app:relaunch",
-  workspaceSelect: "workspace:select",
-  workspaceStatus: "workspace:status",
   workflowOpen: "workflow:open",
   workflowPendingOpen: "workflow:pending-open",
   workflowOpened: "workflow:opened",
   exchangeRead: "exchange:read",
   liveWorkflow: "live:workflow",
   workflowSave: "workflow:save",
-  runtimesDetect: "runtimes:detect",
-  runStart: "run:start",
   runList: "run:list",
   runGet: "run:get",
-  approvalRespond: "approval:respond",
   workflowExport: "workflow:export",
   workflowSetDirty: "workflow:set-dirty",
   recentsList: "recents:list",
@@ -129,9 +124,6 @@ export const LIVE_SESSION_CHANNELS: readonly string[] = [
   IpcChannel.liveEvents,
   IpcChannel.liveLookAgain,
 ];
-
-/** Push channel (main -> renderer). Carries every `RunEvent`. */
-export const RUN_EVENT_CHANNEL = "run:event";
 
 /** Push channel (main -> renderer). Coarse progress for one drafting run. */
 export const PROMPT_DRAFT_STAGE_CHANNEL = "prompt:draft-stage";
@@ -702,8 +694,6 @@ export interface AnthillApi {
    * than waiting for something that is not coming.
    */
   relaunch(): Promise<boolean>;
-  selectWorkspace(): Promise<WorkspaceInfo | null>;
-  workspaceStatus(rootPath: string): Promise<WorkspaceStatus>;
   /** With a path, opens that workflow; without one, asks the author to pick. */
   openWorkflow(path?: string): Promise<OpenWorkflowResult>;
   /**
@@ -729,11 +719,8 @@ export interface AnthillApi {
   saveWorkflow(request: SaveWorkflowRequest): Promise<SaveWorkflowResult>;
   /** File ▸ Save, or ⌘S. Returns the unsubscribe. */
   onSaveWorkflow(listener: () => void): () => void;
-  detectRuntimes(): Promise<RuntimeInfo[]>;
-  startRun(request: StartRunRequest): Promise<StartRunResponse>;
   listRuns(): Promise<WorkflowRun[]>;
   getRun(runId: string): Promise<StoredRunView | undefined>;
-  respondToApproval(response: ApprovalResponse): Promise<void>;
   /** Ask the user for a folder, then write the generated workflow files into it. */
   exportWorkflow(request: ExportWorkflowRequest): Promise<ExportWorkflowResponse>;
   /**
@@ -809,9 +796,6 @@ export interface AnthillApi {
   cancelPromptDraft(): Promise<void>;
   /** Subscribe to drafting progress. Returns an unsubscribe function. */
   onPromptDraftStage(listener: (stage: PromptDraftStage) => void): () => void;
-  /** Subscribe to run events. Returns an unsubscribe function. */
-  onRunEvent(listener: (event: RunEvent) => void): () => void;
-
   /* Live session auto-detection */
 
   /**

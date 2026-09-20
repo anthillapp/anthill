@@ -12,11 +12,6 @@ import { dirname, join, resolve, sep } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 
-import {
-  captureGitStatus,
-  hasUncommittedChanges,
-  selectWorkspace,
-} from "@anthill/workspace";
 import { parseWorkflow } from "@anthill/workflow-schema";
 import { checkWorkflowCompatibility, migrateWorkflow } from "@anthill/workflow";
 import { ExchangeStore } from "@anthill/exchange-store";
@@ -33,9 +28,7 @@ import {
   OPEN_WORKFLOW_CHANNEL,
   SAVE_WORKFLOW_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
-  RUN_EVENT_CHANNEL,
   type AppSettings,
-  type ApprovalResponse,
   type IpcCapabilities,
   type LiveObserveRequest,
   type ExportWorkflowRequest,
@@ -47,15 +40,10 @@ import {
   type PromptDraftRequest,
   type PromptDraftResponse,
   type OpenWorkflowResult,
-  type RunEvent,
   type SaveWorkflowRequest,
   type SaveWorkflowResult,
-  type StartRunRequest,
-  type StartRunResponse,
-  type WorkspaceInfo,
-  type WorkspaceStatus,
 } from "../shared/ipc.js";
-import { createServices, detectRuntimes, startRun, type RunServices } from "./services.js";
+import { createServices, type RunServices } from "./services.js";
 import { detectInterpreters, runDraft, signInToInterpreter } from "./interpreters.js";
 import { readCodexModels } from "./codex-models.js";
 import { readPiModels } from "./pi-models.js";
@@ -412,13 +400,6 @@ function liveSetupService(): ObservationSetupService {
     hookHandlerPath: join(__dirname, "live-hook-handler.js"),
   });
   return liveSetup;
-}
-
-/** Broadcast a run event to the renderer, if a window is still open. */
-function emitRunEvent(event: RunEvent): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(RUN_EVENT_CHANNEL, event);
-  }
 }
 
 /**
@@ -845,32 +826,6 @@ function registerIpcHandlers(): void {
     return true;
   });
 
-  handle(IpcChannel.workspaceSelect, async (): Promise<WorkspaceInfo | null> => {
-    const result = await dialog.showOpenDialog({
-      title: "Select a repository or working directory",
-      properties: ["openDirectory", "createDirectory"],
-    });
-    if (result.canceled || result.filePaths.length === 0) return null;
-
-    const context = await selectWorkspace(result.filePaths[0]);
-    return {
-      rootPath: context.rootPath,
-      activePath: context.activePath,
-      mode: context.mode,
-      git: context.git
-        ? { repositoryRoot: context.git.repositoryRoot, branch: context.git.branch }
-        : undefined,
-    };
-  });
-
-  handle(
-    IpcChannel.workspaceStatus,
-    async (_event, rootPath: string): Promise<WorkspaceStatus> => {
-      const status = await captureGitStatus(rootPath);
-      return { status, dirty: hasUncommittedChanges(status) };
-    },
-  );
-
   handle(
     IpcChannel.workflowOpen,
     async (_event, requested?: string): Promise<OpenWorkflowResult> => {
@@ -977,49 +932,6 @@ function registerIpcHandlers(): void {
       await rememberRecent(path);
 
       return { kind: "saved", path };
-    },
-  );
-
-  handle(IpcChannel.runtimesDetect, async () => {
-    if (!services) return [];
-    return detectRuntimes(services.runtimes);
-  });
-
-  handle(
-    IpcChannel.runStart,
-    async (_event, request: StartRunRequest): Promise<StartRunResponse> => {
-      if (!services) return { ok: false, error: "Run services are not ready yet." };
-      try {
-        const runId = await startRun(
-          services,
-          request.workflow as Workflow,
-          request.workspacePath,
-          emitRunEvent,
-        );
-        return { ok: true, runId };
-      } catch (error) {
-        return {
-          ok: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
-    },
-  );
-
-  handle(IpcChannel.runList, async () => {
-    if (!services) return [];
-    return services.store.listRuns();
-  });
-
-  handle(IpcChannel.runGet, async (_event, runId: string) => {
-    if (!services) return undefined;
-    return services.store.getRun(runId);
-  });
-
-  handle(
-    IpcChannel.approvalRespond,
-    async (_event, response: ApprovalResponse): Promise<void> => {
-      services?.approvals.respond(response.runId, response.nodeId, response.decision);
     },
   );
 
@@ -1416,7 +1328,6 @@ void app.whenReady().then(async () => {
   try {
     services = await createServices(
       join(app.getPath("userData"), "runs"),
-      emitRunEvent,
       electronSqliteBinding(),
     );
   } catch (error) {
@@ -1430,8 +1341,6 @@ void app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  // Unblock any run parked on an approval so the engine can unwind cleanly.
-  services?.approvals.abandonAll("The application is shutting down.");
   if (process.platform !== "darwin") app.quit();
 });
 
@@ -1439,6 +1348,5 @@ app.on("window-all-closed", () => {
 app.on("will-quit", () => {
   inbox?.stop();
   live?.stop();
-  services?.approvals.abandonAll("The application is shutting down.");
   void services?.store.close?.();
 });

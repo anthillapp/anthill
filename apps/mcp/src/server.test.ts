@@ -105,11 +105,19 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-async function connect(): Promise<Session> {
+/**
+ * A session with the built server.
+ *
+ * `--no-launch`, and not as an afterthought: without it every call below that
+ * stores a workflow would ask macOS to open Anthill on whoever is running the
+ * suite (ANT-123). The flag is therefore also under test here — that a server
+ * told not to open anything answers normally, and says so on stderr.
+ */
+async function connect(args: readonly string[] = ["--no-launch"]): Promise<Session> {
   const dataDir = await mkdtemp(join(tmpdir(), "anthill-mcp-e2e-"));
   roots.push(dataDir);
 
-  const child = spawn(process.execPath, [SERVER, "--data-dir", dataDir], {
+  const child = spawn(process.execPath, [SERVER, "--data-dir", dataDir, ...args], {
     stdio: ["pipe", "pipe", "pipe"],
   });
   started.push(child);
@@ -173,6 +181,11 @@ describe("the built server over stdio", () => {
       source: { harness: "claude-code", sessionId: "local-session", taskText: "Read sample.txt" },
     });
     expect(draft.structuredContent).toMatchObject({ outcome: "created", displayed: false, displayRequested: true });
+    // ANT-123. This server was started with --no-launch, so the one thing the
+    // result may not say is that it opened anything — and it has to say which
+    // of the two it did, because the difference is whether a window is coming.
+    expect(draft.structuredContent.app).toMatchObject({ outcome: "disabled" });
+    expect(session.stderr).toContain("not opening Anthill (--no-launch)");
     const ready = await call("get_ready_revision", { workflowId: workflow.id });
     expect(ready.structuredContent.outcome).toBe("ready");
     const workflowText = ready.content[0].text.split("\n").find((line) => line.startsWith("{"));
@@ -181,6 +194,7 @@ describe("the built server over stdio", () => {
       digest: ready.structuredContent.digest, idempotencyKey: "binding" };
     const first = await call("bind_run", request);
     const retry = await call("bind_run", request);
+    expect(first.structuredContent.app).toMatchObject({ outcome: "disabled" });
     expect(first.structuredContent).toMatchObject({ outcome: "bound", registered: false, registrationRequested: true });
     expect(retry.structuredContent).toMatchObject({ outcome: "already_bound",
       runId: first.structuredContent.runId, nonce: first.structuredContent.nonce, revision: 1 });

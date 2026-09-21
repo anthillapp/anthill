@@ -23,20 +23,33 @@ import { isAbsolute, resolve } from "node:path";
 export type ServerOptions = {
   /** Anthill's user-data directory. The exchange is a directory inside it. */
   dataDir: string;
+  /**
+   * Whether a handover may bring the desktop app up.
+   *
+   * On by default, because a handover nobody sees is the thing this was for
+   * (ANT-123). Off is for the two cases where an app appearing is wrong rather
+   * than merely unwanted: a machine driving this server from a script, and the
+   * end-to-end test, which speaks to a real server over a real pipe and must
+   * not open an application on whoever is running it.
+   */
+  launch: boolean;
 };
 
 type OptionsResult =
   | { ok: true; options: ServerOptions }
   | { ok: false; message: string };
 
-/** The flag, spelled once so the parser and the message cannot disagree. */
+/** The flags, spelled once so the parser and the message cannot disagree. */
 const DATA_DIR_FLAG = "--data-dir";
+const NO_LAUNCH_FLAG = "--no-launch";
 
 const USAGE = `anthill-mcp [${DATA_DIR_FLAG} <path>]
 
   ${DATA_DIR_FLAG} <path>  Absolute Anthill user-data directory, holding the exchange this
                     server writes into. Defaults to the installed desktop app's,
-                    which is ${defaultDataDir()} on this machine.`;
+                    which is ${defaultDataDir()} on this machine.
+  ${NO_LAUNCH_FLAG}       Do not open Anthill when a workflow is handed over. The
+                    anthill:// link is still returned; nothing opens it.`;
 
 /**
  * Read the arguments a harness spawned this server with.
@@ -50,9 +63,15 @@ export function readOptions(
   fallbackDataDir: string = defaultDataDir(),
 ): OptionsResult {
   let dataDir: string | undefined;
+  let launch = true;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
+
+    if (argument === NO_LAUNCH_FLAG) {
+      launch = false;
+      continue;
+    }
 
     if (argument === DATA_DIR_FLAG) {
       if (dataDir !== undefined) return { ok: false, message: `${DATA_DIR_FLAG} must be supplied only once.` };
@@ -82,5 +101,5 @@ export function readOptions(
   if (!selected.trim() || !isAbsolute(selected)) {
     return { ok: false, message: `${DATA_DIR_FLAG} needs an absolute path; harness working directories can change.` };
   }
-  return { ok: true, options: { dataDir: resolve(selected) } };
+  return { ok: true, options: { dataDir: resolve(selected), launch } };
 }

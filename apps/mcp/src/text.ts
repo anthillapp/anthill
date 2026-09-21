@@ -36,6 +36,8 @@ import {
 } from "@anthill/workflow-exchange";
 import type { Workflow } from "@anthill/workflow-schema";
 
+import type { LaunchReport } from "./launch.js";
+
 /** A step as the reporting commands name it. */
 export type RunStep = { id: string; name: string };
 
@@ -58,6 +60,17 @@ export type DraftAnswer = {
   /** True only after desktop acknowledgement, not when a request is queued. */
   displayed?: boolean;
   displayRequested?: boolean;
+  /**
+   * What became of bringing Anthill up for this.
+   *
+   * Separate from `displayRequested`, which is about the request left in the
+   * exchange, and from `displayed`, which is the app's own acknowledgement.
+   * This is about the app existing at all: on every outcome but `opened` it
+   * carries the sentence to pass on, because the user is about to wait for a
+   * window that is not coming (ANT-123).
+   */
+  app?: LaunchReport;
+
   problems?: ExchangeProblem[];
   /** The `ask` of every problem that has one, in the order they came back. */
   questions?: string[];
@@ -103,6 +116,17 @@ export type ReviseAnswer = {
   /** The revision a run is working from, when one is, and it is not this one. */
   boundRevision?: number;
   displayRequested?: boolean;
+  /**
+   * What became of bringing Anthill up for this.
+   *
+   * Separate from `displayRequested`, which is about the request left in the
+   * exchange, and from `displayed`, which is the app's own acknowledgement.
+   * This is about the app existing at all: on every outcome but `opened` it
+   * carries the sentence to pass on, because the user is about to wait for a
+   * window that is not coming (ANT-123).
+   */
+  app?: LaunchReport;
+
   problems?: ExchangeProblem[];
   questions?: string[];
 };
@@ -171,6 +195,17 @@ export type BindAnswer = InvalidBindAnswer | {
   /** True only after desktop acknowledgement, not when a request is queued. */
   registered?: boolean;
   registrationRequested?: boolean;
+  /**
+   * What became of bringing Anthill up for this.
+   *
+   * Separate from `displayRequested`, which is about the request left in the
+   * exchange, and from `displayed`, which is the app's own acknowledgement.
+   * This is about the app existing at all: on every outcome but `opened` it
+   * carries the sentence to pass on, because the user is about to wait for a
+   * window that is not coming (ANT-123).
+   */
+  app?: LaunchReport;
+
   /** The commands the harness runs to report progress, ready to be followed. */
   reportingCommands?: string;
   steps?: RunStep[];
@@ -200,6 +235,20 @@ export type CallAnswer = {
 /* The four results                                                           */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The one sentence a result says about Anthill itself.
+ *
+ * Nothing when the link was taken, because "Anthill was opened" is noise in an
+ * answer whose next line is the workflow's URL — and because it would be a
+ * claim about a window this server has not seen. Something on every other
+ * outcome, because then the user is waiting for an app that is not coming and
+ * the model is the only one in a position to tell them.
+ */
+function appText(report: LaunchReport | undefined): string[] {
+  if (!report || report.outcome === "opened") return [];
+  return report.message ? [report.message] : [];
+}
+
 export function draftText(answer: DraftAnswer): string {
   if (answer.outcome === "invalid") return refusedDraftText(answer);
   if (answer.outcome === "incomplete") return join([
@@ -227,6 +276,8 @@ export function draftText(answer: DraftAnswer): string {
     stateText("ready_for_agent"),
     "Ask the user whether to start. When they say so, call get_ready_revision, then bind_run.",
   );
+
+  parts.push(...appText(answer.app));
 
   if (answer.problems && answer.problems.length > 0) {
     parts.push("Also worth knowing:", numbered(answer.problems.map(sentence)));
@@ -279,6 +330,8 @@ export function reviseText(answer: ReviseAnswer): string {
   parts.push(
     "The user decides what is worked on. Tell them what you changed and ask, rather than binding this revision because you wrote it.",
   );
+
+  parts.push(...appText(answer.app));
 
   if (answer.url) parts.push(answer.url);
   return join(parts);
@@ -423,6 +476,7 @@ export function bindText(answer: BindAnswer): string {
     // session and has no other way to learn which step the work is on.
     "Run these as you work. They are the only thing that tells Anthill which step you are on, and they change nothing about the work itself — if one cannot be run, carry on without it.",
     answer.reportingCommands ?? "",
+    ...appText(answer.app),
     answer.url ?? "",
   ]);
 }

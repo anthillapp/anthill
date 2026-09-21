@@ -34,6 +34,7 @@ import { pathToFileURL } from "node:url";
 
 import { createHandlers } from "./handlers.js";
 import { SERVER_INSTRUCTIONS } from "./instructions.js";
+import { disabledLauncher, openUrl } from "./launch.js";
 import { readOptions, type ServerOptions } from "./options.js";
 import { registerExchangeTools } from "./tools.js";
 
@@ -92,7 +93,13 @@ function createMcpServer(options: ServerOptions): McpServer {
     { instructions: SERVER_INSTRUCTIONS },
   );
 
-  registerExchangeTools(server, createHandlers({ store: new ExchangeStore(options.dataDir) }));
+  registerExchangeTools(
+    server,
+    createHandlers({
+      store: new ExchangeStore(options.dataDir),
+      launch: options.launch ? openUrl : disabledLauncher,
+    }),
+  );
   return server;
 }
 
@@ -128,7 +135,10 @@ async function runServer(argv: readonly string[]): Promise<number> {
   // Said on stderr once the transport is up, because the data directory is the
   // one thing that can be silently wrong: a server pointed at a directory the
   // app is not reading answers every call happily and opens nothing.
-  process.stderr.write(`${SERVER_NAME} mcp server ready; exchange under ${read.options.dataDir}\n`);
+  process.stderr.write(
+    `${SERVER_NAME} mcp server ready; exchange under ${read.options.dataDir}` +
+      `${read.options.launch ? "" : "; not opening Anthill (--no-launch)"}\n`,
+  );
   return 0;
 }
 

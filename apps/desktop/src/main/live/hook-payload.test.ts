@@ -35,6 +35,12 @@ describe("reducing a hook payload", () => {
       .toEqual({ last_assistant_message: "ANTHILL-DONE ANT-ABC123 abc123" });
   });
 
+  it("keeps why a session ended, which is the CLI's own word and not prose", () => {
+    // Without it a clean quit, a `/clear` and a logout are the same record.
+    expect(minimalHookPayload({ hook_event_name: "SessionEnd", reason: "logout" }))
+      .toEqual({ hook_event_name: "SessionEnd", reason: "logout" });
+  });
+
   it("does not fall back to raw Bash commands when no description is supplied", () => {
     expect(minimalHookPayload({ tool_name: "Bash", tool_input: { command: "echo personal-data > output.txt" } }))
       .toEqual({ tool_name: "Bash" });

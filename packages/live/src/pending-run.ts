@@ -139,6 +139,16 @@ export type Evidence =
   | { kind: "working"; sessionId: string; at: string; since: string; detail?: string }
   /** The tool recorded that the work finished. */
   | { kind: "completed"; sessionId: string; channel: string; at: string; detail?: string }
+  /**
+   * The person stopped the session themselves.
+   *
+   * Not `completed`, which is Anthill's inference that a session finished what
+   * it was doing, and not `failed`, which is the tool recording that something
+   * went wrong. Somebody pressed a key: the turn ended where it was, and what
+   * happens next is up to them. It is its own kind because those three want
+   * different words on the page and none of them is true of the others.
+   */
+  | { kind: "interrupted"; sessionId: string; channel: string; at: string; detail?: string }
   /** The tool recorded a failure. */
   | { kind: "failed"; sessionId: string; channel: string; at: string; detail?: string }
   /** Nothing new for long enough that Anthill will not claim a live match. */
@@ -440,6 +450,31 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
         statusMessage: evidence.detail ?? "The session recorded that it finished.",
       };
 
+    /*
+      A stop the person made, read out of the record rather than waited out.
+      ANT-122: an interrupt fires no hook at all — neither `Stop` nor
+      `SessionEnd` — so a session stopped by hand used to sit at "Live" until
+      the five-minute silence rule reached it, while its own transcript had
+      said so within the second.
+
+      `observation_lost` rather than an ending of its own: the CLI may still
+      be open and the person may type again, and that state is the one that is
+      already recoverable — a session that starts writing is picked back up
+      (ANT-64, ANT-65). Only a run being followed can be stopped this way; one
+      that already settled is not reopened to be stopped.
+    */
+    case "interrupted":
+      if (run.detectedSessionId && run.detectedSessionId !== evidence.sessionId) return run;
+      if (run.state !== "detected_live") return run;
+      return {
+        ...run,
+        state: "observation_lost",
+        lastObservedAt: evidence.at,
+        evidenceChannel: evidence.channel,
+        statusMessage:
+          evidence.detail ?? "You stopped this session. Anthill is no longer reading it; nothing was sent to the session.",
+      };
+
     case "failed":
       if (run.detectedSessionId && run.detectedSessionId !== evidence.sessionId) return run;
       return {
@@ -583,6 +618,10 @@ function isNewsSince(evidence: Evidence, run: PendingRun, since: number): boolea
   switch (evidence.kind) {
     case "quiet":
     case "unobservable":
+    // A stop is not a sign of life. Re-reading a lost run's transcript finds
+    // the interrupt that closed it, and taking that as a return would reopen
+    // the run on the strength of the record that ended it.
+    case "interrupted":
       return false;
     case "ambiguous":
       // Only sessions still speaking are counted as contenders, so this is

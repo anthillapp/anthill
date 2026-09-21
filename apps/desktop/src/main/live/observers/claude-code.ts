@@ -68,6 +68,9 @@ const SETTLE_MS = 5 * 60_000;
 /** Stop reasons that mean the agent finished answering rather than paused. */
 const TERMINAL_STOP = new Set(["end_turn", "stop_sequence"]);
 
+/** Exactly what Claude Code writes into the transcript when it is stopped. */
+const INTERRUPTED = "[Request interrupted by user]";
+
 /**
  * Tools that hand work somewhere this transcript will not describe.
  *
@@ -169,6 +172,16 @@ type FileState = {
    * off (ANT-119).
    */
   doneAt?: string;
+  /**
+   * When the person interrupted the session, if they did.
+   *
+   * Claude Code writes `[Request interrupted by user]` into the transcript as
+   * an ordinary user record and fires no hook for it, so this file is the only
+   * place it is said at all (ANT-122).
+   */
+  interruptedAt?: string;
+  /** The interrupt already reported, so a poll does not repeat one. */
+  reportedInterruptAt?: string;
   lastActivityAt?: string;
   /**
    * Assistant message ids whose usage has been taken.
@@ -427,6 +440,25 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
         With no hooks on this run the transcript is alone again, nothing can
         retract the handover, and the sticky flag remains the honest answer.
       */
+      // The person's own stop, said once. It outranks everything below: there
+      // is nothing to infer from silence that has already been explained, and
+      // a run this poll declared live would otherwise be declared live again
+      // on the strength of the very record that says it was stopped.
+      if (
+        !state.delegate &&
+        state.interruptedAt &&
+        state.interruptedAt !== state.reportedInterruptAt
+      ) {
+        state.reportedInterruptAt = state.interruptedAt;
+        evidence.push({
+          kind: "interrupted",
+          sessionId,
+          channel: CHANNEL,
+          at: state.interruptedAt,
+          detail: "You stopped this session. Anthill is no longer reading it; nothing was sent to the session.",
+        });
+      }
+
       // Said outright, so nothing is inferred and nothing is waited out. A
       // delegate's transcript still cannot settle the session (ANT-54).
       if (!state.settled && !state.delegate && state.doneAt) {
@@ -609,6 +641,15 @@ function scan(
 
       const carries = (value: unknown) =>
         typeof value === "string" && textCarriesMarker(value, marker);
+
+      // The whole of what Claude Code writes when somebody stops it. Matched
+      // exactly, and only as a message's entire text: the phrase inside a
+      // longer message is somebody quoting it.
+      if (blocks.some((block) => isRecord(block) && str(block.text)?.trim() === INTERRUPTED)) {
+        state.interruptedAt = at;
+        events.push({ ...base, kind: "notification", title: "Stopped by hand" });
+        continue;
+      }
 
       if (carries(message?.content)) {
         state.matched = true;

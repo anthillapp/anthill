@@ -522,6 +522,33 @@ describe("getting a line past what is in its way", () => {
     expect(passesUnder(geometry, row)).toBe(false);
   });
 
+  /**
+   * ANT-121, both halves of it, on the shape it was reported from: a row with
+   * a second row stacked above it, so the short way out of the row is the one
+   * that is occupied.
+   */
+  it("goes the long way round when the near way out is occupied", () => {
+    // A ceiling over the middle of the row, with its own gap above the blocks
+    // it covers: going up clears the row and lands inside the ceiling.
+    const ceiling = [
+      { left: 500, top: -40, w: 200, h: 120 },
+      { left: 760, top: -40, w: 200, h: 120 },
+    ];
+    const blocks = [...row, ...ceiling];
+    const geometry = route(rightPort(row[0]), leftEdge(row[4]), { blocks });
+    expect(passesUnder(geometry, blocks)).toBe(false);
+  });
+
+  it("measures its way past a block taller than the step it was taking", () => {
+    // A neighbour reaching far above the row. Stepping out by fixed multiples
+    // of the clearance put every attempt inside it; the way past is read off
+    // the block that was actually met.
+    const tower = { left: 560, top: -400, w: 200, h: 500 };
+    const blocks = [...row, tower];
+    const geometry = route(rightPort(row[0]), leftEdge(row[4]), { blocks });
+    expect(passesUnder(geometry, blocks)).toBe(false);
+  });
+
   it("leaves a connection between neighbours exactly as it was", () => {
     const port = rightPort(row[0]);
     const landing = leftEdge(row[1]);

@@ -125,6 +125,16 @@ export function minimalHookPayload(data: unknown): Record<string, unknown> {
   const message = clean(data.message);
   if (message) out.message = message;
 
+  // Why a session ended, in the CLI's own word for it — `clear`, `logout`,
+  // `prompt_input_exit`, `other`. A short enumerated token, not prose, and
+  // without it a clean quit, a `/clear` and a logout are the same record
+  // (ANT-122). Bounded in case the enumeration grows a long member.
+  // An enumerated token, so it is taken as itself rather than through
+  // `clean`, which is for prose somebody might have put a secret in.
+  if (typeof data.reason === "string" && /^[a-z_]{1,40}$/.test(data.reason)) {
+    out.reason = data.reason;
+  }
+
   // Keep only complete announcements, wherever they occur in the message:
   // which step the agent is on, and that it has finished. Truncating prose
   // first loses markers beyond the first 200 characters.

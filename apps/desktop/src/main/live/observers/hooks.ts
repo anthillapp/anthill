@@ -296,7 +296,12 @@ export class HookLogObserver {
       // on outright: the silence after it is not a tool running.
       if (name === "SessionEnd") {
         delegated.clear();
-        ended = { at, cli, detail: "The session ended." };
+        const why = str(data.reason);
+        ended = {
+          at,
+          cli,
+          detail: why ? `The session ended (${why}).` : "The session ended.",
+        };
       }
 
       const base: ObservationEventDraft = {
@@ -453,6 +458,20 @@ export class HookLogObserver {
    */
   watching(runId: string): boolean {
     return this.covered.has(runId);
+  }
+
+  /**
+   * Drop what this run had outstanding, because the session was stopped.
+   *
+   * The counterpart of a `Stop` closing its turn's calls (ANT-119), for the
+   * ending this channel cannot see: an interrupt fires no hook, so only the
+   * transcript knows, and a call the interrupt killed will never report back.
+   * Cursors are untouched — the log is still read, there is simply nothing
+   * left to claim.
+   */
+  stopped(runId: string): void {
+    this.open.get(runId)?.clear();
+    this.background.get(runId)?.clear();
   }
 
   /**

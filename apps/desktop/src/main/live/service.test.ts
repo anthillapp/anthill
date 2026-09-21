@@ -1274,6 +1274,47 @@ describe("a session waiting on a tool it started", () => {
     expect(run.statusMessage).toContain("reported the work as finished");
   });
 
+  /**
+   * ANT-122. Stopping a session by hand fires no hook at all — neither `Stop`
+   * nor `SessionEnd` — so the run used to sit at "Live" until the five-minute
+   * silence rule reached it, while the transcript had said so within a second.
+   */
+  it("reads a stop the person made instead of waiting five minutes for silence", async () => {
+    const h = await live();
+    await hookLine(h.hookLogPath, "sess-1", "PreToolUse", at(60_000), "toolu_1");
+    h.setNow(at(61_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("detected_live");
+
+    await appendFile(
+      join(h.claudeRoot, "-tmp-scratch", "sess-1.jsonl"),
+      JSON.stringify({
+        type: "user", sessionId: "sess-1", timestamp: at(90_000),
+        message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] },
+      }) + "\n",
+    );
+    h.setNow(at(91_000));
+    await h.service.poll();
+
+    const run = only(h.service.snapshot());
+    expect(run.state).toBe("observation_lost");
+    expect(run.statusMessage).toContain("You stopped this session");
+  });
+
+  it("is not stopped by somebody quoting the phrase in a longer message", async () => {
+    const h = await live();
+    await appendFile(
+      join(h.claudeRoot, "-tmp-scratch", "sess-1.jsonl"),
+      JSON.stringify({
+        type: "user", sessionId: "sess-1", timestamp: at(90_000),
+        message: { role: "user", content: [{ type: "text", text: "why did it print [Request interrupted by user] there?" }] },
+      }) + "\n",
+    );
+    h.setNow(at(91_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("detected_live");
+  });
+
   it("goes quiet once the call reports back and nothing follows", async () => {
     const h = await live();
     await hookLine(h.hookLogPath, "sess-1", "PreToolUse", at(60_000), "toolu_1");

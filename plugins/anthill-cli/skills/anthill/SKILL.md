@@ -124,9 +124,12 @@ Handle the returned outcome literally:
   gave, then retry the corrected document under the same identity;
 - `invalid`: correct the reported call/document problems.
 
-Give the user the returned `anthill://workflow/<id>` link. A queued request does
-not prove that the desktop app opened it. If Anthill is closed, the handover may
-wait in its local inbox.
+Give the user the returned `anthill://workflow/<id>` link. Anthill is also
+brought up for it: a closed app is launched, a running one comes to the front.
+The result's `app` field says what happened — `opened`, or one of `no_handler`,
+`failed`, `unsupported`, `disabled` with a message to pass on. A queued request
+still does not prove that the desktop app opened the workflow, so say it was
+handed over and Anthill asked to show it.
 
 ## Design mode: stop for the user
 

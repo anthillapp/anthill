@@ -69,6 +69,7 @@ import {
   type ReviseAnswer,
   type WorkflowAnswer,
 } from "./text.js";
+import { openUrl, type LaunchReport, type Launcher } from "./launch.js";
 import { workflowUrl } from "./url.js";
 
 /**
@@ -113,6 +114,12 @@ export type HandlerDependencies = {
   /** Injected so a test can pin the ids a bind mints; defaults to `@anthill/live`'s. */
   mintRunId?: () => string;
   mintNonce?: () => string;
+  /**
+   * How Anthill is brought up. Injected so a test opens nothing at all — the
+   * default runs a real opener against the real machine, which a unit test
+   * must never do.
+   */
+  launch?: Launcher;
 };
 
 /**
@@ -189,6 +196,36 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
   const { store } = dependencies;
   const mintRunId = dependencies.mintRunId ?? (() => newRunId());
   const mintNonce = dependencies.mintNonce ?? (() => newNonce());
+  const launch = dependencies.launch ?? openUrl;
+
+  /**
+   * Ask the machine to bring Anthill up for a workflow this call just acted on.
+   *
+   * Called from exactly the three places that leave something in the exchange
+   * inbox, and that is the whole rule: a drop is this server asking the app to
+   * do something, and an app that is not running cannot. Everything else these
+   * handlers answer — reading a workflow, asking whether a revision is ready —
+   * is the model informing itself, and opening a window for it would put
+   * Anthill in front of somebody who was working on something else. The same
+   * reasoning is why nothing launches from the server's own startup or from
+   * `tools/list`: a harness starts this process long before the user asks for
+   * anything, and often in sessions that never will (ANT-123).
+   *
+   * Never allowed to fail the call. What is stored is stored, and the report
+   * travels in the answer.
+   */
+  async function bringUp(workflowId: string): Promise<LaunchReport> {
+    try {
+      return await launch(workflowUrl(workflowId));
+    } catch (error) {
+      // A launcher that throws is still only a launcher. The message says what
+      // happened and the link in the result still works by hand.
+      return {
+        outcome: "failed",
+        message: `Anthill could not be opened: ${error instanceof Error ? error.message : String(error)}. The handover is stored; ${workflowUrl(workflowId)} opens it.`,
+      };
+    }
+  }
 
   /**
    * The revision an `incomplete` refusal is about, where there is one.
@@ -273,6 +310,11 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       });
 
       const all = [...problems, ...(drop.problems ?? [])];
+      // After the drop, so a queued request is waiting by the time the app
+      // starts reading, and on a conflicting drop too: a conflict means this
+      // same request is already queued, and the app still has to be running to
+      // take it.
+      const app = await bringUp(created.workflowId);
       return result(draftText, {
         outcome: problems.length > 0 ? "incomplete" : created.outcome,
         workflowId: created.workflowId,
@@ -281,6 +323,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         ...(stored?.identity ? { mode: stored.identity.mode } : {}),
         displayed: false,
         displayRequested: drop.outcome !== "conflict",
+        app,
         ...(all.length > 0 ? { problems: all, questions: questionsFrom(all, submission.workflow) } : {}),
       });
     },
@@ -381,11 +424,13 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       });
 
       const bound = stored.bindings.at(-1)?.revision;
+      const app = await bringUp(workflowId);
       return result(reviseText, {
         outcome: added.outcome === "added" ? "revised" : "unchanged",
         workflowId,
         url: workflowUrl(workflowId),
         revision,
+        app,
         ...(added.digest ? { digest: added.digest } : {}),
         ...(bound !== undefined && bound !== revision ? { boundRevision: bound } : {}),
         displayRequested: drop.outcome !== "conflict",
@@ -630,6 +675,10 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         ...(binding.sessionId ? { sessionId: binding.sessionId } : {}),
         registered: false,
         registrationRequested: drop.outcome !== "conflict",
+        // The one place the app being up is not a convenience: nothing but a
+        // running Anthill registers the run, and the reporting commands below
+        // are about to start arriving for it.
+        app: await bringUp(workflowId),
         reportingCommands,
         steps,
         ...problemFields(drop.problems),

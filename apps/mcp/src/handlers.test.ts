@@ -31,6 +31,7 @@ import {
   type Handlers,
   type BindRunInput,
 } from "./handlers.js";
+import type { Launcher } from "./launch.js";
 
 const roots: string[] = [];
 
@@ -53,15 +54,33 @@ async function openStore(): Promise<ExchangeStore> {
   return new ExchangeStore(dir, ticking());
 }
 
-async function openTools(): Promise<{ handlers: Handlers; store: ExchangeStore }> {
+/**
+ * Every launch a run of this file asked for.
+ *
+ * Recorded rather than performed, and it is the recording that matters twice
+ * over: which calls bring Anthill up is the behaviour under test, and a suite
+ * that used the real launcher would open the app on the machine running it —
+ * once per test, including in CI.
+ */
+type Opened = { url: string }[];
+
+async function openTools(
+  launch: Launcher = async () => ({ outcome: "opened" }),
+): Promise<{ handlers: Handlers; store: ExchangeStore; opened: Opened }> {
   const store = await openStore();
+  const opened: Opened = [];
   let minted = 0;
   return {
     store,
+    opened,
     handlers: createHandlers({
       store,
       mintRunId: () => `ANT-RUN${(minted += 1)}`,
       mintNonce: () => `n${minted}`,
+      launch: async (url) => {
+        opened.push({ url });
+        return launch(url);
+      },
     }),
   };
 }
@@ -692,7 +711,11 @@ describe("bind_run", () => {
     await handlers.createWorkflowDraft(draftInput());
     const first = answerOf(await handlers.bindRun(bindInput()));
     await store.addRevision("workflow-1", completeWorkflow({ name: "Edited afterward" }), "user");
-    const restarted = createHandlers({ store, mintRunId: () => { throw new Error("retry minted a run"); } });
+    const restarted = createHandlers({
+      store,
+      mintRunId: () => { throw new Error("retry minted a run"); },
+      launch: async () => ({ outcome: "opened" }),
+    });
     const retried = answerOf(await restarted.bindRun(bindInput()));
     expect(retried.outcome).toBe("already_bound");
     expect(retried.runId).toBe(first.runId);
@@ -848,6 +871,117 @@ describe("bind_run", () => {
       "ANT-RUN1",
       "ANT-RUN2",
     ]);
+  });
+});
+
+/**
+ * ANT-123. A handover used to succeed completely with nothing on screen: the
+ * workflow was stored, a display request was queued for an app that was not
+ * running, and the user was shown a URL they had to notice and click. These
+ * say which calls bring Anthill up, which deliberately do not, and that a
+ * machine that cannot open it says so without turning a stored handover into a
+ * failed one.
+ */
+describe("bringing Anthill up", () => {
+  it("opens the workflow it just stored", async () => {
+    const { handlers, opened } = await openTools();
+
+    const result = await handlers.createWorkflowDraft(draftInput());
+
+    expect(opened).toEqual([{ url: "anthill://workflow/workflow-1" }]);
+    expect(answerOf(result).app).toEqual({ outcome: "opened" });
+    // Nothing is said about an app that came up: the result's own link is the
+    // next line, and "Anthill was opened" would be a claim about a window this
+    // server has not seen.
+    expect(textOf(result)).not.toContain("could not be opened");
+  });
+
+  it("opens it again when a revision replaces what the user is looking at", async () => {
+    const { handlers, opened } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    opened.length = 0;
+
+    await handlers.reviseWorkflow({
+      workflowId: "workflow-1",
+      workflow: completeWorkflow({ name: "Ship the fix, carefully" }),
+    });
+
+    expect(opened).toEqual([{ url: "anthill://workflow/workflow-1" }]);
+  });
+
+  it("opens it when a run is bound, because only a running app registers one", async () => {
+    const { handlers, store, opened } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    const head = await store.readRevision("workflow-1", 1);
+    opened.length = 0;
+
+    const bound = await handlers.bindRun({
+      workflowId: "workflow-1",
+      revision: 1,
+      digest: head!.digest,
+      idempotencyKey: "bind-1",
+      sessionId: "11111111-1111-4111-8111-111111111111",
+    });
+
+    expect(answerOf(bound).outcome).toBe("bound");
+    expect(opened).toEqual([{ url: "anthill://workflow/workflow-1" }]);
+  });
+
+  it("opens nothing for the reads a model does while it works", async () => {
+    const { handlers, opened } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    opened.length = 0;
+
+    await handlers.getWorkflow({ workflowId: "workflow-1" });
+    await handlers.getReadyRevision({ workflowId: "workflow-1" });
+    await handlers.getWorkflow({ workflowId: "nothing-here" });
+
+    // The user was working in their harness. A window appearing because the
+    // model looked something up is the app interrupting them for nothing.
+    expect(opened).toEqual([]);
+  });
+
+  it("opens nothing for a handover that was refused", async () => {
+    const { handlers, opened } = await openTools();
+
+    await handlers.createWorkflowDraft(draftInput({ workflow: { id: "workflow-1" } as never }));
+    await handlers.reviseWorkflow({ workflowId: "never-stored", workflow: completeWorkflow() });
+    await handlers.bindRun({ workflowId: "never-stored", revision: 1, digest: "0123456789abcdef", idempotencyKey: "k" });
+
+    // There is nothing of these to open, which is the same reason none of them
+    // carries a link.
+    expect(opened).toEqual([]);
+  });
+
+  it("still reports the handover as stored when the app cannot be opened", async () => {
+    const { handlers, store } = await openTools(async () => ({
+      outcome: "no_handler",
+      message: "Anthill could not be opened: nothing on this machine is registered for anthill:// links. Install Anthill and open it once.",
+    }));
+
+    const result = await handlers.createWorkflowDraft(draftInput());
+
+    expect(result.isError).toBeUndefined();
+    expect(answerOf(result).outcome).toBe("created");
+    expect((await store.readWorkflow("workflow-1"))?.head?.revision).toBe(1);
+    // Passed on, because otherwise the user waits for a window that is not
+    // coming and nothing in the answer explains why.
+    expect(answerOf(result).app).toMatchObject({ outcome: "no_handler" });
+    expect(textOf(result)).toContain("Install Anthill");
+  });
+
+  it("survives a launcher that throws, and says what happened", async () => {
+    const { handlers } = await openTools(async () => {
+      throw new Error("spawn EPERM");
+    });
+
+    const result = await handlers.createWorkflowDraft(draftInput());
+
+    expect(result.isError).toBeUndefined();
+    expect(answerOf(result).outcome).toBe("created");
+    expect(answerOf(result).app).toMatchObject({ outcome: "failed" });
+    expect(textOf(result)).toContain("spawn EPERM");
+    expect(textOf(result)).toContain("anthill://workflow/workflow-1");
   });
 });
 

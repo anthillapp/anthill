@@ -173,10 +173,20 @@ plausible guess does more damage than an admitted gap.
    it opens or focuses the workflow. **Keep the workflow id**; every later call
    needs it, and a new session cannot guess it.
 
-   A stored handover is not a displayed one. The server writes a request into a
-   local inbox and the app reads it on its own schedule. If Anthill is not
-   running, the handover is waiting and will open when it starts. Say that
-   plainly rather than claiming the user is looking at something.
+   Anthill is brought up for it: the server hands the same link to the machine,
+   which launches the app or brings it to the front. What that amounts to is in
+   the result's `app` field, and it is worth reading before you describe what
+   the user is looking at:
+
+   * `opened` — the link was taken. The app is starting or already in front.
+   * anything else — `no_handler`, `failed`, `unsupported`, `disabled` — carries
+     a message saying why. Pass it on; the handover is stored either way, and
+     the link still opens it by hand.
+
+   A stored handover is still not a displayed one. The server writes a request
+   into a local inbox and the app reads it on its own schedule, so say that the
+   workflow was handed over and Anthill asked to show it — not that the user is
+   looking at it.
 
 ## On `design`, ask before you start. Always.
 

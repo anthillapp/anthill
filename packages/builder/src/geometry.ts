@@ -400,14 +400,14 @@ export function elbow(
 const ROUTE_CLEARANCE = 22;
 
 /**
- * How far out each attempt is pushed, in multiples of the clearance.
+ * How many times a detour may step further out before the side is given up on.
  *
- * One rung is enough for a row of equal blocks; the rest are for a canvas
- * where something else is already sitting where the detour wanted to go. The
- * first rung that crosses nothing wins, so the far ones are only ever reached
- * by lines that need them.
+ * Each step is measured, not guessed: it clears whatever the previous attempt
+ * actually ran into. A row of equal blocks is done in one; the rest are for a
+ * canvas where the way out is itself occupied, and a line that needs none of
+ * them never asks for them.
  */
-const ROUTE_ATTEMPTS = [1, 1.8, 3, 4.5];
+const ROUTE_TRIES = 6;
 
 /**
  * Points along a path, close enough together to catch a block between them.
@@ -576,31 +576,51 @@ function clearOf(
   const hit = crossed(samplesAlong(base), blocks, from, b);
   if (hit.length === 0) return base;
 
+  const drawn = (points: readonly Point[]): CurveGeometry => ({
+    path:
+      routing === "orthogonal"
+        ? points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ")
+        : roundedPath(points, DETOUR_RADIUS),
+    mid: polylineMid(points),
+    from,
+    to: b,
+    ...(routing === "orthogonal" ? { turn: "y" as const } : {}),
+  });
+
   const above = Math.min(...hit.map((block) => block.top));
   const below = Math.max(...hit.map((block) => block.top + block.h));
-  // Whichever way out of the row is nearer to where the line already runs.
-  const up = base.mid.y - above <= below - base.mid.y;
+  // Whichever way out of the row is nearer to where the line already runs —
+  // and then, if that way is boxed in, the other one. Committing to the nearer
+  // side and never reconsidering was half of ANT-121: a line whose short way
+  // out was occupied and whose long way out was clear took neither, and was
+  // returned still crossing.
+  const nearerIsUp = base.mid.y - above <= below - base.mid.y;
 
   let best = base;
   let bestCrossings = hit.length;
-  for (const attempt of ROUTE_ATTEMPTS) {
-    const y = up ? above - ROUTE_CLEARANCE * attempt : below + ROUTE_CLEARANCE * attempt;
-    const points = detour(from, b, y);
-    const crossings = crossed(along(points), blocks, from, b).length;
-    const tried: CurveGeometry = {
-      path:
-        routing === "orthogonal"
-          ? points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ")
-          : roundedPath(points, DETOUR_RADIUS),
-      mid: polylineMid(points),
-      from,
-      to: b,
-      ...(routing === "orthogonal" ? { turn: "y" as const } : {}),
-    };
-    if (crossings === 0) return tried;
-    if (crossings < bestCrossings) {
-      best = tried;
-      bestCrossings = crossings;
+
+  for (const up of nearerIsUp ? [true, false] : [false, true]) {
+    // The edge to clear, which moves as the detour meets more blocks. Stepping
+    // out by fixed multiples of the clearance was the other half: the ladder
+    // knew nothing about what it was climbing past, so four rungs could all
+    // land inside the same tall neighbour.
+    let edge = up ? above : below;
+    for (let attempt = 0; attempt < ROUTE_TRIES; attempt += 1) {
+      const y = up ? edge - ROUTE_CLEARANCE : edge + ROUTE_CLEARANCE;
+      const points = detour(from, b, y);
+      const inTheWay = crossed(along(points), blocks, from, b);
+      if (inTheWay.length === 0) return drawn(points);
+      if (inTheWay.length < bestCrossings) {
+        best = drawn(points);
+        bestCrossings = inTheWay.length;
+      }
+      // Past what this attempt actually met. A step that would not get further
+      // than the last one is the side saying it has nothing left to offer.
+      const next = up
+        ? Math.min(...inTheWay.map((block) => block.top))
+        : Math.max(...inTheWay.map((block) => block.top + block.h));
+      if (up ? next >= edge : next <= edge) break;
+      edge = next;
     }
   }
   return best;

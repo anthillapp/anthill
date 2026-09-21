@@ -1,0 +1,112 @@
+#!/usr/bin/env node
+/**
+ * Find the Anthill MCP server, and say so plainly when it cannot be found.
+ *
+ * Where the plugin runs from depends on how it was installed, so it cannot
+ * reach anything outside itself by a relative path. Installed from a local
+ * marketplace, `CLAUDE_PLUGIN_ROOT` is the checkout's own `plugins/anthill`,
+ * and `../../apps/mcp/dist/server.js` would in fact resolve — but the same
+ * plugin fetched from a git marketplace is a copy of this directory and nothing
+ * else, where that path climbs out of the plugin into whatever happens to be
+ * above it. A path that works only under one of the two is worse than no path,
+ * because it works for whoever wrote it.
+ *
+ * So the server is located absolutely, and until Anthill ships it inside the
+ * installed app there is nothing to locate it by except a path somebody gives
+ * us.
+ *
+ * Three places are looked at, in this order, and each is something a person
+ * chose rather than something guessed:
+ *
+ *   ANTHILL_MCP_SERVER   the built server.js itself
+ *   ANTHILL_REPO         a checkout; the server is at apps/mcp/dist/server.js
+ *   ~/.anthill/plugin.json   {"server": "/abs/path/to/server.js"}
+ *
+ * A stdio MCP server may write nothing to stdout but the protocol, so a failure
+ * is reported on stderr and the process exits non-zero. The host then shows the
+ * server as failed, which is the honest outcome: a server that cannot be found
+ * is not a server that answers "no".
+ */
+
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
+
+/** The one file that is the server, wherever it was found. */
+function fromEnvironment() {
+  const direct = process.env.ANTHILL_MCP_SERVER?.trim();
+  if (direct) return { path: direct, source: "ANTHILL_MCP_SERVER" };
+
+  const repo = process.env.ANTHILL_REPO?.trim();
+  if (repo) {
+    return { path: join(repo, "apps", "mcp", "dist", "server.js"), source: "ANTHILL_REPO" };
+  }
+  return undefined;
+}
+
+/** The settings file, read defensively: a damaged one is no answer, not a crash. */
+function fromSettings() {
+  const file = join(homedir(), ".anthill", "plugin.json");
+  if (!existsSync(file)) return undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    const server = typeof parsed?.server === "string" ? parsed.server.trim() : "";
+    return server ? { path: server, source: file } : undefined;
+  } catch {
+    return { problem: `${file} could not be read as JSON.` };
+  }
+}
+
+function locate() {
+  const found = fromEnvironment() ?? fromSettings();
+  if (!found) return { problem: "Nothing says where the Anthill MCP server is." };
+  if ("problem" in found) return found;
+  if (!isAbsolute(found.path)) {
+    return { problem: `${found.source} gives a relative path (${found.path}); it has to be absolute, because this process starts in whatever directory the host happened to be in.` };
+  }
+  if (!existsSync(found.path)) {
+    return { problem: `${found.source} points at ${found.path}, and there is no file there. If this is a checkout, the server has to be built first: npm run build:deps && npm run build --workspace=@anthill/mcp` };
+  }
+  return found;
+}
+
+const located = locate();
+if ("problem" in located) {
+  process.stderr.write(
+    `anthill plugin: ${located.problem}\n` +
+      "Set one of these and restart the session:\n" +
+      "  ANTHILL_MCP_SERVER=/abs/path/to/anthill/apps/mcp/dist/server.js\n" +
+      "  ANTHILL_REPO=/abs/path/to/anthill\n" +
+      `  ${join(homedir(), ".anthill", "plugin.json")}  {"server": "/abs/path/to/.../server.js"}\n`,
+  );
+  process.exit(78); // EX_CONFIG: the configuration is wrong, not the program.
+}
+
+// Arguments are passed through, so a data directory can be given in .mcp.json
+// without this script having to know what the server's flags mean.
+const child = spawn(process.execPath, [located.path, ...process.argv.slice(2)], {
+  stdio: "inherit",
+  windowsHide: true,
+});
+for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+  process.on(signal, () => {
+    try {
+      child.kill(signal);
+    } catch {
+      // The child is already gone, which is what we were asking for.
+    }
+  });
+}
+child.on("exit", (code, signal) => {
+  if (signal) {
+    process.removeAllListeners(signal);
+    try {
+      process.kill(process.pid, signal);
+    } catch {
+      process.exit(1);
+    }
+  } else {
+    process.exit(code ?? 0);
+  }
+});

@@ -464,8 +464,18 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
       that already settled is not reopened to be stopped.
     */
     case "interrupted":
-      if (run.detectedSessionId && run.detectedSessionId !== evidence.sessionId) return run;
-      if (run.state !== "detected_live") return run;
+      // The session being followed, and only it. A run with no session of its
+      // own has nothing to stop: the stop is a fact about one transcript, and
+      // without a binding or a match there is nothing saying that transcript
+      // is this run's.
+      if (!run.detectedSessionId || run.detectedSessionId !== evidence.sessionId) return run;
+      // A run still being followed. `pending_after_copy` counts: a run a
+      // plugin bound carries its session id from the moment of binding and
+      // sits in that state until its first evidence lands — which, for a
+      // session that was stopped, is the same poll that carries the stop.
+      // Refusing it there meant the one state where the stop is the only news
+      // there is was the one state that ignored it (ANT-122).
+      if (run.state !== "detected_live" && run.state !== "pending_after_copy") return run;
       return {
         ...run,
         state: "observation_lost",

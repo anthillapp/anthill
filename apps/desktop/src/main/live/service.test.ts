@@ -254,6 +254,36 @@ describe("external revision bindings", () => {
     h.service.stop();
   });
 
+  /**
+   * ANT-122, the second way it survived the first fix. A bound run sits at
+   * `pending_after_copy` until something is read about it, so for a session
+   * stopped by hand the stop is not just the first news — it is the only
+   * news. The stop was read, reported once, refused because the run was not
+   * yet live, and never said again: the run stayed on screen claiming a Bash
+   * call from before the stop was still running, for as long as the app was
+   * open.
+   */
+  it("ends a bound run whose first news is that the person stopped it", async () => {
+    const h = await harness();
+    await h.service.registerBinding(input);
+    const transcript = join(h.claudeRoot, "-tmp-scratch", "bound-session.jsonl");
+    await mkdir(dirname(transcript), { recursive: true });
+    await appendFile(transcript, JSON.stringify({
+      type: "user", sessionId: "bound-session", timestamp: "2026-08-29T10:00:30.000Z",
+      message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user for tool use]" }] },
+    }) + "\n");
+    // A call the stop killed, which the hook log has no way of closing: this
+    // is what kept claiming the session was working.
+    await hookLine(h.hookLogPath, "bound-session", "PreToolUse", "2026-08-29T10:00:25.000Z", "toolu_orphan");
+    h.setNow("2026-08-29T10:00:31.000Z");
+    await h.service.poll();
+
+    const run = only(h.service.snapshot());
+    expect(run.state).toBe("observation_lost");
+    expect(run.statusMessage).toContain("You stopped this session");
+    h.service.stop();
+  });
+
   it("keeps fresh transcript activity when an older CLI report is read in the same poll", async () => {
     const h = await harness();
     await h.service.registerBinding(input);
@@ -1279,9 +1309,14 @@ describe("a session waiting on a tool it started", () => {
    * nor `SessionEnd` — so the run used to sit at "Live" until the five-minute
    * silence rule reached it, while the transcript had said so within a second.
    */
-  it("reads a stop the person made instead of waiting five minutes for silence", async () => {
+  it.each([
+    "[Request interrupted by user]",
+    // The one people actually produce: stopping while a tool is running, which
+    // is also the case where a hook the interrupt killed keeps claiming work.
+    "[Request interrupted by user for tool use]",
+  ])("reads a stop the person made, written as %s", async (phrasing) => {
     const h = await live();
-    await hookLine(h.hookLogPath, "sess-1", "PreToolUse", at(60_000), "toolu_1");
+    await hookLine(h.hookLogPath, "sess-1", "PreToolUse", at(60_000), "toolu_orphan");
     h.setNow(at(61_000));
     await h.service.poll();
     expect(only(h.service.snapshot()).state).toBe("detected_live");
@@ -1290,7 +1325,7 @@ describe("a session waiting on a tool it started", () => {
       join(h.claudeRoot, "-tmp-scratch", "sess-1.jsonl"),
       JSON.stringify({
         type: "user", sessionId: "sess-1", timestamp: at(90_000),
-        message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] },
+        message: { role: "user", content: [{ type: "text", text: phrasing }] },
       }) + "\n",
     );
     h.setNow(at(91_000));
@@ -1299,6 +1334,33 @@ describe("a session waiting on a tool it started", () => {
     const run = only(h.service.snapshot());
     expect(run.state).toBe("observation_lost");
     expect(run.statusMessage).toContain("You stopped this session");
+  });
+
+  /**
+   * The other half of reading a stop out of the record: it is only the stop
+   * for as long as it is the last thing said. Somebody who presses the key and
+   * then carries on in the same session has a live session again, and a stop
+   * reported from the file for as long as the file holds it would have pinned
+   * the run to "you stopped this" while the work went on.
+   */
+  it("picks the session back up when the person carries on after stopping it", async () => {
+    const h = await live();
+    const transcript = join(h.claudeRoot, "-tmp-scratch", "sess-1.jsonl");
+    await appendFile(transcript, JSON.stringify({
+      type: "user", sessionId: "sess-1", timestamp: at(90_000),
+      message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user for tool use]" }] },
+    }) + "\n");
+    h.setNow(at(91_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("observation_lost");
+
+    await appendFile(transcript, JSON.stringify({
+      type: "assistant", sessionId: "sess-1", timestamp: at(120_000),
+      message: { content: [{ type: "text", text: "Picking this back up." }] },
+    }) + "\n");
+    h.setNow(at(121_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("detected_live");
   });
 
   it("is not stopped by somebody quoting the phrase in a longer message", async () => {

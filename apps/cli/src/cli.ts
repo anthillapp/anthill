@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { existsSync, realpathSync } from "node:fs";
 import { open, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { ensureDataDir, resolvePaths } from "./paths.js";
 import type { Paths } from "./paths.js";
@@ -482,7 +484,8 @@ function tryOpen(opener: string, url: string): Promise<boolean> {
  * Where the built renderer lives. `cli.js` compiles to `out/cli/src/`, the
  * renderer to `out/renderer/`, so two levels up from here.
  */
-const rendererDir = join(__dirname, "../../renderer");
+const moduleDir = fileURLToPath(new URL(".", import.meta.url));
+const rendererDir = join(moduleDir, "../../renderer");
 
 function waitForSignal(): Promise<void> {
   return new Promise((resolve) => {
@@ -550,11 +553,11 @@ export async function main(): Promise<void> {
   await releaseLock();
 }
 
-// The entry point: run `main` only when this file is executed directly (the
-// CJS `require.main === module` idiom), not when it is imported. A failure is
-// reported and exits non-zero.
-declare const module: { id: string };
-if (typeof require !== "undefined" && require.main === module) {
+// npm exposes this file through a symlink. Compare real paths so direct
+// `anthill` execution runs main while Vitest imports remain side-effect free.
+const invokedDirectly = process.argv[1] !== undefined && existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+if (invokedDirectly) {
   void main().catch((error) => {
     console.error(error);
     process.exit(1);

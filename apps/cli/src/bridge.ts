@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { parseWorkflow } from "@anthill/workflow-schema";
 import {
@@ -60,6 +61,8 @@ import {
 } from "../../desktop/src/main/recents.js";
 import type { Paths } from "./paths.js";
 import { reportPath } from "./report.js";
+
+const moduleDir = fileURLToPath(new URL(".", import.meta.url));
 
 /**
  * The CLI's answer to the desktop's preload: it maps every `IpcChannel`
@@ -205,7 +208,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
       // in the CLI tsconfig's include) and points the marker at the compiled
       // module. If it is absent, `ObservationSetupService` reports "not found"
       // rather than failing the boot.
-      hookHandlerPath: join(__dirname, "../../desktop/src/main/live/hook-handler.js"),
+      hookHandlerPath: join(moduleDir, "../../desktop/src/main/live/hook-handler.js"),
     });
     return liveSetup;
   }

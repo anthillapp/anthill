@@ -1,0 +1,10 @@
+interface:
+  display_name: "Anthill CLI: Use Workflow"
+  short_description: "Design and observe an Anthill workflow"
+  icon_small: "./assets/icon.png"
+  icon_large: "./assets/icon.png"
+  brand_color: "#F0442E"
+  default_prompt: "Use $anthill to design or watch this task in Anthill."
+
+policy:
+  allow_implicit_invocation: true

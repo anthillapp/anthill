@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "exchange": {
+      "type": "stdio",
+      "command": "./bin/anthill-mcp",
+      "args": [],
+      "cwd": "."
+    }
+  }
+}

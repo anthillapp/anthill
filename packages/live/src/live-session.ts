@@ -214,6 +214,28 @@ export function foldLiveSession(
       continue;
     }
 
+    // `anthill done` is an explicit statement from the harness that the bound
+    // workflow finished. It is stronger than a later generic turn-end record:
+    // that record only says Codex yielded, while this marker says the work is
+    // complete. Settle the active block here so a following `turn.end` cannot
+    // turn a completed final step back into "Waiting on you".
+    if (
+      event.kind === "session.end" &&
+      event.source === "anthill" &&
+      event.channel === "anthill:report" &&
+      announced &&
+      blocks[announced]
+    ) {
+      const current = blocks[announced];
+      const spent = spentBy(current, event.at);
+      blocks[announced] = {
+        ...current,
+        state: "done",
+        ...(spent !== undefined ? { spentMs: spent } : {}),
+      };
+      continue;
+    }
+
     // A recorded failure settles the announced step, but never invents one.
     if (event.kind === "error" && announced && blocks[announced]) {
       blocks[announced] = {

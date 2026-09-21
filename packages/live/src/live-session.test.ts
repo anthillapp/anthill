@@ -321,6 +321,20 @@ describe("folding a session", () => {
       expect(view.blocks.implement.state).toBe("done");
     });
 
+    it("keeps an explicitly completed Anthill step done after Codex ends its turn", () => {
+      const view = foldLiveSession(workflow, run({ state: "completed" }), [
+        step("implement"),
+        event({
+          kind: "session.end",
+          title: "The harness reported the work as finished",
+          source: "anthill",
+          channel: "anthill:report",
+        }),
+        turnEnd(),
+      ]);
+      expect(view.blocks.implement.state).toBe("done");
+    });
+
     it("says nothing about a turn that ended before any step was announced", () => {
       const view = foldLiveSession(workflow, run(), [turnEnd()]);
       expect(view.blocks.implement.state).toBe("queued");

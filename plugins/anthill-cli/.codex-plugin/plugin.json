@@ -1,0 +1,39 @@
+{
+  "name": "anthill-cli",
+  "version": "0.7.5+codex.20260921015319",
+  "description": "Hand work from Codex to Anthill as a local, reviewable workflow and report progress against the bound revision.",
+  "author": {
+    "name": "Nick Nesterov",
+    "email": "njrnesterov@gmail.com",
+    "url": "https://github.com/nstr"
+  },
+  "homepage": "https://github.com/nstr/anthill",
+  "repository": "https://github.com/nstr/anthill",
+  "keywords": [
+    "workflow",
+    "codex",
+    "observability",
+    "anthill"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Anthill",
+    "shortDescription": "Design a workflow, hand it to Anthill, and show Codex progress",
+    "longDescription": "Anthill turns work in the current Codex task into a local workflow that can be reviewed in the Anthill desktop app. Codex remains the agent doing the work; Anthill only stores the workflow and observes explicit progress reports.",
+    "developerName": "Anthill",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "$anthill design this task as a workflow for me to review before you start",
+      "$anthill watch this task in Anthill while you do it"
+    ],
+    "brandColor": "#F0442E",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png",
+    "logoDark": "./assets/icon.png"
+  }
+}

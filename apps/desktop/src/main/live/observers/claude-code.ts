@@ -68,8 +68,21 @@ const SETTLE_MS = 5 * 60_000;
 /** Stop reasons that mean the agent finished answering rather than paused. */
 const TERMINAL_STOP = new Set(["end_turn", "stop_sequence"]);
 
-/** Exactly what Claude Code writes into the transcript when it is stopped. */
-const INTERRUPTED = "[Request interrupted by user]";
+/**
+ * What Claude Code writes into the transcript when somebody stops it.
+ *
+ * A shape rather than a string, because there is more than one phrasing. This
+ * machine's transcripts hold `[Request interrupted by user]` 134 times and
+ * `[Request interrupted by user for tool use]` 34 — and matching the first
+ * exactly was the bug: a stop *during a tool call*, which is when somebody
+ * actually reaches for the key, writes the second one and went unread, so the
+ * run carried on claiming the session was live (ANT-122).
+ *
+ * Anchored at both ends and tested against a message's whole text, so a
+ * sentence quoting the phrase is still not a stop, and a wording that grows
+ * another clause inside the brackets is still one.
+ */
+const INTERRUPTED = /^\[Request interrupted by user[^\]]*\]$/;
 
 /**
  * Tools that hand work somewhere this transcript will not describe.
@@ -180,8 +193,6 @@ type FileState = {
    * place it is said at all (ANT-122).
    */
   interruptedAt?: string;
-  /** The interrupt already reported, so a poll does not repeat one. */
-  reportedInterruptAt?: string;
   lastActivityAt?: string;
   /**
    * Assistant message ids whose usage has been taken.
@@ -447,9 +458,18 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
       if (
         !state.delegate &&
         state.interruptedAt &&
-        state.interruptedAt !== state.reportedInterruptAt
+        // Still the last thing in the file, rather than reported once and
+        // never again. A stop is a standing fact about the session, and a
+        // single shot at saying it is lost whenever the poll that carries it
+        // finds the run in a state that cannot take it — a plugin-bound run
+        // is `pending_after_copy` until its first evidence arrives, and that
+        // is the same poll, so the stop was dropped and nothing said it again
+        // (ANT-122). Repeating is safe because folding it twice changes
+        // nothing; what makes it honest is this equality, which stops the
+        // moment the session writes another word, so a session somebody
+        // carried on with is not held down by the key they pressed earlier.
+        state.interruptedAt === state.lastActivityAt
       ) {
-        state.reportedInterruptAt = state.interruptedAt;
         evidence.push({
           kind: "interrupted",
           sessionId,
@@ -645,7 +665,7 @@ function scan(
       // The whole of what Claude Code writes when somebody stops it. Matched
       // exactly, and only as a message's entire text: the phrase inside a
       // longer message is somebody quoting it.
-      if (blocks.some((block) => isRecord(block) && str(block.text)?.trim() === INTERRUPTED)) {
+      if (blocks.some((block) => isRecord(block) && INTERRUPTED.test(str(block.text)?.trim() ?? ""))) {
         state.interruptedAt = at;
         events.push({ ...base, kind: "notification", title: "Stopped by hand" });
         continue;

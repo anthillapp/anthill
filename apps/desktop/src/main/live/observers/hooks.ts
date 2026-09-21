@@ -138,6 +138,15 @@ export class HookLogObserver {
    */
   private readonly open = new Map<string, Map<string, OpenCall>>();
   /**
+   * When each run's session was stopped by hand, once anything has said so.
+   *
+   * A watermark rather than a one-off clearing, because this log is re-read
+   * from disk: anything it opened at or before that moment is not coming back,
+   * however many times the line is read. Never cleared — a session somebody
+   * carries on with writes newer records, and those are above the mark.
+   */
+  private readonly stoppedAt = new Map<string, string>();
+  /**
    * Delegations the session last said were still running, per run.
    *
    * Kept apart from `open` because the two are different claims: an open tool
@@ -204,6 +213,7 @@ export class HookLogObserver {
       this.background.set(run.anthillRunId, delegated);
     }
 
+    const stoppedAt = this.stoppedAt.get(run.anthillRunId);
     const chunk = await readRotatingLines(this.path, cursor);
     // A log that has not grown can still be saying something: a tool that
     // opened before this poll and has not closed is work in flight now, and so
@@ -252,7 +262,9 @@ export class HookLogObserver {
           });
         }
         delegated.clear();
-        for (const [id, task] of listed) delegated.set(id, task);
+        if (!(stoppedAt && (str(row.recordedAt) ?? now) <= stoppedAt)) {
+          for (const [id, task] of listed) delegated.set(id, task);
+        }
       }
 
       const kind = KIND[name];
@@ -266,8 +278,11 @@ export class HookLogObserver {
       // with no id cannot be paired, so it is not counted either way.
       const useId = str(data.tool_use_id);
       if (useId) {
-        if (name === "PreToolUse") inFlight.set(useId, { at, ...(toolName ? { toolName } : {}) });
-        else if (name === "PostToolUse") inFlight.delete(useId);
+        // A call from before the person stopped the session is over, whether
+        // or not anything ever wrote its `PostToolUse`.
+        if (name === "PreToolUse" && !(stoppedAt && at <= stoppedAt)) {
+          inFlight.set(useId, { at, ...(toolName ? { toolName } : {}) });
+        } else if (name === "PostToolUse") inFlight.delete(useId);
       }
 
       /*
@@ -468,10 +483,19 @@ export class HookLogObserver {
    * transcript knows, and a call the interrupt killed will never report back.
    * Cursors are untouched — the log is still read, there is simply nothing
    * left to claim.
+   *
+   * The moment of the stop is kept, not just applied: clearing what had
+   * already been read is no defence against reading it again. A run bound by
+   * a plugin learns of the stop on the same poll that first reads the log, so
+   * the call the stop killed was ingested *after* the clearing and claimed the
+   * session was working from a `PreToolUse` written before the person pressed
+   * the key (ANT-122).
    */
-  stopped(runId: string): void {
+  stopped(runId: string, at: string): void {
     this.open.get(runId)?.clear();
     this.background.get(runId)?.clear();
+    const known = this.stoppedAt.get(runId);
+    if (!known || known < at) this.stoppedAt.set(runId, at);
   }
 
   /**

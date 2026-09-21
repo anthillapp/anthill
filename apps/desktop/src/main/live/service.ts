@@ -491,8 +491,8 @@ export class LiveSessionService {
     // the hook log is still claiming: whatever was open when they pressed the
     // key is not coming back. Said before the hooks are read, so this poll's
     // own "still working" does not undo the stop that produced it (ANT-122).
-    if (evidence.some((item) => item.kind === "interrupted")) {
-      this.hooks.stopped(run.anthillRunId);
+    for (const item of evidence) {
+      if (item.kind === "interrupted") this.hooks.stopped(run.anthillRunId, item.at);
     }
 
     // Hooks are read separately because the log is machine-wide and only

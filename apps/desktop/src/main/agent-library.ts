@@ -227,7 +227,9 @@ export class AgentLibraryStore {
       // Kept as given, empty included. "Unnamed agent" is what an empty name
       // *reads* as, which is the display layer's business; storing it here
       // would make a placeholder indistinguishable from a name somebody chose.
-      name: input.name.trim(),
+      // A trailing space typed by the author is part of the name, not noise:
+      // the trim belongs at the read/display boundary, not on the way in.
+      name: input.name,
       ...(input.models && Object.keys(input.models).length > 0 ? { models: input.models } : {}),
       ...(input.role ? { role: input.role } : {}),
       ...(input.description ? { description: input.description } : {}),
@@ -254,7 +256,9 @@ export class AgentLibraryStore {
     if (!current) return undefined;
     const next: GlobalAgentProfile = {
       ...current,
-      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      // Kept as given, empty included (see `create`): a trailing space is part
+      // of the name, so it is stored rather than trimmed on the way in.
+      ...(input.name !== undefined ? { name: input.name } : {}),
       updatedAt: this.now(),
     };
     // `undefined` is "not mentioned"; `""` is "clear it". The two used to be

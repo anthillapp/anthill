@@ -143,7 +143,9 @@ function stub(
       issued += 1;
       const made: GlobalAgentProfile = {
         id: `agent-${issued}`,
-        name: input.name.trim(),
+        // Kept as given, the way the real store now is: a trailing space is
+        // part of the name, not noise.
+        name: input.name,
         ...(input.models ? { models: input.models } : {}),
         createdAt: "2026-09-01T11:00:00.000Z",
         updatedAt: "2026-09-01T11:00:00.000Z",
@@ -155,7 +157,7 @@ function stub(
       const current = held.find((item) => item.id === id);
       if (!current) return undefined;
       const next: GlobalAgentProfile = { ...current };
-      if (input.name !== undefined) next.name = input.name.trim();
+      if (input.name !== undefined) next.name = input.name;
       // Same contract as the real store: the bag is replaced, not merged,
       // because the absence of a tool's key is the message.
       if (input.models !== undefined) {
@@ -378,6 +380,35 @@ describe("writing an agent", () => {
     // And now the list says it too — the row and the editor's own heading.
     await waitFor(() => expect(screen.getAllByText("Careful Reviewer").length).toBe(2));
     expect(screen.getByText("Saved")).toBeTruthy();
+  });
+
+  /*
+   * The regression for the trim-on-save bug: a space typed at the end of the
+   * name is part of the name, so it is kept rather than trimmed on the way
+   * in — through typing, through save, and in the stored value.
+   */
+  it("keeps a trailing space typed into the name, through save", async () => {
+    const { held } = stub([profile()]);
+    await openAgents();
+    fireEvent.click(await screen.findByText("Reviewer"));
+
+    // Type "Dev " character by character, the way an author would, starting
+    // from an empty field.
+    const nameField = screen.getByLabelText("Name") as HTMLInputElement;
+    fireEvent.change(nameField, { target: { value: "" } });
+    for (const char of "Dev ") {
+      fireEvent.change(nameField, { target: { value: nameField.value + char } });
+    }
+    // The space survives to the next render — it is part of the name, not
+    // noise, so the field still shows it.
+    expect(nameField).toHaveProperty("value", "Dev ");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // And it survives the save: the stored value is kept as given, so the
+    // field re-binds to it with the space still there.
+    await waitFor(() => expect(held()[0].name).toBe("Dev "));
+    expect(nameField).toHaveProperty("value", "Dev ");
   });
 
   /* The button is also the answer to "is there anything of mine not written?",

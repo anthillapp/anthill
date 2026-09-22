@@ -156,16 +156,37 @@ export function applyWheel(
 }
 
 /**
+ * The exclusions that hold for any host: a wheel over a field, a menu or a
+ * list is that control's business — a canvas that zoomed while someone
+ * scrolled a dropdown would be taking a gesture it was not given.
+ */
+const GENERIC_EXCLUSIONS =
+  "input, textarea, select, option, [contenteditable='true'], [role='listbox'], [role='menu'], [role='dialog']";
+
+/**
+ * The desktop host's own chrome. The canvas renders inside the desktop, so a
+ * gesture over the inspector, the block library, the activity feed, the
+ * session rail or a modal belongs to that surface, not the canvas. A host that
+ * renders the canvas bare passes nothing (or its own list) and does not
+ * inherit these class names.
+ */
+export const HOST_EXCLUSIONS =
+  ".inspector, .libraries, .live-side, .live-rail, .modal, .modal-scrim";
+
+/**
  * Whether a gesture that landed here belongs to the canvas.
  *
- * A wheel over a field, a menu or a list is that control's business — a canvas
- * that zoomed while someone scrolled a dropdown would be taking a gesture it
- * was not given.
+ * `excludedSelectors` are the host's own surfaces, in addition to the generic
+ * form controls; a host that does not pass them keeps only the generic ones.
  */
-export function isCanvasGesture(target: EventTarget | null): boolean {
+export function isCanvasGesture(
+  target: EventTarget | null,
+  excludedSelectors?: string,
+): boolean {
   const element = target instanceof Element ? target : null;
   if (!element) return true;
-  return !element.closest(
-    "input, textarea, select, option, [contenteditable='true'], [role='listbox'], [role='menu'], [role='dialog'], .inspector, .libraries, .live-side, .live-rail, .modal, .modal-scrim",
-  );
+  const selector = excludedSelectors
+    ? `${GENERIC_EXCLUSIONS}, ${excludedSelectors}`
+    : GENERIC_EXCLUSIONS;
+  return !element.closest(selector);
 }

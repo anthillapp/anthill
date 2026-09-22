@@ -33,7 +33,7 @@ import {
   route,
   type Point,
 } from "./geometry";
-import { ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, zoomAbout } from "./canvas-zoom";
+import { HOST_EXCLUSIONS, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, zoomAbout } from "./canvas-zoom";
 import { useWheelZoom } from "./use-wheel-zoom";
 import { centerOutputs, type CenterScope } from "./align";
 import { moveNode, removeNode } from "./document";
@@ -529,8 +529,9 @@ export function WorkflowCanvas({
     setView((current) => zoomAbout(current, factor, focal));
   }, []);
 
-  // Pinch, and two-finger vertical movement, over the canvas only.
-  useWheelZoom(surface, setView);
+  // Pinch, and two-finger vertical movement, over the canvas only. The canvas
+  // renders inside the desktop, so the host's own chrome is excluded.
+  useWheelZoom(surface, setView, true, HOST_EXCLUSIONS);
 
   /**
    * Command +/- zoom the workflow rather than the application.

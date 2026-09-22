@@ -5,9 +5,18 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./react-flow": {
+      "types": "./dist/react-flow.d.ts",
+      "default": "./dist/react-flow.js"
+    }
+  },
   "dependencies": {
     "@anthill/workflow": "*",
-    "@anthill/ui": "*",
     "@anthill/workflow-schema": "*",
     "@xyflow/react": "^12.3.5",
     "react": "^18.3.1",

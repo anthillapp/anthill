@@ -20,13 +20,14 @@ export function useWheelZoom(
   surface: RefObject<HTMLElement | null>,
   setView: (next: (current: ZoomView) => ZoomView) => void,
   enabled = true,
+  excludedSelectors?: string,
 ): void {
   useEffect(() => {
     const element = surface.current;
     if (!element || !enabled) return;
 
     const onWheel = (event: WheelEvent) => {
-      if (!isCanvasGesture(event.target)) return;
+      if (!isCanvasGesture(event.target, excludedSelectors)) return;
 
       // Taken before anything is computed: this is what keeps the gesture off
       // the application's own zoom and off the page's scroll.
@@ -38,5 +39,5 @@ export function useWheelZoom(
 
     element.addEventListener("wheel", onWheel, { passive: false });
     return () => element.removeEventListener("wheel", onWheel);
-  }, [surface, setView, enabled]);
+  }, [surface, setView, enabled, excludedSelectors]);
 }

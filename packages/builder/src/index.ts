@@ -4,8 +4,8 @@
  * Authoring only: this package creates and edits workflow DEFINITIONS. It
  * contains no execution logic.
  *
- * Consumers must import React Flow's stylesheet once in their app entry:
- *   import "@xyflow/react/dist/style.css";
+ * The legacy React Flow surface (`Canvas`, `WorkflowBuilder`) lives in the
+ * `@anthill/builder/react-flow` subpath; this entry does not pull it in.
  */
 
 export const PACKAGE_NAME = "@anthill/builder";
@@ -101,6 +101,7 @@ export {
   ZOOM_MAX,
   ZOOM_MIN,
   ZOOM_STEP,
+  HOST_EXCLUSIONS,
   applyWheel,
   clampScale,
   isCanvasGesture,
@@ -127,9 +128,8 @@ export {
   type LayoutOptions,
 } from "./layout";
 
-/* React surface. */
-export { WorkflowBuilder, type WorkflowBuilderProps } from "./WorkflowBuilder";
-export { Canvas, type CanvasProps, type CanvasSelection } from "./Canvas";
+/* React surface. The legacy React Flow `Canvas` and `WorkflowBuilder` are in
+   the `react-flow` subpath, not here. */
 export {
   NO_SELECTION,
   WorkflowCanvas,

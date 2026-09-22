@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { WorkflowBuilder } from "./WorkflowBuilder";
+import { WorkflowBuilder } from "./react-flow";
 import type { Workflow } from "./contracts";
 import { createEmptyWorkflow } from "./document";
 import { ValidationCode } from "./validate";

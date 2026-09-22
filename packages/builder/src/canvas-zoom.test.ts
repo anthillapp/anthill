@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   ZOOM_MAX,
   ZOOM_MIN,
+  HOST_EXCLUSIONS,
   applyWheel,
   clampScale,
   isCanvasGesture,
@@ -153,14 +154,24 @@ describe("whose gesture it is", () => {
     ["the library rail", "libraries"],
     ["the activity feed", "live-side"],
     ["the session rail", "live-rail"],
-  ])("leaves %s alone", (_name, className) => {
+  ])("leaves %s alone when the host passes its classes", (_name, className) => {
     const panel = document.createElement("div");
     panel.className = className;
     const inner = document.createElement("div");
     panel.appendChild(inner);
     document.body.appendChild(panel);
-    expect(isCanvasGesture(inner)).toBe(false);
+    expect(isCanvasGesture(inner, HOST_EXCLUSIONS)).toBe(false);
     panel.remove();
+  });
+
+  it("does not know the host's class names by default", () => {
+    for (const className of ["inspector", "live-rail", "modal-scrim"]) {
+      const panel = document.createElement("div");
+      panel.className = className;
+      document.body.appendChild(panel);
+      expect(isCanvasGesture(panel)).toBe(true);
+      panel.remove();
+    }
   });
 
   it("leaves a modal and an open menu alone", () => {

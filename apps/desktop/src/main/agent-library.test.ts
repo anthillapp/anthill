@@ -355,12 +355,28 @@ describe("the global agent library", () => {
     expect("model" in (row ?? {})).toBe(false);
   });
 
-  it("keeps an unnamed profile unnamed", async () => {
-    // "Unnamed agent" is what an empty name reads as; storing it would make a
-    // placeholder indistinguishable from a name somebody chose.
+  it("keeps a name as given, including one that is only spaces", async () => {
+    // The name is stored as given; whether it *reads* as unnamed is the
+    // display layer's business (a trimmed empty reads as "Unnamed agent"), so
+    // a name of only spaces is kept, not blanked, on the way in.
     const { library } = await store();
     const created = await library.create({ name: "   " });
-    expect(created.name).toBe("");
+    expect(created.name).toBe("   ");
+  });
+
+  it("keeps a trailing space in a name — it is part of the name, not noise", async () => {
+    // The regression for the trim-on-save bug: a space typed at the end of the
+    // name is part of the name, so it is stored rather than trimmed on the way
+    // in, on both create and update.
+    const { path, library } = await store();
+    const created = await library.create({ name: "Dev " });
+    expect(created.name).toBe("Dev ");
+    const updated = await library.update(created.id, { name: "Dev  " });
+    expect(updated?.name).toBe("Dev  ");
+    // And it survives a restart, the way everything else does.
+    const reopened = new AgentLibraryStore(path);
+    const reloaded = (await reopened.load()).find((item) => item.id === created.id);
+    expect(reloaded?.name).toBe("Dev  ");
   });
 
   it("never lets an update touch identity", async () => {

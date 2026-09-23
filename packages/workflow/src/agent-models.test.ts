@@ -106,6 +106,10 @@ describe("reading a stored answer", () => {
 describe("migrating a profile written in an earlier shape", () => {
   it("places a bare model name only one declared list offers", () => {
     expect(migrateModels("opus")).toEqual({ models: { "claude-code": { id: "opus" } } });
+    // ANT-68: Fable is Claude Code's too, so a bare "fable" is attributed
+    // rather than left for review.
+    expect(migrateModels("fable")).toEqual({ models: { "claude-code": { id: "fable" } } });
+    expect(harnessOwningModel("fable")).toBe("claude-code");
   });
 
   it("leaves nothing chosen as nothing chosen", () => {

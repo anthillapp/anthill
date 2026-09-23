@@ -56,6 +56,9 @@ const CLAUDE_CODE: HarnessProfile = {
   target: "claude-code",
   displayName: "Claude Code",
   models: [
+    // Claude Code's own aliases, the same words `claude --model` takes; the
+    // CLI resolves each to the current model of that name (ANT-68).
+    { id: "fable", label: "Fable", hint: "Most capable, for the hardest steps" },
     { id: "opus", label: "Opus", hint: "Deepest reasoning, slowest" },
     { id: "sonnet", label: "Sonnet", hint: "Balanced — a good default" },
     { id: "haiku", label: "Haiku", hint: "Fastest, for simple steps" },

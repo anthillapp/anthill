@@ -135,6 +135,16 @@ describe("compile — agent files", () => {
     expect(reviewer?.content).toContain("Review the working tree.");
   });
 
+  // ANT-68: Fable is one of Claude Code's own aliases, written as chosen.
+  it("writes Fable into a Claude Code agent file as its model", () => {
+    const workflow = reviewLoop();
+    const agents = (workflow.metadata as { workflow: { agents: { models?: unknown }[] } }).workflow
+      .agents;
+    agents[1].models = { "claude-code": { id: "fable" } };
+    const reviewer = compile(workflow).files.find((f) => f.path.endsWith("reviewer.md"));
+    expect(reviewer?.content).toContain("model: fable");
+  });
+
   /*
    * ANT-126. The description used to be the first step's purpose, or "The X in
    * this workflow." An agent doing several steps was described by one of them.

@@ -352,15 +352,88 @@ describe("folding a session", () => {
       expect(view.blocks.implement.state).toBe("running");
     });
 
-    it("is not declared finished by a run that went quiet", () => {
+    it("is not declared finished by a run that went quiet, when the transcript is all there is", () => {
       // `completed` is read from a terminal stop reason plus a long silence,
       // which is this exact session: the silence is the person not having
-      // answered yet. The step's own record outranks that inference.
+      // answered yet. With no hook channel on the run, a turn ending with a
+      // question and a turn ending because the work is done look identical,
+      // and the step's own record outranks the inference.
       const view = foldLiveSession(workflow, run({ state: "completed" }), [
         step("implement"),
-        turnEnd(),
+        { ...turnEnd(), source: "transcript", channel: "claude-code:transcript" },
       ]);
       expect(view.blocks.implement.state).toBe("needsYou");
+    });
+
+    /*
+      ANT-78. The last step of every finished workflow ends with a turn
+      ending — there is no later marker to move it on — so it landed in
+      "Waiting on you" and End never went green, on a run whose closing
+      message said every step had run. Once hooks carry the run, the two
+      cases are told apart by a record: a real wait writes a `notification`
+      (measured: one in 2281 events over six and a half hours, and none at
+      the end), a turn ending because the work is done does not.
+    */
+    describe("at the end of a run the hooks were carrying", () => {
+      const hookTurnEnd = () =>
+        event({ kind: "turn.end", title: "The agent finished its turn", channel: "claude-code:hook" });
+
+      it("finishes the last step when the run completes and nobody was asked for anything", () => {
+        const view = foldLiveSession(workflow, run({ state: "completed" }), [
+          step("implement"),
+          step("test"),
+          hookTurnEnd(),
+          event({ kind: "subagent.end", title: "A subagent finished" }),
+        ]);
+        expect(view.blocks.implement.state).toBe("done");
+        expect(view.blocks.test.state).toBe("done");
+        expect(view.blocks.test.note).toBeUndefined();
+      });
+
+      it("still says waiting on you while the run is live — the turn has only just ended", () => {
+        const view = foldLiveSession(workflow, run(), [step("implement"), hookTurnEnd()]);
+        expect(view.blocks.implement.state).toBe("needsYou");
+      });
+
+      it("keeps a step the CLI said was waiting as waiting, even when the run completes", () => {
+        const view = foldLiveSession(workflow, run({ state: "completed" }), [
+          step("implement"),
+          event({ kind: "notification", title: "Claude needs your permission", detail: "to use AskUserQuestion" }),
+          hookTurnEnd(),
+        ]);
+        expect(view.blocks.implement.state).toBe("needsYou");
+        expect(view.blocks.implement.note).toBe("to use AskUserQuestion");
+      });
+
+      it("does not hold an earlier step's notification against a later step", () => {
+        // The measured run: one permission prompt mid-run, none at the end.
+        const view = foldLiveSession(workflow, run({ state: "completed" }), [
+          step("implement"),
+          event({ kind: "notification", title: "Claude needs your permission", detail: "to use AskUserQuestion" }),
+          event({ kind: "prompt.submit", title: "A prompt was submitted" }),
+          step("test"),
+          hookTurnEnd(),
+        ]);
+        expect(view.blocks.implement.state).toBe("done");
+        expect(view.blocks.test.state).toBe("done");
+      });
+
+      it("goes back to work when the turn ending is followed by more", () => {
+        const view = foldLiveSession(workflow, run(), [
+          step("implement"),
+          hookTurnEnd(),
+          event({ kind: "tool.start", title: "Bash", toolName: "Bash" }),
+        ]);
+        expect(view.blocks.implement.state).toBe("running");
+      });
+
+      it("leaves a lost run's step unknown — only a finish settles it", () => {
+        const view = foldLiveSession(workflow, run({ state: "observation_lost" }), [
+          step("implement"),
+          hookTurnEnd(),
+        ]);
+        expect(view.blocks.implement.state).not.toBe("done");
+      });
     });
 
     it("still finishes a step the agent left running", () => {

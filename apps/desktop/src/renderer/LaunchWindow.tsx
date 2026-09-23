@@ -27,6 +27,7 @@ import type {
 import { AgentEditor } from "./agents/AgentEditor.js";
 import { AgentList } from "./agents/AgentList.js";
 import { useAgentLibrary } from "./agents/useAgentLibrary.js";
+import { useModelCatalogues } from "./agents/model-catalogues.js";
 import { useHarnessConnections } from "./harness/useHarnessConnections.js";
 import { AnthillMark } from "./AnthillMark.js";
 import { WorkflowPicker } from "./workflow/WorkflowPicker.js";
@@ -157,40 +158,7 @@ export function LaunchWindow({
    * in Anthill's source goes stale on their release schedule, and a stale entry
    * here becomes an agent file that fails at the far end.
    */
-  const [codex, setCodex] = useState<CodexModelCatalog | undefined>();
-  useEffect(() => {
-    let live = true;
-    void window.anthill
-      .codexModels()
-      .then((found) => {
-        if (live) setCodex(found);
-      })
-      .catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, []);
-  /**
-   * What pi listed for this machine, read once for the window.
-   *
-   * Live rather than cached: pi keeps no model cache file, so there is no
-   * fetchedAt to show and no stale-cache caveat to carry. A failure costs
-   * the list, not the window — the card then says the list was not given
-   * rather than that pi offers nothing.
-   */
-  const [pi, setPi] = useState<PiModelCatalog | undefined>();
-  useEffect(() => {
-    let live = true;
-    void window.anthill
-      .piModels()
-      .then((found) => {
-        if (live) setPi(found);
-      })
-      .catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, []);
+  const { codex, pi } = useModelCatalogues();
   /** Which tool's connection panel the editor has open, if any. */
   const [connecting, setConnecting] = useState<HarnessTarget | undefined>();
 

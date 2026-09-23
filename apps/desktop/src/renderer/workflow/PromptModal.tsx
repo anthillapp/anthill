@@ -49,6 +49,7 @@ import {
 } from "../live/ObservationStep.js";
 
 import { interpreterLogo } from "./interpreter-logos.js";
+import { agentFileExtension } from "./agent-file-name.js";
 
 export type PromptModalProps = {
   workflow: Workflow;
@@ -472,7 +473,7 @@ export function PromptModal({
                 <h2>Where will the session run?</h2>
                 <p>
                   Anthill writes one file per agent into that folder, as{" "}
-                  <code>.claude/agents/*.md</code>. Those files are what{" "}
+                  <code>{`${harnessProfile.agentDir ?? ".claude/agents"}/*.${agentFileExtension(harnessProfile)}`}</code>. Those files are what{" "}
                   {harnessProfile.displayName} delegates to when a step hands work to one of
                   your agents.
                 </p>

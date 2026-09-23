@@ -42,6 +42,7 @@ import { issuesForNode } from "@anthill/workflow";
 import { OUTCOME_STYLES } from "@anthill/builder";
 import type { ValidationResult } from "@anthill/workflow-schema";
 import { IssueList } from "./IssueList.js";
+import { agentFileName } from "./agent-file-name.js";
 import { renameNode, updateNodeConfig } from "@anthill/builder";
 import type { OutcomeKind } from "@anthill/workflow-schema";
 
@@ -340,7 +341,7 @@ export function BlockInspector({
 
           {profile.agentDir && agent ? (
             <p className="hint">
-              Generated as <code>{`${profile.agentDir}/${agentSlug(agent)}.md`}</code>
+              Generated as <code>{agentFileName(profile, agent)}</code>
             </p>
           ) : null}
       </div>

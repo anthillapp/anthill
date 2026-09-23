@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import type { Workflow } from "@anthill/workflow-schema";
 import {
   DEFAULT_TARGET,
+  HARNESS_DEFAULT,
   addAgentProfile,
   agentProfiles,
   agentSlug,
@@ -28,6 +29,13 @@ import {
 } from "@anthill/workflow";
 
 import type { GlobalAgentProfile } from "../../shared/ipc.js";
+import {
+  catalogueMissing,
+  modelOptionsFor,
+  retiredChoice,
+  useModelCatalogues,
+} from "../agents/model-catalogues.js";
+import { agentFileName } from "./agent-file-name.js";
 
 export type AgentRailProps = {
   workflow: Workflow;
@@ -191,6 +199,30 @@ export function AgentEditor({
     onChange(updateAgentProfile(workflow, profile.id, change));
 
   /*
+    The same catalogue the global library reads, by the same rules. This
+    editor used to list the harness table's models, which is empty for Codex
+    on purpose — Codex's are discovered on the machine — so a Codex workflow
+    offered "Default" and nothing else (ANT-127).
+  */
+  const catalogues = useModelCatalogues();
+  const options = modelOptionsFor(harness.target, catalogues);
+  const missing = catalogueMissing(harness.target, catalogues);
+  const chosen = profile.models?.[harness.target];
+  const picked = options.find((option) => option.id === chosen?.id);
+  const efforts = picked?.efforts ?? [];
+  const retired = retiredChoice(chosen?.id, options, HARNESS_DEFAULT);
+
+  /** This harness's slot only; the other tools' answers travel untouched. */
+  const setModel = (next: { id: string; reasoningEffort?: string } | undefined) =>
+    patch({
+      models: next
+        ? { ...(profile.models ?? {}), [harness.target]: next }
+        : Object.fromEntries(
+            Object.entries(profile.models ?? {}).filter(([key]) => key !== harness.target),
+          ),
+    });
+
+  /*
     `tab-body` is the inspector's scroll region, and every other inspector uses
     it. This one did not: it rendered its root straight into the panel's
     column, which meant no side padding — the name and role inputs ran to the
@@ -229,22 +261,15 @@ export function AgentEditor({
               An empty selection is a real answer here, "this harness's own
               default", which is why it is stored rather than cleared. */}
           <select
-            value={profile.models?.[harness.target]?.id ?? ""}
-            onChange={(event) =>
-              patch({
-                models: event.target.value
-                  ? { ...(profile.models ?? {}), [harness.target]: { id: event.target.value } }
-                  : Object.fromEntries(
-                      Object.entries(profile.models ?? {}).filter(
-                        ([key]) => key !== harness.target,
-                      ),
-                    ),
-              })
-            }
+            value={chosen?.id ?? ""}
+            onChange={(event) => setModel(event.target.value ? { id: event.target.value } : undefined)}
             disabled={!harness.supportsPerAgentModel}
           >
             <option value="">Default ({harness.defaultModel})</option>
-            {harness.models.map((model) => (
+            {/* So the field shows what is stored rather than appearing to
+                have been set to something else. */}
+            {retired ? <option value={retired}>{retired} — no longer offered</option> : null}
+            {options.map((model) => (
               <option key={model.id} value={model.id}>
                 {model.label}
                 {model.hint ? ` — ${model.hint}` : ""}
@@ -252,6 +277,36 @@ export function AgentEditor({
             ))}
           </select>
         </label>
+
+        {/* Only where the tool has the concept, and only for a model that
+            supports it: the catalogue says which levels each model offers,
+            so the list is that model's rather than a fixed one. */}
+        {harness.supportsReasoningEffort && picked && efforts.length > 0 ? (
+          <label className="field">
+            <span>Reasoning effort</span>
+            <select
+              value={chosen?.reasoningEffort ?? HARNESS_DEFAULT}
+              onChange={(event) =>
+                setModel({
+                  id: picked.id,
+                  ...(event.target.value === HARNESS_DEFAULT
+                    ? {}
+                    : { reasoningEffort: event.target.value }),
+                })
+              }
+            >
+              <option value={HARNESS_DEFAULT}>
+                Inherit{picked.defaultEffort ? ` (${picked.defaultEffort})` : ""}
+              </option>
+              {efforts.map((effort) => (
+                <option key={effort.id} value={effort.id}>
+                  {effort.id}
+                  {effort.hint ? ` — ${effort.hint}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
 
         <label className="field">
           <span>Role — optional</span>
@@ -270,6 +325,27 @@ export function AgentEditor({
         </p>
       ) : null}
 
+      {retired ? (
+        <p className="hint warn">
+          {harness.displayName} no longer offers <code>{retired}</code>. It is still what this
+          agent says, so choose again when you are ready.
+        </p>
+      ) : null}
+
+      {/* Not reported as "no models": a list nobody handed over is not a list
+          that is empty. Codex's catalogue is a cache the CLI refreshes when it
+          runs, so opening it once is the retry; pi's is read live when the
+          window loads, so the retry is a reload. */}
+      {missing && harness.supportsPerAgentModel ? (
+        <p className="hint warn">
+          Anthill has not been given {harness.displayName}&rsquo;s model list, so only Default
+          can be offered.{" "}
+          {harness.target === "pi"
+            ? "Check again when the window reloads."
+            : `Open ${harness.displayName} once and check again.`}
+        </p>
+      ) : null}
+
       <label className="field">
         <span>Description — optional</span>
         <textarea
@@ -282,7 +358,7 @@ export function AgentEditor({
 
       {harness.agentDir ? (
         <p className="hint">
-          Generated as <code>{`${harness.agentDir}/${agentSlug(profile)}.md`}</code>
+          Generated as <code>{agentFileName(harness, profile)}</code>
           {users.length > 1
             ? ` — one file covering all ${users.length} of its steps.`
             : "."}

@@ -30,12 +30,9 @@
 import { HARNESS_DEFAULT, harnessProfile, type AgentModels } from "@anthill/workflow";
 import { HARNESS_TARGETS, type HarnessTarget } from "@anthill/workflow-schema";
 
-import type {
-  CodexModelCatalog,
-  CodexModelOption,
-  PiModelCatalog,
-} from "../../shared/ipc.js";
+import type { CodexModelCatalog, PiModelCatalog } from "../../shared/ipc.js";
 import { interpreterLogo } from "../workflow/interpreter-logos.js";
+import { modelOptionsFor, retiredChoice } from "./model-catalogues.js";
 import { isConnected, type HarnessConnections, type ToolStatus } from "../harness/useHarnessConnections.js";
 
 /** What a picker carries when nobody has answered. Never stored. */
@@ -164,33 +161,13 @@ export function AgentModelFields({
           /* Declared for Claude Code, discovered for Codex and pi. A
              discovered list Anthill has not been given is not an empty one,
              and the card says the difference rather than showing a picker
-             with nothing in it. */
-          const options: CodexModelOption[] = harness.modelsAreDeclared
-            ? harness.models.map((option) => ({
-                id: option.id,
-                label: option.label,
-                ...(option.hint ? { hint: option.hint } : {}),
-                efforts: [],
-              }))
-            : target === "codex"
-              ? (codex?.models ?? [])
-              : target === "pi"
-                ? (pi?.models ?? [])
-                : [];
+             with nothing in it. The same rule the workflow's own editor
+             reads (ANT-127). */
+          const options = modelOptionsFor(target, { codex, pi });
 
           const picked = options.find((option) => option.id === chosen?.id);
           const efforts = picked?.efforts ?? [];
-          /*
-           * A stored answer this tool no longer offers — a model retired since
-           * it was chosen, most often. Kept and shown rather than quietly
-           * dropped or silently replaced: it is the author's decision, and a
-           * picker that had reset itself to something else would be the worst
-           * of the three outcomes.
-           */
-          const retired =
-            chosen && chosen.id !== HARNESS_DEFAULT && options.length > 0 && !picked
-              ? chosen.id
-              : undefined;
+          const retired = retiredChoice(chosen?.id, options, HARNESS_DEFAULT);
 
           return (
             <div className={`tool-card${live ? " is-connected" : ""}`} key={target}>

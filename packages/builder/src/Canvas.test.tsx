@@ -10,7 +10,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { Canvas } from "./Canvas";
+import { Canvas } from "./react-flow";
 import type { Workflow } from "./contracts";
 import { createEmptyWorkflow } from "./document";
 import { validate } from "./validate";

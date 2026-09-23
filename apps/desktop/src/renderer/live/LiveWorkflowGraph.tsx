@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  HOST_EXCLUSIONS,
   ZOOM_MAX,
   ZOOM_MIN,
   ZOOM_STEP,
@@ -322,7 +323,7 @@ export function LiveWorkflowGraph({
    * nothing about this one being read-only: the gesture moves the viewport, and
    * there is no code path here that could move a block or touch a connection.
    */
-  useWheelZoom(surface, setViewport);
+  useWheelZoom(surface, setViewport, true, HOST_EXCLUSIONS);
 
   // Frame it once, when the workflow first appears.
   const fittedFor = useRef<string | null>(null);

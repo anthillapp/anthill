@@ -125,9 +125,64 @@ describe("compile — agent files", () => {
     const reviewer = files.find((f) => f.path.endsWith("reviewer.md"));
 
     expect(reviewer?.content).toContain("name: reviewer");
-    expect(reviewer?.content).toContain('description: "Reviews the change"');
+    // No description was written for the Reviewer, so the file gets one
+    // assembled from its role and its step — not the step's purpose alone.
+    expect(reviewer?.content).toContain(
+      'description: "Reviewer: Reads the diff as a careful reader would.',
+    );
+    expect(reviewer?.content).toContain("reviews the change");
     expect(reviewer?.content).toContain("model: opus");
     expect(reviewer?.content).toContain("Review the working tree.");
+  });
+
+  /*
+   * ANT-126. The description used to be the first step's purpose, or "The X in
+   * this workflow." An agent doing several steps was described by one of them.
+   */
+  describe("the description when the author wrote none", () => {
+    it("is the author's own whenever there is one, untouched", () => {
+      const workflow = reviewLoop();
+      const agents = (workflow.metadata as { workflow: { agents: { description?: string }[] } })
+        .workflow.agents;
+      agents[1].description = "Reads every diff twice: once for what it does, once for what it breaks.";
+      const reviewer = compile(workflow).files.find((f) => f.path.endsWith("reviewer.md"));
+      expect(reviewer?.content).toContain(
+        'description: "Reads every diff twice: once for what it does, once for what it breaks."',
+      );
+      expect(reviewer?.content).not.toContain("It carries out");
+    });
+
+    it("covers every step an agent owns, not the first alone", () => {
+      const workflow = verifyLoop();
+      // Give the Developer the verify step too: two steps, one agent.
+      (workflow.nodes[2].config as Record<string, unknown>).agentId = "agent-dev";
+      const developer = compile(workflow).files.find((f) => f.path.endsWith("developer.md"));
+      const description = developer?.content.split("\n").find((line) => line.startsWith("description:"));
+      expect(description).toContain("It carries out 2 steps, in this order:");
+      expect(description).toContain("Implement");
+      expect(description).toContain("Verify");
+      expect(description).toContain("checks the change against the done criteria");
+      expect(description).not.toContain("The Developer in this workflow.");
+    });
+
+    it("names the work's goal and the step's success criteria", () => {
+      const workflow = reviewLoop();
+      workflow.nodes[2].config.successCriteria = ["Every comment is actionable."];
+      const reviewer = compile(workflow).files.find((f) => f.path.endsWith("reviewer.md"));
+      const description = reviewer?.content.split("\n").find((line) => line.startsWith("description:"));
+      expect(description).toContain("land the change with a passing review");
+      expect(description).toContain("done when: Every comment is actionable.");
+    });
+
+    it("gives each of two agents its own, from its own steps", () => {
+      const { files } = compile(reviewLoop());
+      const developer = files.find((f) => f.path.endsWith("developer.md"));
+      const reviewer = files.find((f) => f.path.endsWith("reviewer.md"));
+      expect(developer?.content).toContain("description: \"Developer.");
+      expect(developer?.content).toContain("implements the requested change");
+      expect(developer?.content).not.toContain("reviews the change");
+      expect(reviewer?.content).not.toContain("implements the requested change");
+    });
   });
 
   it("falls back to the harness default model when a block does not choose one", () => {
@@ -141,9 +196,10 @@ describe("compile — agent files", () => {
     const workflow = reviewLoop();
     workflow.nodes[2].config.purpose = 'Checks: "quality", # thoroughly';
     const reviewer = compile(workflow).files.find((f) => f.path.endsWith("reviewer.md"));
-    expect(reviewer?.content).toContain(
-      'description: "Checks: \\"quality\\", # thoroughly"',
-    );
+    const description = reviewer?.content.split("\n").find((line) => line.startsWith("description:"));
+    expect(description).toContain('checks: \\"quality\\", # thoroughly');
+    // One quoted scalar, with nothing unescaped inside it.
+    expect(description?.slice("description: ".length)).toMatch(/^"(?:[^"\\]|\\.)*"$/);
   });
 
   /*
@@ -168,7 +224,7 @@ describe("compile — agent files", () => {
 
     const reviewer = compile(workflow).files.find((f) => f.path.endsWith("reviewer.toml"));
     expect(reviewer?.content).toContain('name = "reviewer"');
-    expect(reviewer?.content).toContain('description = "Reviews the change"');
+    expect(reviewer?.content).toContain('description = "Reviewer: Reads the diff as a careful reader would.');
     expect(reviewer?.content).toContain("developer_instructions = \"\"\"");
     expect(reviewer?.content).toContain('model = "gpt-5.6-sol"');
     expect(reviewer?.content).toContain('model_reasoning_effort = "high"');

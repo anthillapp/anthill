@@ -166,7 +166,7 @@ describe("the built server over stdio", () => {
       id: "stdio-workflow", name: "Verify handover", version: "1", target: "claude-code",
       brief: { goal: "Read the sample file", doneCriteria: ["Report the exact text"] },
       metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION,
-        agents: [{ id: "reader", name: "Reader", models: { "claude-code": { id: "sonnet" } } }] } },
+        agents: [{ id: "reader", name: "Reader", description: "Reads the file the request names, end to end, and hands back what it says in the reader's own words with the lines it rests on.", models: { "claude-code": { id: "sonnet" } } }] } },
       nodes: [
         { id: "start", type: "start", name: "Start", config: {} },
         { id: "read", type: "agent", name: "Read", config: {

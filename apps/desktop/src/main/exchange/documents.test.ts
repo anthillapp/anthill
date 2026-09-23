@@ -25,7 +25,7 @@ async function fixture(mode: HandoverMode = "approval-gate") {
       { id: "end", name: "End", type: "end", config: {} },
     ],
     edges: [{ id: "a", source: "start", target: "fix" }, { id: "b", source: "fix", target: "end" }],
-    metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION, agents: [{ id: "dev", name: "Developer", models: { "claude-code": { id: "sonnet" } } }] } },
+    metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION, agents: [{ id: "dev", name: "Developer", description: "Reads the code around the change, makes the smallest fix that holds, and hands back a diff with a test that fails without it.", models: { "claude-code": { id: "sonnet" } } }] } },
   };
   expect((await store.createWorkflow({ workflow, mode, exchangeVersion: 1, idempotencyKey: "draft", source: { harness: "claude-code", sessionId: "source-1", taskText: "Fix the crash" } })).outcome).toBe("created");
   const path = store.workingCopyPath(workflow.id);

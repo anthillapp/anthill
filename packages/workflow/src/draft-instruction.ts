@@ -167,7 +167,15 @@ several stages is expressed, and it is usually right for a small workflow.
 leaving it out of "agents" is the commonest way a draft arrives with nobody
 described: the reader gets a diagram of work with no one assigned to it. If the
 text describes several roles — a developer, a reviewer, a researcher — list all
-of them, each with its own "id", "name" and "role".
+of them, each with its own "id", "name", "role" and "description".
+
+The "role" is one line: what the agent is. The "description" is the job, and
+it is what the coding agent reads before any step, so write it for that reader:
+what the agent is for, how it should approach the steps it owns and in what
+order, what it inspects, what it hands back and in what form, how it tells the
+work is done, and what it must not do. Several sentences, specific to this
+workflow, covering every step the agent carries out — not the first one, and
+not a restatement of the name.
 
 A step must not point an output at its own id. To say a step repeats, point a
 later step's output back at it and give it "maxIterations".

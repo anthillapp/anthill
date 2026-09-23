@@ -163,10 +163,19 @@ such as `report` into one string.
 
 ## Agents
 
-`metadata.workflow.agents` is a list of `{ id, name }`, optionally `role`,
-`description`, and `models`. A block points at one by `config.agentId` and
-carries no name or model of its own, so renaming an agent cannot split it and
-two steps cannot disagree about what it is.
+`metadata.workflow.agents` is a list of `{ id, name, role, description }`,
+optionally with `models`. A block points at one by `config.agentId` and carries
+no name or model of its own, so renaming an agent cannot split it and two steps
+cannot disagree about what it is.
+
+`role` is one line: what the agent is. `description` is the job, and Anthill
+will not show a workflow whose agents lack one — it becomes the opening of the
+agent's own file, which the coding agent reads before any step. Write it for
+that reader: what the agent is for, how it should approach the steps it owns and
+in what order, what it inspects, what it hands back and in what form, how it
+tells the work is done, and what it must not do. Several sentences, specific to
+this workflow, covering every step the agent carries out. A description shorter
+than a full sentence, or one that restates the name, is refused with a question.
 
 Model choice is explicit for each harness. To inherit the model of the current
 Codex session, which is a complete answer rather than a missing decision, use:

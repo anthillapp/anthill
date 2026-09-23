@@ -118,7 +118,15 @@ function completeWorkflow(overrides: Partial<Workflow> = {}): Workflow {
     metadata: {
       workflow: {
         formatVersion: WORKFLOW_FORMAT_VERSION,
-        agents: [{ id: "agent-1", name: "Developer", models: { "claude-code": { id: "sonnet" } } }],
+        agents: [
+          {
+            id: "agent-1",
+            name: "Developer",
+            description:
+              "Reads the code around the change, makes the smallest fix that holds, and hands back a diff with a test that fails without it.",
+            models: { "claude-code": { id: "sonnet" } },
+          },
+        ],
       },
     },
     ...overrides,

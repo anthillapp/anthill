@@ -58,6 +58,8 @@ function fixFor(error: ValidationError): IssueFix | undefined {
       return { kind: "edit-agent", label: "Edit the agent" };
     case ADVISORIES.AGENT_NO_MODEL_FOR_TARGET:
       return { kind: "edit-agent", label: "Choose a model" };
+    case ADVISORIES.AGENT_NO_DESCRIPTION:
+      return { kind: "edit-agent", label: "Write the description" };
     case ADVISORIES.STEP_NO_EXPECTED_OUTPUT:
     case ADVISORIES.STEP_NO_SUCCESS_CRITERIA:
       return { kind: "step-field", tab: "data", label: "Fill this in" };

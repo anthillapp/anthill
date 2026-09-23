@@ -117,6 +117,8 @@ const ASKS: Record<string, string> = {
     "What is this work for? One sentence about what it should achieve.",
   [WORKFLOWNER_ADVISORY_CODES.AGENT_NO_MODEL_FOR_TARGET]:
     "Which model should this agent use, or should it simply use whatever the session is on?",
+  [WORKFLOWNER_ADVISORY_CODES.AGENT_NO_DESCRIPTION]:
+    "How should this agent go about its work across the steps it owns — what it is for, what it looks at, what it hands back, and how it knows it is done?",
   [WORKFLOWNER_ADVISORY_CODES.STEP_NO_EXPECTED_OUTPUT]:
     "What should this step hand back when it is done?",
   [WORKFLOWNER_ADVISORY_CODES.STEP_NO_SUCCESS_CRITERIA]:

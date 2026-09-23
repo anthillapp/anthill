@@ -19,6 +19,7 @@ import {
 
 import { agentProfiles, agentSlug, assignedAgents, duplicateAgentProfileIds } from "./agents.js";
 import { configuredHarnesses, isConfiguredFor } from "./agent-models.js";
+import { describesEnough } from "./agent-description.js";
 import { DEFAULT_TARGET, harnessProfile } from "./harness.js";
 import {
   WORKFLOWNER_NODE_TYPES,
@@ -98,6 +99,7 @@ export const WORKFLOWNER_VALIDATION_CODES = {
 export const WORKFLOWNER_ADVISORY_CODES = {
   WORKFLOW_NO_GOAL: "WORKFLOW_NO_GOAL",
   AGENT_NO_MODEL_FOR_TARGET: "AGENT_NO_MODEL_FOR_TARGET",
+  AGENT_NO_DESCRIPTION: "AGENT_NO_DESCRIPTION",
   STEP_NO_EXPECTED_OUTPUT: "STEP_NO_EXPECTED_OUTPUT",
   STEP_NO_SUCCESS_CRITERIA: "STEP_NO_SUCCESS_CRITERIA",
 } as const;
@@ -551,6 +553,28 @@ export function validateWorkflow(workflow: Workflow): ValidationResult {
         elsewhere
           ? `${profile.name} has a model chosen for ${elsewhere} but none for ${harness.displayName}, so this workflow uses ${harness.displayName}'s default. The ${elsewhere} choice is not carried over.`
           : `No model is chosen for ${profile.name} on ${harness.displayName}, so this workflow uses ${harness.displayName}'s default.`,
+        where,
+      );
+    }
+
+    /*
+     * An agent with no description, or one too short to be one.
+     *
+     * The description is the operating guidance the agent's file opens with:
+     * what it is for, how it should approach the steps it owns, what it hands
+     * back and how it knows it is done. A role is a title; a description is
+     * the job. An agent doing ten steps with an empty description was handed
+     * a name and left to guess the rest (ANT-126). An advisory rather than an
+     * error, because the compiler can assemble a description from the steps —
+     * but that is a fallback, not the thing itself, and a handover refuses to
+     * proceed on an advisory, so the author is asked.
+     */
+    if (!describesEnough(profile.description)) {
+      advise(
+        WORKFLOWNER_ADVISORY_CODES.AGENT_NO_DESCRIPTION,
+        profile.description?.trim()
+          ? `${profile.name}'s description is too short to guide its work. Say what it is for, how it should approach its ${stepIds.length === 1 ? "step" : `${stepIds.length} steps`}, what it hands back and how it knows it is done.`
+          : `${profile.name} has no description. Its agent file would open with nothing about how it should work across its ${stepIds.length === 1 ? "step" : `${stepIds.length} steps`}.`,
         where,
       );
     }

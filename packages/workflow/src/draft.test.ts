@@ -306,6 +306,14 @@ describe("the drafting instruction", () => {
     expect(instruction).toContain(`"draftVersion": ${WORKFLOWNER_DRAFT_VERSION}`);
   });
 
+  // ANT-126: a drafted agent with a role and no description opened its file
+  // with nothing about how to work.
+  it("requires a description for every agent, and says what it must cover", () => {
+    expect(instruction).toContain('each with its own "id", "name", "role" and "description"');
+    expect(instruction).toContain("what the coding agent reads before any step");
+    expect(instruction).toContain("covering every step the agent carries out");
+  });
+
   it("lists the actions and outcome kinds it is allowed to use", () => {
     expect(instruction).toContain("agent-step");
     expect(instruction).toContain("llm-review");

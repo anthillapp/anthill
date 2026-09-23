@@ -347,14 +347,18 @@ export function AgentEditor({
       ) : null}
 
       <label className="field">
-        <span>Description — optional</span>
+        <span>Description</span>
         <textarea
-          rows={3}
+          rows={5}
           value={profile.description ?? ""}
-          placeholder="Who this agent is and how it should approach the work"
+          placeholder="What this agent is for, how it should approach the steps it owns, what it looks at, what it hands back, and how it knows it is done"
           onChange={(event) => patch({ description: event.target.value || undefined })}
         />
       </label>
+      <p className="hint">
+        The role is a title; this is the job. It opens the agent&rsquo;s file, so a coding
+        agent reads it before any step. Cover all of this agent&rsquo;s steps, not the first.
+      </p>
 
       {harness.agentDir ? (
         <p className="hint">

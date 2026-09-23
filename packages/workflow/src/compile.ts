@@ -36,6 +36,7 @@ import {
 import { ACTION_CATEGORY_LABELS, actionDefinition, type ActionDefinition } from "./actions.js";
 import type { WorkflowAgentConfig } from "./node-config.js";
 import { assignedAgents, type AgentAssignment } from "./agents.js";
+import { describeAgent } from "./agent-description.js";
 
 export type GeneratedFile = {
   /** Repository-relative path, e.g. `.claude/agents/reviewer.md`. */
@@ -197,14 +198,12 @@ function buildAgentFile(
     .map((id) => workflow.nodes.find((node) => node.id === id))
     .filter((node): node is WorkflowNode => node !== undefined);
 
-  const purposes = steps
-    .map((step) => agentConfig(step).purpose)
-    .filter((purpose): purpose is string => Boolean(purpose));
-
   // The profile's own description is what the author wrote about the agent, so
-  // it outranks a description inferred from the first step it happens to do.
-  const description =
-    profile.description?.trim() || purposes[0] || `The ${profile.name} in this workflow.`;
+  // it outranks one assembled from its steps. But the assembled one covers
+  // every step the agent owns; what used to stand here — the first step's
+  // purpose, or "The X in this workflow." — described one corner of the job
+  // or none of it (ANT-126).
+  const description = profile.description?.trim() || describeAgent(profile, steps, workflow);
   // The harness being compiled for, and only its own vocabulary. A profile
   // configured for the other one contributes nothing here — carrying `opus`
   // into a Codex run would be Anthill inventing a fact about the author's

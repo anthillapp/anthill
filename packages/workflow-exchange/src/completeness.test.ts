@@ -60,6 +60,8 @@ function completeWorkflow(): Workflow {
           {
             id: "agent-1",
             name: "Developer",
+            description:
+              "Finds the cause of the startup crash from the stack trace and the boot sequence, fixes it with the smallest change that holds, and hands back the patch with a test that fails without it.",
             models: { "claude-code": { id: "sonnet" } },
           },
         ],
@@ -107,6 +109,31 @@ describe("checkCompleteness", () => {
       expect(askFor(code), code).toBeTruthy();
       expect(askFor(code), code).toContain("?");
     }
+  });
+
+  /*
+    ANT-126. An agent handed over with a name and a one-line role opened its
+    file with nothing about how to work. The editor advises; a handover asks.
+  */
+  it("refuses an agent with no description, and asks how it should work", () => {
+    const workflow = completeWorkflow();
+    const agents = (workflow.metadata as { workflow: { agents: { description?: string }[] } })
+      .workflow.agents;
+    delete agents[0].description;
+
+    const problems = checkCompleteness(workflow, SOURCE);
+    expect(problems.map((problem) => problem.code)).toEqual([
+      WORKFLOWNER_ADVISORY_CODES.AGENT_NO_DESCRIPTION,
+    ]);
+    expect(problems[0].ask).toMatch(/how should this agent/i);
+  });
+
+  it("refuses a description too short to be one", () => {
+    const workflow = completeWorkflow();
+    const agents = (workflow.metadata as { workflow: { agents: { description?: string }[] } })
+      .workflow.agents;
+    agents[0].description = "Handles the dev work.";
+    expect(codes(workflow)).toEqual([WORKFLOWNER_ADVISORY_CODES.AGENT_NO_DESCRIPTION]);
   });
 
   it("refuses a workflow with no goal, which the editor only advises about", () => {
@@ -328,11 +355,15 @@ describe("the same graph, handed over by either host", () => {
             {
               id: "agent-lead",
               name: "Lead",
+              description:
+                "Reads the request and the codebase, decides how the work splits, and hands the developer a plan with the files each step touches.",
               models: { "claude-code": { id: "opus" }, codex: { id: "gpt-5-codex" } },
             },
             {
               id: "agent-dev",
               name: "Developer",
+              description:
+                "Carries out the plan step by step, keeps each diff small enough to review, and hands back the change with the tests that prove it.",
               models: {
                 "claude-code": { id: "sonnet" },
                 codex: { id: "gpt-5-codex", reasoningEffort: "medium" },
@@ -341,6 +372,8 @@ describe("the same graph, handed over by either host", () => {
             {
               id: "agent-rev",
               name: "Reviewer",
+              description:
+                "Reads each diff against the plan and the done criteria, asks for changes where they are not met, and approves only when every criterion holds.",
               models: { "claude-code": { id: "opus" }, codex: { id: "gpt-5-codex" } },
             },
           ],

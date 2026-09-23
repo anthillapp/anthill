@@ -143,6 +143,10 @@ export {
   type GeneratedFile,
 } from "./compile.js";
 
+/* What an agent is for, assembled from every step it owns when nobody wrote it
+   down, and the bar an author's own description has to clear (ANT-126). */
+export { MIN_DESCRIPTION_LENGTH, describeAgent, describesEnough } from "./agent-description.js";
+
 /* Natural-language edits: an interpreter proposes, Anthill validates,
    previews, and applies only on acceptance. The contract half of ANT-12. */
 export {

@@ -142,11 +142,14 @@ describe("fixes", () => {
   });
 });
 
-/** The same workflow with its agent's model question answered. */
+/** The same workflow with its agent's model and description questions answered. */
 function answered(built: Workflow): Workflow {
-  const agents = (built.metadata as { workflow: { agents: { models?: unknown }[] } }).workflow
-    .agents;
+  const agents = (
+    built.metadata as { workflow: { agents: { models?: unknown; description?: string }[] } }
+  ).workflow.agents;
   agents[0].models = { "claude-code": { id: "__default__" } };
+  agents[0].description =
+    "Reads the request and the code around it, makes the smallest change that does the job, and hands back a diff with the tests that prove it.";
   return built;
 }
 
@@ -209,6 +212,45 @@ describe("advisories from a real workflow", () => {
   });
 
   /*
+   * ANT-126. An agent with a name, a one-line role and no description opened
+   * its file with nothing about how to work. Said against a step that uses
+   * it, like the model advisory, so the fix button has somewhere to go.
+   */
+  it("says when an agent has no description", () => {
+    const built = answered(workflow(complete, { goal: "Ship it." }));
+    const agents = (built.metadata as { workflow: { agents: { description?: string }[] } })
+      .workflow.agents;
+    delete agents[0].description;
+
+    const said = (validateWorkflow(built).warnings ?? []).filter(
+      (item) => item.code === WORKFLOWNER_ADVISORY_CODES.AGENT_NO_DESCRIPTION,
+    );
+    expect(said).toHaveLength(1);
+    expect(said[0].message).toContain("Dev has no description");
+    expect(said[0].nodeId).toBe("a");
+  });
+
+  it("says when a description is a title rather than a job", () => {
+    const built = answered(workflow(complete, { goal: "Ship it." }));
+    const agents = (built.metadata as { workflow: { agents: { description?: string }[] } })
+      .workflow.agents;
+    agents[0].description = "Handles the dev work.";
+
+    const said = (validateWorkflow(built).warnings ?? []).filter(
+      (item) => item.code === WORKFLOWNER_ADVISORY_CODES.AGENT_NO_DESCRIPTION,
+    );
+    expect(said).toHaveLength(1);
+    expect(said[0].message).toContain("too short to guide its work");
+  });
+
+  it("offers to edit the agent for a missing description", () => {
+    const issue = allIssues(
+      result([], [{ code: WORKFLOWNER_ADVISORY_CODES.AGENT_NO_DESCRIPTION, message: "m", nodeId: "a" }]),
+    )[0];
+    expect(issue.fix).toEqual({ kind: "edit-agent", label: "Write the description" });
+  });
+
+  /*
    * ANT-50. Switching a workflow's target is the one place a per-tool model
    * quietly changes what runs, so that is where it is said — and only there.
    * An agent nobody has chosen for is not missing anything.
@@ -249,7 +291,11 @@ describe("advisories from a real workflow", () => {
       .agents;
     // A decision, not a gap: raising it would be arguing with the author.
     agents[0].models = { "claude-code": { id: "__default__" } };
-    expect(validateWorkflow(built).warnings).toEqual([]);
+    expect(
+      validateWorkflow(built).warnings?.filter(
+        (item) => item.code === WORKFLOWNER_ADVISORY_CODES.AGENT_NO_MODEL_FOR_TARGET,
+      ),
+    ).toEqual([]);
   });
 
   it("says nothing about a step with no action, which has a real error already", () => {

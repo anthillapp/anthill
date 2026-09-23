@@ -168,6 +168,36 @@ describe("what to do with a request that does not say enough", () => {
   });
 });
 
+/*
+  ANT-126. An agent the assistant added arrived with a name and a one-line
+  role, and its file opened with nothing about how to work. The description is
+  asked for outright; a question about it is for a real gap, not a formality.
+*/
+describe("what an added agent must say about itself", () => {
+  const instruction = () => buildEditInstruction(workflow, { kind: "workflow" }, "Add a QA step.");
+
+  it("requires a role and a description on every added agent", () => {
+    expect(instruction()).toContain('Every "add-agent" carries a "role" and a "description"');
+    expect(instruction()).toContain('"description": "several sentences on what this agent is for');
+  });
+
+  it("says what the description is for and what it must cover", () => {
+    const text = instruction();
+    expect(text).toContain("written for the");
+    expect(text).toContain("coding agent that will read it before any step");
+    expect(text).toContain("what it hands back and in what form");
+    expect(text).toContain('never');
+    expect(text).toContain('a restatement of the name or a phrase like "handles the QA work"');
+  });
+
+  it("asks about the job only when the request and diagram leave it unclear", () => {
+    const text = instruction();
+    expect(text).toContain("Write that description from the request and the diagram when together");
+    expect(text).toContain("ask, using the question shape below, instead of guessing");
+    expect(text).toContain("a job that is clear needs no");
+  });
+});
+
 describe("answering a question the interpreter asked", () => {
   const answered = () =>
     buildEditInstruction(workflow, { kind: "workflow" }, "Implement.", [], {

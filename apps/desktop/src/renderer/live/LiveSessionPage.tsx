@@ -47,7 +47,6 @@ import {
 import { FeedCardView } from "./FeedCard.js";
 import { PresenceChip, PresencePlaque } from "./PresenceChip.js";
 import { presenceKey } from "./presence.js";
-import { INTERPRETER_LOGOS } from "../workflow/interpreter-logos.js";
 import { LiveWorkflowGraph } from "./LiveWorkflowGraph.js";
 import { SessionSummary, summaryDue } from "./SessionSummary.js";
 import { RestartRequired } from "./RestartRequired.js";

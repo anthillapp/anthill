@@ -13,7 +13,7 @@
 import { useState } from "react";
 import type { MarkerCli } from "@anthill/live";
 
-import { interpreterLogo } from "../../workflow/interpreter-logos.js";
+import { interpreterLogoBackground } from "../../workflow/interpreter-logos.js";
 
 /**
  * The short name, not the harness's full one.
@@ -69,7 +69,7 @@ export function HandoverScene() {
         <span className="ex-cli-head">
           <i
             className="ex-cli-logo"
-            style={{ backgroundImage: `url(${interpreterLogo(cli)})` }}
+            style={{ backgroundImage: interpreterLogoBackground(cli) }}
             aria-hidden="true"
           />
           {CLI_NAME[cli]}

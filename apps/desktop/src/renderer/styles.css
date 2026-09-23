@@ -2084,7 +2084,10 @@ ul.plain {
   height: 38px;
   flex: none;
   border-radius: 9px;
-  object-fit: cover;
+  /* `contain`, so a mark that is not a full-bleed square tile is shown whole
+     rather than cropped. The two rasters here are square, so it is the same
+     picture they had under `cover`. */
+  object-fit: contain;
 }
 
 .interpreter-name {

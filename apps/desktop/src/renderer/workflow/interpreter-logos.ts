@@ -6,19 +6,33 @@
  * mark. Vite fingerprints and inlines them, so nothing is fetched at runtime —
  * the app makes no network requests of its own.
  *
+ * `pi.svg` is the file Pi's own project publishes (`https://pi.dev/logo.svg`,
+ * the one its README points at), an SVG rather than a raster because that is
+ * the form its owner publishes it in. Its three paths are byte-identical to
+ * that file; the one thing changed is the `viewBox`, tightened from the
+ * published `0 0 800 800` to the artwork's own bounds. That crops transparent
+ * margin and nothing else, and it is what lets the mark fill its box the way
+ * the other two — square tiles with no margin of their own — fill theirs.
+ * Without it Pi's mark renders about a fifth smaller than its neighbours and
+ * reads as unfinished, which is the complaint this was fixing.
+ *
  * Not every CLI has an official mark in this app. Where there is none, the
  * lookup returns a neutral placeholder — a plain disc, which is not an
  * approximation of anything — rather than a broken image or a redrawn mark.
+ * Every CLI Anthill offers today has one; the placeholder is what the next one
+ * gets until somebody finds its mark.
  */
 
 import type { InterpreterId } from "@anthill/workflow";
 
 import claudeCode from "../assets/claude-code.webp";
 import codex from "../assets/codex.webp";
+import pi from "../assets/pi.svg";
 
 export const INTERPRETER_LOGOS: Partial<Record<InterpreterId, string>> = {
   "claude-code": claudeCode,
   codex,
+  pi,
 };
 
 /**
@@ -41,4 +55,23 @@ const NO_MARK =
  */
 export function interpreterLogo(id: InterpreterId): string {
   return INTERPRETER_LOGOS[id] ?? NO_MARK;
+}
+
+/**
+ * The same mark, as a CSS `background-image` value.
+ *
+ * It exists because of a trap that only springs in a packaged build. A small
+ * SVG is inlined by the bundler as a percent-encoded data URI, and that
+ * encoding leaves single quotes in it (`viewBox='…'`) — which are illegal
+ * inside an unquoted `url(...)`. A call site writing ``url(${interpreterLogo(id)})``
+ * therefore produces a declaration the browser throws away, and no mark
+ * appears. In development the same import is an ordinary file URL with no
+ * quotes in it, so the bug is invisible until the app is built.
+ *
+ * Quoting here rather than at each call site means the next one cannot get it
+ * wrong. Double quotes, with any of their own escaped, because the encodings
+ * involved produce single quotes and never double ones.
+ */
+export function interpreterLogoBackground(id: InterpreterId): string {
+  return `url("${interpreterLogo(id).replace(/"/g, "%22")}")`;
 }

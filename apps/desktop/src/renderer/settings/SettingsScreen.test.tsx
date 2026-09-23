@@ -83,7 +83,7 @@ describe("the page owns itself", () => {
   it("has exactly one heading at the top of the outline", async () => {
     stub();
     show();
-    await waitFor(() => expect(screen.getByRole("switch")).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByRole("switch")[0]).toBeTruthy());
     // One h1, and nothing nested brings a rival.
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Notifications");
@@ -125,7 +125,8 @@ describe("the page owns itself", () => {
 });
 
 describe("the notification setting", () => {
-  const theSwitch = () => screen.getByRole("switch");
+  /** The first switch: a step starting, the one that existed before the others. */
+  const theSwitch = () => screen.getAllByRole("switch")[0];
 
   it("is a switch rather than a checkbox, so the global input rule cannot stretch it", async () => {
     stub();
@@ -133,6 +134,19 @@ describe("the notification setting", () => {
     await waitFor(() => expect(theSwitch()).toBeTruthy());
     expect(theSwitch().tagName).toBe("BUTTON");
     expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  // ANT-132: one switch per moment, each asked for on its own.
+  it("offers one switch per kind of moment, each writing its own preference", async () => {
+    const api = stub();
+    show();
+    await waitFor(() => expect(screen.getAllByRole("switch")).toHaveLength(6));
+    fireEvent.click(screen.getByRole("switch", { name: "A loop comes back round" }));
+    await waitFor(() => expect(api.settingsWrite).toHaveBeenCalledWith({ loopNotifications: true }));
+    fireEvent.click(screen.getByRole("switch", { name: "The session finishes or fails" }));
+    await waitFor(() =>
+      expect(api.settingsWrite).toHaveBeenCalledWith({ finishedNotifications: true }),
+    );
   });
 
   it("shows what is stored and writes what is changed", async () => {
@@ -262,7 +276,7 @@ it("says a preference was not saved, and leaves the switch where it is", async (
   api.settingsWrite = vi.fn(async () => {
     throw new Error("ENOSPC: no space left on device");
   });
-  const theSwitch = () => screen.getByRole("switch");
+  const theSwitch = () => screen.getAllByRole("switch")[0];
   show();
   await waitFor(() => expect(theSwitch().getAttribute("aria-checked")).toBe("false"));
 

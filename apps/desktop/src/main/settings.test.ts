@@ -18,6 +18,9 @@ import { DEFAULT_SETTINGS, SettingsStore, SETTINGS_VERSION } from "./settings.js
 let dir = "";
 let path = "";
 
+/** Everything off but the first switch, which is what the old file expressed. */
+const on = { ...DEFAULT_SETTINGS, stepNotifications: true };
+
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "anthill-settings-"));
   path = join(dir, "settings.json");
@@ -27,8 +30,8 @@ describe("the preferences", () => {
   it("applies concurrent patches to the latest durable settings", async () => {
     const store = new SettingsStore(path);
     await Promise.all([store.write({ stepNotifications: true }), store.write({})]);
-    expect(await store.read()).toEqual({ stepNotifications: true });
-    expect(await new SettingsStore(path).read()).toEqual({ stepNotifications: true });
+    expect(await store.read()).toEqual(on);
+    expect(await new SettingsStore(path).read()).toEqual(on);
   });
   it("are the documented defaults on a machine that has never set any", async () => {
     const store = new SettingsStore(join(dir, "never-written.json"));
@@ -39,20 +42,35 @@ describe("the preferences", () => {
   it("survive a restart", async () => {
     await new SettingsStore(path).write({ stepNotifications: true });
     // A new store over the same file is what a restart looks like from here.
-    expect(await new SettingsStore(path).read()).toEqual({ stepNotifications: true });
+    expect(await new SettingsStore(path).read()).toEqual(on);
   });
 
   it("can be turned back off, and that survives too", async () => {
     const store = new SettingsStore(path);
     await store.write({ stepNotifications: true });
     await store.write({ stepNotifications: false });
-    expect(await new SettingsStore(path).read()).toEqual({ stepNotifications: false });
+    expect(await new SettingsStore(path).read()).toEqual(DEFAULT_SETTINGS);
   });
 
   it("are patched, so a writer cannot erase a setting it has never heard of", async () => {
     const store = new SettingsStore(path);
     await store.write({ stepNotifications: true });
-    expect(await store.write({})).toEqual({ stepNotifications: true });
+    expect(await store.write({})).toEqual(on);
+  });
+
+  it("keep each kind of notification on its own switch", async () => {
+    const store = new SettingsStore(path);
+    await store.write({ loopNotifications: true, finishedNotifications: true });
+    const read = await new SettingsStore(path).read();
+    expect(read.loopNotifications).toBe(true);
+    expect(read.finishedNotifications).toBe(true);
+    expect(read.stepNotifications).toBe(false);
+    expect(read.needsYouNotifications).toBe(false);
+  });
+
+  it("read a file written before the other switches existed as those switches off", async () => {
+    await writeFile(path, JSON.stringify({ version: 1, settings: { stepNotifications: true } }));
+    expect(await new SettingsStore(path).read()).toEqual(on);
   });
 
   it("are handed back as a copy, so a caller cannot edit them in place", async () => {
@@ -86,7 +104,7 @@ describe("a record this Anthill cannot read", () => {
     );
     // "yes please" is not a boolean, and reading it as true would turn
     // notifications on for someone who never asked.
-    expect(await new SettingsStore(path).read()).toEqual({ stepNotifications: false });
+    expect(await new SettingsStore(path).read()).toEqual(DEFAULT_SETTINGS);
   });
 
   it("is replaced by the next write rather than blocking it", async () => {
@@ -95,7 +113,7 @@ describe("a record this Anthill cannot read", () => {
     await store.write({ stepNotifications: true });
     const written = JSON.parse(await readFile(path, "utf8")) as { version: number };
     expect(written.version).toBe(SETTINGS_VERSION);
-    expect(await new SettingsStore(path).read()).toEqual({ stepNotifications: true });
+    expect(await new SettingsStore(path).read()).toEqual(on);
   });
 });
 

@@ -31,7 +31,7 @@ type Harness = {
   storePath: string;
   published: LiveSessionSnapshot[];
   /** Every step transition the service judged worth interrupting someone for. */
-  notices: { title: string; body: string; stepId: string }[];
+  notices: { title: string; body: string; stepId?: string }[];
   /** Every run the service reported as having reached an ending. */
   settled: { runId: string; workflowId?: string; state: string; at?: string }[];
   setNow: (iso: string) => void;
@@ -46,7 +46,7 @@ async function harness(startAt = "2026-08-29T10:00:00.000Z"): Promise<Harness> {
   const storePath = join(dir, "live-sessions.json");
   const store = new PendingRunStore(storePath);
   const published: LiveSessionSnapshot[] = [];
-  const notices: { title: string; body: string; stepId: string }[] = [];
+  const notices: { title: string; body: string; stepId?: string }[] = [];
   const settled: { runId: string; workflowId?: string; state: string; at?: string }[] = [];
   let now = startAt;
 
@@ -1612,7 +1612,29 @@ describe("what the service offers for notification", () => {
 
     expect(h.notices.map((notice) => notice.body)).toEqual([
       "Started: Implement the change",
+      "Finished: Implement the change",
       "Started: Review the change",
+    ]);
+  });
+
+  // ANT-132: the run's own ending is said once, from its state, when the
+  // harness reports the work done.
+  it("says the session finished when the harness reports it done", async () => {
+    const h = await harness(START);
+    await h.service.start();
+    await h.service.startObservation(withSteps);
+    await reportLine(h.reportLogPath, { kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "review", at: at(30_000) });
+    h.setNow(at(30_000));
+    await h.service.poll();
+    await reportLine(h.reportLogPath, { kind: "done", runId: RUN_ID, nonce: NONCE, at: at(60_000) });
+    h.setNow(at(60_000));
+    await h.service.poll();
+    await h.service.poll();
+
+    expect(h.notices.map((notice) => notice.body)).toEqual([
+      "Started: Review the change",
+      "Finished: Review the change",
+      "The session finished.",
     ]);
   });
 

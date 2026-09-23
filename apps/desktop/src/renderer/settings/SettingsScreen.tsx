@@ -17,7 +17,7 @@
  * from somewhere, and you were in the middle of something there.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import type {
   AppSettings,
@@ -177,6 +177,56 @@ export function SettingsScreen({ onLeave }: { onLeave: () => void }) {
   );
 }
 
+const ALL_OFF: AppSettings = {
+  stepNotifications: false,
+  stepFinishedNotifications: false,
+  loopNotifications: false,
+  needsYouNotifications: false,
+  finishedNotifications: false,
+  observationLostNotifications: false,
+};
+
+/**
+ * One switch per moment worth interrupting for, each asked for on its own.
+ *
+ * The order is the order of a session: a step starts, it finishes, the work
+ * may come back round, it may stop to ask, and in the end it finishes or is
+ * lost. The wording says what Anthill can honestly claim for each — a step is
+ * "finished" because the session moved on, not because anything was checked.
+ */
+const NOTICE_ROWS: { key: keyof AppSettings; label: string; note: string }[] = [
+  {
+    key: "stepNotifications",
+    label: "A step starts",
+    note: "The session announced it is starting a step. Never twice for the same step.",
+  },
+  {
+    key: "stepFinishedNotifications",
+    label: "A step finishes",
+    note: "The session moved on to the next step, or said the work is done — which is as finished as Anthill can say.",
+  },
+  {
+    key: "loopNotifications",
+    label: "A loop comes back round",
+    note: "The session announced a step it had already been through — a rework loop, or a return of its own.",
+  },
+  {
+    key: "needsYouNotifications",
+    label: "The session is waiting on you",
+    note: "The CLI recorded that it needs a person: a permission prompt, a question. Needs the local hooks to be installed.",
+  },
+  {
+    key: "finishedNotifications",
+    label: "The session finishes or fails",
+    note: "The record says the work is done, or that it stopped on an error.",
+  },
+  {
+    key: "observationLostNotifications",
+    label: "Anthill loses the session",
+    note: "It stopped writing anything Anthill can read for long enough that Anthill no longer claims to be watching it.",
+  },
+];
+
 function NotificationsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [busy, setBusy] = useState(false);
@@ -194,20 +244,18 @@ function NotificationsPage() {
       // Unreadable preferences are the defaults, which is what the store says
       // too. The page still opens; it is the only way back to them.
       .catch(() => {
-        if (live) setSettings({ stepNotifications: false });
+        if (live) setSettings({ ...ALL_OFF });
       });
     return () => {
       live = false;
     };
   }, []);
 
-  const set = useCallback(async (next: boolean) => {
+  const set = useCallback(async (key: keyof AppSettings, next: boolean) => {
     setBusy(true);
     setUnsaved(null);
     try {
-      setSettings(
-        await window.anthill.settingsWrite({ stepNotifications: next }),
-      );
+      setSettings(await window.anthill.settingsWrite({ [key]: next }));
       // The permission row is about to appear or disappear with the switch; a
       // result from before that is about a question nobody is asking now.
       setProbe(null);
@@ -221,25 +269,28 @@ function NotificationsPage() {
     }
   }, []);
 
-  const on = settings?.stepNotifications === true;
+  /** Whether anything at all would be sent — what makes the permission row worth showing. */
+  const anyOn = settings !== null && NOTICE_ROWS.some((row) => settings[row.key]);
 
   return (
     <>
       <SettingGroup
-        title="Step transitions"
-        footer="Anthill still only reads what your session writes on this machine. Nothing here starts, stops, answers or steers it."
+        title="What to tell me about"
+        footer="Each is one notification the first time it happens, only for a session Anthill is confident is yours. Anthill still only reads what your session writes on this machine. Nothing here starts, stops, answers or steers it."
       >
-        <SettingRow
-          label="Tell me when an observed session reaches a new step"
-          note="One notification the first time a step starts. Not for every event Anthill reads, never twice for the same step, and only for a session it is confident is yours."
-        >
-          <SettingSwitch
-            on={on}
-            label="Tell me when an observed session reaches a new step"
-            disabled={settings === null || busy}
-            onChange={(next) => void set(next)}
-          />
-        </SettingRow>
+        {NOTICE_ROWS.map((row, index) => (
+          <Fragment key={row.key}>
+            {index > 0 ? <SettingDivider /> : null}
+            <SettingRow label={row.label} note={row.note}>
+              <SettingSwitch
+                on={settings?.[row.key] === true}
+                label={row.label}
+                disabled={settings === null || busy}
+                onChange={(next) => void set(row.key, next)}
+              />
+            </SettingRow>
+          </Fragment>
+        ))}
 
         {/* Outside the `on` block below, deliberately: a write the disk
             refuses leaves the switch off, which is precisely when that block
@@ -254,9 +305,12 @@ function NotificationsPage() {
           </p>
         ) : null}
 
-        {/* Only while the switch is on: permission is meaningless when nothing
-            would be sent, and a row about it would be a question nobody asked. */}
-        {on ? (
+        {/* Only while something is on: permission is meaningless when nothing
+            would be sent, and a row about it would be a question nobody asked.
+            And only in a development build: the test button is a diagnostic
+            for whoever is working on Anthill, not a control for whoever is
+            using it. */}
+        {anyOn && import.meta.env.DEV ? (
           <>
             <SettingDivider />
             <SettingRow

@@ -10,7 +10,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
 import { basename, dirname, join, resolve } from "node:path";
 import { readFile } from "node:fs/promises";
-import { existsSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 
 import { parseWorkflow } from "@anthill/workflow-schema";
 import { checkWorkflowCompatibility, migrateWorkflow } from "@anthill/workflow";
@@ -63,6 +63,7 @@ import { exchangeDestination, saveExchangeCopy, readExchangeView, boundWorkflow 
 import { workflowIdFromLink, linksFromArgv, SerialDrain, WindowOperations, WorkflowDelivery } from "./exchange/deep-link.js";
 import { REPORT_LOG } from "./live/observers/cli-report.js";
 import { LiveSessionService, type LiveSessionSnapshot } from "./live/service.js";
+import type { NoticeKind } from "./live/step-notices.js";
 import { ObservationSetupService } from "./live/setup.js";
 import { AgentLibraryStore } from "./agent-library.js";
 import { AssistantThreadStore } from "./assistant-threads.js";
@@ -349,22 +350,82 @@ function settings(): SettingsStore {
  * more than "this was handed over". A system that cannot show one at all says
  * so, which is the one case Settings can state as fact.
  */
-function showNotification(title: string, body: string): { kind: "sent" } | { kind: "unsupported"; reason: string } {
-  if (!Notification.isSupported()) {
-    return { kind: "unsupported", reason: "This system has no notification centre Anthill can use." };
-  }
+/**
+ * Which preference each kind of notice answers to.
+ *
+ * A finish and a failure share one switch: both are "the session stopped",
+ * and somebody who wants to hear the one wants to hear the other.
+ */
+const NOTICE_SETTING: Record<NoticeKind, keyof AppSettings> = {
+  "step-started": "stepNotifications",
+  "step-finished": "stepFinishedNotifications",
+  loop: "loopNotifications",
+  "needs-you": "needsYouNotifications",
+  finished: "finishedNotifications",
+  failed: "finishedNotifications",
+  "observation-lost": "observationLostNotifications",
+};
+
+/**
+ * One line per notification outcome, in the data directory.
+ *
+ * A notification that goes nowhere leaves no trace anywhere else: the OS
+ * does not say, and the person was, by definition, not looking (ANT-132).
+ */
+function noteNotification(line: string): void {
   try {
-    // Silent: a step changing is worth a glance, not a sound. The workflow's
-    // name is the title, so a notification is attributable at a glance to the
-    // thing it is about rather than to "Anthill" in general.
-    new Notification({ title, body, silent: true }).show();
-    return { kind: "sent" };
-  } catch (error) {
-    return {
-      kind: "unsupported",
-      reason: error instanceof Error ? error.message : "The notification could not be sent.",
-    };
+    appendFileSync(join(app.getPath("userData"), "notifications.log"), `${line}\n`);
+  } catch {
+    // A diagnostic that cannot be written is not worth failing anything over.
   }
+}
+
+function showNotification(
+  title: string,
+  body: string,
+): Promise<{ kind: "sent" } | { kind: "unsupported"; reason: string }> {
+  if (!Notification.isSupported()) {
+    return Promise.resolve({
+      kind: "unsupported",
+      reason: "This system has no notification centre Anthill can use.",
+    });
+  }
+  return new Promise((resolve) => {
+    try {
+      // Silent: a step changing is worth a glance, not a sound. The workflow's
+      // name is the title, so a notification is attributable at a glance to the
+      // thing it is about rather than to "Anthill" in general.
+      const notification = new Notification({ title, body, silent: true });
+      /*
+        macOS answers on the notification itself, not on `show()`. Since
+        Electron 42 the User Notifications framework says when it refused one
+        — an unsigned build, a revoked permission — where the API before it
+        said nothing at all, and Anthill's step notifications went nowhere for
+        the whole of macOS 26 without a word (ANT-132). A refusal is reported
+        as the reason it gave; a `show` is "sent", which is still all Anthill
+        can know about whether it appeared.
+      */
+      let settled = false;
+      const settle = (outcome: string, result: { kind: "sent" } | { kind: "unsupported"; reason: string }) => {
+        if (settled) return;
+        settled = true;
+        noteNotification(`${new Date().toISOString()} ${outcome} — ${title}: ${body}`);
+        resolve(result);
+      };
+      notification.once("show", () => settle("shown", { kind: "sent" }));
+      notification.once("failed", (_event, error) =>
+        settle(`failed: ${error}`, { kind: "unsupported", reason: `macOS refused it: ${error}` }),
+      );
+      notification.show();
+      // Neither event is guaranteed on every platform; a probe must not hang.
+      setTimeout(() => settle("no answer within 2s", { kind: "sent" }), 2_000);
+    } catch (error) {
+      resolve({
+        kind: "unsupported",
+        reason: error instanceof Error ? error.message : "The notification could not be sent.",
+      });
+    }
+  });
 }
 
 function assistantThreadStore(): AssistantThreadStore {
@@ -416,7 +477,12 @@ function liveService(): LiveSessionService {
       void settings()
         .read()
         .then((current) => {
-          if (current.stepNotifications) showNotification(notice.title, notice.body);
+          if (!current[NOTICE_SETTING[notice.kind]]) return;
+          return showNotification(notice.title, notice.body).then((result) => {
+            // Written down, so a notification that goes nowhere leaves a
+            // trace somewhere other than the author's memory (ANT-132).
+            if (result.kind !== "sent") console.warn(`[anthill] step notification not delivered: ${result.reason}`);
+          });
         })
         .catch(() => undefined);
     },

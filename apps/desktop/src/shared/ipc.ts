@@ -554,6 +554,16 @@ export type PiModelCatalog = {
 export type AppSettings = {
   /** Native notification on a confidently observed move to a new step. Off by default. */
   stepNotifications: boolean;
+  /** …on a step the session left behind. */
+  stepFinishedNotifications: boolean;
+  /** …on a step announced again — a loop coming back round. */
+  loopNotifications: boolean;
+  /** …when the CLI records that it is waiting for a person. */
+  needsYouNotifications: boolean;
+  /** …when the session finishes, or the record says it failed. */
+  finishedNotifications: boolean;
+  /** …when Anthill can no longer read the session. */
+  observationLostNotifications: boolean;
 };
 
 /**

@@ -11,6 +11,11 @@
  * `response_item` records of type `reasoning` are skipped by name before
  * anything is read out of them. Codex stores the model's own working in those
  * records; Anthill has no use for it and no code here that touches it.
+ *
+ * A session can own more than one file: Codex opens another for each thread
+ * it runs under the session — the "Approve for me" reviewer, one per command
+ * it judges — and writes the parent's `session_id` into it. Those are read
+ * past and never reported; only the session's own file speaks for it.
  */
 
 import { readdir, stat } from "node:fs/promises";
@@ -19,6 +24,7 @@ import { join } from "node:path";
 
 import {
   TIMING,
+  boundSessionId,
   messageExcerpt,
   parseStepMarkers,
   textCarriesMarker,
@@ -40,6 +46,12 @@ const CHANNEL = "codex:rollout";
 type FileState = {
   cursor: TailCursor;
   sessionId?: string;
+  /**
+   * A thread that is not the session's own — Codex's "Approve for me"
+   * reviewer, for one — whose file carries the parent's `session_id` but
+   * speaks for nobody Anthill is following. Read past, never reported (ANT-129).
+   */
+  subthread: boolean;
   matched: boolean;
   lastActivityAt?: string;
   /** The activity timestamp already reported, so it is not reported twice. */
@@ -106,13 +118,32 @@ export class CodexObserver implements LiveSessionObserver {
 
     for (const path of files) {
       const state =
-        states.get(path) ?? { cursor: newCursor(), matched: false, reportedComplete: false };
+        states.get(path) ?? { cursor: newCursor(), subthread: false, matched: false, reportedComplete: false };
       states.set(path, state);
 
       const chunk = await readNewLines(path, state.cursor);
       if (!chunk.grew) continue;
       grew.add(path);
       scan(chunk.lines, state, now, { runId: run.anthillRunId, nonce: run.correlationNonce }, events);
+    }
+
+    /*
+      The session a binding named.
+
+      A handover made through the exchange never pastes a prompt: the marker
+      reaches the rollout only inside the `anthill` commands the agent runs,
+      never in a user message, so nothing below would ever match the session's
+      own file. What did match was the "Approve for me" reviewer's thread,
+      whose request quotes the command — and every verdict it gave ended in
+      `task_complete`, so the page said "Session finished" while the agent
+      was still working (ANT-129). Same answer the Claude Code observer gives:
+      the harness said which session it is in, and that is the better evidence.
+    */
+    const named = boundSessionId(run);
+    if (named) {
+      for (const state of states.values()) {
+        if (state.sessionId === named) state.matched = true;
+      }
     }
 
     const matched = [...states.entries()].filter(([, state]) => state.matched && state.sessionId);
@@ -324,6 +355,8 @@ function scan(
   events: ObservationEventDraft[],
 ): void {
   for (const line of lines) {
+    // Nothing a sub-thread writes is the session's own doing (ANT-129).
+    if (state.subthread) return;
     if (!line.startsWith("{")) continue;
     let row: Record<string, unknown>;
     try {
@@ -339,11 +372,26 @@ function scan(
     if (payload.type === "reasoning") continue;
 
     const at = str(row.timestamp) ?? now;
-    state.lastActivityAt = at;
 
     if (row.type === "session_meta") {
-      const id = payload.session_id ?? payload.id;
-      if (typeof id === "string") state.sessionId = id;
+      /*
+        `session_id` is the session; `id` is this thread. They differ in a
+        file Codex opens for a thread of its own under the session — the
+        "Approve for me" reviewer writes one per command it judges, and names
+        the parent in `parent_thread_id`. Such a file carries the session's
+        id without being the session: its user message is the approval
+        request, its assistant message is the verdict, and its `task_complete`
+        is the verdict's, not the session's.
+      */
+      const session = str(payload.session_id);
+      const thread = str(payload.id);
+      if (str(payload.parent_thread_id) || (session && thread && thread !== session)) {
+        state.subthread = true;
+        return;
+      }
+      const id = session ?? thread;
+      if (id) state.sessionId = id;
+      state.lastActivityAt = at;
       events.push({
         at,
         cli: "codex",
@@ -357,6 +405,7 @@ function scan(
       continue;
     }
 
+    state.lastActivityAt = at;
     const base = {
       at,
       cli: "codex" as const,

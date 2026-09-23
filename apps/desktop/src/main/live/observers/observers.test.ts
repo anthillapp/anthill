@@ -272,11 +272,31 @@ describe("the Claude Code observer", () => {
 
 function codexRollout(
   sessionId: string,
-  options: { marked: boolean; complete?: boolean; error?: string; step?: string },
+  options: {
+    marked: boolean;
+    complete?: boolean;
+    error?: string;
+    step?: string;
+    /**
+     * The thread this file belongs to, when it is not the session's own. A
+     * Codex sub-thread — the "Approve for me" reviewer, say — writes the
+     * parent's `session_id` and its own `id`, plus `parent_thread_id`.
+     */
+    thread?: string;
+  },
 ) {
   const at = new Date().toISOString();
   const rows: unknown[] = [
-    { timestamp: at, type: "session_meta", payload: { session_id: sessionId, cwd: "/tmp/scratch" } },
+    {
+      timestamp: at,
+      type: "session_meta",
+      payload: {
+        session_id: sessionId,
+        id: options.thread ?? sessionId,
+        ...(options.thread ? { parent_thread_id: sessionId } : {}),
+        cwd: "/tmp/scratch",
+      },
+    },
     {
       timestamp: at,
       type: "response_item",
@@ -382,6 +402,53 @@ describe("the Codex observer", () => {
     await writeCodex(dir, "sess-cx", codexRollout("sess-cx", { marked: false }));
     const capabilities = await new CodexObserver(dir).detectCapabilities();
     expect(capabilities).toMatchObject({ reportsCompletion: true, reportsFailure: true });
+  });
+
+  /*
+    ANT-129. A handover made through the exchange never pastes the prompt, so
+    the session's own rollout carries the marker only inside tool calls — and
+    the file that matched was the "Approve for me" reviewer's, whose request
+    quotes the command. Its every verdict ended in `task_complete`, and the
+    page said "Session finished" while the agent was still working.
+  */
+  it("matches the rollout a binding named, with no marker in any user message", async () => {
+    const dir = await root();
+    await writeCodex(dir, "sess-cx", codexRollout("sess-cx", { marked: false }));
+
+    const run = {
+      ...pending("codex"),
+      exchange: { revision: 1, digest: "abcd1234", sessionId: "sess-cx" },
+    };
+    const { evidence } = await new CodexObserver(dir).poll(run, new Date().toISOString());
+    expect(evidence).toContainEqual(
+      expect.objectContaining({ kind: "match", sessionId: "sess-cx", confidence: "strong" }),
+    );
+  });
+
+  it("lets a reviewer sub-thread neither end the session nor speak for it", async () => {
+    const dir = await root();
+    await writeCodex(dir, "sess-cx", codexRollout("sess-cx", { marked: false, step: "implement" }));
+    await writeCodex(
+      dir,
+      "review-1",
+      codexRollout("sess-cx", { marked: true, complete: true, thread: "review-1" }),
+    );
+
+    const run = {
+      ...pending("codex"),
+      exchange: { revision: 1, digest: "abcd1234", sessionId: "sess-cx" },
+      detectedSessionId: "sess-cx",
+      state: "detected_live" as const,
+    };
+    const { evidence, events } = await new CodexObserver(dir).poll(run, new Date().toISOString());
+
+    expect(evidence).not.toContainEqual(expect.objectContaining({ kind: "completed" }));
+    // The session's own work still comes through.
+    expect(events).toContainEqual(expect.objectContaining({ kind: "step.marker", blockId: "implement" }));
+    // The reviewer's does not: not its request, not its verdict, not its ending.
+    expect(events.map((event) => event.kind)).not.toContain("prompt.submit");
+    expect(events.map((event) => event.kind)).not.toContain("turn.end");
+    expect(events.filter((event) => event.kind === "message")).toEqual([]);
   });
 });
 

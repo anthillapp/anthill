@@ -1211,14 +1211,6 @@ details summary {
   flex: 1;
 }
 
-/* Kept for the orchestrator screen, which still uses React Flow: it disables
-   pointer events on edge labels, so clicking a label fell through to the canvas
-   and cleared the selection. */
-.react-flow__edge-textwrapper {
-  pointer-events: all;
-  cursor: pointer;
-}
-
 /* ---------------- orchestrator screen ---------------- */
 
 .side {

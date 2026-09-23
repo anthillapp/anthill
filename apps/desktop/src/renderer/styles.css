@@ -4882,6 +4882,43 @@ button.state-chip {
   animation: live-flow 1s linear infinite;
 }
 
+/* A trail the agent left where the workflow drew nothing: dots, not dashes,
+   so it never reads as one of the connections. */
+.live-detour-trail {
+  stroke-dasharray: 1 6;
+  stroke-linecap: round;
+}
+
+/* The dots walk only while the agent is still in the step it went to. */
+.live-detour.is-live .live-detour-trail {
+  animation: live-walk 1.6s linear infinite;
+}
+
+.live-detour-chip text {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* Hovering a trail picks out both of its ends, since one may be far away. */
+.live-node.is-trail-end .live-node-body {
+  stroke: #7f77dd;
+  stroke-width: 2.5;
+}
+
+.live-swatch-detour {
+  width: 18px;
+  height: 0;
+  border-top: 2px dotted #7f77dd;
+  border-radius: 0;
+  background: none !important;
+}
+
+@keyframes live-walk {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
 /* Opacity on the stroke alone, so the border never leaves and the block never
    changes size — the ports and the edges landing on them do not move. */
 @keyframes live-breathe {
@@ -4919,6 +4956,7 @@ button.state-chip {
   .live-node-body,
   .live-slide,
   .live-edge.tone-live,
+  .live-detour.is-live .live-detour-trail,
   .feed-card.event-new,
   .feed-glyph.state-working,
   .recent-chip.is-pulsing::before {

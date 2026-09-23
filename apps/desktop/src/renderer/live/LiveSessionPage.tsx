@@ -23,6 +23,7 @@ import type { Workflow } from "@anthill/workflow-schema";
 import {
   CLI_LABEL,
   foldLiveSession,
+  finishedSteps,
   hasStepEvidence,
   isWatching,
   statusLabel,
@@ -301,7 +302,7 @@ function LiveSessionContent({
    */
   const runsWorkflow = !run.workflowId || run.workflowId === workflow.id;
   const stepCount = Object.keys(view.blocks).length;
-  const doneCount = Object.values(view.blocks).filter((block) => block.state === "done").length;
+  const doneCount = finishedSteps(view);
 
   /**
    * The events this panel is currently about.
@@ -630,6 +631,10 @@ function LiveSessionContent({
                 {RUN_STATE[state].label}
               </span>
             ))}
+            <span className="live-legend-item" title="The agent announced a step the workflow has no connection to from where it was.">
+              <i className="live-swatch live-swatch-detour" />
+              Unplanned move
+            </span>
           </div>
         </main>
 

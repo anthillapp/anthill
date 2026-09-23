@@ -62,11 +62,31 @@ export type BlockView = {
 
 export type AttributedEvent = ObservationEvent & { mapping: BlockMapping };
 
+/**
+ * A move the workflow never drew.
+ *
+ * The agent announced `to` while it was in `from`, and the workflow has no
+ * connection from one to the other. A rework loop the author drew is a
+ * connection and does not appear here; this is the agent's own decision to
+ * go back to a step, or past one, and it is a fact about the session the
+ * diagram would otherwise fold into "pass 2" as though it had been planned.
+ */
+export type Detour = {
+  from: string;
+  to: string;
+  /** When the agent announced `to`. */
+  at: string;
+  /** Which pass through `to` this move began. */
+  pass: number;
+};
+
 export type LiveSessionView = {
   /** Keyed by block id, covering every block in the workflow. */
   blocks: Record<string, BlockView>;
   /** The block the agent last announced, if it has not since left it. */
   activeBlockId?: string;
+  /** Every move the workflow has no connection for, oldest first. */
+  detours: Detour[];
   /** Every event, oldest first, each with how it was attributed. */
   events: AttributedEvent[];
   /** Events no block could be claimed for. Shown as session-level activity. */
@@ -150,6 +170,9 @@ export function foldLiveSession(
   let lastSeenAt: string | undefined;
   let unmappedCount = 0;
   const attributed: AttributedEvent[] = [];
+  const detours: Detour[] = [];
+  /** Every connection the workflow has, as "source→target". */
+  const planned = new Set(workflow.edges.map((edge) => `${edge.source}→${edge.target}`));
 
   // One action, however many channels wrote it down. A session with hooks
   // installed is described twice over, and everything below counts what it
@@ -180,6 +203,7 @@ export function foldLiveSession(
         }
       }
       const entering = blocks[mapping.blockId];
+      const pass = (entering?.passes ?? 0) + 1;
       blocks[mapping.blockId] = {
         state: "running",
         confidence: "exact",
@@ -187,8 +211,18 @@ export function foldLiveSession(
         // Carried, not reset: what earlier passes cost is still part of what
         // this step has cost.
         ...(entering?.spentMs !== undefined ? { spentMs: entering.spentMs } : {}),
-        passes: (entering?.passes ?? 0) + 1,
+        passes: pass,
       };
+      // Only a move between two steps can be one the plan lacks: the first
+      // step came from nowhere the fold can see, and a step announced again
+      // is not a move at all.
+      if (
+        announced &&
+        announced !== mapping.blockId &&
+        !planned.has(`${announced}→${mapping.blockId}`)
+      ) {
+        detours.push({ from: announced, to: mapping.blockId, at: event.at, pass });
+      }
       announced = mapping.blockId;
       continue;
     }
@@ -282,6 +316,7 @@ export function foldLiveSession(
   return {
     blocks,
     ...(active ? { activeBlockId: active } : {}),
+    detours,
     events: attributed,
     unmappedCount,
     ...(startedAt ? { startedAt } : {}),
@@ -299,4 +334,21 @@ export function foldLiveSession(
  */
 export function hasStepEvidence(view: LiveSessionView): boolean {
   return Object.values(view.blocks).some((block) => block.state !== "queued");
+}
+
+/**
+ * How many steps have finished at least once.
+ *
+ * A step the agent has come back to is drawn as running again, and it is —
+ * but the pass it finished before is still finished. Counting only `done`
+ * blocks made "9 of 10 steps finished" fall to 8 the moment the agent
+ * returned to one of the nine, which read as progress being undone rather
+ * than as a step being visited twice.
+ */
+export function finishedSteps(view: LiveSessionView): number {
+  return Object.values(view.blocks).filter(
+    (block) =>
+      block.state === "done" ||
+      ((block.state === "running" || block.state === "needsYou") && block.passes > 1),
+  ).length;
 }

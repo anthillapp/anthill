@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import type { Workflow } from "@anthill/workflow-schema";
 
 import { attribute, buildWorkflowIndex } from "./attribution.js";
-import { foldLiveSession, hasStepEvidence } from "./live-session.js";
+import { finishedSteps, foldLiveSession, hasStepEvidence } from "./live-session.js";
 import type { ObservationEvent } from "./observation-event.js";
 import { createPendingRun, type PendingRun } from "./pending-run.js";
 
@@ -183,6 +183,53 @@ describe("folding a session", () => {
     expect(view.blocks.test.confidence).toBe("exact");
     expect(view.activeBlockId).toBe("test");
     expect(view.blocks.fix.state).toBe("queued");
+  });
+
+  /*
+    A move the workflow never drew. The agent's own decision to go somewhere
+    the plan has no connection to is a fact about the session, and one the
+    diagram was silently folding into "pass 2" — which reads as a rework loop
+    the author designed rather than a detour the agent took.
+  */
+  it("records a move the workflow has no connection for", () => {
+    const view = foldLiveSession(workflow, run(), [
+      step("implement"),
+      step("test"),
+      step("fix"),
+      step("implement"),
+    ]);
+    expect(view.detours).toEqual([
+      expect.objectContaining({ from: "fix", to: "implement", pass: 2 }),
+    ]);
+    expect(view.detours[0].at).toBe(view.events[3].at);
+  });
+
+  it("leaves a rework loop the workflow drew alone", () => {
+    const view = foldLiveSession(workflow, run(), [step("implement"), step("test"), step("fix")]);
+    expect(view.detours).toEqual([]);
+  });
+
+  it("does not call the first announced step a detour, wherever it was", () => {
+    const view = foldLiveSession(workflow, run(), [step("fix")]);
+    expect(view.detours).toEqual([]);
+  });
+
+  it("does not count the same step announced again as a detour", () => {
+    const view = foldLiveSession(workflow, run(), [step("implement"), step("implement")]);
+    expect(view.detours).toEqual([]);
+  });
+
+  it("keeps a finished step counted while the agent is back in it", () => {
+    const before = foldLiveSession(workflow, run(), [step("implement"), step("test"), step("fix")]);
+    expect(finishedSteps(before)).toBe(2);
+    const again = foldLiveSession(workflow, run(), [
+      step("implement"),
+      step("test"),
+      step("fix"),
+      step("implement"),
+    ]);
+    // "implement" finished once already; being back in it does not undo that.
+    expect(finishedSteps(again)).toBe(3);
   });
 
   it("counts a second visit to a step as another pass", () => {

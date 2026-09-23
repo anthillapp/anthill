@@ -733,6 +733,56 @@ describe("edges only carry control where control demonstrably went", () => {
     }
     unmount();
   });
+
+  /*
+    A move the workflow has no connection for is drawn as what it is: a trail
+    the agent left, over the plan rather than in it. A rework loop the author
+    drew is a connection, and it is the connection that lights up.
+  */
+  describe("a move the workflow never drew", () => {
+    it("draws a trail from where the agent was to where it went", () => {
+      const { unmount } = draw([
+        ...workingUpstream(),
+        announce("checkpoint", "2026-08-29T10:00:20.000Z"),
+      ]);
+      const trail = document.querySelector('.live-detour[data-from="scenario"][data-to="checkpoint"]');
+      expect(trail).not.toBeNull();
+      expect(trail?.textContent).toContain("on its own");
+      unmount();
+    });
+
+    it("keeps the trail walking while the agent is still in that step", () => {
+      const { unmount } = draw([
+        ...workingUpstream(),
+        announce("checkpoint", "2026-08-29T10:00:20.000Z"),
+      ]);
+      expect(document.querySelector(".live-detour.is-live")).not.toBeNull();
+      unmount();
+    });
+
+    it("lets the trail rest once the agent has moved on along the plan", () => {
+      const { unmount } = draw([
+        ...workingUpstream(),
+        // scenario → select: nothing drawn that way. Then select → scenario,
+        // which the workflow has.
+        announce("select", "2026-08-29T10:00:20.000Z"),
+        announce("scenario", "2026-08-29T10:00:30.000Z"),
+      ]);
+      expect(document.querySelectorAll(".live-detour")).toHaveLength(1);
+      expect(document.querySelector(".live-detour.is-live")).toBeNull();
+      unmount();
+    });
+
+    it("draws no trail for a rework loop the workflow has", () => {
+      const { unmount } = draw([
+        ...workingUpstream(),
+        announce("record", "2026-08-29T10:00:20.000Z"),
+        announce("select", "2026-08-29T10:00:30.000Z"),
+      ]);
+      expect(document.querySelector(".live-detour")).toBeNull();
+      unmount();
+    });
+  });
 });
 
 /**

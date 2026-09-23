@@ -30,9 +30,11 @@ import { agentConfig } from "@anthill/workflow";
 import {
   hasStepEvidence,
   type BlockView,
+  type Detour,
   type LiveSessionState,
   type LiveSessionView,
 } from "@anthill/live";
+import type { Rect } from "@anthill/builder";
 import { actionDefinition } from "@anthill/workflow";
 
 import { EDGE_TONE, RUN_STATE, type DrawnRunState, type EdgeTone } from "./run-state.js";
@@ -153,6 +155,47 @@ function carriedControl(
   return !(left !== undefined && arrived !== undefined && arrived < left);
 }
 
+/** The one colour a trail is drawn in. Nothing else on the diagram uses it. */
+const TRAIL = { stroke: "#7f77dd", chipFill: "#eeedfe", ink: "#3c3489" };
+
+/**
+ * Where a trail runs: an arc over the row from the top of one block to the
+ * top of the other.
+ *
+ * Over rather than through, because the connections the workflow drew are
+ * in the row, and a trail is not one of them — it is what happened, laid over
+ * the plan. It lifts with the distance so a long way back is a high arc and a
+ * short one a low hop; either way the chip sits at the crest, where nothing
+ * planned is drawn.
+ */
+export function trailGeometry(from: Rect, to: Rect, tier = 0): {
+  path: string;
+  crest: { x: number; y: number };
+  backwards: boolean;
+} {
+  const a = { x: from.left + from.w / 2, y: from.top - 6 };
+  const b = { x: to.left + to.w / 2, y: to.top - 6 };
+  // Each later trail arcs a little higher than the one before, so two that
+  // cross the same stretch of the row keep their chips apart.
+  const lift = 56 + Math.min(90, Math.abs(b.x - a.x) * 0.15) + tier * 34;
+  const c1 = { x: a.x, y: a.y - lift };
+  const c2 = { x: b.x, y: b.y - lift };
+  return {
+    path: `M ${a.x} ${a.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${b.x} ${b.y}`,
+    crest: {
+      x: (a.x + 3 * c1.x + 3 * c2.x + b.x) / 8,
+      y: (a.y + 3 * c1.y + 3 * c2.y + b.y) / 8,
+    },
+    backwards: to.left < from.left,
+  };
+}
+
+/** What the chip on a trail says. */
+function trailLabel(detour: Detour, backwards: boolean): string {
+  const clock = new Date(detour.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `${backwards ? "↩ went back on its own" : "↷ moved on on its own"} · ${clock}`;
+}
+
 /**
  * Which connection most recently brought control to each step.
  *
@@ -251,6 +294,18 @@ export function LiveWorkflowGraph({
    */
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, scale: 1 });
   const [panning, setPanning] = useState(false);
+  /**
+   * The trail under the pointer, so both of its ends can be picked out.
+   *
+   * A long way back is a long arc, and the block it left may be off the far
+   * side of what is on screen; lighting both ends is what lets the eye follow
+   * it without tracing the line.
+   */
+  const [hoveredTrail, setHoveredTrail] = useState<number | undefined>(undefined);
+  const trailEnds = useMemo(() => {
+    const detour = hoveredTrail === undefined ? undefined : view.detours[hoveredTrail];
+    return new Set(detour ? [detour.from, detour.to] : []);
+  }, [hoveredTrail, view.detours]);
   const panFrom = useRef<{ x: number; y: number; origin: Viewport } | null>(null);
   /**
    * Whether the pointer travelled between going down and coming up.
@@ -428,6 +483,10 @@ export function LiveWorkflowGraph({
         <marker id="live-arrow-live" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="#56aee0" />
         </marker>
+        {/* An open chevron, not a filled head: a direction, not a connection. */}
+        <marker id="live-trail-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M 2 1 L 8 5 L 2 9" fill="none" stroke={TRAIL.stroke} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </marker>
       </defs>
 
       <g transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.scale})`}>
@@ -465,7 +524,7 @@ export function LiveWorkflowGraph({
         return (
           <g
             key={node.id}
-            className={`live-node state-${state}${selected ? " is-selected" : ""}${style.moves ? " moves" : ""}`}
+            className={`live-node state-${state}${selected ? " is-selected" : ""}${style.moves ? " moves" : ""}${trailEnds.has(node.id) ? " is-trail-end" : ""}`}
             opacity={style.opacity}
             onClick={() => onSelect(selected ? undefined : node.id)}
             role="button"
@@ -596,6 +655,54 @@ export function LiveWorkflowGraph({
                 />
               </g>
             ) : null}
+          </g>
+        );
+      })}
+
+      {/*
+        Trails: the moves the workflow never drew.
+
+        Drawn last so they sit over everything, and over the row rather than
+        in it: a connection is part of the plan, a trail is what the agent did
+        instead. Dotted, not dashed; a chevron, not a head; its own colour, so
+        it cannot be read as one of the states. While the agent is still in the
+        step it walked to, the dots walk too; once it has moved on the trail
+        stays where it was left, as a mark on the map.
+      */}
+      {view.detours.map((detour, index) => {
+        const from = workflow.nodes.find((node) => node.id === detour.from);
+        const to = workflow.nodes.find((node) => node.id === detour.to);
+        if (!from || !to) return null;
+        const trail = trailGeometry(blockRect(from), blockRect(to), index);
+        const live = view.activeBlockId === detour.to && view.blocks[detour.to]?.passes === detour.pass;
+        const label = trailLabel(detour, trail.backwards);
+        const chipWidth = label.length * 6.1 + 20;
+        return (
+          <g
+            key={`${detour.from}-${detour.to}-${detour.pass}`}
+            className={`live-detour${live ? " is-live" : ""}`}
+            data-from={detour.from}
+            data-to={detour.to}
+            onMouseEnter={() => setHoveredTrail(index)}
+            onMouseLeave={() => setHoveredTrail(undefined)}
+          >
+            <title>
+              {`The agent ${trail.backwards ? "went back" : "moved"} to ${to.name} from ${from.name} on its own — the workflow has no connection between them.`}
+            </title>
+            <path
+              className="live-detour-trail"
+              d={trail.path}
+              fill="none"
+              stroke={TRAIL.stroke}
+              strokeWidth={2}
+              markerEnd="url(#live-trail-head)"
+            />
+            <g className="live-detour-chip" transform={`translate(${trail.crest.x - chipWidth / 2}, ${trail.crest.y - 12})`}>
+              <rect width={chipWidth} height={24} rx={12} fill={TRAIL.chipFill} stroke={TRAIL.stroke} strokeWidth={0.8} />
+              <text x={chipWidth / 2} y={16} textAnchor="middle" fill={TRAIL.ink}>
+                {label}
+              </text>
+            </g>
           </g>
         );
       })}

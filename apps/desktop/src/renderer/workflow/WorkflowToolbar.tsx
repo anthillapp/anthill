@@ -38,7 +38,7 @@ import { HARNESS_TARGETS, type HarnessTarget } from "@anthill/workflow-schema";
 import type { Workflow } from "@anthill/workflow-schema";
 import { AnthillMark } from "../AnthillMark.js";
 import type { ExchangeSource } from "@anthill/workflow-exchange";
-import { interpreterLogo } from "./interpreter-logos.js";
+import { interpreterLogoBackground } from "./interpreter-logos.js";
 import { isFailure, saveMessage, type SaveStatus } from "./save-status.js";
 import { ProvenancePopover } from "./ProvenancePopover.js";
 import type { HandoverModel } from "./handover.js";
@@ -234,7 +234,7 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
           <span
             className="logo"
             aria-hidden="true"
-            style={{ backgroundImage: `url(${interpreterLogo(handover.source.harness)})` }}
+            style={{ backgroundImage: interpreterLogoBackground(handover.source.harness) }}
           />
           From {HARNESS_PROFILES[handover.source.harness].displayName}
           {/* Drawn, not typed: the emoji padlock renders as a colour glyph the

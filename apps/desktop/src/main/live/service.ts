@@ -42,7 +42,13 @@ import {
 
 import { ClaudeCodeObserver } from "./observers/claude-code.js";
 import { CliReportObserver } from "./observers/cli-report.js";
-import { forgetAnnounced, noticesFor, type AnnouncedSteps, type StepNotice } from "./step-notices.js";
+import {
+  endingNotices,
+  forgetAnnounced,
+  noticesFor,
+  type AnnouncedSteps,
+  type StepNotice,
+} from "./step-notices.js";
 import { isEnding } from "./workflow-status.js";
 import { CodexObserver } from "./observers/codex.js";
 import { PiObserver } from "./observers/pi.js";
@@ -413,7 +419,9 @@ export class LiveSessionService {
     if (hasGoneQuiet(next, now)) next = applyEvidence(next, { kind: "quiet", at: now });
     next = expireIfStale(next, now);
 
-    this.offerNotices(next, added);
+    this.offerNotices(next, added, run);
+    // The run's own endings, judged from where it was to where it is now.
+    for (const notice of endingNotices(run, next)) this.onStepNotice(notice);
     return next;
   }
 
@@ -656,8 +664,8 @@ export class LiveSessionService {
    * Only events the journal accepted as new are offered, which is what keeps a
    * lost run being picked back up from replaying every step it ever announced.
    */
-  private offerNotices(run: PendingRun, added: readonly ObservationEvent[]): void {
+  private offerNotices(run: PendingRun, added: readonly ObservationEvent[], was?: PendingRun): void {
     if (added.length === 0) return;
-    for (const notice of noticesFor(run, added, this.announced)) this.onStepNotice(notice);
+    for (const notice of noticesFor(run, added, this.announced, was)) this.onStepNotice(notice);
   }
 }

@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 import type { ObservationEvent, PendingRun } from "@anthill/live";
 
-import { forgetAnnounced, noticesFor, type AnnouncedSteps } from "./step-notices.js";
+import { endingNotices, forgetAnnounced, noticesFor, type AnnouncedSteps } from "./step-notices.js";
 
 const RUN: PendingRun = {
   anthillRunId: "ANT-1",
@@ -69,9 +69,11 @@ describe("a step transition", () => {
   it("is announced again when the session moves on and comes back", () => {
     const announced = fresh();
     noticesFor(RUN, [marker("implement")], announced);
-    expect(noticesFor(RUN, [marker("review")], announced)).toHaveLength(1);
+    const moved = noticesFor(RUN, [marker("review")], announced).filter((n) => n.kind !== "step-finished");
+    expect(moved).toHaveLength(1);
     // A loop returning to the first step is a transition, because it changed.
-    expect(noticesFor(RUN, [marker("implement")], announced)).toHaveLength(1);
+    const back = noticesFor(RUN, [marker("implement")], announced).filter((n) => n.kind !== "step-finished");
+    expect(back).toHaveLength(1);
   });
 
   it("collapses a burst down to the step actually reached", () => {
@@ -81,7 +83,103 @@ describe("a step transition", () => {
       [marker("implement"), marker("implement"), marker("review")],
       announced,
     );
-    expect(notices.map((notice) => notice.stepId)).toEqual(["implement", "review"]);
+    expect(notices.map((notice) => `${notice.kind}:${notice.stepId}`)).toEqual([
+      "step-started:implement",
+      "step-finished:implement",
+      "step-started:review",
+    ]);
+  });
+});
+
+/*
+  ANT-132. One switch used to cover one moment — a step starting. The others
+  are the moments people actually wait for: a step done, a loop coming round,
+  the session stopping to ask, the work finishing, the session going dark.
+*/
+describe("the other moments", () => {
+  it("says a step finished when the session moves on from it", () => {
+    const announced = fresh();
+    noticesFor(RUN, [marker("implement")], announced);
+    const next = noticesFor(RUN, [marker("review")], announced);
+    expect(next.map((n) => [n.kind, n.body])).toEqual([
+      ["step-finished", "Finished: Implement the change"],
+      ["step-started", "Started: Review the change"],
+    ]);
+  });
+
+  it("says a step finished when the harness reports the work done", () => {
+    const announced = fresh();
+    noticesFor(RUN, [marker("review")], announced);
+    const done: ObservationEvent = {
+      ...marker("review"),
+      kind: "session.end",
+      source: "anthill",
+      channel: "anthill:report",
+      blockId: undefined,
+    };
+    expect(noticesFor(RUN, [done], announced).map((n) => [n.kind, n.body])).toEqual([
+      ["step-finished", "Finished: Review the change"],
+    ]);
+    // Said once: the run's own "finished" is a different notice, from its state.
+    expect(noticesFor(RUN, [done], announced)).toEqual([]);
+  });
+
+  it("calls a step announced again a loop, and counts the pass", () => {
+    const announced = fresh();
+    noticesFor(RUN, [marker("implement"), marker("review")], announced);
+    const round = noticesFor(RUN, [marker("implement")], announced);
+    expect(round.map((n) => [n.kind, n.body])).toEqual([
+      ["step-finished", "Finished: Review the change"],
+      ["loop", "Back to Implement the change — pass 2"],
+    ]);
+  });
+
+  it("says the session is waiting on you, once per stop, at the step it stopped", () => {
+    const announced = fresh();
+    noticesFor(RUN, [marker("implement")], announced);
+    const waiting: ObservationEvent = {
+      ...marker("implement"),
+      kind: "notification",
+      source: "hook",
+      channel: "claude-code:hook",
+      title: "The session is waiting for you",
+      blockId: undefined,
+    };
+    expect(noticesFor(RUN, [waiting], announced).map((n) => [n.kind, n.body])).toEqual([
+      ["needs-you", "Waiting on you at: Implement the change"],
+    ]);
+    expect(noticesFor(RUN, [waiting], announced)).toEqual([]);
+    // Moving on and stopping again is a new wait.
+    noticesFor(RUN, [marker("review")], announced);
+    expect(noticesFor(RUN, [waiting], announced)).toHaveLength(1);
+  });
+
+  it("does not take a turn ending for a wait — Codex ends one whenever it stops", () => {
+    const announced = fresh();
+    noticesFor(RUN, [marker("implement")], announced);
+    const turn: ObservationEvent = { ...marker("implement"), kind: "turn.end", blockId: undefined };
+    expect(noticesFor(RUN, [turn], announced)).toEqual([]);
+  });
+
+  it("says the run finished, failed or was lost from where it went", () => {
+    const live = RUN;
+    expect(endingNotices(live, { ...RUN, state: "completed" }).map((n) => [n.kind, n.body])).toEqual([
+      ["finished", "The session finished."],
+    ]);
+    expect(
+      endingNotices(live, { ...RUN, state: "failed", statusMessage: "the model stream stopped" }).map((n) => n.body),
+    ).toEqual(["Session failed: the model stream stopped"]);
+    expect(endingNotices(live, { ...RUN, state: "observation_lost" }).map((n) => n.kind)).toEqual([
+      "observation-lost",
+    ]);
+  });
+
+  it("says nothing about an ending the run did not just reach", () => {
+    const done = { ...RUN, state: "completed" as const };
+    expect(endingNotices(done, done)).toEqual([]);
+    // A run never matched has no session to have finished.
+    const waiting = { ...RUN, state: "pending_after_copy" as const };
+    expect(endingNotices(waiting, { ...RUN, state: "failed" })).toEqual([]);
   });
 });
 
@@ -136,7 +234,7 @@ describe("the record of what has been said", () => {
     // notifications about steps nobody was watching for.
     const announced = fresh();
     noticesFor(RUN, [marker("implement")], announced); // caller ignores these
-    expect(announced.get(RUN.anthillRunId)).toBe("implement");
+    expect(announced.get(RUN.anthillRunId)?.last).toBe("implement");
     expect(noticesFor(RUN, [marker("implement")], announced)).toEqual([]);
   });
 

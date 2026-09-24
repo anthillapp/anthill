@@ -371,7 +371,11 @@ function scan(
     // Skipped by name, before anything is read out of it.
     if (payload.type === "reasoning") continue;
 
-    const at = str(row.timestamp) ?? now;
+    // A line with no time of its own does not move the activity clock; see
+    // the Claude Code observer, where undated bookkeeping revived stopped
+    // sessions. Codex stamps every rollout line, so here it is a guard.
+    const stamped = str(row.timestamp);
+    const at = stamped ?? state.lastActivityAt ?? now;
 
     if (row.type === "session_meta") {
       /*
@@ -391,7 +395,7 @@ function scan(
       }
       const id = session ?? thread;
       if (id) state.sessionId = id;
-      state.lastActivityAt = at;
+      if (stamped) state.lastActivityAt = stamped;
       events.push({
         at,
         cli: "codex",
@@ -405,7 +409,7 @@ function scan(
       continue;
     }
 
-    state.lastActivityAt = at;
+    if (stamped) state.lastActivityAt = stamped;
     const base = {
       at,
       cli: "codex" as const,

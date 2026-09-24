@@ -644,8 +644,26 @@ function scan(
     }
 
     if (typeof row.sessionId === "string") state.sessionId = row.sessionId;
-    const at = str(row.timestamp) ?? now;
-    state.lastActivityAt = at;
+    /*
+      Only a line that says when it was written moves the activity clock.
+
+      Claude Code keeps its own bookkeeping in this file — `last-prompt`,
+      `custom-title`, `mode`, `atis-latch`, `agent-name` and more — and writes
+      it with no timestamp, often when a session is merely opened in the app.
+      Every transcript on the machine this was found on holds such lines.
+      Dated "now", one of them read as the session writing again: two runs
+      stopped by hand came back as Live four days later, and again on every
+      launch after, because a restart re-reads the file from the top and the
+      same undated line is "now" once more.
+
+      Everything a session actually does — a user turn, an assistant turn, a
+      tool call and its result — carries a timestamp. So the line is still
+      read for what it carries, and an event it produces is dated at the last
+      moment the file did give; it simply cannot say the session is here.
+    */
+    const stamped = str(row.timestamp);
+    const at = stamped ?? state.lastActivityAt ?? now;
+    if (stamped) state.lastActivityAt = stamped;
 
     const base = {
       at,

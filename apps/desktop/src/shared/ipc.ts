@@ -11,7 +11,7 @@
  */
 
 import type { Workflow, WorkflowRun, NodeRun } from "@anthill/workflow-schema";
-import type { AgentModels, InterpreterId } from "@anthill/workflow";
+import type { AgentModels, InterpreterId, ModelPreferences } from "@anthill/workflow";
 import type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun } from "@anthill/live";
 import type { ExchangeSource, ExchangeProblem, HandoverMode, RevisionState } from "@anthill/workflow-exchange";
 
@@ -54,6 +54,9 @@ export const IpcChannel = {
   assistantThreadRead: "assistant:thread-read",
   assistantThreadWrite: "assistant:thread-write",
   assistantThreadClear: "assistant:thread-clear",
+  modelPreferencesRead: "model-preferences:read",
+  modelPreferencesWrite: "model-preferences:write",
+  pluginStatus: "plugins:status",
   settingsRead: "settings:read",
   settingsWrite: "settings:write",
   notificationsProbe: "settings:notifications-probe",
@@ -100,7 +103,11 @@ export const IpcChannel = {
  * constant exists not to do.
  */
 // 21: project-aware observation checks, light refresh, native trust and shared opt-out.
-export const IPC_CONTRACT = 21;
+/*
+ * 22: model preferences (read, write) and the plugin status, for the three
+ * Settings pages ANT-135 added.
+ */
+export const IPC_CONTRACT = 22;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -513,6 +520,46 @@ export type CodexModelOption = {
  * screen says when Codex last looked instead of claiming a model is available
  * now.
  */
+/**
+ * Anthill's plugin in one coding tool, as that tool's own records describe it
+ * (ANT-135). Read from files the tool keeps, never by running it.
+ */
+export type PluginHarnessStatus = {
+  harness: "claude-code" | "codex";
+  label: string;
+  /** The plugin's name in that tool: `anthill` or `anthill-cli`. */
+  plugin: string;
+  /** The tool's own directory exists, so it has been used on this machine. */
+  toolFound: boolean;
+  installed: boolean;
+  /** Installed and not switched off. */
+  enabled: boolean;
+  installedVersion?: string;
+  /** The marketplace it was installed from. */
+  marketplace?: string;
+  /** Where that marketplace comes from: a path, a repository, a URL. */
+  source?: string;
+  /** A local Anthill checkout offered as a marketplace, when one is known. */
+  checkout?: string;
+  /** What that checkout would install now. */
+  availableVersion?: string;
+};
+
+/** Whether the launcher both plugins ship can find the MCP server it runs. */
+export type PluginServerStatus = {
+  /** `~/.anthill/plugin.json` exists and names a server. */
+  configured: boolean;
+  settingsFile: string;
+  path?: string;
+  exists?: boolean;
+  problem?: string;
+};
+
+export type PluginStatus = {
+  harnesses: PluginHarnessStatus[];
+  server: PluginServerStatus;
+};
+
 export type CodexModelCatalog = {
   models: CodexModelOption[];
   fetchedAt?: string;
@@ -928,6 +975,12 @@ export interface AnthillApi {
   settingsRead(): Promise<AppSettings>;
   /** Change some of them; the rest are left alone. Returns what they now are. */
   settingsWrite(patch: Partial<AppSettings>): Promise<AppSettings>;
+  /** The author's model preferences: hidden models, starting answers, tiers. */
+  modelPreferencesRead(): Promise<ModelPreferences>;
+  /** Replaces them, normalised. Rejects when the disk refused the write. */
+  modelPreferencesWrite(next: ModelPreferences): Promise<ModelPreferences>;
+  /** Whether Anthill's plugin is installed in Claude Code and Codex. Read-only. */
+  pluginStatus(): Promise<PluginStatus>;
   /**
    * Send one notification now, so the author can see for themselves whether
    * they arrive.

@@ -91,7 +91,19 @@ function completeWorkflow(overrides: Partial<Workflow> = {}): Workflow {
     metadata: {
       workflow: {
         formatVersion: WORKFLOW_FORMAT_VERSION,
-        agents: [{ id: "agent-1", name: "Developer", models: { "claude-code": { id: "sonnet" } } }],
+        agents: [
+          {
+            id: "agent-1",
+            name: "Developer",
+            // ANT-126 made a description a requirement rather than a nicety, and
+            // a handover without one is refused before it is stored. Every
+            // fixture here goes through `createWorkflow`, so without this the
+            // whole file tests the refusal instead of what it is about.
+            description:
+              "Finds the cause of a crash in the application's startup path, fixes it, and leaves behind a test that fails on the old code.",
+            models: { "claude-code": { id: "sonnet" } },
+          },
+        ],
       },
     },
     ...overrides,

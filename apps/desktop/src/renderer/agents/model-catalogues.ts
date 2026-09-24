@@ -11,7 +11,7 @@
  * drift apart again; the markup stays each editor's own.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { harnessProfile } from "@anthill/workflow";
 import type { HarnessTarget } from "@anthill/workflow-schema";
 
@@ -33,9 +33,13 @@ export type ModelCatalogues = {
  * list, not the editor — `undefined` says "not given", which is not the same
  * as an empty list, and the editors say the difference.
  */
-export function useModelCatalogues(): ModelCatalogues {
+export function useModelCatalogues(): ModelCatalogues & { reload: () => void } {
   const [codex, setCodex] = useState<CodexModelCatalog | undefined>();
   const [pi, setPi] = useState<PiModelCatalog | undefined>();
+  // Bumped to read again. Settings offers a Refresh (ANT-135): a model
+  // released since the window opened is otherwise invisible until a relaunch.
+  const [generation, setGeneration] = useState(0);
+  const reload = useCallback(() => setGeneration((value) => value + 1), []);
 
   useEffect(() => {
     let live = true;
@@ -58,9 +62,9 @@ export function useModelCatalogues(): ModelCatalogues {
     return () => {
       live = false;
     };
-  }, []);
+  }, [generation]);
 
-  return { codex, pi };
+  return { codex, pi, reload };
 }
 
 /**

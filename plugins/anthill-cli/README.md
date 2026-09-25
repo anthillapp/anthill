@@ -82,20 +82,28 @@ The source session id comes from `CODEX_SESSION_ID`, which Codex records as
 `session_id` in its local rollout metadata. The skill never invents or borrows
 an id. The workflow target and source harness are both `codex`.
 
-## Optional detailed progress
+## Detailed progress
 
-With the current Anthill CLI, the skill checks `anthill observation status` in
-the project directory and offers detailed progress when it has not been set up.
-Accepting runs `anthill observation enable`; declining runs
-`anthill observation skip` and remembers the choice. Basic session observation
-and explicit workflow reports remain available either way.
+Anthill always shows basic progress from Codex's own session records. Its hooks
+add the agent's actions and detailed progress. The skill settles them after the
+workflow is stored and before Anthill opens it (`create_workflow_draft` with
+`open: false`, then `open_workflow`), with `anthill observation status`:
 
-Codex separately requires native hook trust. When prompted, enter `/hooks` in
-Codex and review the entries containing `anthill-observation-hook`. Installation
-does not grant that trust. Start a new session after installing or changing
-permissions; check `anthill observation status` again. `ready` confirms enabled,
-trusted hooks; a non-null `lastEventAt` confirms an actual event in the retained
-log. An old CLI without these commands falls back to basic progress.
+- nothing is asked when Codex has the hooks installed, enabled and approved, or
+  when one of them has already fired in this session;
+- when they are missing, the user is offered **Connect** or **Continue with basic
+  progress**; Connect runs `anthill observation enable`, the other
+  `anthill observation skip`, which is remembered until Anthill's hooks change;
+- when Codex has not approved them, the user types `/hooks`, chooses **Review
+  hooks**, and allows only the entries containing `anthill-observation-hook` —
+  never **Trust all**, which would approve every other tool's hooks too. Codex
+  also shows **Hooks need review** by itself when a session starts with
+  unapproved hooks;
+- when the state cannot be confirmed — from inside Codex's sandbox, for
+  instance — it is not treated as unapproved: the skill asks for one-time host
+  access for that exact command, or carries on with basic progress.
+
+Installing never grants trust, and nothing in Anthill grants it for the user.
 
 Rebuild/update the Anthill CLI as well as refreshing the plugin to get this flow.
 

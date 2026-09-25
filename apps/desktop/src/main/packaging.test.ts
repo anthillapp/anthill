@@ -37,7 +37,13 @@ it("registers the workflow protocol without changing entitlements", () => {
   expect(main).toContain('app.on("open-url"');
   expect(main).toContain('app.on("second-instance"');
   expect(main).toContain('linksFromArgv(process.argv)');
-  expect(main).toContain('app.setAsDefaultProtocolClient("anthill", process.execPath, [resolve(process.argv[1])])');
+  // ANT-137. This line used to be asserted *present*. On macOS it registers the
+  // stock Electron.app — every dev Electron's bundle id — so any Electron on the
+  // disk could be handed a workflow link. Only the installed app may claim the
+  // scheme, and it claims it back whenever it becomes active.
+  expect(main).not.toContain("setAsDefaultProtocolClient(\"anthill\", process.execPath");
+  expect(main).toContain("claimScheme(app);");
+  expect(main).toContain('app.on("did-become-active", () => claimScheme(app));');
 });
 
 describe("the native binding survives packaging", () => {

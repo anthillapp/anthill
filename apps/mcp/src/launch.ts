@@ -11,9 +11,17 @@
  * from nothing having happened (ANT-123).
  *
  * So the same `anthill://workflow/<id>` link the result offers is handed to the
- * machine. macOS answers it the way it answers a click: a closed app is
- * launched and the URL delivered once it is ready, a running one is brought to
- * the front and handed the URL directly. Anthill holds a single-instance lock
+ * machine — addressed to Anthill by its bundle id, not to whatever the scheme
+ * happens to point at. macOS answers it the way it answers a click: a closed
+ * app is launched and the URL delivered once it is ready, a running one is
+ * brought to the front and handed the URL directly.
+ *
+ * The bundle id is the fix for a link that went somewhere else (ANT-137). A dev
+ * run of Anthill used to register the stock `Electron.app` for the scheme, and
+ * that id is every dev Electron's; macOS then opened a stranger's Electron,
+ * which showed its default window, while the installed Anthill never got the
+ * link. `open -b` does not ask who owns the scheme, so nothing that happens to
+ * that registration can send a handover astray. Anthill holds a single-instance lock
  * and queues links that arrive before the window exists, so neither the second
  * call nor the one that wins a cold-start race does anything twice.
  *
@@ -78,6 +86,16 @@ export type Launcher = (url: string) => Promise<LaunchReport>;
 const OPENER = "/usr/bin/open";
 
 /**
+ * Anthill's bundle id — `appId` in apps/desktop/package.json, which a test
+ * holds this to.
+ *
+ * The installed app, always: a dev build reads its own `desktop-dev` data, and
+ * this server writes into the installed app's exchange. Someone running the
+ * server against a dev data directory starts it with `--no-launch`.
+ */
+export const ANTHILL_BUNDLE_ID = "com.anthill.desktop";
+
+/**
  * How long to wait for the opener before giving up on it.
  *
  * `open` returns as soon as LaunchServices has taken the request, not when the
@@ -92,38 +110,46 @@ const OPEN_TIMEOUT_MS = 10_000;
 const MAX_STDERR = 400;
 
 /**
- * How macOS says nothing is registered for the scheme.
+ * How macOS says there is no Anthill to open.
  *
- * Matched on the status name rather than on the sentence around it, because the
- * sentence is localised and the name is not. `-10814` is the same error as a
- * number, which is what some macOS versions print instead.
+ * Matched on names rather than on the sentence around them, because the
+ * sentence is localised and the names are not. `open -b` reports a bundle id
+ * it cannot find through `LSCopyApplicationURLsForBundleIdentifier`;
+ * `kLSApplicationNotFoundErr` and its number, `-10814`, are the same failure
+ * as other macOS versions word it.
  */
-const NO_HANDLER = /kLSApplicationNotFoundErr|-10814/;
+const NO_HANDLER = /LSCopyApplicationURLsForBundleIdentifier|kLSApplicationNotFoundErr|-10814/;
 
 /**
- * What to say when nothing claims the scheme.
+ * What to say when there is no Anthill to open.
  *
  * Actionable rather than descriptive: the user cannot do anything with
- * "kLSApplicationNotFoundErr", and the one thing that fixes it — an installed
- * Anthill, opened once so LaunchServices records what it claims — is a sentence
- * long. The link is repeated because at this point it is the only thing left
- * that works, by hand.
+ * "LSCopyApplicationURLsForBundleIdentifier() failed", and the one thing that
+ * fixes it — an installed Anthill, opened once so macOS knows where it is — is
+ * a sentence long. The link is repeated because at this point it is the only
+ * thing left that works, by hand.
  */
 function noHandlerMessage(url: string): string {
   return (
-    "Anthill could not be opened: nothing on this machine is registered for anthill:// links. " +
-    "Install Anthill and open it once, so macOS learns which app claims them. " +
+    "Anthill could not be opened: it is not installed on this machine, or macOS has not seen it yet. " +
+    "Install Anthill and open it once, so macOS knows where it is. " +
     `The handover is stored and waiting; ${url} will open it.`
   );
 }
 
 /**
- * Open one link with the platform's opener.
+ * Open one link in Anthill.
  *
  * @param platform Injected so the refusal on a platform this does not serve can
  *   be tested from any platform, including the one it does serve.
+ * @param bundleId Injected so a test can ask for an app that does not exist and
+ *   see macOS's real answer, without opening the Anthill on the machine running it.
  */
-export function openUrl(url: string, platform: NodeJS.Platform = process.platform): Promise<LaunchReport> {
+export function openUrl(
+  url: string,
+  platform: NodeJS.Platform = process.platform,
+  bundleId: string = ANTHILL_BUNDLE_ID,
+): Promise<LaunchReport> {
   // macOS only, because that is the only platform Anthill is packaged for: the
   // build produces a signed .dmg and nothing else, so on any other platform
   // there is no installed app to bring up and no scheme registered to bring it
@@ -147,7 +173,7 @@ export function openUrl(url: string, platform: NodeJS.Platform = process.platfor
 
     // The URL is one argument, and the child's stdout is discarded rather than
     // inherited: this process's stdout is the protocol.
-    const child = spawn(OPENER, [url], { stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn(OPENER, ["-b", bundleId, url], { stdio: ["ignore", "ignore", "pipe"] });
 
     const timer = setTimeout(() => {
       child.kill("SIGKILL");

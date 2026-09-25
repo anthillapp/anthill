@@ -1122,6 +1122,57 @@ describe("a lost session that writes again", () => {
     expect(h.published.at(-1)?.runs[0].state).toBe("detected_live");
   });
 
+  /*
+    Claude Code keeps its own bookkeeping in the transcript — `last-prompt`,
+    `custom-title`, `mode`, `atis-latch` and a dozen more — and writes it with
+    no timestamp, often when a session is merely opened in the app. Every one
+    of the 212 transcripts on the machine this was found on holds such lines.
+    Read as dated "now", one of them was a session writing again: two runs
+    stopped by hand four days earlier came back as Live on the next launch,
+    "picked back up after 18 hours unseen", and were revived again on every
+    launch after that, because a restart re-reads the file.
+  */
+  async function bookkeeping(root: string, sessionId: string) {
+    await appendFile(
+      join(root, "-tmp-scratch", `${sessionId}.jsonl`),
+      JSON.stringify({ type: "last-prompt", lastPrompt: "Looks good to me, you can start", sessionId }) + "\n",
+      "utf8",
+    );
+  }
+
+  it("is not picked back up by a line that carries no time of its own", async () => {
+    const h = await lostAndClosed();
+
+    await bookkeeping(h.claudeRoot, "sess-1");
+    h.setNow(minutes(60));
+    await h.service.poll();
+
+    expect(only(h.service.snapshot()).state).toBe("observation_lost");
+  });
+
+  it("is not picked back up by re-reading such a line after a restart", async () => {
+    const h = await lostAndClosed();
+    await bookkeeping(h.claudeRoot, "sess-1");
+
+    // A second service over the same files is what a relaunch is: the
+    // transcript is read from its first line again.
+    const restarted = new LiveSessionService(
+      new PendingRunStore(h.storePath),
+      () => undefined,
+      () => minutes(60),
+      {
+        claudeRoot: h.claudeRoot,
+        codexRoot: join(h.claudeRoot, "..", "codex"),
+        journalDir: join(h.claudeRoot, "..", "observations"),
+      },
+    );
+    await restarted.start();
+    await restarted.poll();
+
+    expect(only(restarted.snapshot()).state).toBe("observation_lost");
+    restarted.stop();
+  });
+
   it("stays picked up on the very next look", async () => {
     const h = await lostAndClosed();
     await say(h.claudeRoot, "sess-1", "Back to it.", minutes(60));

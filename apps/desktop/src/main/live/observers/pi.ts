@@ -495,8 +495,12 @@ function scan(
     // them, so they do not count as activity.
     if (NON_WORK.has(str(row.type) ?? "")) continue;
 
-    const at = str(row.timestamp) ?? now;
-    state.lastActivityAt = at;
+    // A line with no time of its own does not move the activity clock; see
+    // the Claude Code observer. pi's session manager stamps every entry, so
+    // here it is a guard, beside the by-name skip above.
+    const stamped = str(row.timestamp);
+    const at = stamped ?? state.lastActivityAt ?? now;
+    if (stamped) state.lastActivityAt = stamped;
 
     if (row.type === "session") {
       const id = str(row.id);

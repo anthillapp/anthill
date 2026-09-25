@@ -48,6 +48,8 @@ import {
   type ObservationState,
 } from "../live/ObservationStep.js";
 
+import { useSetupPoll } from "../live/use-setup-poll.js";
+
 import { interpreterLogo } from "./interpreter-logos.js";
 import { agentFileExtension } from "./agent-file-name.js";
 
@@ -207,12 +209,8 @@ export function PromptModal({
   const observation: ObservationState =
     cli === "pi" ? "passive" : observationState(setup, installFailed !== undefined);
   const face = OBSERVATION_FACE[observation];
-  /** Whether Anthill will have anything to watch with. */
-  const willWatch =
-    observation === "ready" ||
-    observation === "silent" ||
-    observation === "limited" ||
-    observation === "passive";
+  /** Basic session observation is independent of hook installation or trust. */
+  const willWatch = observation !== "unavailable";
 
   // The marker names the CLI, so switching harness mid-workflow mints a new one
   // rather than quietly telling the wrong tool's story.
@@ -228,16 +226,18 @@ export function PromptModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const readSetup = useCallback(async () => {
+  const readSetup = useCallback(async (light = false) => {
     try {
-      const status = await window.anthill.liveSetupStatus();
+      const status = await window.anthill.liveSetupStatus(folder ?? undefined, light);
       setSetup(status.harnesses.find((item) => item.id === cli));
     } catch {
       // Nothing to say about observation is not a reason to block the
       // handover; the step reports `unavailable` and the flow continues.
       setSetup(undefined);
     }
-  }, [cli]);
+  }, [cli, folder]);
+
+  useSetupPoll(() => readSetup(true), !installing, cli === "codex" && Boolean(setup?.hookInstalled) && setup?.codexHooks?.state !== "ready");
 
   useEffect(() => {
     void readSetup();
@@ -258,6 +258,36 @@ export function PromptModal({
   const hasAgents = files.length > 0;
   const firstStep: Step = hasAgents ? 1 : 2;
   const [step, setStep] = useState<Step>(() => (hasAgents && !runRoot(workflow) ? 1 : 2));
+
+  const [reviewSetup, setReviewSetup] = useState(false);
+  const [preferenceError, setPreferenceError] = useState<string>();
+  // Nothing to ask, nothing to show: installed, enabled and approved, or the
+  // person already chose basic progress for these hooks (ANT-138). The same
+  // rule the plugin follows, worked out once in the main process.
+  // A status without the field comes from a main process older than the rule,
+  // and falls back to what that one decided with: the decline alone.
+  useEffect(() => {
+    if (step !== 2 || !setup || reviewSetup) return;
+    const nothingToAsk = setup.observationPrompt === undefined ? setup.observationDeclined === true : setup.observationPrompt === null;
+    if (nothingToAsk) setStep(3);
+  }, [step, setup, reviewSetup]);
+
+  const continueBasic = async () => {
+    // Remembered only where a question was put: "connect" or "trust". A hint
+    // was not a question, and declining it would silence the next real one.
+    const asked = setup?.observationPrompt === undefined
+      ? Boolean(setup && !setup.hookInstalled)
+      : setup.observationPrompt === "connect" || setup.observationPrompt === "trust";
+    if (cli !== "pi" && asked) {
+      try {
+        await window.anthill.liveSetupDecline(cli);
+        setSetup((current) => current ? { ...current, observationDeclined: true } : current);
+      } catch {
+        setPreferenceError("Could not save your preference. You can continue with basic progress; Anthill may ask again next time.");
+      }
+    }
+    setStep(3);
+  };
 
   /**
    * Waiting for the session, once the prompt has gone.
@@ -302,7 +332,7 @@ export function PromptModal({
   const install = useCallback(async () => {
     setInstalling(true);
     try {
-      const outcome = await window.anthill.liveSetupInstall(cli);
+      const outcome = await window.anthill.liveSetupInstall(cli, folder ?? undefined);
       setInstalling(false);
       if (outcome.ok) {
         setInstallFailed(undefined);
@@ -316,7 +346,7 @@ export function PromptModal({
         problem instanceof Error ? problem.message : "The hook entries could not be written.",
       );
     }
-  }, [cli]);
+  }, [cli, folder]);
 
   /**
    * Files, then the run, then the clipboard.
@@ -385,13 +415,11 @@ export function PromptModal({
   const liveReceipt =
     observation === "ready" || observation === "passive"
       ? { tone: "ok", text: "Live progress on" }
-      : observation === "limited"
-        ? { tone: "unsure", text: "Live progress will be limited" }
-        : observation === "silent"
-          ? { tone: "unsure", text: "Live progress on, but untested" }
-          : observation === "unavailable"
-            ? { tone: "flat", text: `No live progress — ${harnessProfile.displayName} was not found` }
-            : { tone: "flat", text: "No live progress" };
+      : observation === "awaiting-session"
+        ? { tone: "ok", text: "Detailed progress ready — start a new Codex session" }
+        : observation === "unavailable"
+          ? { tone: "flat", text: `No live progress — ${harnessProfile.displayName} was not found` }
+          : { tone: "flat", text: "Basic progress on" };
 
   const title =
     step === 1
@@ -536,15 +564,17 @@ export function PromptModal({
                 type="button"
                 className="primary"
                 disabled={installing}
-                onClick={face.install ? () => void install() : () => setStep(3)}
+                onClick={face.install
+                  ? () => void install()
+                  : setup?.observationPrompt === "trust" ? () => void continueBasic() : () => setStep(3)}
               >
                 {face.primary}
               </button>
               {/* Never two buttons reading Continue: the secondary only offers
                   to skip where there is something to skip. */}
               {face.install ? (
-                <button type="button" onClick={() => setStep(3)}>
-                  Continue without live progress
+                <button type="button" disabled={installing} onClick={() => void continueBasic()}>
+                  Continue with basic progress
                 </button>
               ) : hasAgents ? (
                 <button type="button" onClick={() => setStep(1)}>
@@ -558,7 +588,9 @@ export function PromptModal({
                     ? "There is nothing to install for a CLI Anthill cannot find."
                     : observation === "passive"
                       ? "Nothing to install — this tool has no hook mechanism."
-                      : "Already set up — nothing is written again."}
+                      : observation === "needs-trust" || observation === "disabled" || observation === "check-failed"
+                        ? "Basic progress remains available while you finish connecting."
+                        : "Already set up — nothing is written again."}
               </span>
             </footer>
           </>
@@ -598,11 +630,13 @@ export function PromptModal({
                 <div className="state-panel-head">
                   <span className="state-dot" aria-hidden="true" />
                   <span className="state-title">{liveReceipt.text}</span>
-                  <button type="button" className="state-chip" onClick={() => setStep(2)}>
+                  <button type="button" className="state-chip" onClick={() => { setReviewSetup(true); setStep(2); }}>
                     Change…
                   </button>
                 </div>
               </section>
+
+              {preferenceError ? <p role="status">{preferenceError}</p> : null}
 
               {copiedPrompt && willWatch ? (
                 <section

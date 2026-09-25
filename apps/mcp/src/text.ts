@@ -60,6 +60,8 @@ export type DraftAnswer = {
   /** True only after desktop acknowledgement, not when a request is queued. */
   displayed?: boolean;
   displayRequested?: boolean;
+  /** Stored with `open: false`: nothing was asked of the app yet (ANT-138). */
+  openDeferred?: boolean;
   /**
    * What became of bringing Anthill up for this.
    *
@@ -235,6 +237,32 @@ export type CallAnswer = {
 /* The four results                                                           */
 /* -------------------------------------------------------------------------- */
 
+export type OpenAnswer = {
+  outcome: "open_requested" | "not_found";
+  workflowId: string;
+  url?: string;
+  revision?: number;
+  /** True only after desktop acknowledgement, not when a request is queued. */
+  displayed?: boolean;
+  displayRequested?: boolean;
+  app?: LaunchReport;
+  problems?: ExchangeProblem[];
+};
+
+/** What `open_workflow` says: the second half of a draft stored with `open: false`. */
+export function openText(answer: OpenAnswer): string {
+  if (answer.outcome === "not_found") return join([unknownWorkflowText(answer.workflowId)]);
+  const parts = [
+    answer.displayRequested
+      ? `Anthill was asked to open revision ${answer.revision} of ${answer.workflowId}. The desktop has not acknowledged showing it.`
+      : `No new display request was queued for revision ${answer.revision} of ${answer.workflowId}; one is already waiting.`,
+    ...appText(answer.app),
+  ];
+  if (answer.problems && answer.problems.length > 0) parts.push("Also worth knowing:", numbered(answer.problems.map(sentence)));
+  if (answer.url) parts.push(answer.url);
+  return join(parts);
+}
+
 /**
  * The one sentence a result says about Anthill itself.
  *
@@ -262,9 +290,11 @@ export function draftText(answer: DraftAnswer): string {
     answer.outcome === "already_exists"
       ? `This handover has been submitted before. It is already stored as revision ${answer.revision} of ${where}`
       : `Stored as revision ${answer.revision} of ${where}`;
-  const shown = answer.displayRequested
-    ? ". A display request is queued; the desktop has not acknowledged opening it."
-    : ". No display request was queued. Desktop display is not confirmed.";
+  const shown = answer.openDeferred
+    ? ". It has not been opened: call open_workflow with this workflow id when it is time to show it."
+    : answer.displayRequested
+      ? ". A display request is queued; the desktop has not acknowledged opening it."
+      : ". No display request was queued. Desktop display is not confirmed.";
 
   const parts = [`${stored}${shown}`];
 

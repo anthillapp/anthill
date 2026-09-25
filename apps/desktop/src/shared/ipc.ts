@@ -60,6 +60,7 @@ export const IpcChannel = {
   liveEvents: "live:events",
   liveSetupStatus: "live-setup:status",
   liveSetupDismiss: "live-setup:dismiss",
+  liveSetupDecline: "live-setup:decline",
   liveSetupInstall: "live-setup:install",
   liveSetupDisable: "live-setup:disable",
   folderChoose: "folder:choose",
@@ -98,7 +99,8 @@ export const IpcChannel = {
  * The number stayed at 19 through all of it, which is the one thing this
  * constant exists not to do.
  */
-export const IPC_CONTRACT = 20;
+// 21: project-aware observation checks, light refresh, native trust and shared opt-out.
+export const IPC_CONTRACT = 21;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -676,6 +678,25 @@ export type LiveObserveRequest = {
 /* they do not start agents, attach to sessions, or change permissions.  */
 /* ------------------------------------------------------------------ */
 
+export type CodexHookStatus = {
+  state: "needs-trust" | "disabled" | "not-loaded" | "unknown" | "ready";
+  message: string;
+  requiresHostAccess?: boolean;
+  /**
+   * A hook of Anthill's has already fired in the Codex session asking. The
+   * strongest answer there is — it is working, here — and the one that needs
+   * no call into Codex, which a sandboxed agent cannot make (ANT-138).
+   */
+  confirmedInSession?: boolean;
+};
+
+/**
+ * What to ask the person about hooks now, if anything (ANT-138): connect them,
+ * trust them in Codex's /hooks, or read a hint about a check that could not
+ * say. One rule for both ways a Codex workflow starts.
+ */
+export type ObservationPrompt = "connect" | "trust" | "hint";
+
 export type ObservationHarnessSetup = {
   id: MarkerCli;
   label: string;
@@ -684,12 +705,19 @@ export type ObservationHarnessSetup = {
   version?: string;
   reason?: string;
   /**
-   * Verified working: the entries are present *and* the handler ran.
-   *
-   * Only this earns the enabled state. Entries in a config file prove the
-   * install wrote them, not that the harness can run what they point at.
+   * Entries pass structural checks. This installation's handler is probed;
+   * another installation's command is never executed from configuration.
+   * `hookUsesCurrentRuntime` distinguishes those cases. Codex permissions and
+   * received events are checked separately.
    */
   hookInstalled: boolean;
+  hookUsesCurrentRuntime?: boolean;
+  hookInstallProblem?: string;
+  /** Codex's own permission check; a runnable handler alone is not ready. */
+  codexHooks?: CodexHookStatus;
+  observationDeclined?: boolean;
+  /** What to ask now, or nothing. See `ObservationPrompt`. */
+  observationPrompt?: ObservationPrompt | null;
   /** The entries are in the config file, whatever running them does. */
   hookEntriesPresent: boolean;
   /** Why the handler could not run, when entries are present but it cannot. */
@@ -928,11 +956,12 @@ export interface AnthillApi {
   /* Local observation setup */
 
   /** Read local setup state. This does not write hook configuration. */
-  liveSetupStatus(): Promise<ObservationSetupStatus>;
+  liveSetupStatus(cwd?: string, refreshOnly?: boolean): Promise<ObservationSetupStatus>;
   /** Do not show the first-diagram setup prompt again unless reopened manually. */
+  liveSetupDecline(harness: MarkerCli): Promise<void>;
   liveSetupDismiss(): Promise<ObservationSetupStatus>;
   /** Enable Anthill's passive observation hook entries for one available CLI. */
-  liveSetupInstall(harness: MarkerCli): Promise<ObservationSetupActionResult>;
+  liveSetupInstall(harness: MarkerCli, cwd?: string): Promise<ObservationSetupActionResult>;
   /** Remove only Anthill's passive observation hook entries for one CLI. */
   liveSetupDisable(harness: MarkerCli): Promise<ObservationSetupActionResult>;
 }

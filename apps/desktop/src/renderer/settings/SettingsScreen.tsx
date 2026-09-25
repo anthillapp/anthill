@@ -18,6 +18,8 @@
  */
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { CodexHookHelp } from "../live/CodexHookHelp.js";
+import { useSetupPoll } from "../live/use-setup-poll.js";
 
 import type {
   AppSettings,
@@ -60,36 +62,38 @@ const TITLES: Record<PageId, string> = {
 /**
  * What the card can honestly claim about a harness's hooks.
  *
- * Four states, and each is a different claim. Entries in a config file are not
+ * Each state is a different claim. Entries in a config file are not
  * hooks that run (ANT-23), and hooks that run are not hooks the harness calls
  * (ANT-42) — Codex had six entries, a handler that ran on demand and, across
  * eight sessions, not one event, while the card said Enabled.
  */
-type HookState = "enabled" | "silent" | "broken" | "available";
+type HookState = "enabled" | "silent" | "broken" | "available" | "needs-trust" | "disabled" | "unknown" | "ready";
 
 function hookState(harness: ObservationHarnessSetup): HookState {
   if (!harness.hookEntriesPresent) return "available";
   if (!harness.hookInstalled) return "broken";
+  if (harness.id === "codex") {
+    switch (harness.codexHooks?.state) {
+      case "needs-trust": return "needs-trust";
+      case "disabled": return "disabled";
+      case "ready": return harness.hookLastEventAt ? "enabled" : "ready";
+      default: return "unknown";
+    }
+  }
   return harness.hookLastEventAt ? "enabled" : "silent";
 }
 
 const CHIP: Record<HookState, { label: string; tone: "on" | "quiet" | "off" }> =
   {
     enabled: { label: "Enabled", tone: "on" },
+    "needs-trust": { label: "Needs permission", tone: "quiet" },
+    disabled: { label: "Disabled in Codex", tone: "quiet" },
+    unknown: { label: "Not verified", tone: "quiet" },
+    ready: { label: "Ready for next session", tone: "on" },
     silent: { label: "Not seen firing", tone: "quiet" },
     broken: { label: "Not working", tone: "quiet" },
     available: { label: "Available", tone: "off" },
   };
-
-/** How long ago, in the roundest words that are still true. */
-function since(at: string): string {
-  const ms = Date.now() - Date.parse(at);
-  if (!Number.isFinite(ms) || ms < 0) return "time";
-  const hours = Math.floor(ms / 3_600_000);
-  if (hours < 1) return "time";
-  if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"}`;
-  return `${Math.floor(hours / 24)} days`;
-}
 
 export function SettingsScreen({ onLeave }: { onLeave: () => void }) {
   const [page, setPage] = useState<PageId>("notifications");
@@ -367,13 +371,16 @@ function ObservationPage() {
   const [busy, setBusy] = useState<MarkerCli | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    setStatus(await window.anthill.liveSetupStatus());
+  const refresh = useCallback(async (light = false) => {
+    setStatus(await window.anthill.liveSetupStatus(undefined, light));
   }, []);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const pendingTrust = status?.harnesses.some((h) => h.id === "codex" && h.hookInstalled && h.codexHooks?.state !== "ready") ?? false;
+  useSetupPoll(() => refresh(true), busy === null, pendingTrust);
 
   const act = useCallback(
     async (id: MarkerCli, what: "install" | "disable") => {
@@ -510,19 +517,17 @@ function Harness({
         </p>
       ) : null}
 
-      {/* Amber, not red: hooks that never fired may simply be how this build
-          works, and the session-record baseline is unaffected either way. */}
+      {harness.codexHooks ? <CodexHookHelp status={harness.codexHooks} /> : null}
       {state === "silent" ? (
         <p className="harness-warning">
-          The hooks are installed and the handler runs when Anthill calls it,
-          but {harness.label} has never called it — no event has arrived
-          {harness.hookInstalledAt
-            ? ` in the ${since(harness.hookInstalledAt)} since they were installed`
-            : ""}
-          . That may simply be how this build works. Anthill reads this
-          harness&rsquo;s session records either way; what is missing is
-          permission and notification events and real tool durations.
+          No hook events are in the retained log yet. Start a session to verify
+          detailed progress. Basic progress from local session records remains available.
         </p>
+      ) : null}
+      {state === "broken" || (harness.hookEntriesPresent && harness.hookUsesCurrentRuntime === false) ? (
+        <button type="button" className="set-btn" disabled={busy} onClick={onInstall}>
+          {busy ? "Repairing…" : "Repair connection"}
+        </button>
       ) : null}
 
       {expanded ? (

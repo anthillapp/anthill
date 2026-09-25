@@ -77,10 +77,19 @@ The result also carries the workflow id and, where something was stored, the
 revision the content is now at and an anthill:// link the user can open. A
 refusal carries no link, because there would be nothing of yours behind it.
 
+Pass open: false to store the workflow without opening Anthill yet — when there
+is something to ask the user first — and call open_workflow afterwards.
+
 Every handover carries idempotencyKey, mode, source — harness, sessionId and
 taskText — and workflow. A call that leaves one of them out is answered with
 which one, and nothing is stored.`,
       inputSchema: {
+        open: z
+          .unknown()
+          .optional()
+          .describe(
+            "false to store the workflow without opening Anthill, so you can ask the user something first; then call open_workflow. Leave it out to open Anthill at once.",
+          ),
         idempotencyKey: z
           .unknown()
           .optional()
@@ -191,6 +200,24 @@ it. Writing a revision and then binding it is approving your own work.`,
       },
     },
     async (args) => handlers.reviseWorkflow(args),
+  );
+
+  server.registerTool(
+    "open_workflow",
+    {
+      title: "Open a stored workflow in Anthill",
+      description: `Open a workflow in Anthill that create_workflow_draft stored with open: false.
+
+Launches Anthill if it is closed, brings it to the front if it is open, and asks
+it to show the workflow's head revision. Asking twice for the same revision does
+not open it twice. It takes the workflowId and nothing else.
+
+Returns open_requested, with the app's own outcome in "app" — opened, or a
+message to pass on — or not_found for an id this machine has never stored.`,
+      inputSchema: { workflowId: WORKFLOW_ID },
+      annotations: { readOnlyHint: false, openWorldHint: false },
+    },
+    async (args) => handlers.openWorkflow(args),
   );
 
   server.registerTool(

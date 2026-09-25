@@ -22,6 +22,7 @@
 import { useState } from "react";
 
 import type { ObservationHarnessSetup } from "../../shared/ipc.js";
+import { CodexHookHelp } from "./CodexHookHelp.js";
 
 /** What Anthill can say about watching this harness. */
 export type ObservationState =
@@ -31,7 +32,9 @@ export type ObservationState =
   | "limited"
   | "failed"
   | "passive"
-  | "unavailable";
+  | "unavailable"
+  | CodexObservationState;
+type CodexObservationState = "needs-trust" | "disabled" | "check-failed" | "awaiting-session";
 
 type Tone = "ok" | "unsure" | "bad" | "flat";
 
@@ -59,13 +62,33 @@ type Face = {
 };
 
 export const OBSERVATION_FACE: Record<ObservationState, Face> = {
+  "needs-trust": {
+    title: "Allow detailed progress in Codex", chip: "Needs permission", tone: "unsure",
+    install: false, primary: "Continue with basic progress",
+    note: "Anthill’s hooks are installed. One step in Codex remains, and this page notices it by itself.",
+  },
+  disabled: {
+    title: "Detailed progress is disabled in Codex", chip: "Disabled in Codex", tone: "unsure",
+    install: false, primary: "Continue with basic progress",
+    note: "Basic progress is available from local session records.",
+  },
+  "check-failed": {
+    title: "Codex connection could not be verified", chip: "Not verified", tone: "unsure",
+    install: false, primary: "Continue with basic progress",
+    note: "Anthill will keep checking while this page is open. You can continue with basic progress.",
+  },
+  "awaiting-session": {
+    title: "Ready for detailed progress", chip: "Ready", tone: "ok",
+    install: false, primary: "Continue",
+    note: "Codex has granted permission. Start a new session with your workflow; Anthill will confirm when events arrive.",
+  },
   unconfigured: {
-    title: "Live progress is not set up yet",
+    title: "Connect detailed progress?",
     chip: "Not set up",
     tone: "unsure",
     install: true,
-    primary: "Enable Live Observation",
-    note: "Without hooks, Anthill can still hand over the workflow — it just will not be able to show you what the session is doing.",
+    primary: "Connect detailed progress",
+    note: "Basic progress already works from local session records. Connect detailed progress to see tool activity and timing.",
   },
   ready: {
     title: "Live Observation is ready",
@@ -81,7 +104,7 @@ export const OBSERVATION_FACE: Record<ObservationState, Face> = {
     tone: "unsure",
     install: false,
     primary: "Continue",
-    note: "The hooks are in place and no session has written through them yet. That is expected before your first run; if it stays quiet afterwards, Settings can repair it.",
+    note: "The hooks are installed. Start a session to verify detailed progress. Basic progress is already available.",
   },
   limited: {
     title: "Limited progress only",
@@ -97,7 +120,7 @@ export const OBSERVATION_FACE: Record<ObservationState, Face> = {
     tone: "bad",
     install: true,
     primary: "Retry",
-    note: "Your own hooks were left untouched, and handing over still works — you just will not see progress.",
+    note: "Retry to repair Anthill’s connection. Basic progress from session records and handing over remain available.",
   },
   /**
    * A tool with no hook mechanism. There is nothing to install and nothing to
@@ -142,6 +165,14 @@ export function observationState(
   // Entries written and the command will not run: Anthill's own install is
   // broken, which is a failure Anthill caused and can retry.
   if (!harness.hookInstalled) return "failed";
+  if (harness.id === "codex") {
+    switch (harness.codexHooks?.state) {
+      case "needs-trust": return "needs-trust";
+      case "disabled": return "disabled";
+      case "ready": return harness.hookLastEventAt ? "ready" : "awaiting-session";
+      default: return "check-failed";
+    }
+  }
   return harness.hookLastEventAt ? "ready" : "silent";
 }
 
@@ -191,6 +222,11 @@ export function ObservationStep({
         </p>
       </div>
 
+      {harness?.codexHooks ? <CodexHookHelp status={harness.codexHooks} /> : null}
+
+      {!face.install && harness?.hookEntriesPresent && harness.hookUsesCurrentRuntime === false ? (
+        <button type="button" disabled={busy} onClick={onInstall}>Repair connection</button>
+      ) : null}
       {busy ? <p className="hint">Writing the hook entries…</p> : null}
 
       {/* There are no hook entries to show for a passive tool, so the whole

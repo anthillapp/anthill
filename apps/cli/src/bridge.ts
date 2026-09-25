@@ -1,3 +1,4 @@
+import { observationRuntime } from "./observation-runtime.js";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { basename, dirname, join, resolve } from "node:path";
@@ -51,6 +52,7 @@ import {
 } from "../../desktop/src/main/save-destination.js";
 import { AgentLibraryStore } from "../../desktop/src/main/agent-library.js";
 import { LiveSessionService } from "../../desktop/src/main/live/service.js";
+import { SettingsStore } from "../../desktop/src/main/settings.js";
 import { ObservationSetupService } from "../../desktop/src/main/live/setup.js";
 import { PendingRunStore } from "../../desktop/src/main/live/store.js";
 import {
@@ -181,6 +183,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   let live: LiveSessionService | undefined;
   let liveSetup: ObservationSetupService | undefined;
   let agents: AgentLibraryStore | undefined;
+  const settings = new SettingsStore(join(paths.userData, "settings.json"));
 
   function liveService(): LiveSessionService {
     live ??= new LiveSessionService(
@@ -202,13 +205,8 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
 
   function liveSetupService(): ObservationSetupService {
     liveSetup ??= new ObservationSetupService({
-      prefsPath: join(paths.userData, "live-observation-setup.json"),
-      // The hook handler is bundled with the CLI's main-process output: it is
-      // a runtime script path, not an import, so the CLI compiles it (it is
-      // in the CLI tsconfig's include) and points the marker at the compiled
-      // module. If it is absent, `ObservationSetupService` reports "not found"
-      // rather than failing the boot.
-      hookHandlerPath: join(moduleDir, "../../desktop/src/main/live/hook-handler.js"),
+      legacyPrefsPaths: [join(paths.userData, "live-observation-setup.json")],
+      ...observationRuntime(),
     });
     return liveSetup;
   }
@@ -538,10 +536,15 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     liveService().events(String(args[0])),
   );
 
-  register(IpcChannel.liveSetupStatus, async () => liveSetupService().status());
+  register(IpcChannel.settingsRead, async () => settings.read());
+  register(IpcChannel.settingsWrite, async (args) => settings.write(args[0] ?? {}));
+  register(IpcChannel.notificationsProbe, async () => ({ kind: "unsupported", reason: "Native notifications are available in the desktop app." }));
+
+  register(IpcChannel.liveSetupStatus, async (args) => liveSetupService().status(args[0] as string | undefined, args[1] === true));
+  register(IpcChannel.liveSetupDecline, async (args) => liveSetupService().decline(args[0] as MarkerCli));
   register(IpcChannel.liveSetupDismiss, async () => liveSetupService().dismiss());
   register(IpcChannel.liveSetupInstall, async (args) =>
-    liveSetupService().install(args[0] as MarkerCli),
+    liveSetupService().install(args[0] as MarkerCli, args[1] as string | undefined),
   );
   register(IpcChannel.liveSetupDisable, async (args) =>
     liveSetupService().disable(args[0] as MarkerCli),
@@ -747,10 +750,14 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     onLiveEvents: (listener) => on(LIVE_EVENTS_CHANNEL, listener),
     onLiveSnapshot: (listener) => on(LIVE_SNAPSHOT_CHANNEL, listener),
     onOpenSettings: (listener) => on(OPEN_SETTINGS_CHANNEL, () => listener()),
-    liveSetupStatus: () => handle(IpcChannel.liveSetupStatus),
+    settingsRead: () => handle(IpcChannel.settingsRead),
+    settingsWrite: (patch) => handle(IpcChannel.settingsWrite, patch),
+    notificationsProbe: () => handle(IpcChannel.notificationsProbe),
+    liveSetupStatus: (cwd?: string, refreshOnly?: boolean) => handle(IpcChannel.liveSetupStatus, cwd, refreshOnly),
+    liveSetupDecline: (harness: MarkerCli) => handle(IpcChannel.liveSetupDecline, harness),
     liveSetupDismiss: () => handle(IpcChannel.liveSetupDismiss),
-    liveSetupInstall: (harness: MarkerCli) =>
-      handle(IpcChannel.liveSetupInstall, harness),
+    liveSetupInstall: (harness: MarkerCli, cwd?: string) =>
+      handle(IpcChannel.liveSetupInstall, harness, cwd),
     liveSetupDisable: (harness: MarkerCli) =>
       handle(IpcChannel.liveSetupDisable, harness),
   } as AnthillApi;

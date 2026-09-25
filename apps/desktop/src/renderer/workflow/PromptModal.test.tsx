@@ -100,6 +100,7 @@ function stub(
     codexModels: vi.fn(async () => ({ models: [], agentSupport })),
     capabilities: vi.fn(async (): Promise<IpcCapabilities> => ({ contract: 12, channels: [] })),
     liveSetupStatus: vi.fn(async () => ({ dismissed: true, trigger: "", harnesses: [setup] })),
+    liveSetupDecline: vi.fn(async () => {}),
     liveSetupInstall: vi.fn(async () => ({
       ok: true as const,
       message: "installed",
@@ -547,9 +548,9 @@ describe("enabling live observation", () => {
   it("offers to install when nothing is set up", async () => {
     const { api } = stub(notInstalled());
     open();
-    const enable = await screen.findAllByRole("button", { name: "Enable Live Observation" });
+    const enable = await screen.findAllByRole("button", { name: "Connect detailed progress" });
     fireEvent.click(enable[enable.length - 1]);
-    await waitFor(() => expect(api.liveSetupInstall).toHaveBeenCalledWith("claude-code"));
+    await waitFor(() => expect(api.liveSetupInstall).toHaveBeenCalledWith("claude-code", CHOSEN));
   });
 
   it("never installs anything by being opened", async () => {
@@ -596,7 +597,7 @@ describe("enabling live observation", () => {
     stub(notInstalled());
     open();
     await screen.findByRole("heading", { name: "Enable Live Observation" });
-    fireEvent.click(screen.getByRole("button", { name: "Continue without live progress" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue with basic progress" }));
     await screen.findByRole("heading", { name: /^Hand over to/ });
   });
 
@@ -744,3 +745,69 @@ describe("selecting the report channel", () => {
   });
 });
 
+
+
+describe("Codex detailed progress onboarding", () => {
+  const codex = (state: "needs-trust" | "ready" | "disabled" | "unknown", delivered = false) => harness({
+    id: "codex", label: "Codex CLI", cliCommand: "codex",
+    hookLastEventAt: delivered ? "2026-09-24T17:00:00Z" : undefined,
+    codexHooks: { state, message: state === "needs-trust" ? "Review Anthill in /hooks." : "Codex checked." },
+  });
+  const view = () => ({ ...withRoot(CHOSEN), target: "codex" as const });
+
+  it("continues with basic progress even when saving the opt-out fails", async () => {
+    const { api } = stub({ ...codex("needs-trust"), hookEntriesPresent: false, hookInstalled: false });
+    api.liveSetupDecline.mockRejectedValue(new Error("permission denied"));
+    open(view());
+    await screen.findByText("Connect detailed progress?");
+    fireEvent.click(screen.getByRole("button", { name: "Continue with basic progress" }));
+    await screen.findByRole("heading", { name: /^Hand over to/ });
+    expect(screen.getByText(/Could not save your preference/)).toBeTruthy();
+    expect(api.liveSetupDecline).toHaveBeenCalledWith("codex");
+  });
+  it("honours a shared opt-out but allows explicit setup review", async () => {
+    stub({ ...codex("needs-trust"), observationDeclined: true });
+    open(view());
+    await screen.findByRole("heading", { name: /^Hand over to/ });
+    expect(screen.queryByText("Allow detailed progress in Codex")).toBeNull();
+    fireEvent.click(screen.getAllByRole("button", { name: "Change…" }).find((button) => button.classList.contains("state-chip"))!);
+    await screen.findByText("Allow detailed progress in Codex");
+  });
+  it("updates from permission required to ready automatically after returning from Codex", async () => {
+    const { api, copied } = stub(codex("needs-trust"));
+    open(view());
+    await screen.findByText("Allow detailed progress in Codex");
+    expect(api.liveSetupStatus).toHaveBeenCalledWith(CHOSEN, false);
+    fireEvent.click(screen.getByRole("button", { name: "Copy /hooks" }));
+    await screen.findByRole("button", { name: "Copied /hooks" });
+    expect(copied).toEqual(["/hooks"]);
+    api.liveSetupStatus.mockResolvedValue({ dismissed: true, trigger: "", harnesses: [codex("ready")] });
+    fireEvent(window, new Event("focus"));
+    await screen.findByText("Ready for detailed progress");
+    expect(api.liveSetupInstall).not.toHaveBeenCalled();
+    expect(screen.queryByText("Live Observation is ready")).toBeNull();
+    api.liveSetupStatus.mockResolvedValue({ dismissed: true, trigger: "", harnesses: [codex("ready", true)] });
+    fireEvent(window, new Event("focus"));
+    await screen.findByText("Live Observation is ready");
+  });
+
+  it("keeps observing session records while trust is pending", async () => {
+    const { api, listeners, requests } = stub(codex("needs-trust"));
+    const onClose = vi.fn();
+    open(view(), vi.fn(), onClose);
+    fireEvent.click(await screen.findByRole("button", { name: "Continue with basic progress" }));
+    expect(screen.getByText("Basic progress on")).toBeTruthy();
+    fireEvent.click(await copyButton());
+    await waitFor(() => expect(requests).toHaveLength(1));
+    const runId = requests[0].anthillRunId;
+    act(() => listeners.forEach((push) => push({ runs: [{ anthillRunId: runId, state: "detected_live" }], capabilities: [] })));
+    expect(onClose).toHaveBeenCalled();
+    expect(api.liveSetupInstall).not.toHaveBeenCalled();
+  });
+
+  it.each(["needs-trust", "disabled", "unknown"] as const)("does not let old events hide a current %s state", async (state) => {
+    stub(codex(state, true)); open(view());
+    await screen.findByRole("button", { name: "Continue with basic progress" });
+    expect(screen.queryByText("Live Observation is ready")).toBeNull();
+  });
+});

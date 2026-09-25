@@ -13,6 +13,7 @@ Use the Anthill `exchange` MCP tools. Their visible names are host-namespaced;
 identify them by these exact suffixes:
 
 - `create_workflow_draft`
+- `open_workflow`
 - `revise_workflow`
 - `get_workflow`
 - `get_ready_revision`
@@ -38,6 +39,58 @@ is present, use `design`; it preserves the user's chance to edit before work.
 
 The mode changes the handover UX, not Anthill's authority. It never causes
 Anthill to execute anything.
+
+## Detailed progress: settle it before Anthill opens
+
+Anthill always shows basic progress from Codex's own session records. Anthill's
+hooks add the agent's actions and detailed progress. Settle them once per task,
+**after** the workflow is stored and **before** it is opened — see "Submit
+exactly once": store with `open: false`, do this, then call `open_workflow`.
+
+Run `anthill observation status` from the project directory. It only reads; it
+never installs hooks or changes Codex permissions. If the command is missing or
+fails, continue with basic progress and do not invent a setup command.
+
+If the result says `requiresHostAccess: true` (even with exit code zero), or the
+command reports a local filesystem permission failure, request host approval for
+that exact `anthill observation` command and retry once. Do not change sandbox
+configuration or broaden future permissions. If approval is unavailable, say so
+and continue with basic progress.
+
+Then act on `ask`, and on nothing else:
+
+- **`null`** — nothing to ask. The hooks are installed, enabled and approved, or
+  already working in this session (`confirmedInSession: true`). Continue.
+- **`"connect"`** — the hooks are missing or need reconnecting. Explain in one or
+  two sentences that they let Anthill show the agent's actions and detailed
+  progress, and that basic progress works without them. Offer **Connect** and
+  **Continue with basic progress**, in the user's language. Wait for the answer;
+  silence is not consent. On Connect, run `anthill observation enable` and act on
+  its `ask` the same way. On Continue, run `anthill observation skip`.
+- **`"trust"`** — Codex holds the hooks but has not approved them. Ask the user to
+  type `/hooks` in Codex, choose **Review hooks**, and allow only the entries
+  containing `anthill-observation-hook`. Never suggest **Trust all**: it would
+  also approve every other tool's hooks in that list. Never grant trust
+  yourself or work around the check. When the user says they are done, run
+  `anthill observation status` again and act on the new result. If they would
+  rather not, run `anthill observation skip` and continue.
+- **`"hint"`** — Anthill could not confirm the hooks' state. Do not call them
+  unapproved. Relay the `message` in plain words and continue with basic
+  progress.
+
+Relay `message` rather than composing your own claim about the hooks. Only
+`confirmedInSession: true` means detailed progress is already flowing in this
+session; approved hooks that have not fired here yet may start only in a new
+Codex session. Either way, continue this task — never ask the user to abandon it.
+
+Do not ask again in the same task once `ask` is `null` or the user chose basic
+progress. Anthill asks again on its own when the hooks change, are switched off,
+or lose their approval.
+
+Permanent hooks use the installed Anthill app's bundled runtime. If Anthill
+cannot find it, relay the installation message; do not write hooks that depend
+on nvm, the repository build output, or a guessed executable. Detailed progress
+never replaces the bound workflow's `anthill run/step/done` reports.
 
 ## Establish the Codex task identity
 
@@ -103,7 +156,7 @@ not create Codex agents.
 
 ## Submit exactly once, retry idempotently
 
-Call `create_workflow_draft` with:
+Call `create_workflow_draft` with `open: false` and:
 
 - one stable `idempotencyKey` for this handover;
 - `mode: "design"` or `mode: "watch"`;
@@ -118,18 +171,19 @@ intentional new handover. Never change the workflow id to bypass a refusal.
 
 Handle the returned outcome literally:
 
-- `created`: stored and queued for Anthill to open;
+- `created`: stored, not opened yet;
 - `already_exists`: the identical handover already exists;
 - `incomplete`: ask the returned questions or use an answer the user already
   gave, then retry the corrected document under the same identity;
 - `invalid`: correct the reported call/document problems.
 
-Give the user the returned `anthill://workflow/<id>` link. Anthill is also
-brought up for it: a closed app is launched, a running one comes to the front.
-The result's `app` field says what happened — `opened`, or one of `no_handler`,
-`failed`, `unsupported`, `disabled` with a message to pass on. A queued request
-still does not prove that the desktop app opened the workflow, so say it was
-handed over and Anthill asked to show it.
+Once the workflow is stored, settle detailed progress (the section above), then
+call `open_workflow` with the workflow id. That brings Anthill up for it: a
+closed app is launched, a running one comes to the front. Its `app` field says
+what happened — `opened`, or one of `no_handler`, `failed`, `unsupported`,
+`disabled` with a message to pass on. Give the user the `anthill://workflow/<id>`
+link. A queued request still does not prove that the desktop app opened the
+workflow, so say it was handed over and Anthill asked to show it.
 
 ## Design mode: stop for the user
 

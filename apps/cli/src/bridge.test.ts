@@ -28,6 +28,13 @@ async function fixture() {
 }
 
 describe("privileged CLI bridge boundaries", () => {
+  it("opens the shared Settings screen and persists its preferences", async () => {
+    const { bridge } = await fixture();
+    expect(await bridge.api.settingsRead()).toMatchObject({ stepNotifications: false });
+    await bridge.api.settingsWrite({ stepNotifications: true });
+    expect(await bridge.api.settingsRead()).toMatchObject({ stepNotifications: true });
+    expect(await bridge.api.notificationsProbe()).toMatchObject({ kind: "unsupported" });
+  });
   it("exposes history reads but not runner controls, without initializing history at startup", async () => {
     const { bridge, userData } = await fixture();
     const { channels } = await bridge.capabilities();

@@ -234,10 +234,14 @@ export function installWebBridge(): Promise<AnthillApi> {
         onChannel(LIVE_SNAPSHOT_CHANNEL, (payload) =>
           listener(payload as LiveSnapshot),
         ),
-      liveSetupStatus: () => invoke(IpcChannel.liveSetupStatus),
+      settingsRead: () => invoke(IpcChannel.settingsRead),
+      settingsWrite: (patch: unknown) => invoke(IpcChannel.settingsWrite, patch),
+      notificationsProbe: () => invoke(IpcChannel.notificationsProbe),
+      liveSetupStatus: (cwd?: string, refreshOnly?: boolean) => invoke(IpcChannel.liveSetupStatus, cwd, refreshOnly),
+      liveSetupDecline: (harness: MarkerCli) => invoke(IpcChannel.liveSetupDecline, harness),
       liveSetupDismiss: () => invoke(IpcChannel.liveSetupDismiss),
-      liveSetupInstall: (harness: MarkerCli) =>
-        invoke(IpcChannel.liveSetupInstall, harness),
+      liveSetupInstall: (harness: MarkerCli, cwd?: string) =>
+        invoke(IpcChannel.liveSetupInstall, harness, cwd),
       liveSetupDisable: (harness: MarkerCli) =>
         invoke(IpcChannel.liveSetupDisable, harness),
     } as AnthillApi;

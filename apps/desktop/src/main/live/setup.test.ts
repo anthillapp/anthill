@@ -628,3 +628,195 @@ describe("recognising a hook entry", () => {
     expect(parsed).toMatchObject({ execPath: spaced, harness: "codex", event: "Stop", runnable: true });
   });
 });
+
+
+describe("repeated observation setup", () => {
+  it("does not rewrite unchanged hooks or reset the installation date, and dismissal preserves it", async () => {
+    const p = await paths();
+    const { spawnFn } = fakeSpawn([{ stdout: "1.0" }]);
+    const service = new ObservationSetupService(p, spawnFn);
+    expect((await service.install("claude-code")).ok).toBe(true);
+    const original = await readFile(p.claudeConfigPath, "utf8");
+    const before = await stat(p.claudeConfigPath);
+    const prefs = await json(p.prefsPath);
+    const again = await service.install("claude-code");
+    expect(again.ok).toBe(true);
+    expect(again.backupPath).toBeUndefined();
+    expect(await readFile(p.claudeConfigPath, "utf8")).toBe(original);
+    expect((await stat(p.claudeConfigPath)).mtimeMs).toBe(before.mtimeMs);
+    await service.dismiss();
+    expect((await json(p.prefsPath)).harnesses).toEqual(prefs.harnesses);
+  });
+});
+
+describe("shared onboarding and light checks", () => {
+  it("shares a declined offer and migrates old installation metadata without rewriting legacy files", async () => {
+    const p = await paths();
+    const legacy = join(p.root, "old-desktop.json");
+    const old = { harnesses: { codex: { installedAt: "2026-01-01T00:00:00Z" } } };
+    await writeFile(legacy, JSON.stringify(old));
+    const spawn = fakeSpawn([{ stdout: "1.0" }]).spawnFn;
+    const desktop = new ObservationSetupService({ ...p, legacyPrefsPaths: [legacy] }, spawn);
+    const cli = new ObservationSetupService(p, spawn);
+    await desktop.dismiss(); // first write migrates metadata into the shared file
+    await cli.decline("codex");
+    expect((await desktop.status()).harnesses.find((h) => h.id === "codex")?.observationDeclined).toBe(true);
+    expect((await json(p.prefsPath)).harnesses).toMatchObject(old.harnesses);
+    expect(await json(legacy)).toEqual(old);
+  });
+  it("light checks start only app-server, not binary detection or handler probes", async () => {
+    const p = await paths();
+    const fake = fakeSpawn([{ stdout: "1.0" }]);
+    const service = new ObservationSetupService(p, fake.spawnFn);
+    await service.install("claude-code", p.root);
+    await service.install("codex", p.root);
+    fake.calls.length = 0;
+    await service.status(p.root, true);
+    expect(fake.calls.map(({ command, args }) => [command, ...args])).toEqual([["codex", "app-server"]]);
+  });
+  it("does not install against a transient runtime", async () => {
+    const p = await paths();
+    const service = new ObservationSetupService({ ...p, installProblem: "Install the desktop runtime." }, fakeSpawn([{ stdout: "1.0" }]).spawnFn);
+    expect(await service.install("codex")).toMatchObject({ ok: false, error: "Install the desktop runtime." });
+    expect(await exists(p.codexConfigPath)).toBe(false);
+  });
+});
+
+
+describe("foreign Codex runtime verification", () => {
+  it("does not call another installation ready solely because its hooks are trusted", async () => {
+    const p = await paths();
+    await new ObservationSetupService(p, fakeSpawn([{ stdout: "1.0" }]).spawnFn).install("codex", p.root);
+    const config = await json(p.codexConfigPath) as any;
+    const hooks = Object.entries(config.hooks).flatMap(([event, entries]: [string, any]) => entries.flatMap((entry: any) => entry.hooks.map((hook: any) => ({
+      command: hook.command, sourcePath: p.codexConfigPath, eventName: event[0].toLowerCase() + event.slice(1), enabled: true, trustStatus: "trusted",
+    }))));
+    const stdout = [
+      { id: 1, result: {} },
+      { id: 2, result: { data: [{ cwd: p.root, hooks, errors: [] }] } },
+      { id: 3, result: { config: {} } },
+      { id: 4, result: { requirements: null } },
+    ].map((line) => JSON.stringify(line)).join("\n") + "\n";
+    const ownHandler = join(p.root, "other-handler.js");
+    await writeFile(ownHandler, "// anthill-observation-hook");
+    const fake = fakeSpawn([{ stdout }]);
+    const service = new ObservationSetupService({ ...p, hookHandlerPath: ownHandler }, fake.spawnFn);
+    for (const light of [false, true]) {
+      const codex = (await service.status(p.root, light)).harnesses.find((h) => h.id === "codex")!;
+      expect(codex.hookUsesCurrentRuntime).toBe(false);
+      expect(codex.codexHooks).toMatchObject({ state: "unknown", message: expect.stringContaining("has not tested") });
+    }
+    expect(fake.calls.every((call) => call.command === "codex" || call.command === "claude")).toBe(true);
+  });
+});
+
+/**
+ * ANT-138. One rule for when to ask about Anthill's hooks in Codex, for both
+ * ways a Codex workflow starts. The log is a temporary file: nothing here
+ * reads or writes the real ~/.anthill.
+ */
+describe("when to ask about Anthill's hooks", () => {
+  /** What `codex app-server` answers for the installed entries, with this trust. */
+  async function appServer(p: Awaited<ReturnType<typeof paths>>, trustStatus: string, enabled = true): Promise<string> {
+    const config = await json(p.codexConfigPath) as any;
+    const hooks = Object.entries(config.hooks).flatMap(([event, entries]: [string, any]) => entries.flatMap((entry: any) => entry.hooks.map((hook: any) => ({
+      command: hook.command, sourcePath: p.codexConfigPath, eventName: event[0].toLowerCase() + event.slice(1), enabled, trustStatus,
+    }))));
+    return [
+      { id: 1, result: {} },
+      { id: 2, result: { data: [{ cwd: p.root, hooks, errors: [] }] } },
+      { id: 3, result: { config: {} } },
+      { id: 4, result: { requirements: null } },
+    ].map((line) => JSON.stringify(line)).join("\n") + "\n";
+  }
+
+  async function installed() {
+    const p = { ...(await paths()), hookLogPath: "" };
+    p.hookLogPath = join(p.root, "events.jsonl");
+    await new ObservationSetupService(p, fakeSpawn([{ stdout: "1.0" }]).spawnFn).install("codex", p.root);
+    return p;
+  }
+
+  const codexOf = async (service: ObservationSetupService, root: string, session?: string) =>
+    (await service.status(root, false, session)).harnesses.find((h) => h.id === "codex")!;
+
+  it("asks nothing, and does not call Codex, once a hook has fired in this session", async () => {
+    const p = await installed();
+    const session = "01a0d727-ef1b-7b20-8d10-355e4a13c67e";
+    await writeFile(p.hookLogPath, JSON.stringify({ harness: "codex", eventType: "PreToolUse", recordedAt: "2026-09-25T06:00:00Z", data: { session_id: session } }) + "\n");
+    const fake = fakeSpawn([{ stdout: "1.0" }]);
+    const codex = await codexOf(new ObservationSetupService(p, fake.spawnFn), p.root, session);
+    expect(codex.codexHooks).toMatchObject({ state: "ready", confirmedInSession: true });
+    expect(codex.observationPrompt).toBeNull();
+    // The whole point in a sandbox: no app-server, which the agent cannot start.
+    expect(fake.calls.some((call) => call.args.includes("app-server"))).toBe(false);
+  });
+
+  it("does not treat a missing event as distrust: it asks Codex instead", async () => {
+    const p = await installed();
+    const codex = await codexOf(new ObservationSetupService(p, fakeSpawn([{ stdout: await appServer(p, "trusted") }]).spawnFn), p.root, "01a0d727-0000-0000-0000-000000000000");
+    expect(codex.codexHooks).toMatchObject({ state: "ready" });
+    expect(codex.codexHooks?.confirmedInSession).toBeUndefined();
+    expect(codex.observationPrompt).toBeNull();
+  });
+
+  it("asks for trust when Codex holds the hooks untrusted or switched off", async () => {
+    const p = await installed();
+    for (const [trust, enabled] of [["untrusted", true], ["modified", true], ["trusted", false]] as const) {
+      const codex = await codexOf(new ObservationSetupService(p, fakeSpawn([{ stdout: await appServer(p, trust, enabled) }]).spawnFn), p.root);
+      expect(codex.observationPrompt).toBe("trust");
+      expect(codex.codexHooks?.message).toContain("Review hooks");
+      expect(codex.codexHooks?.message).toContain("anthill-observation-hook");
+      // Trust all would also approve every other tool's hooks in the list.
+      if (enabled) expect(codex.codexHooks?.message).toContain("not Trust all");
+    }
+  });
+
+  it("gives a hint, not a verdict, when Codex could not be asked", async () => {
+    const p = await installed();
+    // The CLIs are found; only the question to Codex fails, as it does from
+    // inside Codex's sandbox.
+    const found = fakeSpawn([{ stdout: "1.0" }]).spawnFn;
+    const refused = fakeSpawn([{ stderr: "sqlite: unable to open database file", exitCode: 1 }]).spawnFn;
+    const spawnFn: SpawnFn = (command, args, options) => (args.includes("app-server") ? refused : found)(command, args, options);
+    const codex = await codexOf(new ObservationSetupService(p, spawnFn), p.root);
+    expect(codex.codexHooks?.state).toBe("unknown");
+    expect(codex.observationPrompt).toBe("hint");
+  });
+
+  it("offers to connect when nothing is installed, and remembers 'basic progress' for these commands", async () => {
+    const p = { ...(await paths()), hookLogPath: "" };
+    p.hookLogPath = join(p.root, "events.jsonl");
+    const service = new ObservationSetupService(p, fakeSpawn([{ stdout: "1.0" }]).spawnFn);
+    expect((await codexOf(service, p.root)).observationPrompt).toBe("connect");
+    await service.decline("codex");
+    const after = await codexOf(new ObservationSetupService(p, fakeSpawn([{ stdout: "1.0" }]).spawnFn), p.root);
+    expect(after.observationDeclined).toBe(true);
+    expect(after.observationPrompt).toBeNull();
+  });
+
+  it("asks again when the commands it would install change", async () => {
+    const p = { ...(await paths()), hookLogPath: "" };
+    p.hookLogPath = join(p.root, "events.jsonl");
+    await new ObservationSetupService(p, fakeSpawn([{ stdout: "1.0" }]).spawnFn).decline("codex");
+    // The same person, a different Anthill: the app moved, so the commands did.
+    const moved = join(p.root, "Moved.app", "Anthill");
+    await mkdir(join(p.root, "Moved.app"), { recursive: true });
+    await writeFile(moved, "");
+    const codex = await codexOf(new ObservationSetupService({ ...p, execPath: moved }, fakeSpawn([{ stdout: "1.0" }]).spawnFn), p.root);
+    expect(codex.observationDeclined).toBe(false);
+    expect(codex.observationPrompt).toBe("connect");
+  });
+
+  it("asks again after trust is withdrawn, even from someone who once said no", async () => {
+    const p = await installed();
+    await new ObservationSetupService(p, fakeSpawn([{ stdout: "1.0" }]).spawnFn).decline("codex");
+    // They trusted the hooks by hand later: the approval clears the old "no".
+    const trusted = await codexOf(new ObservationSetupService(p, fakeSpawn([{ stdout: await appServer(p, "trusted") }]).spawnFn), p.root);
+    expect(trusted.observationPrompt).toBeNull();
+    expect((await json(p.prefsPath) as any).harnesses.codex.declinedFor).toBeNull();
+    // Then withdrew it: asked again rather than held to the old decline.
+    const withdrawn = await codexOf(new ObservationSetupService(p, fakeSpawn([{ stdout: await appServer(p, "untrusted") }]).spawnFn), p.root);
+    expect(withdrawn.observationPrompt).toBe("trust");
+  });
+});

@@ -82,6 +82,31 @@ The source session id comes from `CODEX_SESSION_ID`, which Codex records as
 `session_id` in its local rollout metadata. The skill never invents or borrows
 an id. The workflow target and source harness are both `codex`.
 
+## Detailed progress
+
+Anthill always shows basic progress from Codex's own session records. Its hooks
+add the agent's actions and detailed progress. The skill settles them after the
+workflow is stored and before Anthill opens it (`create_workflow_draft` with
+`open: false`, then `open_workflow`), with `anthill observation status`:
+
+- nothing is asked when Codex has the hooks installed, enabled and approved, or
+  when one of them has already fired in this session;
+- when they are missing, the user is offered **Connect** or **Continue with basic
+  progress**; Connect runs `anthill observation enable`, the other
+  `anthill observation skip`, which is remembered until Anthill's hooks change;
+- when Codex has not approved them, the user types `/hooks`, chooses **Review
+  hooks**, and allows only the entries containing `anthill-observation-hook` —
+  never **Trust all**, which would approve every other tool's hooks too. Codex
+  also shows **Hooks need review** by itself when a session starts with
+  unapproved hooks;
+- when the state cannot be confirmed — from inside Codex's sandbox, for
+  instance — it is not treated as unapproved: the skill asks for one-time host
+  access for that exact command, or carries on with basic progress.
+
+Installing never grants trust, and nothing in Anthill grants it for the user.
+
+Rebuild/update the Anthill CLI as well as refreshing the plugin to get this flow.
+
 ## Update, disable, and uninstall
 
 After pulling changes from this local checkout, reinstall so Codex copies a
@@ -142,3 +167,13 @@ runner or a second progress transport, and it never collects private reasoning.
 
 The manual flow, where a user copies a prompt from Anthill into Codex, remains
 available and unchanged.
+
+Detailed-progress hooks installed by the CLI currently require the macOS app in
+`/Applications/Anthill.app` or `~/Applications/Anthill.app`. The command uses its
+bundled runtime and handler, not the Node running the CLI. Basic progress remains
+available on other platforms. A CLI status result with `requiresHostAccess: true`
+needs approval for that exact command outside the agent sandbox; it does not mean
+Codex hook trust was granted. Preferences are shared in
+`~/.anthill/live-observation-setup.json`; older shell preferences are read during
+migration. The app checks pending trust at 15–60 second intervals and on focus;
+after readiness, only focus/reopening triggers a permission check.

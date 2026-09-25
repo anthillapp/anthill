@@ -9,12 +9,15 @@
 import { copyFile, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
+import { readCodexHookStatus } from "./codex-hook-status.js";
+import { hookFingerprint, hookPrompt, isDeclined } from "./hook-prompt.js";
 
 import { detectBinary, runProcess, type SpawnFn } from "@anthill/runtimes";
 import type { MarkerCli } from "@anthill/live";
 
 import type {
+  CodexHookStatus,
   ObservationHarnessSetup,
   ObservationSetupActionResult,
   ObservationSetupStatus,
@@ -50,7 +53,7 @@ const HARNESS = {
   codex: {
     label: "Codex CLI",
     cliCommand: "codex",
-    configFile: () => join(homedir(), ".codex", "hooks.json"),
+    configFile: () => join(process.env.CODEX_HOME || join(homedir(), ".codex"), "hooks.json"),
     events: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"],
     matcherEvents: new Set<string>(),
     boundary:
@@ -73,11 +76,15 @@ type HarnessDefinition = (typeof HARNESS)[HookHarness];
 
 type SetupPrefs = {
   dismissed?: boolean;
-  harnesses?: Partial<Record<MarkerCli, { installedAt?: string; disabledAt?: string }>>;
+  harnesses?: Partial<Record<MarkerCli, { installedAt?: string; disabledAt?: string; declinedAt?: string | null; declinedFor?: string | null }>>;
 };
 
 export type ObservationSetupPaths = {
   prefsPath?: string;
+  /** Read old per-shell preferences; all new writes go to the shared prefsPath. */
+  legacyPrefsPaths?: string[];
+  /** Prevent installing hooks against a transient development runtime. */
+  installProblem?: string;
   /** The machine-wide hook log, so the card can say whether anything arrived. */
   hookLogPath?: string;
   claudeConfigPath?: string;
@@ -95,30 +102,150 @@ export type ObservationSetupPaths = {
   execPath?: string;
 };
 
+/** A session id as the harnesses mint them; anything else is not looked up. */
+const SESSION_ID = /^[0-9a-fA-F-]{8,64}$/;
+
 export class ObservationSetupService {
+  private snapshots = new Map<string, ObservationSetupStatus>();
+  private configSnapshots = new Map<string, string>();
+  private statusRequests = new Map<string, Promise<ObservationSetupStatus>>();
   constructor(
     private readonly paths: ObservationSetupPaths,
     private readonly spawnFn?: SpawnFn,
   ) {}
 
-  async status(): Promise<ObservationSetupStatus> {
+  /**
+   * @param sessionId The Codex session asking, when it is one (the plugin
+   *   passes `CODEX_SESSION_ID`). A hook of Anthill's that has already fired in
+   *   that session answers the question outright, with no call into Codex.
+   */
+  status(cwd?: string, refreshOnly = false, sessionId?: string): Promise<ObservationSetupStatus> {
+    const directory = typeof cwd === "string" && isAbsolute(cwd) ? cwd : homedir();
+    const session = sessionId && SESSION_ID.test(sessionId) ? sessionId : undefined;
+    const key = `${directory}\u0000${session ?? ""}`;
+    const pending = this.statusRequests.get(key);
+    if (pending) return pending;
+    const request = (refreshOnly && this.snapshots.has(directory)
+      ? this.refreshStatus(directory, session) : this.readStatus(directory, session))
+      .then((status) => { this.snapshots.set(directory, status); return status; })
+      .finally(() => this.statusRequests.delete(key));
+    this.statusRequests.set(key, request);
+    return request;
+  }
+
+  private async readStatus(cwd: string, sessionId?: string): Promise<ObservationSetupStatus> {
     const prefs = await this.readPrefs();
     return {
       dismissed: prefs.dismissed === true,
-      trigger: "Shown after the first meaningful Workflow edit: a workflow is open and the edit makes it unsaved.",
+      trigger: "Offer optional detailed progress when handing a workflow to the user's CLI.",
       harnesses: await Promise.all(
-        (Object.keys(HARNESS) as HookHarness[]).map((id) => this.describeHarness(id, prefs)),
+        (Object.keys(HARNESS) as HookHarness[]).map((id) => this.describeHarness(id, prefs, cwd, sessionId)),
       ),
     };
   }
 
+  /** Refresh permissions and receipts only; no CLI detection or handler execution. */
+  private async refreshStatus(cwd: string, sessionId?: string): Promise<ObservationSetupStatus> {
+    const previous = this.snapshots.get(cwd)!;
+    const prefs = await this.readPrefs();
+    const harnesses = await Promise.all(previous.harnesses.map(async (harness) => {
+      if (!isHookHarnessId(harness.id)) return harness;
+      const id = harness.id;
+      const config = await this.readJsonObject(this.configPath(id)).catch(() => ({}));
+      // Recheck the install only when its configuration actually changes.
+      if (JSON.stringify(config) !== this.configSnapshots.get(`${cwd}:${id}`)) {
+        return this.describeHarness(id, prefs, cwd, sessionId);
+      }
+      const missingRuntime = anthillCommands(config, HARNESS[id]).some(({ command }) => {
+        const parsed = parseHookCommand(command);
+        return parsed && (!existsSync(parsed.execPath) || !handlerPresent(parsed.handlerPath));
+      });
+      let codexHooks = id === "codex" && harness.cliAvailable && harness.hookEntriesPresent
+        ? await readCodexHookStatus({ commands: anthillCommands(config, HARNESS[id]), configPath: this.configPath(id), cwd, spawnFn: this.spawnFn })
+        : harness.codexHooks;
+      if (codexHooks?.state === "ready" && harness.hookUsesCurrentRuntime === false) {
+        codexHooks = { state: "unknown", message: "Codex trusts these hooks, but they use another Anthill runtime that this installation has not tested. Repair the connection to use this Anthill’s bundled handler." };
+      }
+      const refreshed: ObservationHarnessSetup = { ...harness, codexHooks,
+        ...(missingRuntime ? { hookInstalled: false, hookProblem: "The configured Anthill runtime is missing. Repair the connection." } : {}),
+        hookLastEventAt: harness.hookEntriesPresent ? await this.lastHookEvent(id) : undefined };
+      return this.withPrompt(id, refreshed, prefs);
+    }));
+    return { ...previous, dismissed: prefs.dismissed === true, harnesses };
+  }
+
   async dismiss(): Promise<ObservationSetupStatus> {
-    await this.writePrefs({ dismissed: true });
+    await this.updatePrefs((prefs) => ({ ...prefs, dismissed: true }));
     return this.status();
   }
 
-  async install(harness: MarkerCli): Promise<ObservationSetupActionResult> {
-    return this.modify(harness, "install");
+  /**
+   * "Continue with basic progress", remembered against the exact commands this
+   * Anthill would install — so it is asked again only when those change, or
+   * after an approval that the person later withdrew (ANT-138).
+   */
+  async decline(harness: MarkerCli): Promise<void> {
+    if (!isHookHarnessId(harness)) throw new Error("Unsupported observation harness.");
+    const declinedFor = hookFingerprint(this.expectedCommands(harness));
+    await this.updatePrefs((prefs) => ({ ...prefs, harnesses: {
+      ...prefs.harnesses, [harness]: { ...prefs.harnesses?.[harness], declinedAt: new Date().toISOString(), declinedFor },
+    } }));
+  }
+
+  /** The commands this Anthill writes for a harness: what a decline or an approval is about. */
+  private expectedCommands(id: HookHarness): { command: string; event: string }[] {
+    return HARNESS[id].events.map((event) => ({ event, command: commandFor(id, event, this.hookHandlerPath(), this.execPath()) }));
+  }
+
+  /**
+   * What to ask about this harness now, worked out once for every path that
+   * describes it — a full read and a light refresh alike.
+   *
+   * An approval seen after a decline clears the decline, best effort: whoever
+   * trusted the hooks by hand has changed their mind, and if they later revoke
+   * that trust they should be asked again rather than held to an old "no".
+   */
+  private async withPrompt(id: HookHarness, harness: ObservationHarnessSetup, prefs: SetupPrefs): Promise<ObservationHarnessSetup> {
+    const fingerprint = hookFingerprint(this.expectedCommands(id));
+    let declined = isDeclined(prefs.harnesses?.[id], fingerprint);
+    if (declined && harness.codexHooks?.state === "ready") {
+      declined = false;
+      // A sandboxed agent may not write here; the next unsandboxed read will.
+      await this.updatePrefs((current) => ({ ...current, harnesses: {
+        ...current.harnesses, [id]: { ...current.harnesses?.[id], declinedAt: null, declinedFor: null },
+      } })).catch(() => undefined);
+    }
+    const observationPrompt = hookPrompt({
+      cliAvailable: harness.cliAvailable,
+      installProblem: harness.hookInstallProblem,
+      entriesPresent: harness.hookEntriesPresent,
+      installed: harness.hookInstalled,
+      usesCurrentRuntime: harness.hookUsesCurrentRuntime !== false,
+      codexState: id === "codex" ? harness.codexHooks?.state : "ready",
+      confirmedInSession: harness.codexHooks?.confirmedInSession,
+      declined,
+    });
+    return { ...harness, observationDeclined: declined, observationPrompt };
+  }
+
+  /**
+   * Whether a hook of Anthill's has fired in this Codex session.
+   *
+   * Read from the log the hooks themselves write, which a sandboxed agent can
+   * read. Absence proves nothing — the session may predate the install, or
+   * simply not have reached a hook yet — so it is only ever used to skip a
+   * question, never to raise one.
+   */
+  private async firedInSession(sessionId: string): Promise<boolean> {
+    const marker = `"session_id":"${sessionId}"`;
+    return Boolean(
+      await this.searchTail(marker, 8 * 1024 * 1024) ??
+      await this.searchTail(marker, 8 * 1024 * 1024, `${this.hookLogPath()}.1`),
+    );
+  }
+
+  async install(harness: MarkerCli, cwd?: string): Promise<ObservationSetupActionResult> {
+    return this.modify(harness, "install", cwd);
   }
 
   async disable(harness: MarkerCli): Promise<ObservationSetupActionResult> {
@@ -128,6 +255,7 @@ export class ObservationSetupService {
   private async modify(
     harness: MarkerCli,
     action: "install" | "disable",
+    cwd?: string,
   ): Promise<ObservationSetupActionResult> {
     try {
       if (!isHookHarnessId(harness)) {
@@ -137,10 +265,11 @@ export class ObservationSetupService {
           error: `Unsupported observation harness: ${String(harness)}.`,
         };
       }
+      if (action === "install" && this.paths.installProblem) throw new Error(this.paths.installProblem);
       const def = HARNESS[harness];
       const configPath = this.configPath(harness);
       const hookHandlerPath = this.hookHandlerPath();
-      if (action === "install" && !existsSync(hookHandlerPath)) {
+      if (action === "install" && !handlerPresent(hookHandlerPath)) {
         return {
           ok: false,
           status: await this.status(),
@@ -149,16 +278,24 @@ export class ObservationSetupService {
       }
 
       const before = await this.readJsonObject(configPath);
-      const backupPath = await this.backup(configPath);
       const after =
         action === "install"
           ? withAnthillHooks(before, def, harness, hookHandlerPath, this.execPath())
           : withoutAnthillHooks(before, def);
-      await mkdir(dirname(configPath), { recursive: true });
-      await writeFile(configPath, `${JSON.stringify(after, null, 2)}\n`, "utf8");
-
-      await this.recordHarnessAction(harness, action);
-      const status = await this.status();
+      const changed = JSON.stringify(before) !== JSON.stringify(after);
+      const backupPath = changed ? await this.backup(configPath) : undefined;
+      if (changed) {
+        await mkdir(dirname(configPath), { recursive: true });
+        await writeFile(configPath, `${JSON.stringify(after, null, 2)}\n`, "utf8");
+        await this.recordHarnessAction(harness, action);
+      }
+      if (action === "install" && !changed) {
+        await this.updatePrefs((prefs) => ({ ...prefs, harnesses: { ...prefs.harnesses,
+          [harness]: { ...prefs.harnesses?.[harness], declinedAt: null, declinedFor: null } } }));
+      }
+      // A read started before the write must not become the install receipt.
+      await Promise.allSettled([...this.statusRequests.values()]);
+      const status = await this.status(cwd);
       const installed = status.harnesses.find((item) => item.id === harness)?.hookInstalled;
       if (action === "install" && !installed) {
         return {
@@ -174,7 +311,7 @@ export class ObservationSetupService {
         backupPath,
         message:
           action === "install"
-            ? `${def.label} observation hooks are enabled. This affects Anthill observation only.`
+            ? `${def.label} observation hooks are installed. ${status.harnesses.find((item) => item.id === harness)?.codexHooks?.message ?? "Start a session to receive detailed progress."}`
             : `${def.label} observation hooks are disabled. The CLI itself is unchanged.`,
       };
     } catch (error) {
@@ -186,7 +323,7 @@ export class ObservationSetupService {
     }
   }
 
-  private async describeHarness(id: HookHarness, prefs?: SetupPrefs): Promise<ObservationHarnessSetup> {
+  private async describeHarness(id: HookHarness, prefs: SetupPrefs, cwd: string, sessionId?: string): Promise<ObservationHarnessSetup> {
     const def = HARNESS[id];
     const installedAt = prefs?.harnesses?.[id]?.installedAt;
     const detection = await detectBinary({
@@ -197,7 +334,8 @@ export class ObservationSetupService {
     const configPath = this.configPath(id);
     const config = await this.readJsonObject(configPath).catch(() => ({}));
     const hookHandlerPath = this.hookHandlerPath();
-    const entriesPresent = hasEveryAnthillHook(config, def) && existsSync(hookHandlerPath);
+    this.configSnapshots.set(`${cwd}:${id}`, JSON.stringify(config));
+    const entriesPresent = hasEveryAnthillHook(config, def);
     // Only worth probing when there is something to probe: a run costs a
     // process, and "not installed" is already the honest answer.
     const commands = anthillCommands(config, def);
@@ -205,7 +343,21 @@ export class ObservationSetupService {
     // Asked only when there is an install to describe: a harness with no
     // entries has nothing to have fired.
     const lastEventAt = entriesPresent ? await this.lastHookEvent(id) : undefined;
-    return {
+    const usesCurrentRuntime = entriesPresent && commands.every(({ command }) => this.ownHook(command, id));
+    // A hook of Anthill's that has fired in this very session is the answer:
+    // Codex ran it, so it is installed, enabled and trusted, here. No call into
+    // Codex is needed — which matters, because a sandboxed agent cannot make one.
+    const confirmed = id === "codex" && sessionId !== undefined && usesCurrentRuntime && problem === undefined &&
+      await this.firedInSession(sessionId);
+    let codexHooks: CodexHookStatus | undefined = confirmed
+      ? { state: "ready", confirmedInSession: true, message: "Anthill’s hooks are already working in this Codex session." }
+      : id === "codex" && detection.available && entriesPresent
+        ? await readCodexHookStatus({ commands, configPath, cwd, spawnFn: this.spawnFn })
+        : undefined;
+    if (codexHooks?.state === "ready" && commands.some(({ command }) => !this.ownHook(command, id))) {
+      codexHooks = { state: "unknown", message: "Codex trusts these hooks, but they use another Anthill runtime that this installation has not tested. Repair the connection to use this Anthill’s bundled handler." };
+    }
+    return this.withPrompt(id, {
       id,
       label: def.label,
       cliCommand: def.cliCommand,
@@ -213,7 +365,10 @@ export class ObservationSetupService {
       ...(detection.version ? { version: trimVersion(detection.version) } : {}),
       ...(detection.available ? {} : { reason: detection.reason }),
       hookInstalled: entriesPresent && problem === undefined,
+      hookUsesCurrentRuntime: usesCurrentRuntime,
+      hookInstallProblem: this.paths.installProblem,
       hookEntriesPresent: entriesPresent,
+      ...(codexHooks ? { codexHooks } : {}),
       ...(problem ? { hookProblem: problem } : {}),
       ...(lastEventAt ? { hookLastEventAt: lastEventAt } : {}),
       ...(installedAt && entriesPresent ? { hookInstalledAt: installedAt } : {}),
@@ -233,7 +388,7 @@ export class ObservationSetupService {
         `Reference ${hookHandlerPath} from each Anthill hook entry.`,
         "Record hook payloads locally for observation; do not start, attach to, stop, or steer any session.",
       ],
-    };
+    }, prefs);
   }
 
   private configPath(harness: HookHarness): string {
@@ -445,14 +600,24 @@ export class ObservationSetupService {
   }
 
   private async readPrefs(): Promise<SetupPrefs> {
-    const text = await readFile(this.prefsPath(), "utf8").catch(() => "");
-    if (!text) return {};
-    try {
-      const parsed = JSON.parse(text) as SetupPrefs;
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
+    let merged: SetupPrefs = {};
+    const legacy = this.paths.prefsPath ? [] : [
+      join(homedir(), "Library/Application Support/@anthill/desktop/live-observation-setup.json"),
+      join(homedir(), ".config/@anthill/desktop/live-observation-setup.json"),
+      join(homedir(), ".anthill/cli/live-observation-setup.json"),
+    ];
+    for (const path of [...legacy, ...(this.paths.legacyPrefsPaths ?? []), this.prefsPath()]) {
+      let prefs: SetupPrefs;
+      try { prefs = JSON.parse(await readFile(path, "utf8")); }
+      catch { continue; }
+      if (!prefs || typeof prefs !== "object" || Array.isArray(prefs)) continue;
+      const harnesses = { ...merged.harnesses };
+      for (const id of Object.keys(HARNESS) as HookHarness[]) {
+        if (prefs.harnesses?.[id]) harnesses[id] = { ...harnesses[id], ...prefs.harnesses[id] };
+      }
+      merged = { ...merged, ...prefs, harnesses };
     }
+    return merged;
   }
 
   private async writePrefs(prefs: SetupPrefs): Promise<void> {
@@ -474,7 +639,7 @@ export class ObservationSetupService {
         ...(prefs.harnesses ?? {}),
         [harness]:
           action === "install"
-            ? { installedAt: now }
+            ? { installedAt: now, declinedAt: null, declinedFor: null }
             : { ...(prefs.harnesses?.[harness] ?? {}), disabledAt: now },
       },
     }));
@@ -825,4 +990,11 @@ function labelEvent(event: string): string {
 
 function isHookHarnessId(value: unknown): value is HookHarness {
   return value === "claude-code" || value === "codex";
+}
+
+/** Plain Node cannot stat members of Electron's asar; the probe verifies the member. */
+function handlerPresent(path: string): boolean {
+  if (existsSync(path)) return true;
+  const inside = path.indexOf(".asar/");
+  return inside > 0 && existsSync(path.slice(0, inside + 5));
 }

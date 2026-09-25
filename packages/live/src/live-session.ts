@@ -166,6 +166,16 @@ export function foldLiveSession(
   }
 
   let announced: string | undefined;
+  /**
+   * Whether the hook channel wrote anything for this run.
+   *
+   * The hooks are what can tell "waiting on you" from "done": they write a
+   * `notification` for a real wait and nothing for a turn that ended because
+   * the work was over. The transcript alone cannot (ANT-78).
+   */
+  const hooksCarried = events.some((event) => event.channel.endsWith(":hook"));
+  /** Whether the CLI said it was waiting for a person since the announced step began. */
+  let askedSinceEntered = false;
   let startedAt: string | undefined;
   let lastSeenAt: string | undefined;
   let unmappedCount = 0;
@@ -224,8 +234,11 @@ export function foldLiveSession(
         detours.push({ from: announced, to: mapping.blockId, at: event.at, pass });
       }
       announced = mapping.blockId;
+      askedSinceEntered = false;
       continue;
     }
+
+    if (event.kind === "notification" && announced) askedSinceEntered = true;
 
     if (yieldsToYou(event) && announced && blocks[announced]?.state === "running") {
       blocks[announced] = {
@@ -290,7 +303,23 @@ export function foldLiveSession(
     // and that record beats an inference drawn from the same silence: the step
     // stays amber rather than being declared finished at the point where
     // somebody is still needed.
-    if (open && run.state === "completed" && blocks[announced].state !== "needsYou") {
+    //
+    // Unless the hooks were carrying the run and the only thing that put the
+    // step there was the turn ending (ANT-78). With hooks, a real wait writes
+    // a `notification` — a permission prompt, the CLI's own "waiting for your
+    // input" — and none came since this step began. The last step of every
+    // finished workflow ends with a turn ending and has no later marker to
+    // move it on, so without this no finished run could ever go green. With
+    // no hooks the two cases are indistinguishable, and the amber stays.
+    const yieldedOnlyByTurnEnd =
+      blocks[announced].state === "needsYou" && hooksCarried && !askedSinceEntered;
+    if (
+      open &&
+      run.state === "completed" &&
+      (blocks[announced].state !== "needsYou" || yieldedOnlyByTurnEnd)
+    ) {
+      const { note: _yield, ...settled } = blocks[announced];
+      blocks[announced] = settled;
       // Nothing announced a departure, so the last thing anything was recorded
       // at is as close as the record gets to when this step stopped.
       const spent = lastSeenAt ? spentBy(blocks[announced], lastSeenAt) : blocks[announced].spentMs;

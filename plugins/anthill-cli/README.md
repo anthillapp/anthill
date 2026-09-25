@@ -82,6 +82,23 @@ The source session id comes from `CODEX_SESSION_ID`, which Codex records as
 `session_id` in its local rollout metadata. The skill never invents or borrows
 an id. The workflow target and source harness are both `codex`.
 
+## Optional detailed progress
+
+With the current Anthill CLI, the skill checks `anthill observation status` in
+the project directory and offers detailed progress when it has not been set up.
+Accepting runs `anthill observation enable`; declining runs
+`anthill observation skip` and remembers the choice. Basic session observation
+and explicit workflow reports remain available either way.
+
+Codex separately requires native hook trust. When prompted, enter `/hooks` in
+Codex and review the entries containing `anthill-observation-hook`. Installation
+does not grant that trust. Start a new session after installing or changing
+permissions; check `anthill observation status` again. `ready` confirms enabled,
+trusted hooks; a non-null `lastEventAt` confirms an actual event in the retained
+log. An old CLI without these commands falls back to basic progress.
+
+Rebuild/update the Anthill CLI as well as refreshing the plugin to get this flow.
+
 ## Update, disable, and uninstall
 
 After pulling changes from this local checkout, reinstall so Codex copies a
@@ -142,3 +159,13 @@ runner or a second progress transport, and it never collects private reasoning.
 
 The manual flow, where a user copies a prompt from Anthill into Codex, remains
 available and unchanged.
+
+Detailed-progress hooks installed by the CLI currently require the macOS app in
+`/Applications/Anthill.app` or `~/Applications/Anthill.app`. The command uses its
+bundled runtime and handler, not the Node running the CLI. Basic progress remains
+available on other platforms. A CLI status result with `requiresHostAccess: true`
+needs approval for that exact command outside the agent sandbox; it does not mean
+Codex hook trust was granted. Preferences are shared in
+`~/.anthill/live-observation-setup.json`; older shell preferences are read during
+migration. The app checks pending trust at 15–60 second intervals and on focus;
+after readiness, only focus/reopening triggers a permission check.

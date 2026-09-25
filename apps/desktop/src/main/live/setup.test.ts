@@ -628,3 +628,84 @@ describe("recognising a hook entry", () => {
     expect(parsed).toMatchObject({ execPath: spaced, harness: "codex", event: "Stop", runnable: true });
   });
 });
+
+
+describe("repeated observation setup", () => {
+  it("does not rewrite unchanged hooks or reset the installation date, and dismissal preserves it", async () => {
+    const p = await paths();
+    const { spawnFn } = fakeSpawn([{ stdout: "1.0" }]);
+    const service = new ObservationSetupService(p, spawnFn);
+    expect((await service.install("claude-code")).ok).toBe(true);
+    const original = await readFile(p.claudeConfigPath, "utf8");
+    const before = await stat(p.claudeConfigPath);
+    const prefs = await json(p.prefsPath);
+    const again = await service.install("claude-code");
+    expect(again.ok).toBe(true);
+    expect(again.backupPath).toBeUndefined();
+    expect(await readFile(p.claudeConfigPath, "utf8")).toBe(original);
+    expect((await stat(p.claudeConfigPath)).mtimeMs).toBe(before.mtimeMs);
+    await service.dismiss();
+    expect((await json(p.prefsPath)).harnesses).toEqual(prefs.harnesses);
+  });
+});
+
+describe("shared onboarding and light checks", () => {
+  it("shares a declined offer and migrates old installation metadata without rewriting legacy files", async () => {
+    const p = await paths();
+    const legacy = join(p.root, "old-desktop.json");
+    const old = { harnesses: { codex: { installedAt: "2026-01-01T00:00:00Z" } } };
+    await writeFile(legacy, JSON.stringify(old));
+    const spawn = fakeSpawn([{ stdout: "1.0" }]).spawnFn;
+    const desktop = new ObservationSetupService({ ...p, legacyPrefsPaths: [legacy] }, spawn);
+    const cli = new ObservationSetupService(p, spawn);
+    await desktop.dismiss(); // first write migrates metadata into the shared file
+    await cli.decline("codex");
+    expect((await desktop.status()).harnesses.find((h) => h.id === "codex")?.observationDeclined).toBe(true);
+    expect((await json(p.prefsPath)).harnesses).toMatchObject(old.harnesses);
+    expect(await json(legacy)).toEqual(old);
+  });
+  it("light checks start only app-server, not binary detection or handler probes", async () => {
+    const p = await paths();
+    const fake = fakeSpawn([{ stdout: "1.0" }]);
+    const service = new ObservationSetupService(p, fake.spawnFn);
+    await service.install("claude-code", p.root);
+    await service.install("codex", p.root);
+    fake.calls.length = 0;
+    await service.status(p.root, true);
+    expect(fake.calls.map(({ command, args }) => [command, ...args])).toEqual([["codex", "app-server"]]);
+  });
+  it("does not install against a transient runtime", async () => {
+    const p = await paths();
+    const service = new ObservationSetupService({ ...p, installProblem: "Install the desktop runtime." }, fakeSpawn([{ stdout: "1.0" }]).spawnFn);
+    expect(await service.install("codex")).toMatchObject({ ok: false, error: "Install the desktop runtime." });
+    expect(await exists(p.codexConfigPath)).toBe(false);
+  });
+});
+
+
+describe("foreign Codex runtime verification", () => {
+  it("does not call another installation ready solely because its hooks are trusted", async () => {
+    const p = await paths();
+    await new ObservationSetupService(p, fakeSpawn([{ stdout: "1.0" }]).spawnFn).install("codex", p.root);
+    const config = await json(p.codexConfigPath) as any;
+    const hooks = Object.entries(config.hooks).flatMap(([event, entries]: [string, any]) => entries.flatMap((entry: any) => entry.hooks.map((hook: any) => ({
+      command: hook.command, sourcePath: p.codexConfigPath, eventName: event[0].toLowerCase() + event.slice(1), enabled: true, trustStatus: "trusted",
+    }))));
+    const stdout = [
+      { id: 1, result: {} },
+      { id: 2, result: { data: [{ cwd: p.root, hooks, errors: [] }] } },
+      { id: 3, result: { config: {} } },
+      { id: 4, result: { requirements: null } },
+    ].map((line) => JSON.stringify(line)).join("\n") + "\n";
+    const ownHandler = join(p.root, "other-handler.js");
+    await writeFile(ownHandler, "// anthill-observation-hook");
+    const fake = fakeSpawn([{ stdout }]);
+    const service = new ObservationSetupService({ ...p, hookHandlerPath: ownHandler }, fake.spawnFn);
+    for (const light of [false, true]) {
+      const codex = (await service.status(p.root, light)).harnesses.find((h) => h.id === "codex")!;
+      expect(codex.hookUsesCurrentRuntime).toBe(false);
+      expect(codex.codexHooks).toMatchObject({ state: "unknown", message: expect.stringContaining("has not tested") });
+    }
+    expect(fake.calls.every((call) => call.command === "codex" || call.command === "claude")).toBe(true);
+  });
+});

@@ -10,6 +10,7 @@ import type { Paths } from "./paths.js";
 import { startServer } from "./server.js";
 import { createBridge } from "./bridge.js";
 import { appendReport } from "./report.js";
+import { observationCommand } from "./observation.js";
 import type { HarnessReport } from "@anthill/live";
 
 /**
@@ -55,6 +56,7 @@ function usage(): string {
     "       anthill run <runId> <nonce>",
     "       anthill step <runId> <nonce> <stepId>",
     "       anthill done <runId> <nonce>",
+    "       anthill observation status|enable|skip",
     "",
     "  --port <n>       listen on this port (default 4173)",
     "  --host <h>       bind to this interface (default 127.0.0.1)",
@@ -503,6 +505,12 @@ function waitForSignal(): Promise<void> {
  * The CLI entry point.
  */
 export async function main(): Promise<void> {
+  if (process.argv[2] === "observation") {
+    const reply = await observationCommand(process.argv.length === 4 ? process.argv[3] : undefined);
+    console.log(JSON.stringify(reply.result));
+    process.exitCode = reply.exitCode;
+    return;
+  }
   const argv = process.argv.slice(2);
   // The report subcommands are what the prompt tells the harness to run.
   // They append one line to the report file and exit: no server, no lock,

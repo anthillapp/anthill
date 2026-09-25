@@ -39,6 +39,45 @@ is present, use `design`; it preserves the user's chance to edit before work.
 The mode changes the handover UX, not Anthill's authority. It never causes
 Anthill to execute anything.
 
+## Optional detailed progress
+
+On the first invocation in a task, run `anthill observation status` from the
+project directory. This reads setup state; it does not install hooks or change
+Codex permissions. If the command is unavailable or fails, continue the handover
+with basic progress and the existing reporting commands; do not invent a setup
+command or block the task.
+
+Only when the JSON response says `offer: true`, ask the user once:
+“Connect detailed progress in Anthill? It adds tool activity and timing. Basic
+progress already works.” Match the user's language. Offer “Connect” and “Use
+basic progress”. Continue independent task work while awaiting this optional
+choice; silence is not consent to install.
+
+After “Connect”, run `anthill observation enable`. After “Use basic progress”,
+run `anthill observation skip` to remember that preference. Installation errors
+leave basic progress available. Never report success from an exit code alone:
+read the returned `state` and `message`. If `requiresHostAccess` is true (even with exit code zero), or the command
+reports a local filesystem permission failure, request host approval for that
+exact `anthill observation` command and retry once. Do not change sandbox
+configuration, grant hook trust, or broaden future agent permissions. If host
+approval is unavailable, explain the limitation and keep basic progress.
+
+Permanent hooks use the installed Anthill app's bundled Node and handler. If
+Anthill cannot find that runtime, relay the installation message; do not write
+hooks that depend on nvm, the repository build output, or a guessed executable.
+
+If `state` is `needs-trust`, tell the user to enter `/hooks` in Codex and review
+and trust only the entries containing `anthill-observation-hook`. This native
+Codex step is separate from consenting to installation. Do not grant trust on
+the user's behalf or bypass the trust check. After they confirm, run
+`anthill observation status` once. `ready` means enabled and trusted; only a
+non-null `lastEventAt` proves events have arrived. Newly installed hooks may
+require a new Codex session. Continue this task with basic progress rather than
+asking the user to abandon it. For other states, relay the specific message.
+
+Do not repeatedly ask when `offer` is false. Detailed progress is optional and
+does not replace the bound workflow's `anthill run/step/done` reports.
+
 ## Establish the Codex task identity
 
 Before submitting, read the current Codex session identifier without printing

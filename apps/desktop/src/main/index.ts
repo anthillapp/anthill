@@ -1,3 +1,4 @@
+import { installedObservationRuntime } from "./live/installed-runtime.js";
 /**
  * Anthill desktop shell — Electron main process.
  *
@@ -496,8 +497,13 @@ function liveService(): LiveSessionService {
 
 function liveSetupService(): ObservationSetupService {
   liveSetup ??= new ObservationSetupService({
-    prefsPath: join(app.getPath("userData"), "live-observation-setup.json"),
-    hookHandlerPath: join(__dirname, "live-hook-handler.js"),
+    legacyPrefsPaths: [join(app.getPath("userData"), "live-observation-setup.json")],
+    ...(app.isPackaged
+      ? { execPath: process.execPath, hookHandlerPath: join(__dirname, "live-hook-handler.js") }
+      : installedObservationRuntime() ?? {
+          hookHandlerPath: join(__dirname, "live-hook-handler.js"),
+          installProblem: "Install the packaged Anthill app before connecting permanent hooks. Basic progress remains available in development builds.",
+        }),
   });
   return liveSetup;
 }
@@ -1258,7 +1264,7 @@ function registerIpcHandlers(): void {
 
   handle(
     IpcChannel.liveSetupStatus,
-    async (): Promise<ObservationSetupStatus> => liveSetupService().status(),
+    async (_event, cwd?: string, refreshOnly?: boolean): Promise<ObservationSetupStatus> => liveSetupService().status(cwd, refreshOnly),
   );
   handle(
     IpcChannel.liveSetupDismiss,
@@ -1266,8 +1272,8 @@ function registerIpcHandlers(): void {
   );
   handle(
     IpcChannel.liveSetupInstall,
-    async (_event, harness: MarkerCli): Promise<ObservationSetupActionResult> =>
-      liveSetupService().install(harness),
+    async (_event, harness: MarkerCli, cwd?: string): Promise<ObservationSetupActionResult> =>
+      liveSetupService().install(harness, cwd),
   );
   handle(
     IpcChannel.liveSetupDisable,

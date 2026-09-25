@@ -234,7 +234,7 @@ describe("live observation", () => {
     expect(screen.queryByRole("switch")).toBeNull();
   });
 
-  it("keeps the amber note for hooks that have never fired", async () => {
+  it("does not guess Codex permissions from missing hook events", async () => {
     stub({
       harnesses: [
         { ...HARNESS, id: "codex", label: "Codex CLI", hookLastEventAt: undefined },
@@ -242,8 +242,8 @@ describe("live observation", () => {
     });
     show();
     fireEvent.click(await screen.findByRole("button", { name: "Live observation" }));
-    expect(await screen.findByText(/has never called it/)).toBeTruthy();
-    expect(screen.getByText("Not seen firing")).toBeTruthy();
+    expect(await screen.findByText("Not verified")).toBeTruthy();
+    expect(screen.queryByText(/has never called it/)).toBeNull();
   });
 
   it("says so plainly when there is no CLI to report on", async () => {

@@ -124,10 +124,11 @@ const api: AnthillApi = {
       ipcRenderer.removeListener(LIVE_SNAPSHOT_CHANNEL, handler);
     };
   },
-  liveSetupStatus: () => ipcRenderer.invoke(IpcChannel.liveSetupStatus),
+  liveSetupStatus: (cwd?: string, refreshOnly?: boolean) => ipcRenderer.invoke(IpcChannel.liveSetupStatus, cwd, refreshOnly),
+  liveSetupDecline: (harness: MarkerCli) => ipcRenderer.invoke(IpcChannel.liveSetupDecline, harness),
   liveSetupDismiss: () => ipcRenderer.invoke(IpcChannel.liveSetupDismiss),
-  liveSetupInstall: (harness: MarkerCli) =>
-    ipcRenderer.invoke(IpcChannel.liveSetupInstall, harness),
+  liveSetupInstall: (harness: MarkerCli, cwd?: string) =>
+    ipcRenderer.invoke(IpcChannel.liveSetupInstall, harness, cwd),
   liveSetupDisable: (harness: MarkerCli) =>
     ipcRenderer.invoke(IpcChannel.liveSetupDisable, harness),
 };

@@ -261,12 +261,24 @@ export function PromptModal({
 
   const [reviewSetup, setReviewSetup] = useState(false);
   const [preferenceError, setPreferenceError] = useState<string>();
+  // Nothing to ask, nothing to show: installed, enabled and approved, or the
+  // person already chose basic progress for these hooks (ANT-138). The same
+  // rule the plugin follows, worked out once in the main process.
+  // A status without the field comes from a main process older than the rule,
+  // and falls back to what that one decided with: the decline alone.
   useEffect(() => {
-    if (step === 2 && setup?.observationDeclined && !reviewSetup) setStep(3);
-  }, [step, setup?.observationDeclined, reviewSetup]);
+    if (step !== 2 || !setup || reviewSetup) return;
+    const nothingToAsk = setup.observationPrompt === undefined ? setup.observationDeclined === true : setup.observationPrompt === null;
+    if (nothingToAsk) setStep(3);
+  }, [step, setup, reviewSetup]);
 
   const continueBasic = async () => {
-    if (cli !== "pi" && setup && !setup.hookInstalled) {
+    // Remembered only where a question was put: "connect" or "trust". A hint
+    // was not a question, and declining it would silence the next real one.
+    const asked = setup?.observationPrompt === undefined
+      ? Boolean(setup && !setup.hookInstalled)
+      : setup.observationPrompt === "connect" || setup.observationPrompt === "trust";
+    if (cli !== "pi" && asked) {
       try {
         await window.anthill.liveSetupDecline(cli);
         setSetup((current) => current ? { ...current, observationDeclined: true } : current);
@@ -552,7 +564,9 @@ export function PromptModal({
                 type="button"
                 className="primary"
                 disabled={installing}
-                onClick={face.install ? () => void install() : () => setStep(3)}
+                onClick={face.install
+                  ? () => void install()
+                  : setup?.observationPrompt === "trust" ? () => void continueBasic() : () => setStep(3)}
               >
                 {face.primary}
               </button>

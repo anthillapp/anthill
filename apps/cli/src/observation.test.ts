@@ -1,11 +1,29 @@
 import { describe, expect, it, vi } from "vitest";
 import { observationCommand } from "./observation.js";
 import type { ObservationSetupService } from "../../desktop/src/main/live/setup.js";
+import { hookPrompt } from "../../desktop/src/main/live/hook-prompt.js";
+
+/** What the real service would ask for this harness: the same rule, not a guess. */
+function withPrompt(harness: Record<string, any>) {
+  return {
+    ...harness,
+    observationPrompt: hookPrompt({
+      cliAvailable: harness.cliAvailable,
+      installProblem: harness.hookInstallProblem,
+      entriesPresent: harness.hookEntriesPresent,
+      installed: harness.hookInstalled,
+      usesCurrentRuntime: harness.hookUsesCurrentRuntime !== false,
+      codexState: harness.codexHooks?.state,
+      confirmedInSession: harness.codexHooks?.confirmedInSession,
+      declined: harness.observationDeclined === true,
+    }),
+  };
+}
 
 function service(over: Record<string, unknown> = {}) {
-  const harness = { id: "codex", cliAvailable: true, hookInstalled: false, hookEntriesPresent: false, ...over };
+  const harness = withPrompt({ id: "codex", cliAvailable: true, hookInstalled: false, hookEntriesPresent: false, ...over });
   const status = vi.fn(async () => ({ harnesses: [harness] }));
-  const install = vi.fn(async () => ({ ok: true, status: { harnesses: [{ ...harness, hookInstalled: true, hookEntriesPresent: true, codexHooks: { state: "needs-trust", message: "Review /hooks." } }] } }));
+  const install = vi.fn(async () => ({ ok: true, status: { harnesses: [withPrompt({ ...harness, hookInstalled: true, hookEntriesPresent: true, codexHooks: { state: "needs-trust", message: "Review /hooks." } })] } }));
   const decline = vi.fn(async () => {});
   return { api: { status, install, decline } as unknown as ObservationSetupService, status, install, decline };
 }
@@ -14,7 +32,7 @@ describe("plugin observation onboarding", () => {
   it("offers once without writing or installing on status", async () => {
     const fake = service();
     expect(await observationCommand("status", fake.api, "/project")).toMatchObject({ exitCode: 0, result: { offer: true, installed: false } });
-    expect(fake.status).toHaveBeenCalledWith("/project");
+    expect(fake.status).toHaveBeenCalledWith("/project", false, undefined);
     expect(fake.install).not.toHaveBeenCalled(); expect(fake.decline).not.toHaveBeenCalled();
   });
   it("installs only on enable and returns native trust as pending, not success", async () => {
@@ -55,5 +73,31 @@ describe("plugin observation onboarding", () => {
     expect((await observationCommand("enable", fake.api)).exitCode).toBe(1);
     expect(fake.install).not.toHaveBeenCalled();
     expect((await observationCommand("trust-all", fake.api)).exitCode).toBe(1);
+  });
+
+  // ANT-138: what the agent is told to ask, in one field it acts on.
+  it("asks to connect, then for trust, then nothing — and hints rather than accusing", async () => {
+    expect((await observationCommand("status", service().api)).result).toMatchObject({ ask: "connect" });
+    const trust = (await observationCommand("status", service({ hookInstalled: true, hookEntriesPresent: true, codexHooks: { state: "needs-trust", message: "x" } }).api)).result as any;
+    expect(trust).toMatchObject({ ask: "trust", offer: false });
+    expect(trust.message).toContain("Review hooks");
+    expect(trust.message).toContain("Do not suggest Trust all");
+    const ready = (await observationCommand("status", service({ hookInstalled: true, hookEntriesPresent: true, codexHooks: { state: "ready", message: "Ready" } }).api)).result as any;
+    expect(ready.ask).toBeNull();
+    const unknown = (await observationCommand("status", service({ hookInstalled: true, hookEntriesPresent: true, codexHooks: { state: "unknown", message: "Codex could not be asked." } }).api)).result as any;
+    expect(unknown.ask).toBe("hint");
+    expect(unknown.message).toContain("does not mean they are unapproved");
+  });
+
+  it("passes the Codex session along, so a hook that fired here settles it", async () => {
+    const fake = service({ hookInstalled: true, hookEntriesPresent: true, codexHooks: { state: "ready", confirmedInSession: true, message: "Working here." } });
+    vi.stubEnv("CODEX_SESSION_ID", "01a0d727-ef1b-7b20-8d10-355e4a13c67e");
+    try {
+      const result = (await observationCommand("status", fake.api, "/project")).result as any;
+      expect(fake.status).toHaveBeenCalledWith("/project", false, "01a0d727-ef1b-7b20-8d10-355e4a13c67e");
+      expect(result).toMatchObject({ ask: null, confirmedInSession: true });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

@@ -65,7 +65,7 @@ export const OBSERVATION_FACE: Record<ObservationState, Face> = {
   "needs-trust": {
     title: "Allow detailed progress in Codex", chip: "Needs permission", tone: "unsure",
     install: false, primary: "Continue with basic progress",
-    note: "Anthill is installed. One permission step in Codex remains; this page updates automatically.",
+    note: "Anthill’s hooks are installed. One step in Codex remains, and this page notices it by itself.",
   },
   disabled: {
     title: "Detailed progress is disabled in Codex", chip: "Disabled in Codex", tone: "unsure",

@@ -1139,3 +1139,49 @@ describe("revise_workflow", () => {
     expect(textOf(result)).toContain("waiting will not change it");
   });
 });
+
+/**
+ * ANT-138. Storing a handover and opening Anthill are two calls when the
+ * caller has something to ask in between — whether to connect Codex's hooks —
+ * so the answer comes before a window appears, not after.
+ */
+describe("storing now and opening later", () => {
+  it("stores without opening when told not to open", async () => {
+    const { handlers, store, opened } = await openTools();
+
+    const result = await handlers.createWorkflowDraft({ ...draftInput(), open: false });
+
+    expect(answerOf(result)).toMatchObject({ outcome: "created", displayRequested: false, openDeferred: true });
+    expect(opened).toEqual([]);
+    expect(await inbox(store)).toEqual([]);
+    expect(textOf(result)).toContain("open_workflow");
+    expect((await store.readWorkflow("workflow-1"))?.head?.revision).toBe(1);
+  });
+
+  it("opens it afterwards, once, however often it is asked", async () => {
+    const { handlers, store, opened } = await openTools();
+    await handlers.createWorkflowDraft({ ...draftInput(), open: false });
+
+    const first = await handlers.openWorkflow({ workflowId: "workflow-1" });
+    const again = await handlers.openWorkflow({ workflowId: "workflow-1" });
+
+    expect(answerOf(first)).toMatchObject({ outcome: "open_requested", revision: 1, displayRequested: true, app: { outcome: "opened" } });
+    // The same request, still queued — not a second one.
+    expect(answerOf(again)).toMatchObject({ outcome: "open_requested", displayRequested: true });
+    expect((await inbox(store)).filter((drop) => drop.kind === "display")).toHaveLength(1);
+    expect(opened.map((item) => item.url)).toEqual(["anthill://workflow/workflow-1", "anthill://workflow/workflow-1"]);
+  });
+
+  it("says so for an id this machine never stored, and opens nothing", async () => {
+    const { handlers, opened } = await openTools();
+    const result = await handlers.openWorkflow({ workflowId: "nothing-here" });
+    expect(answerOf(result).outcome).toBe("not_found");
+    expect(opened).toEqual([]);
+  });
+
+  it("still opens at once when nothing is said about opening", async () => {
+    const { handlers, opened } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    expect(opened).toHaveLength(1);
+  });
+});

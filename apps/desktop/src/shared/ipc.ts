@@ -682,7 +682,20 @@ export type CodexHookStatus = {
   state: "needs-trust" | "disabled" | "not-loaded" | "unknown" | "ready";
   message: string;
   requiresHostAccess?: boolean;
+  /**
+   * A hook of Anthill's has already fired in the Codex session asking. The
+   * strongest answer there is — it is working, here — and the one that needs
+   * no call into Codex, which a sandboxed agent cannot make (ANT-138).
+   */
+  confirmedInSession?: boolean;
 };
+
+/**
+ * What to ask the person about hooks now, if anything (ANT-138): connect them,
+ * trust them in Codex's /hooks, or read a hint about a check that could not
+ * say. One rule for both ways a Codex workflow starts.
+ */
+export type ObservationPrompt = "connect" | "trust" | "hint";
 
 export type ObservationHarnessSetup = {
   id: MarkerCli;
@@ -703,6 +716,8 @@ export type ObservationHarnessSetup = {
   /** Codex's own permission check; a runnable handler alone is not ready. */
   codexHooks?: CodexHookStatus;
   observationDeclined?: boolean;
+  /** What to ask now, or nothing. See `ObservationPrompt`. */
+  observationPrompt?: ObservationPrompt | null;
   /** The entries are in the config file, whatever running them does. */
   hookEntriesPresent: boolean;
   /** Why the handler could not run, when entries are present but it cannot. */

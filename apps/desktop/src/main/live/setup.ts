@@ -11,11 +11,13 @@ import { existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { readCodexHookStatus } from "./codex-hook-status.js";
+import { hookFingerprint, hookPrompt, isDeclined } from "./hook-prompt.js";
 
 import { detectBinary, runProcess, type SpawnFn } from "@anthill/runtimes";
 import type { MarkerCli } from "@anthill/live";
 
 import type {
+  CodexHookStatus,
   ObservationHarnessSetup,
   ObservationSetupActionResult,
   ObservationSetupStatus,
@@ -74,7 +76,7 @@ type HarnessDefinition = (typeof HARNESS)[HookHarness];
 
 type SetupPrefs = {
   dismissed?: boolean;
-  harnesses?: Partial<Record<MarkerCli, { installedAt?: string; disabledAt?: string; declinedAt?: string | null }>>;
+  harnesses?: Partial<Record<MarkerCli, { installedAt?: string; disabledAt?: string; declinedAt?: string | null; declinedFor?: string | null }>>;
 };
 
 export type ObservationSetupPaths = {
@@ -100,6 +102,9 @@ export type ObservationSetupPaths = {
   execPath?: string;
 };
 
+/** A session id as the harnesses mint them; anything else is not looked up. */
+const SESSION_ID = /^[0-9a-fA-F-]{8,64}$/;
+
 export class ObservationSetupService {
   private snapshots = new Map<string, ObservationSetupStatus>();
   private configSnapshots = new Map<string, string>();
@@ -109,31 +114,38 @@ export class ObservationSetupService {
     private readonly spawnFn?: SpawnFn,
   ) {}
 
-  status(cwd?: string, refreshOnly = false): Promise<ObservationSetupStatus> {
+  /**
+   * @param sessionId The Codex session asking, when it is one (the plugin
+   *   passes `CODEX_SESSION_ID`). A hook of Anthill's that has already fired in
+   *   that session answers the question outright, with no call into Codex.
+   */
+  status(cwd?: string, refreshOnly = false, sessionId?: string): Promise<ObservationSetupStatus> {
     const directory = typeof cwd === "string" && isAbsolute(cwd) ? cwd : homedir();
-    const pending = this.statusRequests.get(directory);
+    const session = sessionId && SESSION_ID.test(sessionId) ? sessionId : undefined;
+    const key = `${directory}\u0000${session ?? ""}`;
+    const pending = this.statusRequests.get(key);
     if (pending) return pending;
     const request = (refreshOnly && this.snapshots.has(directory)
-      ? this.refreshStatus(directory) : this.readStatus(directory))
+      ? this.refreshStatus(directory, session) : this.readStatus(directory, session))
       .then((status) => { this.snapshots.set(directory, status); return status; })
-      .finally(() => this.statusRequests.delete(directory));
-    this.statusRequests.set(directory, request);
+      .finally(() => this.statusRequests.delete(key));
+    this.statusRequests.set(key, request);
     return request;
   }
 
-  private async readStatus(cwd: string): Promise<ObservationSetupStatus> {
+  private async readStatus(cwd: string, sessionId?: string): Promise<ObservationSetupStatus> {
     const prefs = await this.readPrefs();
     return {
       dismissed: prefs.dismissed === true,
       trigger: "Offer optional detailed progress when handing a workflow to the user's CLI.",
       harnesses: await Promise.all(
-        (Object.keys(HARNESS) as HookHarness[]).map((id) => this.describeHarness(id, prefs, cwd)),
+        (Object.keys(HARNESS) as HookHarness[]).map((id) => this.describeHarness(id, prefs, cwd, sessionId)),
       ),
     };
   }
 
   /** Refresh permissions and receipts only; no CLI detection or handler execution. */
-  private async refreshStatus(cwd: string): Promise<ObservationSetupStatus> {
+  private async refreshStatus(cwd: string, sessionId?: string): Promise<ObservationSetupStatus> {
     const previous = this.snapshots.get(cwd)!;
     const prefs = await this.readPrefs();
     const harnesses = await Promise.all(previous.harnesses.map(async (harness) => {
@@ -142,7 +154,7 @@ export class ObservationSetupService {
       const config = await this.readJsonObject(this.configPath(id)).catch(() => ({}));
       // Recheck the install only when its configuration actually changes.
       if (JSON.stringify(config) !== this.configSnapshots.get(`${cwd}:${id}`)) {
-        return this.describeHarness(id, prefs, cwd);
+        return this.describeHarness(id, prefs, cwd, sessionId);
       }
       const missingRuntime = anthillCommands(config, HARNESS[id]).some(({ command }) => {
         const parsed = parseHookCommand(command);
@@ -154,10 +166,10 @@ export class ObservationSetupService {
       if (codexHooks?.state === "ready" && harness.hookUsesCurrentRuntime === false) {
         codexHooks = { state: "unknown", message: "Codex trusts these hooks, but they use another Anthill runtime that this installation has not tested. Repair the connection to use this Anthill’s bundled handler." };
       }
-      return { ...harness, codexHooks,
+      const refreshed: ObservationHarnessSetup = { ...harness, codexHooks,
         ...(missingRuntime ? { hookInstalled: false, hookProblem: "The configured Anthill runtime is missing. Repair the connection." } : {}),
-        observationDeclined: Boolean(prefs.harnesses?.[id]?.declinedAt),
         hookLastEventAt: harness.hookEntriesPresent ? await this.lastHookEvent(id) : undefined };
+      return this.withPrompt(id, refreshed, prefs);
     }));
     return { ...previous, dismissed: prefs.dismissed === true, harnesses };
   }
@@ -167,11 +179,69 @@ export class ObservationSetupService {
     return this.status();
   }
 
+  /**
+   * "Continue with basic progress", remembered against the exact commands this
+   * Anthill would install — so it is asked again only when those change, or
+   * after an approval that the person later withdrew (ANT-138).
+   */
   async decline(harness: MarkerCli): Promise<void> {
     if (!isHookHarnessId(harness)) throw new Error("Unsupported observation harness.");
+    const declinedFor = hookFingerprint(this.expectedCommands(harness));
     await this.updatePrefs((prefs) => ({ ...prefs, harnesses: {
-      ...prefs.harnesses, [harness]: { ...prefs.harnesses?.[harness], declinedAt: new Date().toISOString() },
+      ...prefs.harnesses, [harness]: { ...prefs.harnesses?.[harness], declinedAt: new Date().toISOString(), declinedFor },
     } }));
+  }
+
+  /** The commands this Anthill writes for a harness: what a decline or an approval is about. */
+  private expectedCommands(id: HookHarness): { command: string; event: string }[] {
+    return HARNESS[id].events.map((event) => ({ event, command: commandFor(id, event, this.hookHandlerPath(), this.execPath()) }));
+  }
+
+  /**
+   * What to ask about this harness now, worked out once for every path that
+   * describes it — a full read and a light refresh alike.
+   *
+   * An approval seen after a decline clears the decline, best effort: whoever
+   * trusted the hooks by hand has changed their mind, and if they later revoke
+   * that trust they should be asked again rather than held to an old "no".
+   */
+  private async withPrompt(id: HookHarness, harness: ObservationHarnessSetup, prefs: SetupPrefs): Promise<ObservationHarnessSetup> {
+    const fingerprint = hookFingerprint(this.expectedCommands(id));
+    let declined = isDeclined(prefs.harnesses?.[id], fingerprint);
+    if (declined && harness.codexHooks?.state === "ready") {
+      declined = false;
+      // A sandboxed agent may not write here; the next unsandboxed read will.
+      await this.updatePrefs((current) => ({ ...current, harnesses: {
+        ...current.harnesses, [id]: { ...current.harnesses?.[id], declinedAt: null, declinedFor: null },
+      } })).catch(() => undefined);
+    }
+    const observationPrompt = hookPrompt({
+      cliAvailable: harness.cliAvailable,
+      installProblem: harness.hookInstallProblem,
+      entriesPresent: harness.hookEntriesPresent,
+      installed: harness.hookInstalled,
+      usesCurrentRuntime: harness.hookUsesCurrentRuntime !== false,
+      codexState: id === "codex" ? harness.codexHooks?.state : "ready",
+      confirmedInSession: harness.codexHooks?.confirmedInSession,
+      declined,
+    });
+    return { ...harness, observationDeclined: declined, observationPrompt };
+  }
+
+  /**
+   * Whether a hook of Anthill's has fired in this Codex session.
+   *
+   * Read from the log the hooks themselves write, which a sandboxed agent can
+   * read. Absence proves nothing — the session may predate the install, or
+   * simply not have reached a hook yet — so it is only ever used to skip a
+   * question, never to raise one.
+   */
+  private async firedInSession(sessionId: string): Promise<boolean> {
+    const marker = `"session_id":"${sessionId}"`;
+    return Boolean(
+      await this.searchTail(marker, 8 * 1024 * 1024) ??
+      await this.searchTail(marker, 8 * 1024 * 1024, `${this.hookLogPath()}.1`),
+    );
   }
 
   async install(harness: MarkerCli, cwd?: string): Promise<ObservationSetupActionResult> {
@@ -221,7 +291,7 @@ export class ObservationSetupService {
       }
       if (action === "install" && !changed) {
         await this.updatePrefs((prefs) => ({ ...prefs, harnesses: { ...prefs.harnesses,
-          [harness]: { ...prefs.harnesses?.[harness], declinedAt: null } } }));
+          [harness]: { ...prefs.harnesses?.[harness], declinedAt: null, declinedFor: null } } }));
       }
       // A read started before the write must not become the install receipt.
       await Promise.allSettled([...this.statusRequests.values()]);
@@ -253,7 +323,7 @@ export class ObservationSetupService {
     }
   }
 
-  private async describeHarness(id: HookHarness, prefs: SetupPrefs, cwd: string): Promise<ObservationHarnessSetup> {
+  private async describeHarness(id: HookHarness, prefs: SetupPrefs, cwd: string, sessionId?: string): Promise<ObservationHarnessSetup> {
     const def = HARNESS[id];
     const installedAt = prefs?.harnesses?.[id]?.installedAt;
     const detection = await detectBinary({
@@ -273,13 +343,21 @@ export class ObservationSetupService {
     // Asked only when there is an install to describe: a harness with no
     // entries has nothing to have fired.
     const lastEventAt = entriesPresent ? await this.lastHookEvent(id) : undefined;
-    let codexHooks = id === "codex" && detection.available && entriesPresent
-      ? await readCodexHookStatus({ commands, configPath, cwd, spawnFn: this.spawnFn })
-      : undefined;
+    const usesCurrentRuntime = entriesPresent && commands.every(({ command }) => this.ownHook(command, id));
+    // A hook of Anthill's that has fired in this very session is the answer:
+    // Codex ran it, so it is installed, enabled and trusted, here. No call into
+    // Codex is needed — which matters, because a sandboxed agent cannot make one.
+    const confirmed = id === "codex" && sessionId !== undefined && usesCurrentRuntime && problem === undefined &&
+      await this.firedInSession(sessionId);
+    let codexHooks: CodexHookStatus | undefined = confirmed
+      ? { state: "ready", confirmedInSession: true, message: "Anthill’s hooks are already working in this Codex session." }
+      : id === "codex" && detection.available && entriesPresent
+        ? await readCodexHookStatus({ commands, configPath, cwd, spawnFn: this.spawnFn })
+        : undefined;
     if (codexHooks?.state === "ready" && commands.some(({ command }) => !this.ownHook(command, id))) {
       codexHooks = { state: "unknown", message: "Codex trusts these hooks, but they use another Anthill runtime that this installation has not tested. Repair the connection to use this Anthill’s bundled handler." };
     }
-    return {
+    return this.withPrompt(id, {
       id,
       label: def.label,
       cliCommand: def.cliCommand,
@@ -287,10 +365,9 @@ export class ObservationSetupService {
       ...(detection.version ? { version: trimVersion(detection.version) } : {}),
       ...(detection.available ? {} : { reason: detection.reason }),
       hookInstalled: entriesPresent && problem === undefined,
-      hookUsesCurrentRuntime: entriesPresent && commands.every(({ command }) => this.ownHook(command, id)),
+      hookUsesCurrentRuntime: usesCurrentRuntime,
       hookInstallProblem: this.paths.installProblem,
       hookEntriesPresent: entriesPresent,
-      observationDeclined: Boolean(prefs.harnesses?.[id]?.declinedAt),
       ...(codexHooks ? { codexHooks } : {}),
       ...(problem ? { hookProblem: problem } : {}),
       ...(lastEventAt ? { hookLastEventAt: lastEventAt } : {}),
@@ -311,7 +388,7 @@ export class ObservationSetupService {
         `Reference ${hookHandlerPath} from each Anthill hook entry.`,
         "Record hook payloads locally for observation; do not start, attach to, stop, or steer any session.",
       ],
-    };
+    }, prefs);
   }
 
   private configPath(harness: HookHarness): string {
@@ -562,7 +639,7 @@ export class ObservationSetupService {
         ...(prefs.harnesses ?? {}),
         [harness]:
           action === "install"
-            ? { installedAt: now, declinedAt: null }
+            ? { installedAt: now, declinedAt: null, declinedFor: null }
             : { ...(prefs.harnesses?.[harness] ?? {}), disabledAt: now },
       },
     }));

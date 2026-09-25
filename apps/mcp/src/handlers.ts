@@ -58,6 +58,7 @@ import {
   bindText,
   callText,
   draftText,
+  openText,
   questionsFrom,
   readyText,
   reviseText,
@@ -148,6 +149,12 @@ export type CreateDraftInput = {
   workflow?: unknown;
   workflowId?: unknown;
   exchangeVersion?: unknown;
+  /**
+   * `false` stores the handover without opening Anthill, so something can be
+   * asked first; `open_workflow` opens it after (ANT-138). Anything else —
+   * including leaving it out — opens it at once, as before.
+   */
+  open?: unknown;
 };
 
 /** The id the two read-only tools address, unjudged until `readWorkflowId`. */
@@ -188,6 +195,7 @@ export type Handlers = {
   createWorkflowDraft(input: CreateDraftInput): Promise<CallToolResult>;
   reviseWorkflow(input: ReviseInput): Promise<CallToolResult>;
   getWorkflow(input: WorkflowInput): Promise<CallToolResult>;
+  openWorkflow(input: WorkflowInput): Promise<CallToolResult>;
   getReadyRevision(input: WorkflowInput): Promise<CallToolResult>;
   bindRun(input: BindRunInput): Promise<CallToolResult>;
 };
@@ -297,6 +305,24 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       }
 
       const stored = await store.readWorkflow(created.workflowId);
+
+      // Stored, and not opened: the caller has something to ask first — whether
+      // to connect Codex's hooks, say — and a window appearing mid-question
+      // would put Anthill in front of the answer (ANT-138). `open_workflow`
+      // does the rest when it is time.
+      if (input.open === false) {
+        return result(draftText, {
+          outcome: problems.length > 0 ? "incomplete" : created.outcome,
+          workflowId: created.workflowId,
+          url,
+          revision,
+          ...(stored?.identity ? { mode: stored.identity.mode } : {}),
+          displayed: false,
+          displayRequested: false,
+          openDeferred: true,
+          ...(problems.length > 0 ? { problems, questions: questionsFrom(problems, submission.workflow) } : {}),
+        });
+      }
 
       // Asking the app to open it is a separate write from storing it, and a
       // draft the user never sees is a draft nobody can answer the questions
@@ -434,6 +460,41 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         ...(added.digest ? { digest: added.digest } : {}),
         ...(bound !== undefined && bound !== revision ? { boundRevision: bound } : {}),
         displayRequested: drop.outcome !== "conflict",
+        ...(drop.problems ? { problems: drop.problems } : {}),
+      });
+    },
+
+    /**
+     * Open a stored handover in Anthill: the second half of a
+     * `create_workflow_draft` called with `open: false` (ANT-138).
+     *
+     * Opens the head revision — what the user will see and edit — and is keyed
+     * on it, so asking twice for the same revision does not open it twice.
+     */
+    async openWorkflow(input): Promise<CallToolResult> {
+      const addressed = readWorkflowId(input.workflowId);
+      if ("problem" in addressed) return result(callText, invalidCall([addressed.problem]));
+      const workflowId = addressed.workflowId;
+
+      const stored = await store.readWorkflow(workflowId);
+      const revision = stored?.head?.revision;
+      if (!stored || revision === undefined) return result(openText, { outcome: "not_found", workflowId });
+
+      const drop = await store.dropInbox({
+        kind: "display",
+        key: displayKey(workflowId, `open-revision-${revision}`),
+        workflowId,
+        revision,
+      });
+      const app = await bringUp(workflowId);
+      return result(openText, {
+        outcome: "open_requested",
+        workflowId,
+        url: workflowUrl(workflowId),
+        revision,
+        displayed: false,
+        displayRequested: drop.outcome !== "conflict",
+        app,
         ...(drop.problems ? { problems: drop.problems } : {}),
       });
     },

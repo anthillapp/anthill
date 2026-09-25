@@ -68,6 +68,7 @@ import { ObservationSetupService } from "./live/setup.js";
 import { AgentLibraryStore } from "./agent-library.js";
 import { AssistantThreadStore } from "./assistant-threads.js";
 import { SettingsStore } from "./settings.js";
+import { claimScheme } from "./url-scheme.js";
 import { PendingRunStore } from "./live/store.js";
 import { WorkflowStatusStore } from "./live/workflow-status.js";
 import {
@@ -1441,8 +1442,10 @@ function applyMenu(): void {
 }
 
 void app.whenReady().then(async () => {
-  if (app.isPackaged) app.setAsDefaultProtocolClient("anthill");
-  else if (process.argv[1]) app.setAsDefaultProtocolClient("anthill", process.execPath, [resolve(process.argv[1])]);
+  // The installed app only, and reclaimed whenever it comes back to the front
+  // having lost it — see url-scheme.ts for why a dev run must not (ANT-137).
+  claimScheme(app);
+  app.on("did-become-active", () => claimScheme(app));
   // History is opened lazily; the editor does not depend on the legacy store.
   applyAppIcon();
   applyMenu();

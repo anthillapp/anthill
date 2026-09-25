@@ -2,23 +2,26 @@
  * The launcher, against the real machine where that is safe.
  *
  * The one case worth running for real is the one nobody can fake convincingly:
- * what macOS says when nothing claims a scheme. The message it prints is the
+ * what macOS says when there is no such app. The message it prints is the
  * whole basis for telling "Anthill is not installed" apart from "the opener
  * fell over", and a test that asserted against a string written here would go
- * on passing after Apple changed it. So the scheme below is one no machine can
- * have a handler for, and opening it opens nothing.
+ * on passing after Apple changed it. So the bundle id below is one no machine
+ * can have, and opening with it opens nothing — never the Anthill that may be
+ * installed on the machine running the suite.
  *
  * Everything else is exercised without spawning anything: the platform refusal
  * takes the platform as an argument, and the disabled launcher runs no process
  * at all.
  */
 
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { disabledLauncher, openUrl } from "./launch.js";
+import { ANTHILL_BUNDLE_ID, disabledLauncher, openUrl } from "./launch.js";
 
-/** A scheme nothing on any machine claims, so opening it opens nothing. */
-const UNCLAIMED = "anthill-mcp-test-unclaimed://workflow/w";
+/** A bundle id no machine has, so opening with it opens nothing. */
+const NO_SUCH_APP = "com.anthill.test.no-such-app";
+const URL = "anthill://workflow/w";
 
 const onMac = process.platform === "darwin";
 
@@ -31,14 +34,26 @@ describe("bringing Anthill up", () => {
     expect(report.message).toContain("anthill://workflow/w");
   });
 
-  it.runIf(onMac)("reports an unregistered scheme as something the user can fix", async () => {
-    const report = await openUrl(UNCLAIMED);
+  it.runIf(onMac)("reports a missing Anthill as something the user can fix", async () => {
+    const report = await openUrl(URL, "darwin", NO_SUCH_APP);
     expect(report.outcome).toBe("no_handler");
-    // Not "kLSApplicationNotFoundErr": the sentence has to be one the person
-    // reading the harness can act on.
+    // Not "LSCopyApplicationURLsForBundleIdentifier() failed": the sentence has
+    // to be one the person reading the harness can act on.
     expect(report.message).toContain("Install Anthill");
-    expect(report.message).toContain(UNCLAIMED);
-    expect(report.message).not.toMatch(/kLSApplicationNotFoundErr|-10814/);
+    expect(report.message).toContain(URL);
+    expect(report.message).not.toMatch(/LSCopyApplicationURLsForBundleIdentifier|kLSApplicationNotFoundErr|-10814/);
+  });
+
+  /**
+   * ANT-137. The link goes to Anthill by bundle id, so a scheme registration
+   * some other Electron has taken over cannot send a handover astray — and the
+   * id it goes to has to be the one the app is actually built with.
+   */
+  it("addresses the app the desktop build produces", () => {
+    const desktop = JSON.parse(
+      readFileSync(new globalThis.URL("../../desktop/package.json", import.meta.url), "utf8"),
+    ) as { build?: { appId?: string } };
+    expect(ANTHILL_BUNDLE_ID).toBe(desktop.build?.appId);
   });
 
   it("says so when the user turned launching off", async () => {

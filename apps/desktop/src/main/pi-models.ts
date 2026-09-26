@@ -79,8 +79,14 @@ async function askPiForModels(spawnFn?: SpawnFn): Promise<PiModelList | undefine
  * Tolerant of the exact column padding: each row is split on whitespace, the
  * first two fields are provider and model, and the `thinking` flag is read
  * from the second-to-last field so a model name with a space would not shift
- * it. The header row is skipped by its first two fields. `undefined` when
- * nothing parses — a table with no data rows is not a catalogue.
+ * it. `undefined` when nothing parses — a table with no data rows is not a
+ * catalogue.
+ *
+ * Only lines under the `provider  model …` header are rows. A pi with no
+ * provider signed in exits 0 and prints prose instead — "No models available.
+ * Use /login to log into a provider via OAuth or API key. See:" — which has
+ * five words like any row, and was offered as a model called "models" with
+ * the id `No/models` (ANT-145).
  */
 export function parsePiModels(text: string): PiModelList | undefined {
   const lines = text
@@ -88,9 +94,14 @@ export function parsePiModels(text: string): PiModelList | undefined {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   const models: PiModelOption[] = [];
+  let inTable = false;
   for (const line of lines) {
     const cols = line.split(/\s+/);
-    if (cols[0] === "provider" && cols[1] === "model") continue; // header row
+    if (cols[0] === "provider" && cols[1] === "model") {
+      inTable = true; // header row
+      continue;
+    }
+    if (!inTable) continue; // prose before the table, or no table at all
     if (cols.length < 5) continue; // not a data row
     const provider = cols[0];
     const model = cols[1];

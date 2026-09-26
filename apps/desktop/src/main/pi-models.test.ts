@@ -98,6 +98,25 @@ describe("parsePiModels", () => {
     expect(parsePiModels("")).toBeUndefined();
   });
 
+  it("is undefined when pi has no provider signed in (ANT-145)", () => {
+    // pi 0.85.1, exit code 0.
+    const output = [
+      "No models available. Use /login to log into a provider via OAuth or API key. See:",
+      "  /Users/someone/.nvm/versions/node/v22/lib/node_modules/@earendil-works/pi-coding-agent/docs/providers.md",
+      "  /Users/someone/.nvm/versions/node/v22/lib/node_modules/@earendil-works/pi-coding-agent/docs/models.md",
+    ].join("\n");
+    expect(parsePiModels(output)).toBeUndefined();
+  });
+
+  it("ignores prose printed before the table", () => {
+    const output = [
+      "Loaded 2 providers from your settings file today",
+      "provider   model      context  max-out  thinking  images",
+      "llama-cpp  small-4b   8K       4K       no        no",
+    ].join("\n");
+    expect(parsePiModels(output)?.models.map((model) => model.id)).toEqual(["llama-cpp/small-4b"]);
+  });
+
   it("ignores a line that is not a data row", () => {
     const output = [
       "provider   model      context  max-out  thinking  images",

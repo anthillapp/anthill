@@ -881,6 +881,90 @@ describe("what each CLI's records yield as activity", () => {
     );
   });
 
+  /*
+   * ANT-147. Told to "print" the markers, Codex Desktop printed them with a
+   * shell: the lines exist only in the command's output, as its exec tool
+   * records it — stdout JSON-encoded inside a `custom_tool_call_output` part.
+   */
+  describe("a step announced from a command", () => {
+    const row = (payload: unknown) =>
+      JSON.stringify({ timestamp: new Date().toISOString(), type: "response_item", payload });
+    const printf = (callId: string, step: string) => [
+      row({
+        type: "custom_tool_call",
+        call_id: callId,
+        name: "exec",
+        input: `const r = await tools.exec_command({cmd:"printf '%s\\n' 'ANTHILL-STEP ${RUN_ID} ${NONCE} ${step}'"}); text(r);`,
+      }),
+      row({
+        type: "custom_tool_call_output",
+        call_id: callId,
+        output: [
+          { type: "input_text", text: "Script completed\nOutput:\n" },
+          {
+            type: "input_text",
+            text: JSON.stringify({ exit_code: 0, output: `ANTHILL-STEP ${RUN_ID} ${NONCE} ${step}\n/tmp/scratch\n` }),
+          },
+        ],
+      }),
+    ];
+    const steps = (events: { kind: string; blockId?: string }[]) =>
+      events.filter((event) => event.kind === "step.marker").map((event) => event.blockId);
+
+    it("moves the step, read from the command's output", async () => {
+      const dir = await root();
+      const body = codexRollout("sess-cx", { marked: true }) + [...printf("c1", "implement"), ...printf("c2", "test")].join("\n") + "\n";
+      await writeCodex(dir, "sess-cx", body);
+      const { events } = await new CodexObserver(dir).poll(pending("codex"), new Date().toISOString());
+      expect(steps(events)).toEqual(["implement", "test"]);
+    });
+
+    it("reads a plain function call's output too", async () => {
+      const dir = await root();
+      const body =
+        codexRollout("sess-cx", { marked: true }) +
+        [
+          row({ type: "function_call", call_id: "c1", name: "shell", arguments: "{}" }),
+          row({ type: "function_call_output", call_id: "c1", output: `ANTHILL-STEP ${RUN_ID} ${NONCE} fix\n` }),
+        ].join("\n") +
+        "\n";
+      await writeCodex(dir, "sess-cx", body);
+      const { events } = await new CodexObserver(dir).poll(pending("codex"), new Date().toISOString());
+      expect(steps(events)).toEqual(["fix"]);
+    });
+
+    it("counts a step printed and then repeated in the reply once, and a real return again", async () => {
+      const dir = await root();
+      const reply = (text: string) => row({ type: "message", role: "assistant", content: [{ type: "output_text", text }] });
+      const body =
+        codexRollout("sess-cx", { marked: true }) +
+        [
+          ...printf("c1", "test"),
+          reply(`ANTHILL-STEP ${RUN_ID} ${NONCE} test`),
+          ...printf("c2", "fix"),
+          ...printf("c3", "test"),
+        ].join("\n") +
+        "\n";
+      await writeCodex(dir, "sess-cx", body);
+      const { events } = await new CodexObserver(dir).poll(pending("codex"), new Date().toISOString());
+      expect(steps(events)).toEqual(["test", "fix", "test"]);
+    });
+
+    it("does not take the step from a command that only names the line", async () => {
+      const dir = await root();
+      const body =
+        codexRollout("sess-cx", { marked: true }) +
+        [
+          printf("c1", "implement")[0],
+          row({ type: "custom_tool_call_output", call_id: "c1", output: [{ type: "input_text", text: "exit_code 1: permission denied" }] }),
+        ].join("\n") +
+        "\n";
+      await writeCodex(dir, "sess-cx", body);
+      const { events } = await new CodexObserver(dir).poll(pending("codex"), new Date().toISOString());
+      expect(steps(events)).toEqual([]);
+    });
+  });
+
   it("reads an announced step out of a pi session file", async () => {
     const dir = await root();
     await writePi(dir, "sess-pi", piSession("sess-pi", { marked: true, step: "implement" }));

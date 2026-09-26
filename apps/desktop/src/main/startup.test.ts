@@ -81,3 +81,17 @@ it("serves every channel the preload invokes", () => {
   const unserved = invoked.filter((channel) => !new RegExp(`handle\\(\\s*IpcChannel\\.${channel}\\b`).test(main));
   expect(unserved).toEqual([]);
 });
+
+/*
+ * ANT-150. On macOS, Electron 42's Chromium takes SIGTERM itself: the quit
+ * starts, the window's close guard runs, and `process.on("SIGTERM")` never
+ * does — so a dev restart with an unsaved workflow stopped on "Discard
+ * changes?", the replacement gave up on the lock, and electron-vite went with
+ * it. The replacement asking for the lock is what ends a quitting dev run.
+ */
+it("lets a quitting development run go when its replacement asks for the lock", () => {
+  const start = main.indexOf('app.on("second-instance"');
+  expect(start).toBeGreaterThan(-1);
+  const handler = main.slice(start, main.indexOf("});", start));
+  expect(handler).toMatch(/if \(quitting\) \{[\s\S]*if \(!app\.isPackaged\) app\.exit\(0\);[\s\S]*return;/);
+});

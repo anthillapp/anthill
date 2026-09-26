@@ -920,6 +920,17 @@ describe("an ended session's report", () => {
     expect(within(report()).getByText(/Anthill did not check them/)).toBeTruthy();
   });
 
+  it("renders the agent's words the way the feed does, not as raw Markdown (ANT-148)", async () => {
+    const text = "Done.\n\n- **Root cause:** `subtract` was missing.\n- **Changes:** added it and a test.";
+    await show([marker("implement", at(1)), said(text, at(2))], run({ state: "completed", lastObservedAt: at(3) }));
+    openReport();
+    const quote = report().querySelector(".session-report-words") as HTMLElement;
+    expect(quote.textContent).not.toContain("**");
+    expect(quote.textContent).not.toContain("`");
+    expect(within(quote).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(quote).getByText("Root cause:").tagName).toBe("STRONG");
+  });
+
   it("says when the agent left no words to show", async () => {
     await show([marker("implement", at(1))], run({ state: "completed", lastObservedAt: at(3) }));
     openReport();

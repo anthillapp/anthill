@@ -52,6 +52,12 @@ export type LiveWorkflowGraphProps = {
    */
   sessionState: LiveSessionState;
   selectedBlockId?: string;
+  /**
+   * What an ended session recorded on each block it reached — "~61k tokens",
+   * or "no token data". Absent while the session runs, and for a block never
+   * reached, which gets no figure at all.
+   */
+  usageNote?: Record<string, string>;
   onSelect: (blockId: string | undefined) => void;
 };
 
@@ -271,6 +277,7 @@ export function LiveWorkflowGraph({
   view,
   sessionState,
   selectedBlockId,
+  usageNote,
   onSelect,
 }: LiveWorkflowGraphProps) {
   // Through the hook, so a block this graph placed keeps the place it was
@@ -601,6 +608,10 @@ export function LiveWorkflowGraph({
                     {state === "done" && block?.spentMs !== undefined
                       ? ` · took ${readDuration(block.spentMs) || "0s"}`
                       : ""}
+                    {/* An ended session's recording for the block. Last on the
+                        line, so the state and the time are what survive when
+                        the card is too narrow for all of it. */}
+                    {usageNote?.[node.id] ? ` · ${usageNote[node.id]}` : ""}
                   </span>
                 </div>
               </foreignObject>

@@ -69,7 +69,7 @@ async function show(recents: RecentWorkflow[], runs: PendingRun[] = [], events: 
       onOpen={onOpen}
       onOpenLive={onOpenLive}
       onExplain={() => undefined}
-      onFromSession={() => undefined} onWelcomeTour={() => undefined}
+      onFromSession={() => undefined} onWelcomeTour={() => undefined} onShowTips={() => undefined}
       onSettings={() => undefined}
     />,
   );
@@ -353,7 +353,7 @@ describe("the three list states survive", () => {
     render(
       <LaunchWindow onNewWorkflow={() => undefined} onFromPrompt={() => undefined} onOpen={() => undefined}
       onExplain={() => undefined}
-      onFromSession={() => undefined} onWelcomeTour={() => undefined}
+      onFromSession={() => undefined} onWelcomeTour={() => undefined} onShowTips={() => undefined}
       onSettings={() => undefined} />,
     );
     expect(screen.getByText("Looking for your workflows…")).toBeTruthy();
@@ -402,7 +402,7 @@ describe("the way to the explainer", () => {
         onFromPrompt={() => undefined}
         onOpen={() => undefined}
         onExplain={onExplain}
-        onFromSession={() => undefined} onWelcomeTour={() => undefined}
+        onFromSession={() => undefined} onWelcomeTour={() => undefined} onShowTips={() => undefined}
         onSettings={() => undefined}
       />,
     );
@@ -429,7 +429,7 @@ describe("a workflow from a coding session", () => {
         onFromPrompt={() => undefined}
         onOpen={() => undefined}
         onExplain={() => undefined}
-        onFromSession={onFromSession} onWelcomeTour={() => undefined}
+        onFromSession={onFromSession} onWelcomeTour={() => undefined} onShowTips={() => undefined}
         onSettings={() => undefined}
       />,
     );
@@ -467,7 +467,7 @@ describe("the first run", () => {
   function render0(recents: RecentWorkflow[], connections: unknown[]) {
     const api = stub(recents) as Record<string, unknown>;
     api.pluginConnections = vi.fn(async () => connections);
-    const props = { onFromSession: vi.fn(), onNewWorkflow: vi.fn(), onWelcomeTour: vi.fn() };
+    const props = { onFromSession: vi.fn(), onNewWorkflow: vi.fn(), onWelcomeTour: vi.fn(), onShowTips: vi.fn() };
     render(
       <LaunchWindow
         onFromPrompt={() => undefined}
@@ -515,6 +515,17 @@ describe("the first run", () => {
     const props = render0([], []);
     fireEvent.click(await screen.findByRole("button", { name: "Welcome tour" }));
     expect(props.onWelcomeTour).toHaveBeenCalled();
+  });
+
+  it("replays the canvas tips on the most recent workflow, or on a new one", async () => {
+    const empty = render0([], []);
+    fireEvent.click(await screen.findByRole("button", { name: "Show tips" }));
+    expect(empty.onShowTips).toHaveBeenCalledWith(undefined);
+    cleanup();
+
+    const some = render0([workflow({ path: "/w/latest.workflow.json", name: "latest" })], []);
+    fireEvent.click(await screen.findByRole("button", { name: "Show tips" }));
+    expect(some.onShowTips).toHaveBeenCalledWith("/w/latest.workflow.json");
   });
 });
 

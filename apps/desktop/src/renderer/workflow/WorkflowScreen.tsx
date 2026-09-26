@@ -69,6 +69,8 @@ import { WorkflowToolbar, type ToolbarHandover } from "./WorkflowToolbar.js";
 import { HandoverNotice } from "./HandoverNotice.js";
 import { handoverModel } from "./handover.js";
 import { useExchange } from "./use-exchange.js";
+import { CanvasTour } from "../tour/CanvasTour.js";
+import { CANVAS_TOUR, markTourSeen, tourDue } from "../tour/tour-steps.js";
 
 export type WorkflowScreenProps = {
   onExit: () => void;
@@ -169,6 +171,12 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    * live: every other observation state is a statement about what Anthill does
    * not know, and there is nothing honest to fill a page with.
    */
+  /**
+   * Whether the canvas tour is showing. Read once per screen: it is due after
+   * onboarding or a Show tips, and the canvas it points at only exists once a
+   * workflow is open — which is when this component renders the canvas.
+   */
+  const [touring, setTouring] = useState(() => tourDue());
   const [liveRun, setLiveRun] = useState<PendingRun | null>(
     start?.kind === "open" && start.live ? start.live : null,
   );
@@ -481,13 +489,6 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     onExit();
   }, [confirmDiscard, onExit]);
 
-  const newWorkflow = useCallback(() => {
-    if (!confirmDiscard("Starting a new workflow")) return;
-    setWorkflow(null);
-    setFromPrompt(false);
-    markDirty(false);
-  }, [confirmDiscard, markDirty]);
-
   const startLinking = useCallback((nodeId: string, outputId: string) => {
     setLinking({ nodeId, outputId });
     setSelection({ kind: "output", nodeId, outputId });
@@ -768,8 +769,6 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         canStepBack={canStepBack(history)}
         canStepForward={canStepForward(history)}
         onStep={step}
-        onNew={newWorkflow}
-        onOpen={() => void open()}
         onSave={save}
         onPrompt={() => setShowPrompt(true)}
         {...(handover ? { handover } : {})}
@@ -879,6 +878,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
               New/Open/Save/Prompt, which act on the document. */}
           <button
             type="button"
+            data-tour="describe"
             className={`canvas-describe${describing ? " is-open" : ""}`}
             title={
               describing
@@ -925,7 +925,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
           </div>
         </div>
 
-        <aside className="inspector">
+        <aside className="inspector" data-tour="inspector">
           {/* The assistant replaces the inspector outright rather than sitting
               beside it as a tab: while it is open a canvas click references a
               block instead of selecting one, so there is nothing for an
@@ -1025,6 +1025,18 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
             : `${cycles.length} ${cycles.length === 1 ? "loop" : "loops"}`}
         </span>
       </footer>
+
+      {/* The canvas tour (ANT-141): only once there is a canvas to point at,
+          and only while it is due — after onboarding, or from Show tips. */}
+      {touring ? (
+        <CanvasTour
+          steps={CANVAS_TOUR}
+          onClose={() => {
+            markTourSeen();
+            setTouring(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -50,6 +50,8 @@ export type LaunchWindowProps = {
   onFromSession: () => void;
   /** Onboarding again, from the footer. */
   onWelcomeTour: () => void;
+  /** The canvas tour again, on this workflow (the most recent), or on a new one. */
+  onShowTips: (path?: string) => void;
   onSettings: () => void;
 };
 
@@ -121,6 +123,7 @@ export function LaunchWindow({
   onExplain,
   onFromSession,
   onWelcomeTour,
+  onShowTips,
   onSettings,
 }: LaunchWindowProps) {
   /**
@@ -384,6 +387,7 @@ export function LaunchWindow({
             onExplain={onExplain}
             onFromSession={onFromSession}
             onWelcomeTour={onWelcomeTour}
+            onShowTips={() => onShowTips(recents?.[0]?.path)}
             onSettings={onSettings}
             // Only once the list has answered: an empty list still loading is
             // not a first run, and flashing the card at a returning author
@@ -539,6 +543,7 @@ function LaunchIntro({
   onExplain,
   onFromSession,
   onWelcomeTour,
+  onShowTips,
   onSettings,
   firstRun,
 }: {
@@ -548,6 +553,7 @@ function LaunchIntro({
   onExplain: () => void;
   onFromSession: () => void;
   onWelcomeTour: () => void;
+  onShowTips: () => void;
   onSettings: () => void;
   /** No workflow on this machine yet: one card replaces the four start rows. */
   firstRun: boolean;
@@ -645,6 +651,10 @@ function LaunchIntro({
       <div className="launch-welcome-links">
         <button type="button" className="launch-welcome-link" onClick={onWelcomeTour}>
           Welcome tour
+        </button>
+        <span aria-hidden="true">·</span>
+        <button type="button" className="launch-welcome-link" onClick={onShowTips}>
+          Show tips
         </button>
         <span aria-hidden="true">·</span>
         <button type="button" className="launch-welcome-link" onClick={onExplain}>

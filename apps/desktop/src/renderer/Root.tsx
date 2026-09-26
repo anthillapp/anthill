@@ -17,6 +17,7 @@ import { HowItWorksScreen } from "./explain/HowItWorksScreen.js";
 import { FromSessionScreen } from "./handoff/FromSessionScreen.js";
 import { markOnboardingSeen, onboardingDue } from "./explain/first-run.js";
 import { Onboarding } from "./onboarding/Onboarding.js";
+import { askForTour } from "./tour/tour-steps.js";
 import { LaunchWindow } from "./LaunchWindow.js";
 import { SettingsScreen, type PageId } from "./settings/SettingsScreen.js";
 import { WorkflowScreen } from "./workflow/WorkflowScreen.js";
@@ -136,6 +137,10 @@ export function Root() {
 
   const finishOnboarding = () => {
     markOnboardingSeen();
+    // The canvas tour follows onboarding, on the first workflow opened after
+    // it (ANT-141). Asked for here, so someone who met Anthill before the
+    // tour existed is never interrupted by it.
+    askForTour();
     setOnboarding(false);
   };
 
@@ -173,6 +178,12 @@ export function Root() {
       onExplain={() => setExplaining(true)}
       onFromSession={() => setFromSession(true)}
       onWelcomeTour={() => setOnboarding(true)}
+      // Replays the canvas tour on the workflow most recently open, or on a new
+      // one when there is none yet — the tour needs a canvas to point at.
+      onShowTips={(path) => {
+        askForTour();
+        setStart(path ? { kind: "open", path } : { kind: "templates" });
+      }}
       onSettings={openSettings}
     />
   );

@@ -138,8 +138,6 @@ export type WorkflowToolbarProps = {
   canStepBack: boolean;
   canStepForward: boolean;
   onStep: (direction: "back" | "forward") => void;
-  onNew: () => void;
-  onOpen: () => void;
   onSave: () => void;
   /** Open the prompt. Absent on a handover, where a second run is not wanted. */
   onPrompt: () => void;
@@ -291,8 +289,9 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
         onStep={() => props.onStep("forward")}
       />
 
-      <button onClick={props.onNew}>New</button>
-      <button onClick={props.onOpen}>Open</button>
+      {/* New and Open are gone from here (ANT-141): both leave the document
+          in front of you, and the launch window — one step back — is where
+          a workflow is started or opened. Undo, redo and Save act on this one. */}
       {/*
         On a handover, Save is the act — and the one thing standing between a
         broken graph and a session being handed it.
@@ -315,6 +314,9 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
         }}
         aria-disabled={saveBlocked ? true : undefined}
         className={saveBlocked ? "is-blocked" : undefined}
+        // On a handover, Save is the next step: there is no Prompt, and saving
+        // is what the session is waiting for.
+        {...(handover ? { "data-tour": "next-step", "data-tour-kind": "save" } : {})}
         title={
           saveBlocked
             ? `${props.problemCount} ${props.problemCount === 1 ? "problem" : "problems"} in the workflow. ` +
@@ -339,6 +341,8 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
         <button
           className={`primary${clean ? "" : " is-blocked"}`}
           aria-disabled={!clean}
+          data-tour="next-step"
+          data-tour-kind="prompt"
           onClick={() => (clean ? props.onPrompt() : props.onToggleProblems())}
           title={clean ? undefined : "Fix the problems first"}
         >

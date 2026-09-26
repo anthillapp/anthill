@@ -34,6 +34,8 @@ import { AnthillMark } from "./AnthillMark.js";
 import { readyTools } from "./plugin/plugin-card.js";
 import { HARNESSES, usePluginConnections } from "./plugin/usePluginConnections.js";
 import { WorkflowPicker } from "./workflow/WorkflowPicker.js";
+import { CanvasTour } from "./tour/CanvasTour.js";
+import { LAUNCH_TOUR, askForLaunchTour, launchTourDue, markLaunchTourSeen } from "./tour/tour-steps.js";
 
 export type LaunchWindowProps = {
   /** Start from a template, or blank. */
@@ -51,7 +53,8 @@ export type LaunchWindowProps = {
   /** Onboarding again, from the footer. */
   onWelcomeTour: () => void;
   /** The canvas tour again, on this workflow (the most recent), or on a new one. */
-  onShowTips: (path?: string) => void;
+  /** Show tips: the launch window replays its part; this asks for the canvas part. */
+  onShowTips: () => void;
   onSettings: () => void;
 };
 
@@ -147,6 +150,9 @@ export function LaunchWindow({
    * at when you have one — not behind a navigation that leaves the workflows.
    */
   const [pane, setPane] = useState<"workflows" | "agents">("workflows");
+  // The launch-screen part of the tour (ANT-144): due after onboarding, or
+  // when Show tips asks for it. Finished or skipped, it is seen.
+  const [touring, setTouring] = useState(() => launchTourDue());
 
   /**
    * Held here rather than in either pane: the list is on the right and the
@@ -352,6 +358,15 @@ export function LaunchWindow({
 
   return (
     <div className="launch">
+      {touring ? (
+        <CanvasTour
+          steps={LAUNCH_TOUR}
+          onClose={() => {
+            markLaunchTourSeen();
+            setTouring(false);
+          }}
+        />
+      ) : null}
       {/* The intro is centred in its pane; the editor fills it. One class,
           because they are two contents of one pane rather than two panes. */}
       <div className={`launch-left${editing ? " is-editing" : ""}`}>
@@ -387,7 +402,11 @@ export function LaunchWindow({
             onExplain={onExplain}
             onFromSession={onFromSession}
             onWelcomeTour={onWelcomeTour}
-            onShowTips={() => onShowTips(recents?.[0]?.path)}
+            onShowTips={() => {
+              onShowTips();
+              askForLaunchTour();
+              setTouring(true);
+            }}
             onSettings={onSettings}
             // Only once the list has answered: an empty list still loading is
             // not a first run, and flashing the card at a returning author
@@ -406,12 +425,14 @@ export function LaunchWindow({
           <div className="launch-tabs" role="group" aria-label="Launch library">
             <LaunchTab
               label="Workflows"
+              tour="launch-workflows"
               count={recents?.length ?? 0}
               current={pane === "workflows"}
               onClick={() => goTo("workflows")}
             />
             <LaunchTab
               label="Agents"
+              tour="launch-agents"
               count={agents.count}
               current={pane === "agents"}
               onClick={() => goTo("agents")}
@@ -619,6 +640,7 @@ function LaunchIntro({
             glyph="+"
             title="Create New Workflow"
             subtitle="Start from a template, or blank"
+            tour="launch-create"
             onClick={onNewWorkflow}
           />
           <LaunchAction
@@ -696,7 +718,7 @@ function FirstRunCard({ onDescribe, onDraw }: { onDescribe: () => void; onDraw: 
       : "Needs the plugin — you can add it in Settings";
 
   return (
-    <section className="first-run-card" aria-labelledby="first-run-title">
+    <section className="first-run-card" aria-labelledby="first-run-title" data-tour="launch-create" data-tour-kind="first-run">
       <span className="kicker">New here</span>
       <h2 id="first-run-title">Create your first workflow</h2>
       <div className="rows">
@@ -728,11 +750,14 @@ function FirstRunCard({ onDescribe, onDraw }: { onDescribe: () => void; onDraw: 
  */
 function LaunchTab({
   label,
+  tour,
   count,
   current,
   onClick,
 }: {
   label: string;
+  /** The coach mark that points at this tab. */
+  tour: string;
   count: number;
   current: boolean;
   onClick: () => void;
@@ -740,6 +765,7 @@ function LaunchTab({
   return (
     <button
       type="button"
+      data-tour={tour}
       className="launch-tab"
       {...(current ? { "aria-current": "true" as const } : {})}
       onClick={onClick}
@@ -843,6 +869,7 @@ function LaunchAction({
   title,
   subtitle,
   arrives = false,
+  tour,
   onClick,
 }: {
   glyph: string;
@@ -850,10 +877,16 @@ function LaunchAction({
   subtitle: string;
   /** Something that comes from outside Anthill rather than starting here. */
   arrives?: boolean;
+  /** The coach mark that points at this row, if one does. */
+  tour?: string;
   onClick: () => void;
 }) {
   return (
-    <button className={`launch-action${arrives ? " is-arriving" : ""}`} onClick={onClick}>
+    <button
+      className={`launch-action${arrives ? " is-arriving" : ""}`}
+      {...(tour ? { "data-tour": tour, "data-tour-kind": "create" } : {})}
+      onClick={onClick}
+    >
       <i aria-hidden="true">{glyph}</i>
       <span>
         <span className="launch-action-title">{title}</span>

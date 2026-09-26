@@ -517,15 +517,74 @@ describe("the first run", () => {
     expect(props.onWelcomeTour).toHaveBeenCalled();
   });
 
-  it("replays the canvas tips on the most recent workflow, or on a new one", async () => {
-    const empty = render0([], []);
-    fireEvent.click(await screen.findByRole("button", { name: "Show tips" }));
-    expect(empty.onShowTips).toHaveBeenCalledWith(undefined);
-    cleanup();
+  /*
+   * ANT-144. The launch screen's own coach marks: where a workflow starts,
+   * where the workflows are, where the agents are. jsdom lays nothing out, so
+   * every element is given a real-looking box for the tour to point at.
+   */
+  describe("the launch-screen tips", () => {
+    const KEY = "anthill.launch-tour-due";
+    const laidOut = () =>
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+        () => ({ x: 20, y: 20, left: 20, top: 20, width: 200, height: 40, right: 220, bottom: 60 }) as DOMRect,
+      );
+    const title = () => document.querySelector(".tour-card .title")?.textContent;
 
-    const some = render0([workflow({ path: "/w/latest.workflow.json", name: "latest" })], []);
-    fireEvent.click(await screen.findByRole("button", { name: "Show tips" }));
-    expect(some.onShowTips).toHaveBeenCalledWith("/w/latest.workflow.json");
+    afterEach(() => {
+      localStorage.removeItem(KEY);
+      vi.restoreAllMocks();
+    });
+
+    it("shows once after onboarding asked for it: where to start, the workflows, the agents", async () => {
+      laidOut();
+      localStorage.setItem(KEY, "2026-09-26T00:00:00.000Z");
+      render0([workflow({ path: "/w/a.workflow.json", name: "a" })], []);
+      await waitFor(() => expect(title()).toBe("Create a workflow"));
+      expect(document.querySelector(".tour-card .count")?.textContent).toBe("1 of 3");
+
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(title()).toBe("Workflows");
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(title()).toBe("Agent profiles");
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+      expect(document.querySelector(".tour-card")).toBeNull();
+      expect(localStorage.getItem(KEY)).toBeNull();
+    });
+
+    it("points a new user at the first-run card", async () => {
+      laidOut();
+      localStorage.setItem(KEY, "2026-09-26T00:00:00.000Z");
+      render0([], []);
+      await screen.findByText("Create your first workflow", { selector: "h2" });
+      await waitFor(() => expect(title()).toBe("Create your first workflow"));
+    });
+
+    it("counts a skip as seen", async () => {
+      laidOut();
+      localStorage.setItem(KEY, "2026-09-26T00:00:00.000Z");
+      render0([workflow({ path: "/w/a.workflow.json", name: "a" })], []);
+      await waitFor(() => expect(title()).toBe("Create a workflow"));
+      fireEvent.click(screen.getByRole("button", { name: "Skip tour" }));
+      expect(document.querySelector(".tour-card")).toBeNull();
+      expect(localStorage.getItem(KEY)).toBeNull();
+    });
+
+    it("does not interrupt a returning user", async () => {
+      laidOut();
+      render0([workflow({ path: "/w/a.workflow.json", name: "a" })], []);
+      await screen.findByRole("button", { name: /Open Existing Workflow/ });
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(document.querySelector(".tour-card")).toBeNull();
+    });
+
+    it("Show tips replays them here, and asks for the canvas part instead of opening a workflow", async () => {
+      laidOut();
+      const props = render0([workflow({ path: "/w/latest.workflow.json", name: "latest" })], []);
+      fireEvent.click(await screen.findByRole("button", { name: "Show tips" }));
+      expect(props.onShowTips).toHaveBeenCalledWith();
+      await waitFor(() => expect(title()).toBe("Create a workflow"));
+    });
   });
 });
 

@@ -117,6 +117,7 @@ jobs:
           RAW_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           RAW_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_API_KEY: ${{ steps.notary.outputs.path }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
       # Says plainly which of the two kinds of build this is, so a failure to
       # sign cannot be discovered later by somebody downloading it.

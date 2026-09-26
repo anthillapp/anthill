@@ -238,7 +238,31 @@ else into your repository.
 
 ## Where Anthill keeps things
 
-Everything is local, and there is no account, no sync and no telemetry.
+Workflows and session data stay local. Anthill has no account or sync. The
+packaged macOS app offers three independent controls under **Settings → Privacy**;
+all are off by default:
+
+- **Anonymous product analytics** sends a random app identifier and the
+  names of five app actions to PostHog, along with SDK and connection metadata.
+  It sends no prompts, workflow contents,
+  paths, clicks, page views, or recordings. Turning it off stops future events
+  and deletes the local identifier.
+- **JavaScript error reports** send sanitized stack locations to Sentry, with
+  messages, user data, breadcrumbs, and runtime context removed. Turning it on
+  takes effect after a restart; turning it off stops new reports immediately.
+- **Native crash reports** separately permit Electron memory dumps to Sentry.
+  A dump may contain private data from memory. This requires error reporting
+  and a restart. Turning it off stops new uploads immediately.
+
+The CLI and development builds do not send diagnostics. Session replay is off.
+
+Release builds need no PostHog or Sentry credentials to send opted-in events;
+their project token and DSN are public client configuration. To upload private
+source maps during a release, create a Sentry organization token with the
+`org:ci` scope and store it as the `SENTRY_AUTH_TOKEN` GitHub Actions repository
+secret. The release build uses that secret to upload the maps and removes the
+local map files afterward. Without it, releases still build and error reports
+arrive, but Sentry cannot map minified stack positions back to source.
 
 | Path | What |
 | --- | --- |

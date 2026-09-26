@@ -6,6 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webFrame } from "electron";
+import { hookupIpc } from "@sentry/electron/preload-namespaced";
 
 import type { GlobalAgentInput } from "../shared/ipc.js";
 import type { InterpreterId } from "@anthill/workflow";
@@ -30,7 +31,13 @@ import {
   type SaveWorkflowRequest,
 } from "../shared/ipc.js";
 
+const errorReportingAtLaunch = process.argv.includes("--anthill-report-errors");
+if (errorReportingAtLaunch) {
+  hookupIpc();
+}
+
 const api: AnthillApi = {
+  errorReportingAtLaunch,
   // Stamped in, not asked for: this is the age of the preload itself, and it
   // has to be readable even when main answers nothing at all.
   contract: IPC_CONTRACT,

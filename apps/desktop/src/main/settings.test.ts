@@ -13,7 +13,7 @@ import { join } from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { DEFAULT_SETTINGS, SettingsStore, SETTINGS_VERSION } from "./settings.js";
+import { DEFAULT_SETTINGS, SettingsStore, SETTINGS_VERSION, reportingConsentOnDisk } from "./settings.js";
 
 let dir = "";
 let path = "";
@@ -37,6 +37,14 @@ describe("the preferences", () => {
     const store = new SettingsStore(join(dir, "never-written.json"));
     expect(await store.read()).toEqual(DEFAULT_SETTINGS);
     expect(DEFAULT_SETTINGS.stepNotifications).toBe(false);
+    expect(reportingConsentOnDisk(path)).toEqual({ errorReportingEnabled: false, nativeCrashReportingEnabled: false });
+  });
+
+  it("keeps diagnostics off for old files and reads explicit launch consent", async () => {
+    await writeFile(path, JSON.stringify({ version: 1, settings: { stepNotifications: true } }));
+    expect(reportingConsentOnDisk(path)).toEqual({ errorReportingEnabled: false, nativeCrashReportingEnabled: false });
+    await new SettingsStore(path).write({ errorReportingEnabled: true, nativeCrashReportingEnabled: true });
+    expect(reportingConsentOnDisk(path)).toEqual({ errorReportingEnabled: true, nativeCrashReportingEnabled: true });
   });
 
   it("survive a restart", async () => {

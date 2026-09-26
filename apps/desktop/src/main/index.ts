@@ -71,7 +71,10 @@ import { AssistantThreadStore } from "./assistant-threads.js";
 import { ModelPreferencesStore } from "./model-preferences.js";
 import { pluginStatus } from "./plugin-status.js";
 import { devCheckout, INSTALL_GUIDES, installPlugin, pluginConnections, type Harness } from "./plugin-connect.js";
-import { SettingsStore } from "./settings.js";
+import { SettingsStore, reportingConsentOnDisk } from "./settings.js";
+import { DesktopAnalytics } from "./analytics.js";
+import { sanitizeErrorEvent } from "../shared/error-reporting.js";
+import * as Sentry from "@sentry/electron/main";
 import { claimScheme } from "./url-scheme.js";
 import { PendingRunStore } from "./live/store.js";
 import { WorkflowStatusStore } from "./live/workflow-status.js";
@@ -90,11 +93,14 @@ import {
 // a `--data-dir` this build will not accept, or one the filesystem will not
 // create, threw out of module evaluation with these handlers six lines beneath
 // it and no window anywhere, and the app died without printing a word.
+let reportErrorsAllowed = false;
 process.on("uncaughtException", (error) => {
   console.error("[anthill] uncaught exception:", error);
+  if (reportErrorsAllowed) Sentry.captureException(error);
 });
 process.on("unhandledRejection", (reason) => {
   console.error("[anthill] unhandled rejection:", reason);
+  if (reportErrorsAllowed) Sentry.captureException(reason instanceof Error ? reason : new Error("Unhandled rejection"));
 });
 
 /**
@@ -125,6 +131,45 @@ process.on("unhandledRejection", (reason) => {
 const USER_DATA_DIR = chooseDataDirectory();
 app.setName("Anthill");
 app.setPath("userData", USER_DATA_DIR);
+
+const analytics = new DesktopAnalytics(USER_DATA_DIR, app.isPackaged && process.platform === "darwin");
+const launchConsent = reportingConsentOnDisk(join(USER_DATA_DIR, "settings.json"));
+let reportErrorsAtLaunch = false;
+let nativeCrashAllowed = launchConsent.nativeCrashReportingEnabled;
+if (app.isPackaged && process.platform === "darwin" && launchConsent.errorReportingEnabled) {
+  try {
+    Sentry.init({
+      dsn: "https://0d9d9c4af97fd9088c38cf794e2ef71d@o4512154362183680.ingest.us.sentry.io/4512154370834432",
+      ipcMode: Sentry.IPCMode.Classic,
+      defaultIntegrations: launchConsent.nativeCrashReportingEnabled
+        ? [Sentry.sentryMinidumpIntegration()]
+        : [],
+      sendDefaultPii: false,
+      sendClientReports: false,
+      tracesSampleRate: 0,
+      attachScreenshot: false,
+      dataCollection: {
+        userInfo: false,
+        cookies: false,
+        httpHeaders: false,
+        httpBodies: [],
+        urlQueryParams: false,
+        graphQL: { document: false, variables: false },
+        genAI: { inputs: false, outputs: false },
+        databaseQueryData: false,
+        stackFrameVariables: false,
+        frameContextLines: 0,
+      },
+      beforeSend: (event) => reportErrorsAllowed && (event.platform !== "native" || nativeCrashAllowed)
+        ? sanitizeErrorEvent(event)
+        : null,
+    });
+    reportErrorsAllowed = true;
+    reportErrorsAtLaunch = true;
+  } catch (error) {
+    console.error("[anthill] error reporting could not start:", error);
+  }
+}
 
 /**
  * The data directory, or a box saying why there is not going to be one.
@@ -577,6 +622,7 @@ function createWindow(): void {
     // Windows and Linux take the icon from the window; macOS from the dock.
     ...(process.platform === "darwin" ? {} : { icon: iconPath() }),
     webPreferences: {
+      additionalArguments: reportErrorsAtLaunch ? ["--anthill-report-errors"] : [],
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
@@ -723,6 +769,7 @@ async function openWorkflowAt(path: string): Promise<OpenWorkflowResult> {
     const workflow = parseWorkflow(migration.workflow);
     await workflowFiles.grant(path);
     await rememberRecent(path);
+    analytics.capture("workflow_opened");
     return {
       ok: true,
       opened: {
@@ -1079,6 +1126,7 @@ function registerIpcHandlers(): void {
       // Saving is how a workflow gets into the launch window's list in the first
       // place: a workflow drafted from a prompt has never been opened from a file.
       await rememberRecent(path);
+      analytics.capture("workflow_saved");
 
       return { kind: "saved", path };
     },
@@ -1232,7 +1280,9 @@ function registerIpcHandlers(): void {
   handle(IpcChannel.liveObserve, async (_event, request: LiveObserveRequest) => {
     const service = liveService();
     await service.start();
-    return service.startObservation(request);
+    const result = await service.startObservation(request);
+    analytics.capture("live_observation_started");
+    return result;
   });
   handle(IpcChannel.liveSnapshot, async () => liveService().start());
   handle(IpcChannel.liveCancel, async (_event, runId: string) =>
@@ -1303,9 +1353,39 @@ function registerIpcHandlers(): void {
     if (url) await shell.openExternal(url);
   });
   handle(IpcChannel.settingsRead, async () => settings().read());
-  handle(IpcChannel.settingsWrite, async (_event, patch: Partial<AppSettings>) =>
-    settings().write(patch ?? {}),
-  );
+  handle(IpcChannel.settingsWrite, async (_event, patch: Partial<AppSettings>) => {
+    const previous = await settings().read();
+    const requested = { ...patch };
+    if (requested.errorReportingEnabled === false) requested.nativeCrashReportingEnabled = false;
+    if (requested.nativeCrashReportingEnabled === true && !(requested.errorReportingEnabled ?? previous.errorReportingEnabled)) {
+      requested.nativeCrashReportingEnabled = false;
+    }
+    if (requested.analyticsEnabled === false && previous.analyticsEnabled) await analytics.disable();
+    let next: AppSettings;
+    try {
+      next = await settings().write(requested);
+    } catch (error) {
+      if (previous.analyticsEnabled) await analytics.enable().catch(() => undefined);
+      throw error;
+    }
+    if (next.analyticsEnabled && !previous.analyticsEnabled) {
+      try {
+        await analytics.enable();
+        analytics.capture("analytics_enabled");
+      } catch (error) {
+        await settings().write({ analyticsEnabled: false });
+        throw error;
+      }
+    }
+    if (previous.nativeCrashReportingEnabled && !next.nativeCrashReportingEnabled) {
+      nativeCrashAllowed = false;
+    }
+    if (previous.errorReportingEnabled && !next.errorReportingEnabled) {
+      reportErrorsAllowed = false;
+      nativeCrashAllowed = false;
+    }
+    return next;
+  });
   // Sent on demand, because "are notifications allowed" has no answer to read:
   // the author is being asked to look at their own screen.
   handle(IpcChannel.notificationsProbe, async () =>
@@ -1598,6 +1678,9 @@ void app.whenReady().then(async () => {
   applyMenu();
   setRecentsPaths({ userData: app.getPath("userData"), home: app.getPath("home") });
   registerIpcHandlers();
+  if ((await settings().read()).analyticsEnabled) {
+    await analytics.enable().then(() => analytics.capture("desktop_opened")).catch(() => undefined);
+  }
   createWindow();
 
   // Reading what a coding harness left in the exchange, from here on. Started

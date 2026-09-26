@@ -1,9 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import * as Sentry from "@sentry/electron/renderer";
 
 import "./styles.css";
 
 import { Root } from "./Root.js";
+import { sanitizeErrorEvent } from "../shared/error-reporting.js";
 
 /**
  * Under the desktop, the preload has already injected `window.anthill` before
@@ -19,6 +21,15 @@ async function bootstrap(): Promise<void> {
       "../../../cli/src/web-bridge"
     );
     await installWebBridge();
+  }
+  if (window.anthill.errorReportingAtLaunch && import.meta.env.PROD) {
+    Sentry.init({
+      defaultIntegrations: [Sentry.globalHandlersIntegration()],
+      sendDefaultPii: false,
+      sendClientReports: false,
+      tracesSampleRate: 0,
+      beforeSend: sanitizeErrorEvent,
+    });
   }
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

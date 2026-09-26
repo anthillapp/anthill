@@ -124,6 +124,19 @@ describe("the page owns itself", () => {
   });
 });
 
+describe("privacy controls", () => {
+  it("starts with sharing off and writes analytics consent only after a click", async () => {
+    const api = stub();
+    show();
+    fireEvent.click(page("Privacy"));
+    const analytics = await screen.findByRole("switch", { name: "Anonymous product analytics" });
+    expect(analytics.getAttribute("aria-checked")).toBe("false");
+    expect(api.settingsWrite).not.toHaveBeenCalled();
+    fireEvent.click(analytics);
+    await waitFor(() => expect(api.settingsWrite).toHaveBeenCalledWith({ analyticsEnabled: true }));
+  });
+});
+
 describe("the notification setting", () => {
   /** The first switch: a step starting, the one that existed before the others. */
   const theSwitch = () => screen.getAllByRole("switch")[0];

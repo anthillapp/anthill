@@ -646,6 +646,12 @@ export type PiModelCatalog = {
 
 /** The preferences Anthill keeps for this machine. Documented in main/settings.ts. */
 export type AppSettings = {
+  /** Anonymous product analytics for the packaged macOS desktop app. Off by default. */
+  analyticsEnabled: boolean;
+  /** JavaScript error reports, from the next app launch. Off by default. */
+  errorReportingEnabled: boolean;
+  /** Native memory dumps, from the next app launch. Off by default. */
+  nativeCrashReportingEnabled: boolean;
   /** Native notification on a confidently observed move to a new step. Off by default. */
   stepNotifications: boolean;
   /** …on a step the session left behind. */
@@ -849,6 +855,8 @@ export type ObservationSetupActionResult =
 /* ------------------------------------------------------------------ */
 
 export interface AnthillApi {
+  /** True only when error reporting was enabled at desktop launch. */
+  readonly errorReportingAtLaunch?: boolean;
   /**
    * The contract version of the preload that answered, as a plain value.
    *

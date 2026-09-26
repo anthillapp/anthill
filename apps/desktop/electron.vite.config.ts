@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import react from "@vitejs/plugin-react";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
 
 /**
  * The app's version, from the one place that already has to be right.
@@ -33,10 +34,25 @@ const anthillPackages = [
   "@anthill/workspace",
 ];
 
+const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
+function sourceMapsFor(output: "main" | "preload" | "renderer") {
+  return sentryAuthToken ? sentryVitePlugin({
+    org: "anthillapp",
+    project: "anthill",
+    authToken: sentryAuthToken,
+    telemetry: false,
+    sourcemaps: {
+      assets: `./out/${output}/**/*.map`,
+      filesToDeleteAfterUpload: `./out/${output}/**/*.map`,
+    },
+  }) : undefined;
+}
+
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: anthillPackages })],
+    plugins: [externalizeDepsPlugin({ exclude: anthillPackages }), sourceMapsFor("main")].filter(Boolean),
     build: {
+      sourcemap: sentryAuthToken ? "hidden" : false,
       rollupOptions: {
         input: {
           index: resolve(__dirname, "src/main/index.ts"),
@@ -46,8 +62,9 @@ export default defineConfig({
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin({ exclude: anthillPackages })],
+    plugins: [externalizeDepsPlugin({ exclude: anthillPackages }), sourceMapsFor("preload")].filter(Boolean),
     build: {
+      sourcemap: sentryAuthToken ? "hidden" : false,
       rollupOptions: {
         input: resolve(__dirname, "src/preload/index.ts"),
       },
@@ -55,9 +72,10 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(__dirname, "src/renderer"),
-    plugins: [react()],
+    plugins: [react(), sourceMapsFor("renderer")].filter(Boolean),
     define: { __ANTHILL_VERSION__: JSON.stringify(version) },
     build: {
+      sourcemap: sentryAuthToken ? "hidden" : false,
       rollupOptions: {
         input: resolve(__dirname, "src/renderer/index.html"),
       },

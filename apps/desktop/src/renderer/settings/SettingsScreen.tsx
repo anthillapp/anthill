@@ -42,7 +42,10 @@ import {
 const NAV = [
   {
     label: "Anthill",
-    items: [{ id: "notifications", label: "Notifications" }],
+    items: [
+      { id: "notifications", label: "Notifications" },
+      { id: "privacy", label: "Privacy" },
+    ],
   },
   {
     label: "Coding tools",
@@ -65,6 +68,7 @@ export type PageId = (typeof NAV)[number]["items"][number]["id"];
 
 const TITLES: Record<PageId, string> = {
   notifications: "Notifications",
+  privacy: "Privacy",
   tools: "Coding tools",
   models: "Models",
   plugins: "Plugins",
@@ -156,6 +160,7 @@ export function SettingsScreen({
           </header>
           <div className="settings-body">
             {page === "notifications" ? <NotificationsPage /> : null}
+            {page === "privacy" ? <PrivacyPage /> : null}
             {page === "tools" ? <CodingToolsPage /> : null}
             {page === "models" ? <ModelsPage /> : null}
             {page === "plugins" ? <PluginsPage /> : null}
@@ -169,6 +174,9 @@ export function SettingsScreen({
 }
 
 const ALL_OFF: AppSettings = {
+  analyticsEnabled: false,
+  errorReportingEnabled: false,
+  nativeCrashReportingEnabled: false,
   stepNotifications: false,
   stepFinishedNotifications: false,
   loopNotifications: false,
@@ -176,6 +184,77 @@ const ALL_OFF: AppSettings = {
   finishedNotifications: false,
   observationLostNotifications: false,
 };
+
+function PrivacyPage() {
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [unsaved, setUnsaved] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    void window.anthill.settingsRead().then(
+      (value) => { if (live) setSettings(value); },
+      () => { if (live) setSettings({ ...ALL_OFF }); },
+    );
+    return () => { live = false; };
+  }, []);
+
+  const set = async (key: keyof Pick<AppSettings, "analyticsEnabled" | "errorReportingEnabled" | "nativeCrashReportingEnabled">, value: boolean) => {
+    setBusy(true);
+    setUnsaved(false);
+    try {
+      setSettings(await window.anthill.settingsWrite({ [key]: value }));
+    } catch {
+      setUnsaved(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <SettingGroup
+      title="Optional diagnostics"
+      footer="All sharing is off until you turn it on. These controls apply only to the packaged macOS app. The CLI and development builds do not send diagnostics."
+    >
+      <SettingRow
+        label="Anonymous product analytics"
+        note="Sends a random app identifier and the names of these actions: opening Anthill, enabling analytics, opening or saving a workflow, and starting live observation. PostHog also receives SDK and connection metadata. No workflow content, prompts, paths, clicks, pageviews, or recordings. Turning this off removes the local identifier."
+      >
+        <SettingSwitch
+          on={settings?.analyticsEnabled === true}
+          label="Anonymous product analytics"
+          disabled={settings === null || busy}
+          onChange={(next) => void set("analyticsEnabled", next)}
+        />
+      </SettingRow>
+      <SettingDivider />
+      <SettingRow
+        label="JavaScript error reports"
+        note="Sends error stack locations with messages and runtime data removed. Starts after you restart Anthill. Turning it off stops new reports immediately."
+      >
+        <SettingSwitch
+          on={settings?.errorReportingEnabled === true}
+          label="JavaScript error reports"
+          disabled={settings === null || busy}
+          onChange={(next) => void set("errorReportingEnabled", next)}
+        />
+      </SettingRow>
+      <SettingDivider />
+      <SettingRow
+        label="Native crash reports"
+        note="Separately allows Electron memory dumps to be sent after a crash. A dump may contain private text or credentials from memory. Requires JavaScript error reports and a restart."
+      >
+        <SettingSwitch
+          on={settings?.nativeCrashReportingEnabled === true}
+          label="Native crash reports"
+          disabled={settings === null || busy || !settings.errorReportingEnabled}
+          onChange={(next) => void set("nativeCrashReportingEnabled", next)}
+        />
+      </SettingRow>
+      {unsaved ? <p className="set-result" role="alert">This preference was not saved.</p> : null}
+    </SettingGroup>
+  );
+}
 
 /**
  * One switch per moment worth interrupting for, each asked for on its own.

@@ -31,6 +31,8 @@ import { useAgentLibrary } from "./agents/useAgentLibrary.js";
 import { useModelCatalogues } from "./agents/model-catalogues.js";
 import { useHarnessConnections } from "./harness/useHarnessConnections.js";
 import { AnthillMark } from "./AnthillMark.js";
+import { readyTools } from "./plugin/plugin-card.js";
+import { HARNESSES, usePluginConnections } from "./plugin/usePluginConnections.js";
 import { WorkflowPicker } from "./workflow/WorkflowPicker.js";
 
 export type LaunchWindowProps = {
@@ -46,6 +48,8 @@ export type LaunchWindowProps = {
   onExplain: () => void;
   /** How a Claude Code or Codex session hands a workflow over. */
   onFromSession: () => void;
+  /** Onboarding again, from the footer. */
+  onWelcomeTour: () => void;
   onSettings: () => void;
 };
 
@@ -116,6 +120,7 @@ export function LaunchWindow({
   onOpenLive,
   onExplain,
   onFromSession,
+  onWelcomeTour,
   onSettings,
 }: LaunchWindowProps) {
   /**
@@ -378,7 +383,12 @@ export function LaunchWindow({
             onOpen={onOpen}
             onExplain={onExplain}
             onFromSession={onFromSession}
+            onWelcomeTour={onWelcomeTour}
             onSettings={onSettings}
+            // Only once the list has answered: an empty list still loading is
+            // not a first run, and flashing the card at a returning author
+            // would be the one wrong thing to show them.
+            firstRun={recents !== null && recents.length === 0}
           />
         )}
       </div>
@@ -528,14 +538,19 @@ function LaunchIntro({
   onOpen,
   onExplain,
   onFromSession,
+  onWelcomeTour,
   onSettings,
+  firstRun,
 }: {
   onNewWorkflow: () => void;
   onFromPrompt: () => void;
   onOpen: (path?: string) => void;
   onExplain: () => void;
   onFromSession: () => void;
+  onWelcomeTour: () => void;
   onSettings: () => void;
+  /** No workflow on this machine yet: one card replaces the four start rows. */
+  firstRun: boolean;
 }) {
   /*
     Ask for the file here, and leave this screen only once there is one.
@@ -590,39 +605,48 @@ function LaunchIntro({
         Design a workflow, hand it to your agent, and follow its progress.
       </p>
 
-      <div className="launch-actions">
-        <LaunchAction
-          glyph="+"
-          title="Create New Workflow"
-          subtitle="Start from a template, or blank"
-          onClick={onNewWorkflow}
-        />
-        <LaunchAction
-          glyph="✎"
-          title="Workflow from a Prompt"
-          subtitle="Describe the work; a local CLI proposes a workflow"
-          onClick={onFromPrompt}
-        />
-        <LaunchAction
-          glyph="⌸"
-          title="Open Existing Workflow"
-          subtitle="A .workflow.json file on this machine"
-          onClick={() => void onChooseFile()}
-        />
-        {/* Dashed, and with an arrow: the other three are things you start
-            here, and this one is something that arrives from elsewhere. */}
-        <LaunchAction
-          glyph="⌘"
-          title="From a Coding Session"
-          subtitle="Let Claude Code or Codex hand one over"
-          arrives
-          onClick={onFromSession}
-        />
-      </div>
+      {firstRun ? (
+        <FirstRunCard onDescribe={onFromSession} onDraw={onNewWorkflow} />
+      ) : (
+        <div className="launch-actions">
+          <LaunchAction
+            glyph="+"
+            title="Create New Workflow"
+            subtitle="Start from a template, or blank"
+            onClick={onNewWorkflow}
+          />
+          <LaunchAction
+            glyph="✎"
+            title="Workflow from a Prompt"
+            subtitle="Describe the work; a local CLI proposes a workflow"
+            onClick={onFromPrompt}
+          />
+          <LaunchAction
+            glyph="⌸"
+            title="Open Existing Workflow"
+            subtitle="A .workflow.json file on this machine"
+            onClick={() => void onChooseFile()}
+          />
+          {/* Dashed, and with an arrow: the other three are things you start
+              here, and this one is something that arrives from elsewhere. */}
+          <LaunchAction
+            glyph="⌘"
+            title="From a Coding Session"
+            subtitle="Let Claude Code or Codex hand one over"
+            arrives
+            onClick={onFromSession}
+          />
+        </div>
+      )}
 
-      {/* Two doors, side by side: what this is, and how it behaves. Settings
-          is app-level and belongs here rather than in a bar about a document. */}
+      {/* The doors that stay whichever start area is showing: the tour again,
+          what this is, and Settings, which is app-level and belongs here
+          rather than in a bar about a document. */}
       <div className="launch-welcome-links">
+        <button type="button" className="launch-welcome-link" onClick={onWelcomeTour}>
+          Welcome tour
+        </button>
+        <span aria-hidden="true">·</span>
         <button type="button" className="launch-welcome-link" onClick={onExplain}>
           How Anthill works
         </button>
@@ -640,6 +664,48 @@ function LaunchIntro({
         />
       )}
     </>
+  );
+}
+
+/**
+ * The first run's one card: create your first workflow, two ways.
+ *
+ * A first-time author has nothing behind "Open Existing" or a list to come
+ * back to, so four start rows would be four choices with nothing behind most
+ * of them. Describing the work to a tool they already have is the shorter path
+ * and goes first; its note says in plain words whether a plugin is connected,
+ * and goes green only when one really is — the same check the plugin card
+ * makes, so the two never disagree.
+ */
+function FirstRunCard({ onDescribe, onDraw }: { onDescribe: () => void; onDraw: () => void }) {
+  const plugins = usePluginConnections();
+  const ready = readyTools(HARNESSES.map((tool) => ({ label: tool.label, view: plugins.views[tool.id] })));
+  const note =
+    ready.length > 0
+      ? `${ready.join(" and ")} ${ready.length > 1 ? "are" : "is"} connected`
+      : "Needs the plugin — you can add it in Settings";
+
+  return (
+    <section className="first-run-card" aria-labelledby="first-run-title">
+      <span className="kicker">New here</span>
+      <h2 id="first-run-title">Create your first workflow</h2>
+      <div className="rows">
+        <button type="button" className="first-run-row" onClick={onDescribe}>
+          <i aria-hidden="true">⌘</i>
+          <span>
+            <strong>Describe it in Codex or Claude Code</strong>
+            <span className={`first-run-note${ready.length > 0 ? " is-ready" : ""}`}>{note}</span>
+          </span>
+        </button>
+        <button type="button" className="first-run-row" onClick={onDraw}>
+          <i aria-hidden="true">+</i>
+          <span>
+            <strong>Draw it yourself</strong>
+            <span className="first-run-note">Drag in steps and connect them</span>
+          </span>
+        </button>
+      </div>
+    </section>
   );
 }
 

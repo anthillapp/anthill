@@ -4,7 +4,16 @@ import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest
 import type { AnthillApi } from "../shared/ipc.js";
 import { Root } from "./Root.js";
 
-vi.mock("./explain/first-run.js", () => ({ explainerDue: () => false, markExplainerSeen: vi.fn() }));
+const firstRun = vi.hoisted(() => ({ due: false, seen: 0 }));
+vi.mock("./explain/first-run.js", () => ({
+  onboardingDue: () => firstRun.due,
+  markOnboardingSeen: () => {
+    firstRun.seen += 1;
+  },
+}));
+vi.mock("./onboarding/Onboarding.js", () => ({
+  Onboarding: ({ onFinish }: { onFinish(): void }) => <button onClick={onFinish}>Skip for now</button>,
+}));
 vi.mock("./LaunchWindow.js", () => ({
   LaunchWindow: ({ onNewWorkflow }: { onNewWorkflow(): void }) => <button onClick={onNewWorkflow}>New workflow</button>,
 }));
@@ -84,4 +93,42 @@ it("opens a clean launch screen without a discard question", async () => {
   act(() => receive("/incoming.json", 10));
   expect(confirm).not.toHaveBeenCalled();
   expect(screen.getByText("/incoming.json")).toBeTruthy();
+});
+
+/*
+ * ANT-140: a first start lands on onboarding, once; finishing it lands on the
+ * launch window and remembers that it was seen. A returning start goes straight
+ * to the launch window.
+ */
+it("starts on onboarding the first time, and finishes on the launch window", async () => {
+  firstRun.due = true;
+  firstRun.seen = 0;
+  try {
+    await act(async () => { render(<Root />); });
+    expect(screen.queryByRole("button", { name: "New workflow" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(firstRun.seen).toBe(1);
+    expect(screen.getByRole("button", { name: "New workflow" })).toBeTruthy();
+  } finally {
+    firstRun.due = false;
+  }
+});
+
+it("goes straight to the launch window once onboarding has been seen", async () => {
+  await act(async () => { render(<Root />); });
+  expect(screen.getByRole("button", { name: "New workflow" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
+});
+
+it("lets a handed-over workflow through onboarding, and does not show the tour again", async () => {
+  firstRun.due = true;
+  firstRun.seen = 0;
+  try {
+    await act(async () => { render(<Root />); });
+    act(() => receive("/incoming.json", 11));
+    expect(screen.getByText("/incoming.json")).toBeTruthy();
+    expect(firstRun.seen).toBe(1);
+  } finally {
+    firstRun.due = false;
+  }
 });

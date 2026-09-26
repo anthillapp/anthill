@@ -4,6 +4,9 @@
  * The Orchestrator card is gone: offering a finished mode and an unfinished one
  * as equal choices was never a real choice, and it pushed the thing people
  * actually come back for — their workflows — off the first screen.
+ *
+ * The one exception to "every route leaves from it" is the very first start,
+ * which lands on onboarding and arrives here when that is finished.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -12,7 +15,8 @@ import type { PendingRun } from "@anthill/live";
 
 import { HowItWorksScreen } from "./explain/HowItWorksScreen.js";
 import { FromSessionScreen } from "./handoff/FromSessionScreen.js";
-import { explainerDue, markExplainerSeen } from "./explain/first-run.js";
+import { markOnboardingSeen, onboardingDue } from "./explain/first-run.js";
+import { Onboarding } from "./onboarding/Onboarding.js";
 import { LaunchWindow } from "./LaunchWindow.js";
 import { SettingsScreen, type PageId } from "./settings/SettingsScreen.js";
 import { WorkflowScreen } from "./workflow/WorkflowScreen.js";
@@ -27,11 +31,16 @@ export function Root() {
   /**
    * The explainer is a screen at the launcher's own level, not a dialog over
    * it: it answers what the product is, which is a question you ask before
-   * you are inside anything. It is also where a first start lands, so the
-   * first thing a new author reads is the same thing the link shows later —
-   * one explainer, not two that can drift apart.
+   * you are inside anything. It opens from its link; a first start lands on
+   * onboarding instead (ANT-140).
    */
-  const [explaining, setExplaining] = useState(() => explainerDue());
+  const [explaining, setExplaining] = useState(false);
+  /**
+   * Onboarding: shown once, on the first start, and again from Welcome tour.
+   * Finishing it — from either page — goes to the launch window, which for a
+   * machine with no workflows is the first-run card.
+   */
+  const [onboarding, setOnboarding] = useState(() => onboardingDue());
   /**
    * "From a coding session" — a screen at the launcher's level, like the
    * explainer, because it is reached from both and returns to the launcher.
@@ -93,6 +102,12 @@ export function Root() {
       setSettingsFrom(null);
       setExplaining(false);
       setFromSession(false);
+      // A workflow handed over mid-onboarding means the plugin already works;
+      // the tour has nothing left to say, now or on the next start.
+      setOnboarding((showing) => {
+        if (showing) markOnboardingSeen();
+        return false;
+      });
     });
   }, []);
 
@@ -117,12 +132,16 @@ export function Root() {
       .catch(() => undefined);
   }, [openHandedOver]);
 
-  const leaveExplainer = () => {
-    markExplainerSeen();
-    setExplaining(false);
+  const leaveExplainer = () => setExplaining(false);
+
+  const finishOnboarding = () => {
+    markOnboardingSeen();
+    setOnboarding(false);
   };
 
-  const screen = fromSession ? (
+  const screen = onboarding ? (
+    <Onboarding onFinish={finishOnboarding} onSettings={openPluginSettings} />
+  ) : fromSession ? (
     <FromSessionScreen onBack={() => setFromSession(false)} onSettings={openPluginSettings} />
   ) : explaining ? (
     <HowItWorksScreen
@@ -153,6 +172,7 @@ export function Root() {
       onOpenLive={(path, run) => setStart({ kind: "open", path, live: run })}
       onExplain={() => setExplaining(true)}
       onFromSession={() => setFromSession(true)}
+      onWelcomeTour={() => setOnboarding(true)}
       onSettings={openSettings}
     />
   );

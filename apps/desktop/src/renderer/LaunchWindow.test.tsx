@@ -69,7 +69,7 @@ async function show(recents: RecentWorkflow[], runs: PendingRun[] = [], events: 
       onOpen={onOpen}
       onOpenLive={onOpenLive}
       onExplain={() => undefined}
-      onFromSession={() => undefined}
+      onFromSession={() => undefined} onWelcomeTour={() => undefined}
       onSettings={() => undefined}
     />,
   );
@@ -353,7 +353,7 @@ describe("the three list states survive", () => {
     render(
       <LaunchWindow onNewWorkflow={() => undefined} onFromPrompt={() => undefined} onOpen={() => undefined}
       onExplain={() => undefined}
-      onFromSession={() => undefined}
+      onFromSession={() => undefined} onWelcomeTour={() => undefined}
       onSettings={() => undefined} />,
     );
     expect(screen.getByText("Looking for your workflows…")).toBeTruthy();
@@ -402,7 +402,7 @@ describe("the way to the explainer", () => {
         onFromPrompt={() => undefined}
         onOpen={() => undefined}
         onExplain={onExplain}
-        onFromSession={() => undefined}
+        onFromSession={() => undefined} onWelcomeTour={() => undefined}
         onSettings={() => undefined}
       />,
     );
@@ -422,25 +422,99 @@ describe("the way to the explainer", () => {
 describe("a workflow from a coding session", () => {
   it("is offered under the tagline, and asks for the From a session screen", async () => {
     const onFromSession = vi.fn();
-    const api = stub([]);
+    stub([workflow({ path: "/w/a.workflow.json", name: "a" })]);
     render(
       <LaunchWindow
         onNewWorkflow={() => undefined}
         onFromPrompt={() => undefined}
         onOpen={() => undefined}
         onExplain={() => undefined}
-        onFromSession={onFromSession}
+        onFromSession={onFromSession} onWelcomeTour={() => undefined}
         onSettings={() => undefined}
       />,
     );
-    await waitFor(() => expect(api.listRecentPlans).toHaveBeenCalled());
+    const row = await screen.findByRole("button", { name: /From a Coding Session/ });
 
     expect(screen.getByText("Design a workflow, hand it to your agent, and follow its progress.")).toBeTruthy();
-    const row = screen.getByRole("button", { name: /From a Coding Session/ });
     expect(row.textContent).toContain("Let Claude Code or Codex hand one over");
     expect(row.classList.contains("is-arriving")).toBe(true);
     fireEvent.click(row);
     expect(onFromSession).toHaveBeenCalled();
+  });
+});
+
+/**
+ * ANT-140: a machine with no workflow gets one card instead of four rows, and
+ * the card's plugin line is green only when a plugin is really connected.
+ */
+describe("the first run", () => {
+  const connection = (harness: "claude-code" | "codex", ready: boolean) => ({
+    harness,
+    label: harness === "codex" ? "Codex" : "Claude Code",
+    cli: { available: true },
+    source: "/src",
+    status: {
+      harness,
+      label: harness === "codex" ? "Codex" : "Claude Code",
+      plugin: "anthill",
+      toolFound: true,
+      installed: ready,
+      enabled: ready,
+    },
+    ...(ready ? { serverAnswers: true } : {}),
+  });
+
+  function render0(recents: RecentWorkflow[], connections: unknown[]) {
+    const api = stub(recents) as Record<string, unknown>;
+    api.pluginConnections = vi.fn(async () => connections);
+    const props = { onFromSession: vi.fn(), onNewWorkflow: vi.fn(), onWelcomeTour: vi.fn() };
+    render(
+      <LaunchWindow
+        onFromPrompt={() => undefined}
+        onOpen={() => undefined}
+        onExplain={() => undefined}
+        onSettings={() => undefined}
+        {...props}
+      />,
+    );
+    return props;
+  }
+
+  it("replaces the start rows with one card, and both of its paths go where they say", async () => {
+    const props = render0([], [connection("claude-code", false), connection("codex", false)]);
+    await screen.findByText("Create your first workflow");
+    expect(screen.getByText("New here")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Open Existing Workflow/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /From a Coding Session/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Describe it in Codex or Claude Code/ }));
+    expect(props.onFromSession).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Draw it yourself/ }));
+    expect(props.onNewWorkflow).toHaveBeenCalled();
+  });
+
+  it("says a plugin is needed until one really answers", async () => {
+    render0([], [connection("claude-code", false), connection("codex", false)]);
+    const note = await screen.findByText("Needs the plugin — you can add it in Settings");
+    expect(note.classList.contains("is-ready")).toBe(false);
+  });
+
+  it("names the connected tool, in green", async () => {
+    render0([], [connection("claude-code", true), connection("codex", false)]);
+    const note = await screen.findByText("Claude Code is connected");
+    expect(note.classList.contains("is-ready")).toBe(true);
+  });
+
+  it("is gone once there is a workflow", async () => {
+    render0([workflow({ path: "/w/a.workflow.json", name: "a" })], []);
+    await screen.findByRole("button", { name: /Open Existing Workflow/ });
+    expect(screen.queryByText("Create your first workflow")).toBeNull();
+  });
+
+  it("keeps the way back to the tour", async () => {
+    const props = render0([], []);
+    fireEvent.click(await screen.findByRole("button", { name: "Welcome tour" }));
+    expect(props.onWelcomeTour).toHaveBeenCalled();
   });
 });
 
@@ -518,23 +592,25 @@ describe("agents beside the workflows", () => {
  */
 describe("Open Existing Workflow", () => {
   const button = () => screen.getByRole("button", { name: /Open Existing Workflow/ });
+  // A machine with a workflow: with none, the first-run card takes the rows' place.
+  const one = [workflow({ path: "/w/a.workflow.json", name: "a" })];
 
   it("asks for a file rather than navigating first", async () => {
-    const { api, onOpen } = await show([]);
+    const { api, onOpen } = await show(one);
     fireEvent.click(button());
     await waitFor(() => expect(api.openWorkflow).toHaveBeenCalled());
     expect(onOpen).not.toHaveBeenCalled();
   });
 
   it("stays put when the dialog is cancelled", async () => {
-    const { onOpen } = await show([]);
+    const { onOpen } = await show(one);
     fireEvent.click(button());
     await waitFor(() => expect(screen.getByRole("button", { name: /Open Existing Workflow/ })).toBeTruthy());
     expect(onOpen).not.toHaveBeenCalled();
   });
 
   it("opens what was chosen, once there is something", async () => {
-    const { api, onOpen } = await show([]);
+    const { api, onOpen } = await show(one);
     api.openWorkflow = vi.fn(async () => ({
       ok: true as const,
       opened: { path: "/tmp/chosen.workflow.json", workflow: { name: "Chosen" } },

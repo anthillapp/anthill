@@ -233,3 +233,29 @@ describe("the animations", () => {
     for (const move of moves) expect(move).toMatch(/^(0|-?\d+(\.\d+)?px)$/);
   });
 });
+
+/**
+ * The canvas origin chip's modifiers are shared words.
+ *
+ * `canvas-origin from-session` is the "Handed over" chip on a workflow a coding
+ * session handed over. When the From-a-coding-session screen arrived it named
+ * its root `.from-session` and gave it `height: 100vh` — and the chip took it,
+ * growing into a full-height panel that covered the diagram (ANT-143). A rule
+ * naming one of the chip's modifiers has to name the chip too.
+ */
+describe("the canvas origin chip", () => {
+  const MODIFIERS = ["from-session", "from-template"];
+
+  it("is the only thing its modifiers style", () => {
+    const loose: string[] = [];
+    for (const match of css.matchAll(/(^|})([^{}@]+)\{/g)) {
+      for (const selector of match[2].split(",")) {
+        const text = selector.trim();
+        if (!MODIFIERS.some((name) => new RegExp(`\\.${name}(?![\\w-])`).test(text))) continue;
+        if (/\.canvas-origin(?![\w-])/.test(text)) continue;
+        loose.push(text);
+      }
+    }
+    expect(loose).toEqual([]);
+  });
+});

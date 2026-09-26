@@ -224,6 +224,20 @@ async function isWorkflowDirty(window: BrowserWindow): Promise<boolean> {
 let allowCloseWithUnsavedWorkflow = false;
 
 /**
+ * Whether the app is on its way out, rather than one window closing.
+ *
+ * The window's `close` handler always cancels the first close and decides
+ * asynchronously, and a cancelled close aborts a quit. It then closed only
+ * the window — and on macOS an app with no windows keeps running. So Cmd+Q
+ * left a windowless process behind, and a SIGTERM did nothing at all: the
+ * dev watcher's restart never replaced the running app, and the replacement,
+ * finding the lock still held, quit in a third of a second and took the dev
+ * server with it (ANT-72). Knowing the quit was asked for is what lets the
+ * close handler carry it on once the question is settled.
+ */
+let quitting = false;
+
+/**
  * Ask before something throws the open workflow's unsaved edits away.
  *
  * Three things in this process can: closing the window, restarting, and opening
@@ -621,11 +635,17 @@ function createWindow(): void {
         "Discard changes",
         "Closing now discards everything since the last save.",
       );
-      if (!mayClose) return;
+      if (!mayClose) {
+        // The person kept their work, so the quit that asked is off too.
+        quitting = false;
+        return;
+      }
 
       allowCloseWithUnsavedWorkflow = true;
       workflowDirty = false;
-      window.close();
+      // Carry on with what was asked: a quit, not just this window.
+      if (quitting) app.quit();
+      else window.close();
     }).finally(() => {
       closePending = false;
       // A link queued behind a cancelled close still needs delivery.
@@ -1365,16 +1385,75 @@ function registerIpcHandlers(): void {
   hands its argv to the first and exits; the first responds by fronting its
   window, which is what the person double-clicking again actually wanted.
 */
-if (!app.requestSingleInstanceLock()) {
-  app.quit();
-} else {
+/*
+  The lock, and in a development run, a short wait for it.
+
+  The dev watcher restarts Electron by signalling the running app and
+  spawning the replacement at once, without waiting (electron-vite 2.3), and
+  it ends itself — dev server and all — when any Electron it spawned exits.
+  The replacement therefore always meets a lock its predecessor has not let
+  go of yet; quitting on the spot is what took the dev server down (ANT-72).
+  In development it waits up to five seconds for the predecessor to finish
+  quitting. A packaged app never waits: a second launch there is a person
+  double-clicking, and the answer is to hand over and go.
+*/
+const INSTANCE_LOCK_WAIT_MS = 5_000;
+const lockHeld: Promise<boolean> = (() => {
+  if (app.requestSingleInstanceLock()) return Promise.resolve(true);
+  if (app.isPackaged) return Promise.resolve(false);
+  return new Promise<boolean>((resolve) => {
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (app.requestSingleInstanceLock()) {
+        clearInterval(timer);
+        resolve(true);
+      } else if (Date.now() - started >= INSTANCE_LOCK_WAIT_MS) {
+        clearInterval(timer);
+        resolve(false);
+      }
+    }, 100);
+  });
+})();
+
+void lockHeld.then((held) => {
+  if (!held) {
+    app.quit();
+    return;
+  }
   app.on("second-instance", (_event, argv) => {
+    // An app on its way out does not open a window for a newcomer: that is
+    // the replacement asking for the lock, and a window reopened here would
+    // keep this process alive in its way.
+    if (quitting) return;
     for (const link of linksFromArgv(argv)) receiveLink(link);
     workflowWindow();
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
+  });
+});
+
+app.on("before-quit", () => {
+  quitting = true;
+});
+
+/*
+  A signal is not a person closing a window.
+
+  Nobody is there to answer "discard changes?", so a SIGTERM, SIGINT or
+  SIGHUP quits without asking — the way a terminal's Ctrl-C and the dev
+  watcher's restart both expect. What the person had open is what autosave
+  and the working copy are for. If the orderly quit is still in progress
+  after three seconds, the process ends anyway: a signal that is ignored is
+  the bug this replaces.
+*/
+for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+  process.on(signal, () => {
+    quitting = true;
+    allowCloseWithUnsavedWorkflow = true;
+    app.quit();
+    setTimeout(() => app.exit(0), 3_000).unref();
   });
 }
 
@@ -1448,6 +1527,9 @@ function applyMenu(): void {
 }
 
 void app.whenReady().then(async () => {
+  // Nothing opens until this process holds the lock; a development run may
+  // still be waiting for its predecessor to let go (ANT-72).
+  if (!(await lockHeld)) return;
   // The installed app only, and reclaimed whenever it comes back to the front
   // having lost it — see url-scheme.ts for why a dev run must not (ANT-137).
   claimScheme(app);

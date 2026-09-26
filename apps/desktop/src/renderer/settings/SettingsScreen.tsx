@@ -185,7 +185,8 @@ const ALL_OFF: AppSettings = {
   observationLostNotifications: false,
 };
 
-function PrivacyPage() {
+/** Exported with `available` so tests can render the release build's page. */
+export function PrivacyPage({ available = __ANTHILL_DIAGNOSTICS__ }: { available?: boolean }) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [busy, setBusy] = useState(false);
   const [unsaved, setUnsaved] = useState(false);
@@ -214,7 +215,9 @@ function PrivacyPage() {
   return (
     <SettingGroup
       title="Optional diagnostics"
-      footer="All sharing is off until you turn it on. These controls apply only to the packaged macOS app. The CLI and development builds do not send diagnostics."
+      footer={available
+        ? "All sharing is off until you turn it on. The CLI and development builds do not send diagnostics."
+        : "This build never sends diagnostics. Only the released macOS app can, and only after you turn them on."}
     >
       <SettingRow
         label="Anonymous product analytics"
@@ -223,7 +226,7 @@ function PrivacyPage() {
         <SettingSwitch
           on={settings?.analyticsEnabled === true}
           label="Anonymous product analytics"
-          disabled={settings === null || busy}
+          disabled={!available || settings === null || busy}
           onChange={(next) => void set("analyticsEnabled", next)}
         />
       </SettingRow>
@@ -235,7 +238,7 @@ function PrivacyPage() {
         <SettingSwitch
           on={settings?.errorReportingEnabled === true}
           label="JavaScript error reports"
-          disabled={settings === null || busy}
+          disabled={!available || settings === null || busy}
           onChange={(next) => void set("errorReportingEnabled", next)}
         />
       </SettingRow>
@@ -247,7 +250,7 @@ function PrivacyPage() {
         <SettingSwitch
           on={settings?.nativeCrashReportingEnabled === true}
           label="Native crash reports"
-          disabled={settings === null || busy || !settings.errorReportingEnabled}
+          disabled={!available || settings === null || busy || !settings.errorReportingEnabled}
           onChange={(next) => void set("nativeCrashReportingEnabled", next)}
         />
       </SettingRow>

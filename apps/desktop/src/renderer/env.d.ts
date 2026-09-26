@@ -16,6 +16,12 @@ declare global {
    * round trip to learn something the build already knew.
    */
   const __ANTHILL_VERSION__: string;
+
+  /**
+   * True only in the release workflow's build (`ANTHILL_RELEASE_BUILD=1`).
+   * Everything else — dev runs, local packages, tests — sends no diagnostics.
+   */
+  const __ANTHILL_DIAGNOSTICS__: boolean;
 }
 
 export {};

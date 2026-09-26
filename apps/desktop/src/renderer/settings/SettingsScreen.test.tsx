@@ -14,7 +14,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ObservationHarnessSetup } from "../../shared/ipc.js";
-import { SettingsScreen } from "./SettingsScreen.js";
+import { PrivacyPage, SettingsScreen } from "./SettingsScreen.js";
 
 const HARNESS: ObservationHarnessSetup = {
   id: "claude-code" as const,
@@ -125,10 +125,20 @@ describe("the page owns itself", () => {
 });
 
 describe("privacy controls", () => {
-  it("starts with sharing off and writes analytics consent only after a click", async () => {
+  it("cannot be turned on outside the release build", async () => {
     const api = stub();
     show();
     fireEvent.click(page("Privacy"));
+    const analytics = await screen.findByRole("switch", { name: "Anonymous product analytics" });
+    await waitFor(() => expect(api.settingsRead).toHaveBeenCalled());
+    fireEvent.click(analytics);
+    expect(api.settingsWrite).not.toHaveBeenCalled();
+    expect(screen.getByText(/This build never sends diagnostics/)).toBeTruthy();
+  });
+
+  it("starts with sharing off and writes analytics consent only after a click", async () => {
+    const api = stub();
+    render(<PrivacyPage available />);
     const analytics = await screen.findByRole("switch", { name: "Anonymous product analytics" });
     expect(analytics.getAttribute("aria-checked")).toBe("false");
     expect(api.settingsWrite).not.toHaveBeenCalled();

@@ -132,11 +132,13 @@ const USER_DATA_DIR = chooseDataDirectory();
 app.setName("Anthill");
 app.setPath("userData", USER_DATA_DIR);
 
-const analytics = new DesktopAnalytics(USER_DATA_DIR, app.isPackaged && process.platform === "darwin");
+/** Only the released macOS app reports anything; see `__ANTHILL_DIAGNOSTICS__`. */
+const diagnosticsAvailable = __ANTHILL_DIAGNOSTICS__ && app.isPackaged && process.platform === "darwin";
+const analytics = new DesktopAnalytics(USER_DATA_DIR, diagnosticsAvailable);
 const launchConsent = reportingConsentOnDisk(join(USER_DATA_DIR, "settings.json"));
 let reportErrorsAtLaunch = false;
 let nativeCrashAllowed = launchConsent.nativeCrashReportingEnabled;
-if (app.isPackaged && process.platform === "darwin" && launchConsent.errorReportingEnabled) {
+if (diagnosticsAvailable && launchConsent.errorReportingEnabled) {
   try {
     Sentry.init({
       dsn: "https://0d9d9c4af97fd9088c38cf794e2ef71d@o4512154362183680.ingest.us.sentry.io/4512154370834432",

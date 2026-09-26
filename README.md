@@ -255,7 +255,9 @@ all are off by default:
   A dump may contain private data from memory. This requires error reporting
   and a restart. Turning it off stops new uploads immediately.
 
-The CLI and development builds do not send diagnostics. Session replay is off.
+Only tagged releases built by the release workflow can send diagnostics: the
+CLI, development runs, manual workflow runs and locally built packages have
+it compiled out. Session replay is off.
 
 Release builds need no PostHog or Sentry credentials to send opted-in events;
 their project token and DSN are public client configuration. To upload private

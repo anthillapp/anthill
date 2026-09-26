@@ -35,6 +35,13 @@ const anthillPackages = [
 ];
 
 const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
+
+/**
+ * Diagnostics are compiled in only for the release workflow's build. A dev run,
+ * or a package built on somebody's own machine, can never send anything, even
+ * with consent stored in its settings.
+ */
+const diagnostics = JSON.stringify(process.env.ANTHILL_RELEASE_BUILD === "1");
 function sourceMapsFor(output: "main" | "preload" | "renderer") {
   return sentryAuthToken ? sentryVitePlugin({
     org: "anthillapp",
@@ -51,6 +58,7 @@ function sourceMapsFor(output: "main" | "preload" | "renderer") {
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin({ exclude: anthillPackages }), sourceMapsFor("main")].filter(Boolean),
+    define: { __ANTHILL_DIAGNOSTICS__: diagnostics },
     build: {
       sourcemap: sentryAuthToken ? "hidden" : false,
       rollupOptions: {
@@ -73,7 +81,7 @@ export default defineConfig({
   renderer: {
     root: resolve(__dirname, "src/renderer"),
     plugins: [react(), sourceMapsFor("renderer")].filter(Boolean),
-    define: { __ANTHILL_VERSION__: JSON.stringify(version) },
+    define: { __ANTHILL_VERSION__: JSON.stringify(version), __ANTHILL_DIAGNOSTICS__: diagnostics },
     build: {
       sourcemap: sentryAuthToken ? "hidden" : false,
       rollupOptions: {

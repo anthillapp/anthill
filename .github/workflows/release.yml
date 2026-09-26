@@ -102,10 +102,14 @@ jobs:
       # Built on its own so the Sentry token reaches only the bundler, which
       # uploads the hidden source maps and deletes them. Packaging and signing
       # below never see it. Without the secret, no maps are made at all.
+      #
+      # Diagnostics are compiled in only for a tagged release: a manual run's
+      # artefact, like a dev run or a local package, never reports anything.
       - name: Build the app bundles
         run: npm run build --workspace=@anthill/desktop
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          ANTHILL_RELEASE_BUILD: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
 
       # Credentials reach electron-builder through the environment and appear
       # nowhere in the repository. Absent, it skips notarising and says so; the

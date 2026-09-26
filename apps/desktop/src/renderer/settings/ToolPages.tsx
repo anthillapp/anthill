@@ -348,7 +348,9 @@ export function ModelsPage() {
                   note={
                     target === "codex"
                       ? "Anthill has not been given Codex's model list. Open Codex once, then refresh."
-                      : `Anthill could not read ${harness.displayName}'s model list. Refresh to ask again.`
+                      : target === "pi"
+                        ? "Anthill could not read a model list from Pi. Pi lists none until a provider is signed in — run /login in pi, then refresh."
+                        : `Anthill could not read ${harness.displayName}'s model list. Refresh to ask again.`
                   }
                 >
                   <button type="button" className="set-btn" onClick={catalogues.reload}>

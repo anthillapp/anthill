@@ -244,6 +244,9 @@ describe("reading a duration back", () => {
     expect(readDuration(420)).toBe("420ms");
     expect(readDuration(4200)).toBe("4.2s");
     expect(readDuration(95_000)).toBe("1m 35s");
+    // A session picked up again later: hours and days, not thousands of minutes.
+    expect(readDuration(2 * 3_600_000 + 5 * 60_000 + 7_000)).toBe("2h 5m");
+    expect(readDuration(89 * 3_600_000 + 31 * 60_000)).toBe("3d 17h");
   });
 
   it("says nothing rather than something wrong when there is no duration", () => {

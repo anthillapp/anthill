@@ -29,6 +29,13 @@ export type BlockSpan = {
   /** The next announcement, or the settle time. Absent while still open. */
   endedAt?: string;
   durationMs?: number;
+  /**
+   * The recordings attributed to this span's step while it was the latest
+   * pass through it. An inference, like the per-step figure it is a slice of:
+   * a step's passes always sum to exactly its `tokensLikelyByBlock` entry, so a
+   * loop can be read pass by pass without anything being counted twice.
+   */
+  tokens?: TokenTally;
 };
 
 export type TokenTally = { in: number; out: number };
@@ -69,6 +76,10 @@ export function sessionMetrics(
   let tokensRecorded: TokenTally | undefined;
   let tokensUnattributed: TokenTally | undefined;
   const tokensLikelyByBlock = new Map<string, TokenTally>();
+  /** Each step's latest pass, which is where a recording for that step lands. */
+  const latestSpan = new Map<string, BlockSpan>();
+  /** Recordings for a step that came before its first announcement. */
+  const early = new Map<string, TokenTally>();
 
   for (const event of events) {
     if (event.kind === "step.marker" && event.mapping.confidence === "exact" && event.blockId) {
@@ -79,17 +90,27 @@ export function sessionMetrics(
       }
       const pass = (passesByBlock.get(event.blockId) ?? 0) + 1;
       passesByBlock.set(event.blockId, pass);
-      spans.push({ blockId: event.blockId, pass, startedAt: event.at });
+      const span: BlockSpan = { blockId: event.blockId, pass, startedAt: event.at };
+      // Anything recorded for this step before it was ever announced belongs
+      // to its first pass rather than to no pass, so the passes still sum.
+      const before = early.get(event.blockId);
+      if (before) {
+        span.tokens = before;
+        early.delete(event.blockId);
+      }
+      spans.push(span);
+      latestSpan.set(event.blockId, span);
       continue;
     }
 
     if (event.kind === "usage" && event.tokens) {
       tokensRecorded = add(tokensRecorded, event.tokens);
-      if (event.mapping.confidence !== "unmapped" && event.mapping.blockId) {
-        tokensLikelyByBlock.set(
-          event.mapping.blockId,
-          add(tokensLikelyByBlock.get(event.mapping.blockId), event.tokens),
-        );
+      const blockId = event.mapping.confidence !== "unmapped" ? event.mapping.blockId : undefined;
+      if (blockId) {
+        tokensLikelyByBlock.set(blockId, add(tokensLikelyByBlock.get(blockId), event.tokens));
+        const span = latestSpan.get(blockId);
+        if (span) span.tokens = add(span.tokens, event.tokens);
+        else early.set(blockId, add(early.get(blockId), event.tokens));
       } else {
         tokensUnattributed = add(tokensUnattributed, event.tokens);
       }

@@ -126,6 +126,32 @@ describe("tokens from the harness's recordings", () => {
     // And the total is the sum of both, never a division of either.
     expect(metrics.tokensRecorded).toEqual({ in: 1400, out: 90 });
   });
+
+  it("splits a looped step's tokens by pass, and the passes sum to the step", () => {
+    const metrics = sessionMetrics([
+      step("test", 0),
+      usage({ in: 100, out: 10 }, 1_000, "test"),
+      step("fix", 2_000),
+      usage({ in: 50, out: 5 }, 3_000, "fix"),
+      step("test", 4_000),
+      usage({ in: 300, out: 30 }, 5_000, "test"),
+      usage({ in: 1, out: 1 }, 6_000, "test"),
+    ]);
+    const passes = metrics.spans.filter((span) => span.blockId === "test").map((span) => span.tokens);
+    expect(passes).toEqual([{ in: 100, out: 10 }, { in: 301, out: 31 }]);
+    expect(metrics.tokensLikelyByBlock.get("test")).toEqual({ in: 401, out: 41 });
+  });
+
+  it("gives a pass with no recording no tokens at all, rather than zero", () => {
+    const metrics = sessionMetrics([step("plan", 0), step("build", 1_000)]);
+    expect(metrics.spans.every((span) => span.tokens === undefined)).toBe(true);
+  });
+
+  it("carries a recording made before a step's first announcement into its first pass", () => {
+    const metrics = sessionMetrics([usage({ in: 7, out: 3 }, 0, "plan"), step("plan", 1_000)]);
+    expect(metrics.spans[0].tokens).toEqual({ in: 7, out: 3 });
+    expect(metrics.tokensLikelyByBlock.get("plan")).toEqual({ in: 7, out: 3 });
+  });
 });
 
 describe("time per agent", () => {

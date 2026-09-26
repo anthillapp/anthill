@@ -26,6 +26,7 @@ import {
   finishedSteps,
   hasStepEvidence,
   isWatching,
+  sessionMetrics,
   statusLabel,
   type AttributedEvent,
   type ObservationEvent,
@@ -49,7 +50,10 @@ import { FeedCardView } from "./FeedCard.js";
 import { PresenceChip, PresencePlaque } from "./PresenceChip.js";
 import { presenceKey } from "./presence.js";
 import { LiveWorkflowGraph } from "./LiveWorkflowGraph.js";
-import { SessionSummary, summaryDue } from "./SessionSummary.js";
+import { HowItRan } from "./HowItRan.js";
+import { compact, endStateOf, outcomes, sessionUsage } from "./report.js";
+import { SessionReport } from "./SessionReport.js";
+import { UsagePanel } from "./UsagePanel.js";
 import { RestartRequired } from "./RestartRequired.js";
 import { RUN_STATE } from "./run-state.js";
 
@@ -161,7 +165,19 @@ function LiveSessionContent({
 }: LiveSessionPageProps) {
   const now = useNow();
   const [events, setEvents] = useState<ObservationEvent[]>([]);
-  const [selectedBlock, setSelectedBlock] = useState<string | undefined>();
+  /**
+   * What the feed is narrowed to: one step, or every step an agent was
+   * assigned. A step is also what the graph selects; an agent selects nothing
+   * on the graph, because it is not one block.
+   */
+  const [scope, setScope] = useState<
+    { kind: "block"; blockId: string } | { kind: "agent"; name: string; blockIds: string[] } | undefined
+  >();
+  const selectedBlock = scope?.kind === "block" ? scope.blockId : undefined;
+  const setSelectedBlock = useCallback(
+    (blockId: string | undefined) => setScope(blockId ? { kind: "block", blockId } : undefined),
+    [],
+  );
   const [openEvent, setOpenEvent] = useState<number | undefined>();
   /**
    * How the feed is ordered and filtered.
@@ -312,12 +328,23 @@ function LiveSessionContent({
    * of this list, so what the header claims and what the feed holds cannot
    * disagree.
    */
-  const scoped = useMemo<AttributedEvent[]>(
-    () =>
-      selectedBlock
-        ? view.events.filter((event) => event.mapping.blockId === selectedBlock)
-        : view.events,
-    [view.events, selectedBlock],
+  const scoped = useMemo<AttributedEvent[]>(() => {
+    if (!scope) return view.events;
+    const ids = new Set(scope.kind === "block" ? [scope.blockId] : scope.blockIds);
+    return view.events.filter((event) => event.mapping.blockId !== undefined && ids.has(event.mapping.blockId));
+  }, [view.events, scope]);
+
+  /**
+   * The ended session's report (ANT-142), folded from the same view the graph
+   * draws and the same journal the feed reads, so the three cannot disagree
+   * and a restart rebuilds identical numbers.
+   */
+  const end = endStateOf(run);
+  const endedAt = end ? (view.lastSeenAt ?? run.lastObservedAt ?? run.closedAt) : undefined;
+  const metrics = useMemo(() => sessionMetrics(view.events, endedAt), [view.events, endedAt]);
+  const usage = useMemo(
+    () => sessionUsage(workflow, view, metrics, endedAt),
+    [workflow, view, metrics, endedAt],
   );
 
   /**
@@ -445,9 +472,62 @@ function LiveSessionContent({
     }
   }, [run.anthillRunId]);
 
-  const selectedName = selectedBlock
-    ? (workflow.nodes.find((node) => node.id === selectedBlock)?.name ?? selectedBlock)
-    : undefined;
+  const selectedName =
+    scope?.kind === "agent"
+      ? scope.name
+      : selectedBlock
+        ? (workflow.nodes.find((node) => node.id === selectedBlock)?.name ?? selectedBlock)
+        : undefined;
+  const selectedUsage = selectedBlock ? usage.blocks.find((block) => block.blockId === selectedBlock) : undefined;
+
+  /** The ended session's progress, in the same words as the report's chips. */
+  const endedProgress = (() => {
+    if (!end) return undefined;
+    if (end === "lost") return "progress unknown";
+    const counted = outcomes(workflow, view);
+    const n = (key: Parameters<typeof counted.get>[0]) => counted.get(key)?.length ?? 0;
+    if (end === "failed") {
+      return [n("failed") ? `${n("failed")} failed` : "", n("notReached") ? `${n("notReached")} not reached` : ""]
+        .filter(Boolean)
+        .join(" · ") || `${doneCount} of ${stepCount} steps finished`;
+    }
+    return `${doneCount} of ${stepCount} steps finished`;
+  })();
+
+  /** Tokens on each reached block of an ended session: "~42k in · 9k out", or "no token data". */
+  const blockUsageNote = useMemo(() => {
+    if (!end) return undefined;
+    const notes: Record<string, string> = {};
+    for (const block of usage.blocks) {
+      if (block.passes.length === 0) continue;
+      notes[block.blockId] = block.tokens ? `~${compact(block.tokens.in + block.tokens.out)} tokens` : "no token data";
+    }
+    return notes;
+  }, [end, usage]);
+
+  /** Which run, which session, read from where — provenance, not the result. */
+  const technical = (
+    <>
+      {run.exchange ? <><dt>Bound revision</dt><dd>{run.exchange.revision}</dd></> : null}
+      <dt>Anthill run</dt>
+      <dd>
+        <code>{run.anthillRunId}</code>
+      </dd>
+      <dt>Session</dt>
+      <dd>
+        {run.detectedSessionId ? (
+          <code>{run.detectedSessionId}</code>
+        ) : (
+          <span className="quiet">not identified</span>
+        )}
+      </dd>
+      <dt>Evidence</dt>
+      <dd>
+        <code>{run.evidenceChannel ?? "—"}</code>
+        {run.confidence ? <span className={`conf conf-${run.confidence}`}>{run.confidence}</span> : null}
+      </dd>
+    </>
+  );
 
   return (
     <div className="app live-page">
@@ -462,7 +542,13 @@ function LiveSessionContent({
         {/* The boundary sentence is doing real work on this page, so it changes
             tense rather than disappearing with the button. */}
         <span className="live-page-boundary">
-          {watching ? "Anthill is observing, not running" : "Anthill observed this session; it never ran it"}
+          {end === "lost"
+            ? "Anthill lost contact with the session"
+            : end
+              ? "Observation ended — Anthill never ran this session"
+              : watching
+                ? "Anthill is observing, not running"
+                : "Anthill observed this session; it never ran it"}
         </span>
         {watching ? (
           <button
@@ -481,24 +567,11 @@ function LiveSessionContent({
           <dl className="live-rail-facts">
             <dt>Workflow</dt>
             <dd>{run.workflowName ?? workflow.name}</dd>
-            {run.exchange ? <><dt>Bound revision</dt><dd>{run.exchange.revision}</dd></> : null}
-            <dt>Anthill run</dt>
-            <dd>
-              <code>{run.anthillRunId}</code>
-            </dd>
-            <dt>Session</dt>
-            <dd>
-              {run.detectedSessionId ? (
-                <code>{run.detectedSessionId}</code>
-              ) : (
-                <span className="quiet">not identified</span>
-              )}
-            </dd>
-            <dt>Evidence</dt>
-            <dd>
-              <code>{run.evidenceChannel ?? "—"}</code>
-              {run.confidence ? <span className={`conf conf-${run.confidence}`}>{run.confidence}</span> : null}
-            </dd>
+            {/* While the session runs these identify what is being read and
+                belong in view. Once it has ended they are provenance, and the
+                report above the graph is what the reader came for, so they
+                fold away into Technical details below. */}
+            {end ? null : technical}
             <dt>Started</dt>
             <dd>{view.startedAt ? clock(view.startedAt) : "—"}</dd>
             {/*
@@ -515,6 +588,13 @@ function LiveSessionContent({
             <dt>Last seen</dt>
             <dd>{relative(view.lastSeenAt ?? run.lastObservedAt, now)}</dd>
           </dl>
+
+          {end ? (
+            <details className="live-rail-details">
+              <summary>Technical details</summary>
+              <dl className="live-rail-facts">{technical}</dl>
+            </details>
+          ) : null}
 
           <div className="live-rail-cannot">
             <span className="kicker">What Anthill cannot tell you</span>
@@ -574,9 +654,9 @@ function LiveSessionContent({
               <span className="canvas-chip">
                 {feed.kind === "restart-required" || feed.kind === "failed" || feed.kind === "loading"
                   ? `${stepCount} steps · progress unknown`
-                  : mapped
-                    ? `${doneCount} of ${stepCount} steps finished`
-                    : `${stepCount} steps · none announced yet`}
+                  : !mapped
+                    ? `${stepCount} steps · none announced yet`
+                    : (endedProgress ?? `${doneCount} of ${stepCount} steps finished`)}
               </span>
             ) : (
               <span className="canvas-chip warn">this run&rsquo;s workflow is not open</span>
@@ -591,8 +671,20 @@ function LiveSessionContent({
             <PresenceChip run={run} presence={presence} />
           </div>
 
-          {runsWorkflow && summaryDue(run) ? (
-            <SessionSummary workflow={workflow} run={run} events={view.events} />
+          {runsWorkflow && end && feed.kind === "events" ? (
+            <SessionReport
+              workflow={workflow}
+              run={run}
+              view={view}
+              end={end}
+              usage={usage}
+              {...(endedAt ? { endedAt } : {})}
+              onPickBlock={setSelectedBlock}
+              onUnmapped={() => {
+                setScope(undefined);
+                setFilter("unmapped");
+              }}
+            />
           ) : null}
 
           {runsWorkflow ? (
@@ -601,6 +693,7 @@ function LiveSessionContent({
               view={view}
               sessionState={run.state}
               {...(selectedBlock ? { selectedBlockId: selectedBlock } : {})}
+              {...(blockUsageNote ? { usageNote: blockUsageNote } : {})}
               onSelect={setSelectedBlock}
             />
           ) : (
@@ -624,6 +717,15 @@ function LiveSessionContent({
             </p>
           ) : null}
 
+          {runsWorkflow && end && feed.kind === "events" ? (
+            <UsagePanel
+              usage={usage}
+              cli={run.selectedCli}
+              onPickBlock={setSelectedBlock}
+              onPickAgent={(name, blockIds) => setScope({ kind: "agent", name, blockIds })}
+            />
+          ) : null}
+
           <div className="live-legend" hidden={!runsWorkflow}>
             {(["queued", "running", "needsYou", "done", "failed", "unknown"] as const).map((state) => (
               <span key={state} className="live-legend-item">
@@ -645,14 +747,14 @@ function LiveSessionContent({
                 when the feed is long enough for you to need it. */}
             <header className="live-activity-top">
               <h2>Activity</h2>
-              {selectedBlock ? (
+              {scope ? (
                 <span className="scope-chip">
                   {selectedName}
                   <span className="scope-count">{scoped.length}</span>
                   <button
                     className="scope-clear"
                     aria-label="Show the whole session"
-                    onClick={() => setSelectedBlock(undefined)}
+                    onClick={() => setScope(undefined)}
                   >
                     ✕
                   </button>
@@ -725,6 +827,8 @@ function LiveSessionContent({
             ) : null}
 
             {feed.kind === "loading" ? <p className="empty">Reading what Anthill has observed…</p> : null}
+
+            {end && selectedUsage && runsWorkflow ? <HowItRan block={selectedUsage} events={scoped.length} /> : null}
 
             {feed.kind === "empty" || (feed.kind === "events" && shown.length === 0) ? (
               <p className="empty">

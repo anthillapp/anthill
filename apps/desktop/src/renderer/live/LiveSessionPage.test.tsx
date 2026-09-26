@@ -266,7 +266,13 @@ describe("the page's read-only boundary", () => {
       // correctly for a finished run, not vanish with the button.
       await show([step("implement")], run({ state: "completed" }));
       expect(screen.queryByText("Anthill is observing, not running")).toBeNull();
-      expect(screen.getByText(/Anthill observed this session/)).toBeTruthy();
+      expect(screen.getByText("Observation ended — Anthill never ran this session")).toBeTruthy();
+    });
+
+    it("says contact was lost, and keeps the Stop button while records may still arrive", async () => {
+      await show([step("implement")], run({ state: "observation_lost" }));
+      expect(screen.getByText("Anthill lost contact with the session")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Stop observing in Anthill" })).toBeTruthy();
     });
   });
 
@@ -854,69 +860,158 @@ describe("looking again from the page", () => {
 });
 
 /**
- * The summary a settled session has earned.
+ * An ended session's report (ANT-142).
  *
- * ANT-21 / ANT-9. Two tiers, and the tests hold them apart: durations come
- * from the agent's own announcements; tokens are what the harness recorded,
- * labelled recorded rather than total, "Likely" where attribution is an
- * inference, and "not recorded" — never zero — where there is nothing.
+ * The acceptance criteria, one by one: an honest view for a completed, a
+ * failed, a lost and a no-usage session; a looped step's passes that sum to
+ * its total; agent totals from attributed steps, with unattributed tokens kept
+ * apart; missing data marked rather than zeroed; and every figure leading to
+ * the step or events it counted.
  */
-describe("the settled session's summary", () => {
-  const settled = () =>
-    run({
-      state: "completed",
-      lastObservedAt: "2026-08-29T10:12:00.000Z",
-    });
+describe("an ended session's report", () => {
+  const at = (minute: number, second = 0) =>
+    new Date(Date.parse("2026-08-29T10:00:00.000Z") + minute * 60_000 + second * 1000).toISOString();
+  const marker = (blockId: string, when: string) =>
+    event({ kind: "step.marker", title: "Step announced", blockId, at: when });
+  const usage = (tokens: { in: number; out: number }, when: string) =>
+    event({ kind: "usage", title: "Token usage recorded", tokens, at: when });
+  const said = (text: string, when: string) =>
+    event({ kind: "message", title: "Message", detail: text, author: { kind: "main" }, at: when });
+  const report = () => document.querySelector(".session-report") as HTMLElement;
+  const openReport = () => fireEvent.click(within(report()).getByRole("button", { name: /What happened/ }));
+  const openUsage = () => fireEvent.click(screen.getByRole("button", { name: /By block and agent/ }));
 
-  const usage = (tokens: { in: number; out: number }, at: string) =>
-    event({ kind: "usage", title: "Token usage recorded", tokens, at });
+  /** Implement, then Run tests twice around a loop, with usage inside each and one outside. */
+  const looped = () => [
+    usage({ in: 1_000, out: 100 }, at(0, 1)),
+    marker("implement", at(1)),
+    usage({ in: 40_000, out: 2_000 }, at(2)),
+    marker("test", at(4)),
+    usage({ in: 10_000, out: 500 }, at(5)),
+    marker("implement", at(6)),
+    marker("test", at(7)),
+    usage({ in: 20_000, out: 1_000 }, at(8)),
+    said("All tests pass now.", at(9)),
+  ];
 
-  it("appears only once the run has settled", async () => {
-    await show([step("implement")], run({ state: "detected_live" }));
-    expect(document.querySelector(".session-summary")).toBeNull();
-    cleanup();
-
-    await show([step("implement")], settled());
-    expect(document.querySelector(".session-summary")).toBeTruthy();
+  it("is not shown while the session is running", async () => {
+    await show(looped(), run({ state: "detected_live" }));
+    expect(report()).toBeNull();
+    expect(screen.queryByRole("button", { name: /By block and agent/ })).toBeNull();
   });
 
-  it("times each announced step from its own markers", async () => {
+  it("calls a completed session finished, collapsed, and never a success", async () => {
+    await show(looped(), run({ state: "completed", lastObservedAt: at(10) }));
+    expect(report().className).toContain("is-completed");
+    const line = within(report()).getByRole("button", { name: /What happened/ });
+    expect(line.getAttribute("aria-expanded")).toBe("false");
+    expect(line.textContent).toContain("Session finished");
+    expect(line.textContent).toContain("2 done");
+    openReport();
+    expect(report().textContent).toContain("Finished is not the same as succeeded");
+    expect(report().textContent).not.toMatch(/succeeded\b(?! —)|success/i);
+  });
+
+  it("gives the agent's last words as the agent's, and says so", async () => {
+    await show(looped(), run({ state: "completed", lastObservedAt: at(10) }));
+    openReport();
+    expect(within(report()).getByText("Claude Code said")).toBeTruthy();
+    expect(within(report()).getByText("All tests pass now.")).toBeTruthy();
+    expect(within(report()).getByText(/Anthill did not check them/)).toBeTruthy();
+  });
+
+  it("says when the agent left no words to show", async () => {
+    await show([marker("implement", at(1))], run({ state: "completed", lastObservedAt: at(3) }));
+    openReport();
+    expect(within(report()).getByText(/No message from the agent was recorded/)).toBeTruthy();
+  });
+
+  it("names a failure, what it reached, and what it never did", async () => {
     await show(
-      [
-        event({ kind: "step.marker", title: "Step announced", blockId: "implement", at: "2026-08-29T10:00:00.000Z" }),
-        event({ kind: "step.marker", title: "Step announced", blockId: "test", at: "2026-08-29T10:04:00.000Z" }),
-      ],
-      settled(),
+      [marker("implement", at(1)), event({ kind: "error", title: "Tool failed", at: at(2) })],
+      run({ state: "failed", lastObservedAt: at(3) }),
     );
-    const rows = [...document.querySelectorAll(".summary-steps tr")].map(
-      (row) => row.textContent ?? "",
-    );
-    expect(rows[0]).toContain("Make the change");
-    expect(rows[0]).toContain("4m");
+    expect(report().className).toContain("is-failed");
+    expect(report().textContent).toContain("Ended with an error");
+    expect(report().textContent).toContain("1 failed · 1 not reached");
+    expect(screen.getByText("1 failed · 1 not reached", { selector: ".canvas-chip" })).toBeTruthy();
+    openReport();
+    expect(report().textContent).toContain("from the session's error record");
   });
 
-  it("says tokens were not recorded rather than showing zero", async () => {
-    await show([step("implement")], settled());
-    expect(screen.getByText("not recorded")).toBeTruthy();
-    expect(screen.queryByText(/^0 in/)).toBeNull();
-  });
-
-  it("labels per-step tokens as the inference they are", async () => {
+  it("marks what was last heard from a lost session as possibly out of date", async () => {
     await show(
-      [
-        event({ kind: "step.marker", title: "Step announced", blockId: "implement", at: "2026-08-29T10:00:00.000Z" }),
-        usage({ in: 1200, out: 300 }, "2026-08-29T10:01:00.000Z"),
-      ],
-      settled(),
+      [marker("implement", at(1)), said("Working on it.", at(2))],
+      run({ state: "observation_lost", lastObservedAt: at(2) }),
     );
-    const summary = document.querySelector(".session-summary") as Element;
-    expect(summary.textContent).toContain("1,200 in · 300 out");
-    expect(summary.querySelector(".conf-likely")).toBeTruthy();
+    expect(report().textContent).toContain("Lost contact with the session");
+    expect(screen.getByText("progress unknown", { selector: ".canvas-chip" })).toBeTruthy();
+    openReport();
+    expect(within(report()).getByText("Last message received · may be out of date")).toBeTruthy();
   });
 
-  it("owns the boundary: the harness measured, Anthill did not", async () => {
-    await show([step("implement")], settled());
-    expect(screen.getByText(/Anthill measured nothing/)).toBeTruthy();
+  it("reads 'no tokens recorded' and 'no token data' for a session without usage, never zero", async () => {
+    await show([marker("implement", at(1)), marker("test", at(2))], run({ state: "completed", lastObservedAt: at(3) }));
+    expect(screen.getByRole("button", { name: /By block and agent/ }).textContent).toContain("no tokens recorded");
+    openUsage();
+    const table = document.querySelector(".usage-table") as HTMLElement;
+    expect(table.textContent).toContain("no token data");
+    expect(table.textContent).not.toMatch(/\b0 in\b/);
+  });
+
+  it("splits a looped step by pass, and the passes add up to the step", async () => {
+    await show(looped(), run({ state: "completed", lastObservedAt: at(10) }));
+    openUsage();
+    const row = screen.getByRole("button", { name: "Run tests" }).closest("tr") as HTMLElement;
+    expect(row.textContent).toContain("×2");
+    expect(row.textContent).toContain("~30k in · ~1.5k out");
+    fireEvent.click(screen.getByRole("button", { name: "Run tests" }));
+    const passes = [...document.querySelectorAll(".usage-pass")].map((pass) => pass.textContent ?? "");
+    expect(passes).toHaveLength(2);
+    expect(passes[0]).toContain("~10k in · ~500 out");
+    expect(passes[1]).toContain("~20k in · ~1.0k out");
+  });
+
+  it("totals each agent over the steps it was assigned, and keeps unattributed tokens apart", async () => {
+    await show(looped(), run({ state: "completed", lastObservedAt: at(10) }));
+    openUsage();
+    const agents = document.querySelector(".usage-agents") as HTMLElement;
+    const developer = within(agents).getByText("Developer").closest("li") as HTMLElement;
+    expect(developer.textContent).toContain("Make the change");
+    expect(developer.textContent).toContain("~40k in");
+    expect(screen.getByText(/as the workflow assigned them/)).toBeTruthy();
+    expect(screen.getByText(/Could not be assigned to a block: 1.0k in · 100 out tokens/)).toBeTruthy();
+  });
+
+  it("leads from every chip to the step it counted, with its events and how it ran", async () => {
+    await show(looped(), run({ state: "completed", lastObservedAt: at(10) }));
+    openReport();
+    fireEvent.click(within(report()).getByRole("button", { name: "Run tests ran 2 passes" }));
+    const ran = screen.getByRole("region", { name: "How Run tests ran" });
+    expect(ran.textContent).toContain("2 passes");
+    expect(ran.querySelectorAll("li")).toHaveLength(2);
+    expect(document.querySelector(".scope-chip")?.textContent).toContain("Run tests");
+  });
+
+  it("scopes the feed to every step an agent was assigned", async () => {
+    await show(looped(), run({ state: "completed", lastObservedAt: at(10) }));
+    openUsage();
+    fireEvent.click(within(document.querySelector(".usage-agents") as HTMLElement).getByRole("button", { name: /Test Runner/ }));
+    expect(document.querySelector(".scope-chip")?.textContent).toContain("Test Runner");
+  });
+
+  it("says a step was never reached instead of showing zeros", async () => {
+    await show([marker("implement", at(1))], run({ state: "failed", lastObservedAt: at(2) }));
+    openReport();
+    fireEvent.click(within(report()).getByRole("button", { name: "1 not reached" }));
+    expect(screen.getByText(/never reached this step, so there is nothing recorded for it/)).toBeTruthy();
+  });
+
+  it("folds the run's technical details away once it has ended", async () => {
+    await show(looped(), run({ state: "completed", lastObservedAt: at(10) }));
+    const details = document.querySelector(".live-rail-details") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(details.textContent).toContain("ANT-1A2B3C4D");
   });
 
   it("keeps usage rows out of the feed and the unmapped count", async () => {

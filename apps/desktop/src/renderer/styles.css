@@ -6813,79 +6813,6 @@ button.state-chip {
   margin-top: 0;
 }
 
-/* The settled session's accounting, above the graph it describes. */
-.session-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  /* This one rule owns every side of the card's spacing, including the gap to
-     the chip row above it. That gap used to be nobody's — the chips carry no
-     bottom padding and this carried no top margin, so the two sat flush
-     without either rule looking wrong alone. The sides are 16px to match the
-     chips above and the canvas below; they were 14px, which put the card two
-     pixels outside the row it belongs under. */
-  margin: 12px 16px 10px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-}
-
-.summary-steps {
-  border-collapse: collapse;
-  font-size: 12.5px;
-}
-
-.summary-steps td {
-  padding: 3px 0;
-  border-bottom: 1px solid rgba(32, 30, 29, 0.06);
-}
-
-.summary-figure {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-dim);
-  padding-left: 18px !important;
-  white-space: nowrap;
-}
-
-.summary-pass {
-  color: var(--ink-quiet);
-}
-
-.summary-agents,
-.summary-tokens {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  font-size: 12.5px;
-}
-
-.summary-agents > div,
-.summary-tokens > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.summary-agents dt,
-.summary-tokens dt {
-  color: var(--ink-dim);
-}
-
-.summary-agents dd,
-.summary-tokens dd {
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.summary-boundary {
-  margin: 0;
-  font-size: 11.5px;
-  color: var(--ink-quiet);
-}
-
 /* The one control a lost session gets, and it is a control over Anthill. */
 .live-rail-look {
   display: flex;
@@ -9255,3 +9182,246 @@ button.presence-chip {
 .first-run-row strong { font-size: 14px; font-weight: 600; }
 .first-run-note { font-size: 12px; color: var(--ink-dim); }
 .first-run-note.is-ready { color: #2f6b48; }
+
+/* ------------------------------------------------------------------ */
+/* Live session — an ended session's report (ANT-142)                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * One line in the flow above the graph; opened, its body floats over the
+ * canvas, so reading the report never moves the graph it describes. The
+ * coloured left edge is the only colour it takes, and a finished session's is
+ * grey, not green: finished is not the same as succeeded.
+ */
+.session-report {
+  position: relative;
+  z-index: 9;
+  margin: 10px 16px 4px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--report-tone, var(--ink-quiet));
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(32, 30, 29, 0.1);
+}
+.session-report.is-completed { --report-tone: #bab6b6; }
+.session-report.is-failed { --report-tone: var(--accent); }
+.session-report.is-lost { --report-tone: #d8a21a; }
+.session-report.is-open { border-radius: 12px 12px 0 0; }
+.session-report-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  width: 100%;
+  padding: 11px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  text-align: left;
+}
+.session-report-line:hover:not(:disabled) { background: transparent; }
+.session-report-line strong { font-size: 16px; font-weight: 700; letter-spacing: -0.015em; white-space: nowrap; }
+.session-report-line .quiet { font-size: 12px; color: var(--ink-dim); white-space: nowrap; }
+.session-report-counts { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.session-report-line .spacer { flex: 1; }
+.session-report-toggle { font-size: 12px; font-weight: 600; color: var(--ink-3); }
+/* A drawn chevron: the ⌄ glyph sits on its font's baseline and drops below the label. */
+.session-report-line .chevron {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  box-sizing: border-box;
+  border-right: 1.5px solid var(--ink-dim);
+  border-bottom: 1.5px solid var(--ink-dim);
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 160ms ease;
+}
+.session-report-line[aria-expanded="true"] .chevron { transform: translateY(2px) rotate(225deg); }
+@media (prefers-reduced-motion: reduce) { .session-report-line .chevron { transition: none; } }
+
+.session-report-body {
+  position: absolute;
+  top: 100%;
+  left: -3px;
+  right: -1px;
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 2px 16px 14px 19px;
+  border: 1px solid var(--border);
+  border-top: 0;
+  border-left: 3px solid var(--report-tone, var(--ink-quiet));
+  border-radius: 0 0 12px 12px;
+  background: var(--surface);
+  box-shadow: 0 14px 24px rgba(32, 30, 29, 0.1);
+}
+.session-report-body .kicker {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.session-report-source { margin: 0; font-size: 12.5px; color: var(--ink-3); }
+.session-report-words {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f5f3f3;
+}
+.session-report-words p { margin: 6px 0 0; font-size: 13px; line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
+.session-report-words.is-asking { background: #fdf8ec; }
+.session-report-words.is-asking .kicker { color: #8a6a08; }
+.session-report-words.is-empty { font-size: 12.5px; color: var(--ink-dim); }
+.session-report-caveat { display: block; margin-top: 6px; font-size: 11.5px; color: var(--ink-dim); }
+.session-report-chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.session-report-chips .kicker { margin-right: 4px; }
+.report-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.report-chip > i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: #bab6b6; }
+.report-chip.is-done > i { background: #2f8f5f; }
+.report-chip.is-failed > i { background: var(--accent); }
+.report-chip.is-waiting > i,
+.report-chip.is-loop > i { background: #d8a21a; }
+.report-chip.is-unknown > i { background: #8a8584; }
+.report-chip.is-notReached > i { background: transparent; border: 1.2px solid #bab6b6; }
+.report-chip.is-loop { border-color: #eddfbc; background: #fdf8ec; color: #8a6a08; }
+.report-chip.is-unmapped { border-style: dashed; }
+.session-report-details {
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid #efeded;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+/* Usage: one line under the graph; opened, it floats up over the canvas. */
+.usage-panel {
+  position: relative;
+  z-index: 8;
+  margin: 8px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 22px rgba(32, 30, 29, 0.1);
+}
+.usage-panel.is-open { border-radius: 0 0 12px 12px; }
+.usage-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--ink-2);
+}
+.usage-line:hover:not(:disabled) { background: transparent; }
+.usage-line .kicker,
+.usage-body .kicker {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.usage-line .spacer { flex: 1; }
+.usage-toggle { font-size: 12px; font-weight: 600; color: var(--ink-3); }
+.usage-body {
+  position: absolute;
+  bottom: 100%;
+  left: -1px;
+  right: -1px;
+  max-height: 46vh;
+  overflow-y: auto;
+  display: grid;
+  /* One column in a narrow stage, two once there is room: the stage's width,
+     not the window's, is what the tables have to fit in. */
+  grid-template-columns: 1fr;
+  gap: 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-bottom: 1px solid #efeded;
+  border-radius: 12px 12px 0 0;
+  background: var(--surface);
+  box-shadow: 0 -10px 22px rgba(32, 30, 29, 0.08);
+}
+.live-stage { container-type: inline-size; container-name: live-stage; }
+@container live-stage (min-width: 760px) {
+  .usage-body { grid-template-columns: 1.3fr 1fr; }
+}
+.usage-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; overflow-x: auto; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.usage-table th,
+.usage-table td { padding: 6px 4px; border-bottom: 1px solid #f0eeee; text-align: left; white-space: nowrap; vertical-align: top; }
+/* A step's name may wrap; its figures may not, or a number splits in two. */
+.usage-table th { white-space: normal; min-width: 8em; }
+.usage-table th { font-weight: 400; }
+.usage-table .passes { color: var(--ink-dim); }
+.usage-table tr.is-done .outcome { color: #2f6b48; }
+.usage-table tr.is-failed .outcome { color: var(--accent-700); }
+.usage-table tr.is-waiting .outcome { color: #8a6a08; }
+.usage-table tr.is-notReached td { color: var(--ink-quiet); }
+.usage-row-name { padding: 0; border: 0; background: transparent; font-weight: 600; color: var(--ink); text-align: left; }
+.usage-row-name:hover:not(:disabled) { background: transparent; text-decoration: underline; }
+.usage-row-name[aria-expanded]::after { content: " ▸"; font-size: 10px; color: var(--ink-dim); }
+.usage-row-name[aria-expanded="true"]::after { content: " ▾"; }
+.usage-pass th { padding-left: 18px; color: var(--ink-3); }
+.usage-agents { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.usage-agents li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-bottom: 1px solid #f0eeee;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.usage-agents button { display: flex; flex-direction: column; gap: 2px; padding: 0; border: 0; background: transparent; text-align: left; min-width: 0; }
+.usage-agents button:hover:not(:disabled) { background: transparent; }
+.usage-agents button:hover strong { text-decoration: underline; }
+.usage-agent-blocks { font-size: 11.5px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.usage-note { margin: 0; font-size: 11.5px; line-height: 1.55; color: var(--ink-dim); }
+
+/* One step of an ended session, above its events in the feed. */
+.how-it-ran {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--run-tone, #bab6b6);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.how-it-ran.is-done { --run-tone: #2f8f5f; }
+.how-it-ran.is-failed { --run-tone: var(--accent); }
+.how-it-ran.is-unknown { --run-tone: #8a8584; }
+.how-it-ran.is-waiting { --run-tone: #d8a21a; }
+.how-it-ran .kicker { font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-dim); }
+.how-it-ran-total { margin: 0; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.how-it-ran-passes { margin: 0; padding: 8px 0 0 18px; border-top: 1px solid #efeded; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.how-it-ran-note { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--ink-dim); }
+
+/* Provenance folds away once the session has ended. */
+.live-rail-details { padding: 0 4px; color: var(--on-dark-dim); }
+.live-rail-details > summary { cursor: pointer; font-size: 12px; }
+.live-rail-details[open] > summary { margin-bottom: 8px; }

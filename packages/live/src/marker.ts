@@ -272,9 +272,19 @@ function escape(value: string): string {
  * Both halves must be present: the run id says which run, and the nonce says
  * which copy of it. Requiring both is what stops a prompt copied yesterday,
  * still sitting in someone's scrollback, from matching a run created today.
+ *
+ * And both must be present *as the marker block writes them* — each on a line
+ * of its own, under its own field name. Two substrings anywhere was the test
+ * once, so a session that merely mentioned a run became a candidate for it: a
+ * driver printing the id and nonce in a table, a Live Session rail pasted into
+ * another chat, a progress command carrying both on one line (ANT-79). Only a
+ * pasted Anthill prompt produces the block. Leading whitespace is allowed,
+ * because a paste can indent it; nothing else is.
  */
 export function textCarriesMarker(text: string, marker: Pick<RunMarker, "runId" | "nonce">): boolean {
-  return text.includes(marker.runId) && text.includes(marker.nonce);
+  const line = (field: string, value: string) =>
+    new RegExp(`^[ \\t>]*${field}:[ \\t]*${escape(value)}[ \\t]*$`, "m").test(text);
+  return line(FIELD.runId, marker.runId) && line(FIELD.nonce, marker.nonce);
 }
 
 /** Read a marker back out of a prompt, for tests and for diagnostics. */

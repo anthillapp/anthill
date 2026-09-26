@@ -24,7 +24,9 @@ import {
   modelFor,
   removeAgentProfile,
   stepsUsingAgent,
+  startingModels,
   updateAgentProfile,
+  visibleModelIds,
   type AgentProfile,
 } from "@anthill/workflow";
 
@@ -35,6 +37,8 @@ import {
   retiredChoice,
   useModelCatalogues,
 } from "../agents/model-catalogues.js";
+import { ModelTierBar } from "../agents/ModelTierBar.js";
+import { useModelPreferences } from "../agents/useModelPreferences.js";
 import { agentFileName } from "./agent-file-name.js";
 
 export type AgentRailProps = {
@@ -49,6 +53,7 @@ export type AgentRailProps = {
 export function AgentRail({ workflow, onChange, selectedId, onSelect }: AgentRailProps) {
   const profiles = agentProfiles(workflow);
   const harness = harnessProfile(workflow.target ?? DEFAULT_TARGET);
+  const { preferences } = useModelPreferences();
 
   /**
    * The global library, for the agents you have already described elsewhere.
@@ -71,7 +76,9 @@ export function AgentRail({ workflow, onChange, selectedId, onSelect }: AgentRai
   }, []);
 
   const create = () => {
-    const { workflow: next, agentId } = addAgentProfile(workflow, { name: "" });
+    // With the author's starting answers, when they have given any (ANT-135).
+    const models = startingModels(preferences);
+    const { workflow: next, agentId } = addAgentProfile(workflow, { name: "", ...(models ? { models } : {}) });
     onChange(next);
     onSelect(agentId);
   };
@@ -205,12 +212,18 @@ export function AgentEditor({
     offered "Default" and nothing else (ANT-127).
   */
   const catalogues = useModelCatalogues();
-  const options = modelOptionsFor(harness.target, catalogues);
+  const { preferences } = useModelPreferences();
+  const offered = modelOptionsFor(harness.target, catalogues);
   const missing = catalogueMissing(harness.target, catalogues);
   const chosen = profile.models?.[harness.target];
+  // The author's hidden models are left out, except the one already chosen (ANT-135).
+  const visible = new Set(
+    visibleModelIds(offered.map((option) => option.id), harness.target, preferences, chosen?.id),
+  );
+  const options = offered.filter((option) => visible.has(option.id));
   const picked = options.find((option) => option.id === chosen?.id);
   const efforts = picked?.efforts ?? [];
-  const retired = retiredChoice(chosen?.id, options, HARNESS_DEFAULT);
+  const retired = retiredChoice(chosen?.id, offered, HARNESS_DEFAULT);
 
   /** This harness's slot only; the other tools' answers travel untouched. */
   const setModel = (next: { id: string; reasoningEffort?: string } | undefined) =>
@@ -317,6 +330,16 @@ export function AgentEditor({
           />
         </label>
       </div>
+
+      {/* Every tool's slot at once, not only this workflow's: that is what
+          lets the same agent mean something when the target is switched. */}
+      {harness.supportsPerAgentModel ? (
+        <ModelTierBar
+          models={profile.models}
+          preferences={preferences}
+          onChange={(models) => patch({ models })}
+        />
+      ) : null}
 
       {!harness.supportsPerAgentModel ? (
         <p className="hint warn">

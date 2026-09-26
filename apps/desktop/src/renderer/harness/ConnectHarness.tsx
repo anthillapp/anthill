@@ -49,7 +49,11 @@ const LINKED = "Connected to Anthill";
  * that are not success, which is most of them and the reason this screen
  * exists.
  */
-export function connectScript(connection: HarnessConnection, target: HarnessTarget): Script {
+export function connectScript(
+  connection: HarnessConnection,
+  target: HarnessTarget,
+  context: ConnectContext = "agent",
+): Script {
   const harness = harnessProfile(target);
   const short = harness.displayName;
 
@@ -57,9 +61,14 @@ export function connectScript(connection: HarnessConnection, target: HarnessTarg
     case "on":
       return {
         title: `${short} is connected`,
-        body: harness.supportsPerAgentModel
-          ? `You can now choose the model this agent uses when a workflow targets ${short}.`
-          : `${short} has no per-agent model, so a workflow targeting it uses the model chosen in the session.`,
+        body:
+          context === "settings"
+            ? harness.supportsPerAgentModel
+              ? `Agents can now be given a ${short} model, and the Models page lists what it offers.`
+              : `${short} has no per-agent model, so a workflow targeting it uses the model chosen in the session.`
+            : harness.supportsPerAgentModel
+              ? `You can now choose the model this agent uses when a workflow targets ${short}.`
+              : `${short} has no per-agent model, so a workflow targeting it uses the model chosen in the session.`,
         steps: [
           { label: FOUND, state: "done", word: "Done" },
           {
@@ -72,7 +81,12 @@ export function connectScript(connection: HarnessConnection, target: HarnessTarg
           },
           { label: LINKED, state: "done", word: "Done" },
         ],
-        primary: harness.supportsPerAgentModel ? "Choose the model" : "Back to the agent",
+        primary:
+          context === "settings"
+            ? "Done"
+            : harness.supportsPerAgentModel
+              ? "Choose the model"
+              : "Back to the agent",
         primaryKind: "done",
       };
 
@@ -143,18 +157,27 @@ export function connectScript(connection: HarnessConnection, target: HarnessTarg
   }
 }
 
+/**
+ * Where the sheet was opened from. The agent editor is the original home and
+ * the default; Settings opens the same sheet (ANT-135), where there is no
+ * agent behind it and "your unsaved changes to this agent" would be a promise
+ * about something that is not there.
+ */
+export type ConnectContext = "agent" | "settings";
+
 export type ConnectHarnessProps = {
   target: HarnessTarget;
+  context?: ConnectContext;
   connection: HarnessConnection;
   /** Ask the machine again about this tool. */
   onRecheck: () => void;
   onClose: () => void;
 };
 
-export function ConnectHarness({ target, connection, onRecheck, onClose }: ConnectHarnessProps) {
+export function ConnectHarness({ target, context = "agent", connection, onRecheck, onClose }: ConnectHarnessProps) {
   const harness = harnessProfile(target);
   const definition = interpreterDefinition(target);
-  const script = connectScript(connection, target);
+  const script = connectScript(connection, target, context);
   const busy = connection.status === "checking";
 
   /**
@@ -218,8 +241,9 @@ export function ConnectHarness({ target, connection, onRecheck, onClose }: Conne
 
         {/* The sentence the whole containment exists to make true. */}
         <p className="connect-note">
-          Your unsaved changes to this agent are kept — you come back to this section when
-          setup finishes.
+          {context === "settings"
+            ? "Connecting changes nothing in your workflows or agents — you come back to this page when setup finishes."
+            : "Your unsaved changes to this agent are kept — you come back to this section when setup finishes."}
         </p>
 
         {connection.status === "signed-out" ? (
@@ -268,9 +292,13 @@ export function ConnectHarness({ target, connection, onRecheck, onClose }: Conne
             </button>
           ) : null}
 
-          <button type="button" onClick={onClose}>
-            {connection.status === "on" ? "Close" : "Cancel"}
-          </button>
+          {/* In Settings a connected tool's primary is already "Done"; a
+              Close beside it would be the same button twice. */}
+          {context === "settings" && script.primaryKind === "done" ? null : (
+            <button type="button" onClick={onClose}>
+              {connection.status === "on" ? "Close" : "Cancel"}
+            </button>
+          )}
         </div>
       </div>
     </div>

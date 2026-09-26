@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { AgentModels } from "@anthill/workflow";
+import { startingModels, type AgentModels } from "@anthill/workflow";
 
 import type { GlobalAgentProfile, RecentWorkflow } from "../../shared/ipc.js";
 
@@ -183,8 +183,15 @@ export function useAgentLibrary(workflows: RecentWorkflow[] | null) {
       // edit: the row has to exist before there is a draft of it, and a
       // profile that did not exist until it was named would make Save mean
       // two different things.
-      void window.anthill
-        .agentsCreate({ name: "" })
+      // With the author's starting answers, when they have given any
+      // (ANT-135). Unreadable preferences are no preferences, not a failure.
+      void Promise.resolve()
+        .then(() => window.anthill.modelPreferencesRead())
+        .catch(() => undefined)
+        .then((preferences) => {
+          const models = preferences ? startingModels(preferences) : undefined;
+          return window.anthill.agentsCreate({ name: "", ...(models ? { models } : {}) });
+        })
         .catch(() => undefined)
         .then((profile) => {
           if (!profile) {

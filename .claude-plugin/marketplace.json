@@ -12,7 +12,7 @@
     {
       "name": "anthill",
       "description": "Hand the work of this session to Anthill as a reviewable workflow, then report progress against the revision the user approved.",
-      "version": "0.7.8",
+      "version": "0.7.9",
       "author": {
         "name": "Nick Nesterov",
         "email": "njrnesterov@gmail.com"

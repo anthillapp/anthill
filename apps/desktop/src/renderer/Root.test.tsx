@@ -114,20 +114,21 @@ it("starts on onboarding the first time, and finishes on the launch window", asy
   }
 });
 
-it("asks for the canvas tour when onboarding finishes, and only then", async () => {
-  localStorage.removeItem("anthill.canvas-tour-due");
+it("asks for both parts of the tour when onboarding finishes, and only then", async () => {
+  const keys = ["anthill.canvas-tour-due", "anthill.launch-tour-due"];
+  for (const key of keys) localStorage.removeItem(key);
   await act(async () => { render(<Root />); });
-  expect(localStorage.getItem("anthill.canvas-tour-due")).toBeNull();
+  for (const key of keys) expect(localStorage.getItem(key), key).toBeNull();
   cleanup();
 
   firstRun.due = true;
   try {
     await act(async () => { render(<Root />); });
     fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
-    expect(localStorage.getItem("anthill.canvas-tour-due")).not.toBeNull();
+    for (const key of keys) expect(localStorage.getItem(key), key).not.toBeNull();
   } finally {
     firstRun.due = false;
-    localStorage.removeItem("anthill.canvas-tour-due");
+    for (const key of keys) localStorage.removeItem(key);
   }
 });
 

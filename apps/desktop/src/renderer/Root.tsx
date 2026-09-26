@@ -17,7 +17,7 @@ import { HowItWorksScreen } from "./explain/HowItWorksScreen.js";
 import { FromSessionScreen } from "./handoff/FromSessionScreen.js";
 import { markOnboardingSeen, onboardingDue } from "./explain/first-run.js";
 import { Onboarding } from "./onboarding/Onboarding.js";
-import { askForTour } from "./tour/tour-steps.js";
+import { askForLaunchTour, askForTour } from "./tour/tour-steps.js";
 import { LaunchWindow } from "./LaunchWindow.js";
 import { SettingsScreen, type PageId } from "./settings/SettingsScreen.js";
 import { WorkflowScreen } from "./workflow/WorkflowScreen.js";
@@ -137,9 +137,11 @@ export function Root() {
 
   const finishOnboarding = () => {
     markOnboardingSeen();
-    // The canvas tour follows onboarding, on the first workflow opened after
-    // it (ANT-141). Asked for here, so someone who met Anthill before the
-    // tour existed is never interrupted by it.
+    // The tour follows onboarding: its launch-screen part on the screen this
+    // opens onto (ANT-144), its canvas part on the first workflow opened
+    // after it (ANT-141). Asked for here, so someone who met Anthill before
+    // the tour existed is never interrupted by it.
+    askForLaunchTour();
     askForTour();
     setOnboarding(false);
   };
@@ -178,12 +180,11 @@ export function Root() {
       onExplain={() => setExplaining(true)}
       onFromSession={() => setFromSession(true)}
       onWelcomeTour={() => setOnboarding(true)}
-      // Replays the canvas tour on the workflow most recently open, or on a new
-      // one when there is none yet — the tour needs a canvas to point at.
-      onShowTips={(path) => {
-        askForTour();
-        setStart(path ? { kind: "open", path } : { kind: "templates" });
-      }}
+      // The launch window replays its own part of the tour on the spot; the
+      // canvas part is asked for here and plays on the next workflow opened.
+      // Show tips no longer carries the author off into whatever they had open
+      // last — they asked about the screen they are on (ANT-144).
+      onShowTips={askForTour}
       onSettings={openSettings}
     />
   );

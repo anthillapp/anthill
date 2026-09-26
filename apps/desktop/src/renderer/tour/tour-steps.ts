@@ -63,34 +63,80 @@ export const CANVAS_TOUR: TourStep[] = [
   },
 ];
 
-/*
- * Due only once it has been asked for: finishing onboarding asks for it, and
- * Show tips asks again. A returning user — who met Anthill before there was a
- * tour — never has it asked for, so an update does not interrupt them.
+/**
+ * The launch screen's hints (ANT-144): where a workflow starts, where the ones
+ * you have live, and where the agents that carry them out are kept. The first
+ * control is the first-run card for someone with no workflows yet, and the
+ * Create row for everyone else — both carry the same anchor.
  */
-const DUE_KEY = "anthill.canvas-tour-due";
+export const LAUNCH_TOUR: TourStep[] = [
+  {
+    anchor: "launch-create",
+    title: "Create a workflow",
+    text: "Start here: describe the work to Codex or Claude Code, or draw the workflow yourself.",
+    kinds: {
+      "first-run": {
+        title: "Create your first workflow",
+        text: "Start here: describe the work to Codex or Claude Code and review it here, or draw it yourself.",
+      },
+      create: {
+        title: "Create a workflow",
+        text: "Start a new workflow from a template or a blank canvas, and edit it here.",
+      },
+    },
+  },
+  {
+    anchor: "launch-workflows",
+    title: "Workflows",
+    text: "Workflows you open, or that a coding session hands over, are listed here with their live state.",
+  },
+  {
+    anchor: "launch-agents",
+    title: "Agent profiles",
+    text: "Agents carry out the steps. Your reusable agent profiles live here; open one to edit it.",
+  },
+];
 
-export function tourDue(): boolean {
-  try {
-    return window.localStorage.getItem(DUE_KEY) !== null;
-  } catch {
-    return false;
-  }
+/*
+ * Due only once it has been asked for: finishing onboarding asks for both
+ * parts, and Show tips asks again. A returning user — who met Anthill before
+ * there was a tour — never has it asked for, so an update does not interrupt
+ * them. Each part has its own flag, so seeing one does not use up the other.
+ */
+function dueFlag(key: string) {
+  return {
+    due(): boolean {
+      try {
+        return window.localStorage.getItem(key) !== null;
+      } catch {
+        return false;
+      }
+    },
+    ask(): void {
+      try {
+        window.localStorage.setItem(key, new Date().toISOString());
+      } catch {
+        // Without storage there is no tour to replay; nothing else depends on it.
+      }
+    },
+    /** Finished or skipped: both count as seen. */
+    seen(): void {
+      try {
+        window.localStorage.removeItem(key);
+      } catch {
+        // The worst case is seeing it again.
+      }
+    },
+  };
 }
 
-export function askForTour(): void {
-  try {
-    window.localStorage.setItem(DUE_KEY, new Date().toISOString());
-  } catch {
-    // Without storage there is no tour to replay; nothing else depends on it.
-  }
-}
+const canvas = dueFlag("anthill.canvas-tour-due");
+const launch = dueFlag("anthill.launch-tour-due");
 
-/** Finished or skipped: both count as seen. */
-export function markTourSeen(): void {
-  try {
-    window.localStorage.removeItem(DUE_KEY);
-  } catch {
-    // The worst case is seeing it again.
-  }
-}
+export const tourDue = canvas.due;
+export const askForTour = canvas.ask;
+export const markTourSeen = canvas.seen;
+
+export const launchTourDue = launch.due;
+export const askForLaunchTour = launch.ask;
+export const markLaunchTourSeen = launch.seen;

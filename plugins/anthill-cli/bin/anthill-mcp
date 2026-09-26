@@ -31,7 +31,8 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** The one file that is the server, wherever it was found. */
 function fromEnvironment() {
@@ -83,11 +84,43 @@ if ("problem" in located) {
   process.exit(78); // EX_CONFIG: the configuration is wrong, not the program.
 }
 
+/**
+ * The version this installed copy of the plugin is, and which harness it is for.
+ *
+ * Read from the manifest beside this script, because this script is the one
+ * part of the installed copy that runs every session. A copy installed from a
+ * directory is never refreshed on its own, and the server compares what it is
+ * told here with its own version and says so when they differ (ANT-120). A
+ * manifest that cannot be read tells the server nothing, which it takes as
+ * nothing to report.
+ */
+function installedPlugin() {
+  const root = dirname(dirname(fileURLToPath(import.meta.url)));
+  for (const [dir, host] of [[".claude-plugin", "claude-code"], [".codex-plugin", "codex"]]) {
+    try {
+      const manifest = JSON.parse(readFileSync(join(root, dir, "plugin.json"), "utf8"));
+      if (typeof manifest?.version === "string") return { version: manifest.version, host };
+    } catch {
+      // Not this harness's manifest; try the other.
+    }
+  }
+  return undefined;
+}
+
+const plugin = installedPlugin();
+
 // Arguments are passed through, so a data directory can be given in .mcp.json
-// without this script having to know what the server's flags mean.
+// without this script having to know what the server's flags mean. The
+// plugin's version travels in the child's environment rather than as a flag:
+// the server refuses flags it does not know, and an older server started by a
+// newer launcher must still start.
 const child = spawn(process.execPath, [located.path, ...process.argv.slice(2)], {
   stdio: "inherit",
   windowsHide: true,
+  env: {
+    ...process.env,
+    ...(plugin ? { ANTHILL_PLUGIN_VERSION: plugin.version, ANTHILL_PLUGIN_HOST: plugin.host } : {}),
+  },
 });
 for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
   process.on(signal, () => {

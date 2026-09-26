@@ -36,6 +36,7 @@ import { createHandlers } from "./handlers.js";
 import { SERVER_INSTRUCTIONS } from "./instructions.js";
 import { disabledLauncher, openUrl } from "./launch.js";
 import { readOptions, type ServerOptions } from "./options.js";
+import { PLUGIN_HOST_ENV, PLUGIN_VERSION_ENV, pluginDriftNotice } from "./plugin-drift.js";
 import { registerExchangeTools } from "./tools.js";
 
 const SERVER_NAME = "anthill";
@@ -87,10 +88,12 @@ function transportFailureLine(error: unknown): string {
  * test — the wiring test spawns the built program and speaks JSON-RPC to it,
  * which is the only way to see what a harness sees.
  */
-function createMcpServer(options: ServerOptions): McpServer {
+function createMcpServer(options: ServerOptions, drift: string | undefined): McpServer {
   const server = new McpServer(
     { name: SERVER_NAME, title: "Anthill", version: SERVER_VERSION },
-    { instructions: SERVER_INSTRUCTIONS },
+    // An out-of-date installed plugin leads the instructions, because the
+    // skill that brought the harness here is the thing that is stale (ANT-120).
+    { instructions: drift ? `${drift}\n\n${SERVER_INSTRUCTIONS}` : SERVER_INSTRUCTIONS },
   );
 
   registerExchangeTools(
@@ -117,7 +120,16 @@ async function runServer(argv: readonly string[]): Promise<number> {
     return 2;
   }
 
-  const server = createMcpServer(read.options);
+  // The launcher of the installed plugin copy says what version it was
+  // installed at; a copy nobody refreshed is the thing this catches.
+  const drift = pluginDriftNotice(
+    process.env[PLUGIN_VERSION_ENV],
+    process.env[PLUGIN_HOST_ENV],
+    SERVER_VERSION,
+  );
+  if (drift) process.stderr.write(`${SERVER_NAME} mcp server: ${drift}\n`);
+
+  const server = createMcpServer(read.options, drift);
 
   const transport = new StdioServerTransport();
   // Set before `connect`, and both halves of that matter. `connect` chains

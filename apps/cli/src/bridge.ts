@@ -269,6 +269,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     contract: IPC_CONTRACT,
     channels: [...registered],
     shell: "cli",
+    platform: process.platform,
     errorReports: diagnostics?.errorReportsAtLaunch ?? false,
   }));
 

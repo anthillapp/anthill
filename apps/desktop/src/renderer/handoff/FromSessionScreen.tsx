@@ -22,6 +22,7 @@ import { useState, type ReactNode } from "react";
 
 import { AnthillMark } from "../AnthillMark.js";
 import { interpreterLogo } from "../workflow/interpreter-logos.js";
+import { UnsupportedWindowsChip } from "../windows/unsupported-windows.js";
 import { PluginCard } from "../plugin/PluginCard.js";
 import { HARNESSES, usePluginConnections, type Harness } from "../plugin/usePluginConnections.js";
 
@@ -108,6 +109,8 @@ export function FromSessionScreen({ onBack, onSettings }: FromSessionScreenProps
         </button>
         <AnthillMark size={18} />
         <span className="from-session-title">From a coding session</span>
+        <span className="spacer" style={{ flex: 1 }} />
+        <UnsupportedWindowsChip skin="on-dark" />
       </div>
 
       <div className="from-session-body">

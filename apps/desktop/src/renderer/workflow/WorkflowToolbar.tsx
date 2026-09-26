@@ -41,6 +41,7 @@ import type { ExchangeSource } from "@anthill/workflow-exchange";
 import { interpreterLogoBackground } from "./interpreter-logos.js";
 import { isFailure, saveMessage, type SaveStatus } from "./save-status.js";
 import { ProvenancePopover } from "./ProvenancePopover.js";
+import { UnsupportedWindowsChip } from "../windows/unsupported-windows.js";
 import type { HandoverModel } from "./handover.js";
 
 /**
@@ -352,6 +353,9 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
           Prompt
         </button>
       )}
+
+      {/* The unsupported-Windows chip, in the chrome and never over the canvas (ANT-154). */}
+      <UnsupportedWindowsChip skin="on-dark" />
 
       {showSource && handover ? (
         <ProvenancePopover

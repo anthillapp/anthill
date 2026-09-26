@@ -993,8 +993,20 @@ function registerIpcHandlers(): void {
       contract: IPC_CONTRACT,
       channels: [...registered],
       shell: "desktop",
+      platform: process.platform,
     }),
   );
+
+  /*
+   * Quit, from the Windows gate's Exit (ANT-154). `app.quit()` closes the
+   * window the ordinary way, so its close handler still asks about unsaved
+   * work — Exit on a first-run gate has none, but it must not be the one
+   * door that skips the question.
+   */
+  handle(IpcChannel.appQuit, async (): Promise<boolean> => {
+    setTimeout(() => app.quit(), 50);
+    return true;
+  });
 
   /**
    * Restart Anthill.

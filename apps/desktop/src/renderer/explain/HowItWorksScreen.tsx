@@ -22,6 +22,7 @@
 import { useState } from "react";
 
 import { AnthillMark } from "../AnthillMark.js";
+import { UnsupportedWindowsChip } from "../windows/unsupported-windows.js";
 
 import { DesignScene } from "./scenes/DesignScene.js";
 import { WatchScene } from "./scenes/WatchScene.js";
@@ -48,6 +49,9 @@ export function HowItWorksScreen({ onBack, onCreate, onFromSession }: HowItWorks
             ←
           </button>
           <AnthillMark size={18} />
+        </div>
+        <div className="win-chip-corner">
+          <UnsupportedWindowsChip skin="on-light" />
         </div>
 
         <div className="how-slot">

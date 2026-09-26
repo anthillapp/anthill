@@ -8,7 +8,16 @@ export const EXTERNAL_LINKS = {
   community: "https://www.reddit.com/r/AnthillApp/",
   website: "https://getanthill.ai/",
   support: "https://buymeacoffee.com/anthill",
+  /** The Windows issue form: what an experimental Windows build reports through (ANT-154). */
+  windowsIssue: "https://github.com/nstr/anthill/issues/new?template=windows.yml",
 } as const;
+
+/**
+ * Where Anthill runs, in the words every surface uses — About, the README,
+ * the CLI's warning and the release notes say the same thing (ANT-154).
+ */
+export const PLATFORM_SCOPE =
+  "macOS: desktop app and CLI. Linux: CLI. Windows support is coming soon – building from source is possible for experimentation, but Windows is not yet officially supported and some features may not work.";
 
 export type ExternalLink = keyof typeof EXTERNAL_LINKS;
 

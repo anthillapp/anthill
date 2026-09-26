@@ -199,6 +199,23 @@ describe("the About page", () => {
     }
     expect(screen.queryByText(/Nothing here is sent anywhere/)).toBeNull();
   });
+
+  // ANT-154: the product's statement of scope, on every platform, and the
+  // way to report a Windows problem.
+  it("says where Anthill runs, and links the Windows issue form", async () => {
+    stub();
+    const openLink = vi.fn(async () => undefined);
+    (window.anthill as unknown as { openLink: typeof openLink }).openLink = openLink;
+    show();
+    fireEvent.click(page("About"));
+    expect(
+      await screen.findByText(
+        "macOS: desktop app and CLI. Linux: CLI. Windows support is coming soon – building from source is possible for experimentation, but Windows is not yet officially supported and some features may not work.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Report a Windows issue" }));
+    expect(openLink).toHaveBeenLastCalledWith("windowsIssue");
+  });
 });
 
 describe("privacy controls", () => {

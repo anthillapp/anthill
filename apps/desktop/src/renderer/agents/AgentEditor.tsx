@@ -31,6 +31,7 @@ import type { HarnessConnections } from "../harness/useHarnessConnections.js";
 import { ConnectHarness } from "../harness/ConnectHarness.js";
 import { AgentModelFields } from "./AgentModelFields.js";
 import type { AgentDraft } from "./useAgentLibrary.js";
+import { UnsupportedWindowsChip } from "../windows/unsupported-windows.js";
 
 /**
  * The models a profile has actually chosen, one chip per tool.
@@ -165,6 +166,7 @@ export function AgentEditor({
         </button>
         <span className="kicker">Agent profile</span>
         <span className="spacer" />
+        <UnsupportedWindowsChip skin="on-light" />
         {/* One line about the draft rather than the last keystroke. A failed
             write outranks "unsaved", which is true but understates it: the
             author pressed Save and it did not work, and that is the thing they

@@ -43,6 +43,7 @@ const api: AnthillApi = {
   contract: IPC_CONTRACT,
   capabilities: () => ipcRenderer.invoke(IpcChannel.appCapabilities),
   relaunch: () => ipcRenderer.invoke(IpcChannel.appRelaunch),
+  quit: () => ipcRenderer.invoke(IpcChannel.appQuit),
   openWorkflow: (path?: string) => ipcRenderer.invoke(IpcChannel.workflowOpen, path),
   pendingWorkflowOpen: () => ipcRenderer.invoke(IpcChannel.workflowPendingOpen),
   workflowOpened: (path, id, outcome) => ipcRenderer.invoke(IpcChannel.workflowOpened, path, id, outcome),

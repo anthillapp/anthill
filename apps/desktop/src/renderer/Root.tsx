@@ -21,6 +21,8 @@ import { askForLaunchTour, askForTour } from "./tour/tour-steps.js";
 import { LaunchWindow } from "./LaunchWindow.js";
 import { SettingsScreen, type PageId } from "./settings/SettingsScreen.js";
 import { WorkflowScreen } from "./workflow/WorkflowScreen.js";
+import { UnsupportedWindowsProvider } from "./windows/unsupported-windows.js";
+import { WindowsGate } from "./windows/WindowsGate.js";
 
 type Start =
   | { kind: "templates" }
@@ -201,7 +203,7 @@ export function Root() {
     screen's own flex chain reaches the root unchanged when it is showing.
   */
   return (
-    <>
+    <UnsupportedWindowsProvider>
       <div style={{ display: settingsFrom ? "none" : "contents" }}>{screen}</div>
       {settingsFrom ? (
         <SettingsScreen
@@ -209,7 +211,9 @@ export function Root() {
           {...(settingsPage ? { initialPage: settingsPage } : {})}
         />
       ) : null}
-    </>
+      {/* Over whatever screen opened first, once per version, on Windows only. */}
+      <WindowsGate />
+    </UnsupportedWindowsProvider>
   );
 }
 

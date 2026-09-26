@@ -17,11 +17,12 @@
  * from somewhere, and you were in the middle of something there.
  */
 
-import type { ExternalLink } from "../../shared/links.js";
+import { PLATFORM_SCOPE, type ExternalLink } from "../../shared/links.js";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { CodexHookHelp } from "../live/CodexHookHelp.js";
 import { useSetupPoll } from "../live/use-setup-poll.js";
 import { CHIP, hookState } from "./hook-state.js";
+import { UnsupportedWindowsChip } from "../windows/unsupported-windows.js";
 import { CodingToolsPage, ModelsPage, PluginsPage } from "./ToolPages.js";
 
 import { DEFAULT_WORKFLOW_FOLDER } from "../../shared/ipc.js";
@@ -154,6 +155,9 @@ export function SettingsScreen({
 
           {/* With the footer rather than the pages: a quiet link out, not a
               setting and not a call to action. */}
+          <div className="win-chip-rail">
+            <UnsupportedWindowsChip skin="on-dark" />
+          </div>
           <button
             type="button"
             className="settings-coffee on-dark"
@@ -801,6 +805,12 @@ function AboutPage() {
         note="Local-first. Nothing is sent anywhere unless you turn it on under Privacy."
       >
         <span className="set-note">{__ANTHILL_VERSION__}</span>
+      </SettingRow>
+      <SettingDivider />
+      {/* On every platform: this is the product's public statement of scope,
+          in the same words as the README, the CLI and the release notes. */}
+      <SettingRow label="Platforms" note={PLATFORM_SCOPE}>
+        <AboutLink name="windowsIssue">Report a Windows issue</AboutLink>
       </SettingRow>
       <SettingDivider />
       <SettingRow

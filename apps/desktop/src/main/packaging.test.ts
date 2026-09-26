@@ -177,3 +177,27 @@ describe("signing and notarisation", () => {
     expect(granted).toHaveLength(4);
   });
 });
+
+/*
+ * ANT-154: Windows is an experimental source build, never a release. No
+ * Windows target in the builder config, no Windows flag in the scripts that
+ * package, and no Windows artifact in the release workflow — until native
+ * support has been validated on real machines and published on purpose.
+ */
+describe("no Windows release", () => {
+  it("packages for macOS only", () => {
+    const build = manifest.build as unknown as Record<string, unknown>;
+    for (const key of ["win", "nsis", "msi", "appx", "squirrelWindows", "portable"]) {
+      expect(build[key], key).toBeUndefined();
+    }
+    const scripts = (manifest as unknown as { scripts: Record<string, string> }).scripts;
+    for (const script of Object.values(scripts)) expect(script).not.toMatch(/--win\b|-w\b/);
+  });
+
+  it("releases no Windows artifact", () => {
+    const release = readFileSync(resolve("../../.github/workflows/release.yml"), "utf8");
+    expect(release).not.toMatch(/runs-on:\s*windows|--win\b|\.exe\b|\.msi\b|\.appx\b/);
+    // And the release says where Anthill does and does not run.
+    expect(release).toContain("Windows support is coming soon");
+  });
+});

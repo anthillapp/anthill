@@ -24,6 +24,7 @@ import type { Workflow } from "@anthill/workflow-schema";
 import { CLI_LABEL, type LiveSessionView, type PendingRun } from "@anthill/live";
 
 import { readDuration } from "./feed.js";
+import { MessageMarkup } from "./message-markup.js";
 import {
   END_TITLE,
   OUTCOME_ORDER,
@@ -113,7 +114,9 @@ export function SessionReport({ workflow, run, view, end, usage, endedAt, onPick
                     ? "Last message received · may be out of date"
                     : `${cli} said`}
               </span>
-              <p>{words.text}</p>
+              {/* Rendered the way the feed card renders the same message, so the
+                  report does not print raw Markdown and local links (ANT-148). */}
+              <MessageMarkup text={words.text} />
               <span className="session-report-caveat">
                 In the agent&rsquo;s words, as {cli} recorded them — Anthill did not check them.
               </span>

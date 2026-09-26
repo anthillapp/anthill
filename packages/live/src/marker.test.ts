@@ -51,11 +51,53 @@ describe("the correlation marker", () => {
   });
 
   it("needs both halves before it will claim a match", () => {
-    expect(textCarriesMarker("… ANT-1A2B3C4D … 9f8e7d …", marker)).toBe(true);
+    expect(textCarriesMarker(renderMarker(marker), marker)).toBe(true);
     // The run id on its own is not enough: an old copied prompt in someone's
     // scrollback would otherwise match a run created today.
-    expect(textCarriesMarker("… ANT-1A2B3C4D …", marker)).toBe(false);
-    expect(textCarriesMarker("… 9f8e7d …", marker)).toBe(false);
+    expect(textCarriesMarker("anthill-run-id: ANT-1A2B3C4D", marker)).toBe(false);
+    expect(textCarriesMarker("anthill-nonce: 9f8e7d", marker)).toBe(false);
+  });
+
+  /*
+    ANT-79. Two substrings anywhere was the whole test, so a session that
+    merely mentioned a run — a driver printing the id and nonce in a table, a
+    Live Session rail pasted into another chat — became a candidate for it.
+    Only the marker block as Anthill writes it counts now.
+  */
+  describe("recognising the marker as written, not as mentioned", () => {
+    it("matches the block inside a pasted prompt, whatever surrounds it", () => {
+      expect(textCarriesMarker(`Please do this.\n\n${renderMarker(marker)}\n\n# The work`, marker)).toBe(true);
+    });
+
+    it("tolerates the indentation a paste may add", () => {
+      const indented = renderMarker(marker).split("\n").map((line) => `  ${line}`).join("\n");
+      expect(textCarriesMarker(indented, marker)).toBe(true);
+    });
+
+    it("does not match the two values merely mentioned in prose", () => {
+      expect(textCarriesMarker("… ANT-1A2B3C4D … 9f8e7d …", marker)).toBe(false);
+      expect(textCarriesMarker("Run ANT-1A2B3C4D, nonce 9f8e7d, is the one to watch.", marker)).toBe(false);
+    });
+
+    it("does not match a table of the values, the shape a driver session printed", () => {
+      const table = "| Run | Nonce |\n| --- | --- |\n| ANT-1A2B3C4D | 9f8e7d |";
+      expect(textCarriesMarker(table, marker)).toBe(false);
+    });
+
+    it("does not match the progress commands, which carry both values on one line", () => {
+      expect(textCarriesMarker("anthill step ANT-1A2B3C4D 9f8e7d implement", marker)).toBe(false);
+      expect(textCarriesMarker("ANTHILL-STEP ANT-1A2B3C4D 9f8e7d implement", marker)).toBe(false);
+    });
+
+    it("does not match a block for another run or another copy", () => {
+      expect(textCarriesMarker(renderMarker({ ...marker, nonce: "000000" }), marker)).toBe(false);
+      expect(textCarriesMarker(renderMarker({ ...marker, runId: "ANT-99999999" }), marker)).toBe(false);
+    });
+
+    it("does not take a longer value for this one", () => {
+      const longer = renderMarker(marker).replace("9f8e7d", "9f8e7d00");
+      expect(textCarriesMarker(longer, marker)).toBe(false);
+    });
   });
 
   it("mints ids that are recognisable and distinct", () => {

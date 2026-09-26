@@ -294,7 +294,7 @@ describe("agents named on a step but not described", () => {
     expect(inferred[0].message).toContain('an agent called "Developer" was created');
   });
 
-  it("invents a name and nothing else — no role, description or model", () => {
+  it("invents a name and nothing else – no role, description or model", () => {
     const { workflow } = mapDraftToWorkflow(undescribed(), OPTIONS);
     expect(agentProfiles(workflow)[0]).toEqual({ id: "agent-1", name: "Developer" });
   });
@@ -471,7 +471,7 @@ describe("approval gates", () => {
 
 describe("traceability", () => {
   it("keeps the author's prompt whole", () => {
-    const long = "Build me a thing.\n\nSTAGE 1 — research\n…".repeat(20);
+    const long = "Build me a thing.\n\nSTAGE 1 – research\n…".repeat(20);
     const { workflow } = mapDraftToWorkflow(draft(), { ...OPTIONS, prompt: long });
     expect(workflowSource(workflow)?.prompt).toBe(long);
   });

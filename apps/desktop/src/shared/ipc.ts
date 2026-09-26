@@ -10,6 +10,7 @@
  * reachable only through the channels named here.
  */
 
+import type { ExternalLink } from "./links.js";
 import type { Workflow, WorkflowRun, NodeRun } from "@anthill/workflow-schema";
 import type { AgentModels, InterpreterId, ModelPreferences } from "@anthill/workflow";
 import type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun } from "@anthill/live";
@@ -60,6 +61,7 @@ export const IpcChannel = {
   pluginConnections: "plugins:connections",
   pluginInstall: "plugins:install",
   pluginGuide: "plugins:open-guide",
+  linkOpen: "link:open",
   settingsRead: "settings:read",
   settingsWrite: "settings:write",
   diagnosticsRendererError: "diagnostics:renderer-error",
@@ -71,6 +73,7 @@ export const IpcChannel = {
   liveSetupInstall: "live-setup:install",
   liveSetupDisable: "live-setup:disable",
   folderChoose: "folder:choose",
+  workflowFolderChoose: "settings:choose-workflow-folder",
   interpreterSignIn: "interpreters:sign-in",
   pathsCheck: "paths:check",
   pathReveal: "path:reveal",
@@ -115,7 +118,8 @@ export const IpcChannel = {
  * 23: the plugin connections, the install that runs the tools' own plugin
  * commands, and the install guide a missing tool opens (From a session).
  */
-export const IPC_CONTRACT = 23;
+// 24: choosing the workflow folder on Settings ▸ General, and the setting it writes.
+export const IPC_CONTRACT = 24;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -671,7 +675,15 @@ export type AppSettings = {
   finishedNotifications: boolean;
   /** …when Anthill can no longer read the session. */
   observationLostNotifications: boolean;
+  /**
+   * Where the save dialog opens for a workflow that has never been saved.
+   * An absolute path, or empty for the default, `~/Documents/Anthill`.
+   */
+  workflowFolder: string;
 };
+
+/** How the default workflow folder is shown; main resolves it against the home folder. */
+export const DEFAULT_WORKFLOW_FOLDER = "~/Documents/Anthill";
 
 /**
  * What happened when a test notification was sent.
@@ -925,6 +937,11 @@ export interface AnthillApi {
    */
   chooseRunFolder(): Promise<string | null>;
   /**
+   * Ask for the folder new workflows are saved in, and keep it. The settings
+   * as they now are, or null when the dialog was cancelled.
+   */
+  chooseWorkflowFolder(): Promise<AppSettings | null>;
+  /**
    * Tell the main process whether the open workflow has unsaved edits, so closing
    * the window can ask before discarding them. The renderer cannot block a
    * window close on its own.
@@ -1055,6 +1072,8 @@ export interface AnthillApi {
   pluginInstall(harness: "claude-code" | "codex"): Promise<PluginInstallResult>;
   /** Open the tool's own install guide in the browser: one fixed page per tool. */
   pluginGuide(harness: "claude-code" | "codex"): Promise<void>;
+  /** Open one of Anthill's own pages (`shared/links.ts`) in the default browser. */
+  openLink?(name: ExternalLink): Promise<void>;
   /**
    * Send one notification now, so the author can see for themselves whether
    * they arrive.

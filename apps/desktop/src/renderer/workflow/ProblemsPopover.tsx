@@ -108,7 +108,7 @@ export function ProblemsPopover({
       */}
       {issues.length === 0 ? (
         <p className="empty">
-          Nothing to fix. Anthill checks that the graph compiles into a prompt — it says nothing
+          Nothing to fix. Anthill checks that the graph compiles into a prompt – it says nothing
           about whether the work is right.
         </p>
       ) : null}

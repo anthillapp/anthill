@@ -1227,7 +1227,7 @@ describe("a lost session that writes again", () => {
     expect(run.closedAt).toBeDefined();
   });
 
-  it("looks slowly — not on every tick", async () => {
+  it("looks slowly – not on every tick", async () => {
     const h = await lostAndClosed();
     // The recovery look last ran at the moment of closing; a transcript that
     // grows ten seconds later waits for the next look.

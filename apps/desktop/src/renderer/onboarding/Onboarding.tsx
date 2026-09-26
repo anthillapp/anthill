@@ -77,7 +77,7 @@ function Welcome({
         </h1>
         <p className="ob-lede">See your workflows take shape, as clearly as if you sketched them on paper.</p>
         <p className="ob-sub">
-          Steps, the agents who carry them out, and what happens when work is sent back — laid out
+          Steps, the agents who carry them out, and what happens when work is sent back – laid out
           where you can see them.
         </p>
         <button type="button" className="primary ob-continue" onClick={onContinue}>
@@ -214,7 +214,7 @@ function Connect({
         </h1>
         <p className="ob-connect-lede">
           Describe a task in Codex or Claude Code, then review it here as a workflow. The plugin
-          carries that handover — you can skip it and draw workflows yourself.
+          carries that handover – you can skip it and draw workflows yourself.
         </p>
 
         <div className="ob-path" aria-label="How the handover works" role="img">

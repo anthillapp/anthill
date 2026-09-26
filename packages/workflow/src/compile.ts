@@ -220,7 +220,7 @@ function buildAgentFile(
   if (steps.length === 1) {
     const config = agentConfig(steps[0]);
     const action = config.actionKind ? actionDefinition(config.actionKind) : undefined;
-    if (action) body.push("", `Action: ${actionLabel(action)} — ${action.summary}.`);
+    if (action) body.push("", `Action: ${actionLabel(action)} – ${action.summary}.`);
     body.push(...renderStepDetail(config));
   } else {
     body.push(
@@ -298,7 +298,7 @@ function renderTransitions(
   const describeTarget = (edge: WorkflowEdge): string => {
     const target = byId.get(edge.target);
     if (!target) return "an unknown block";
-    if (target.type === "end") return `stop — the workflow is complete (${target.name})`;
+    if (target.type === "end") return `stop – the workflow is complete (${target.name})`;
 
     // The outcome kind carries meaning the target alone does not: sending work
     // back is a different instruction from moving on to the next step, even
@@ -450,7 +450,7 @@ function renderLoops(
     sections.push("2. Make the smallest reasonable fix.");
     sections.push("3. Verify it locally.");
     sections.push(
-      "4. Verify it independently — do not rely only on the check written alongside the fix.",
+      "4. Verify it independently – do not rely only on the check written alongside the fix.",
     );
     sections.push(
       "5. Evaluate against the done criteria above. If they are not met, go round again.",
@@ -532,9 +532,9 @@ function buildPrompt(
   /** What the author actually chose, which is not the same as the resolved id. */
   const chosen = explicitModelFor(profile.models, harness.target);
   const effort = reasoningEffortFor(profile.models, harness.target);
-      const modelNote = harness.supportsPerAgentModel ? ` — model: ${model}` : "";
-      const stepCount = stepIds.length > 1 ? ` — ${stepIds.length} steps` : "";
-      const role = profile.role?.trim() ? ` — ${profile.role.trim()}` : "";
+      const modelNote = harness.supportsPerAgentModel ? ` – model: ${model}` : "";
+      const stepCount = stepIds.length > 1 ? ` – ${stepIds.length} steps` : "";
+      const role = profile.role?.trim() ? ` – ${profile.role.trim()}` : "";
       return `- \`${slug}\` (${profile.name})${role}${stepCount}${modelNote}`;
     });
     sections.push(
@@ -562,7 +562,7 @@ function buildPrompt(
     if (node.type === "approval") {
       const prompt = approvalConfig(node).prompt;
       steps.push("");
-      steps.push(`### ${step}. ${node.name} — stop and ask a human`);
+      steps.push(`### ${step}. ${node.name} – stop and ask a human`);
       steps.push("");
       steps.push(
         prompt
@@ -587,8 +587,8 @@ function buildPrompt(
     steps.push("");
     const heading = assignment
       ? usesSubagents
-        ? `### ${step}. ${node.name} — delegate to the \`${assignment.slug}\` subagent`
-        : `### ${step}. ${node.name} — act as ${assignment.profile.name}`
+        ? `### ${step}. ${node.name} – delegate to the \`${assignment.slug}\` subagent`
+        : `### ${step}. ${node.name} – act as ${assignment.profile.name}`
       : `### ${step}. ${node.name}`;
     steps.push(heading);
 
@@ -597,7 +597,7 @@ function buildPrompt(
       // "Action: {label}" stays a literal prefix — category is appended after
       // the summary, in the same place and words the inspector uses
       // (`{category} · {label}`), rather than inserted before the label.
-      steps.push(`Action: ${action.label} — ${action.summary} (${ACTION_CATEGORY_LABELS[action.category]}).`);
+      steps.push(`Action: ${action.label} – ${action.summary} (${ACTION_CATEGORY_LABELS[action.category]}).`);
     }
     if (config.purpose) {
       steps.push("");

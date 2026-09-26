@@ -203,7 +203,7 @@ export function openUrl(
       if (NO_HANDLER.test(said)) return finish({ outcome: "no_handler", message: noHandlerMessage(url) });
       finish({
         outcome: "failed",
-        message: `Anthill could not be opened: ${OPENER} exited ${code ?? "on a signal"}${said ? ` — ${said}` : ""}. The handover is stored; ${url} opens it.`,
+        message: `Anthill could not be opened: ${OPENER} exited ${code ?? "on a signal"}${said ? ` – ${said}` : ""}. The handover is stored; ${url} opens it.`,
       });
     });
   });

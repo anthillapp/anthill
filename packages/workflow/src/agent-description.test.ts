@@ -52,8 +52,8 @@ describe("describing an agent from its steps", () => {
     ];
     const text = describeAgent(qa, steps, workflowWith(steps));
     expect(text).toContain("It carries out 3 steps, in this order:");
-    expect(text).toContain("Prepare QA environment (inspect context) — get the app running");
-    expect(text).toContain("QA ANT-121 (browser check) — exercise the routing case");
+    expect(text).toContain("Prepare QA environment (inspect context) – get the app running");
+    expect(text).toContain("QA ANT-121 (browser check) – exercise the routing case");
     expect(text).toContain("Compile QA report");
   });
 
@@ -97,7 +97,7 @@ describe("describing an agent from its steps", () => {
     const steps = [step("a", "QA ANT-1", { actionKind: "browser-check", purpose: "QA the ticket end to end." })];
     const text = describeAgent(qa, steps, workflowWith(steps, { goal: "QA the seven tickets." }));
     expect(text).toContain("The work it belongs to: QA the seven tickets.");
-    expect(text).toContain("QA ANT-1 (browser check) — QA the ticket end to end.");
+    expect(text).toContain("QA ANT-1 (browser check) – QA the ticket end to end.");
   });
 
   it("ends each list with one full stop, not each item's and its own", () => {

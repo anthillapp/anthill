@@ -21,7 +21,7 @@ export async function createIsolatedWorkspace(
 ): Promise<WorkspaceContext> {
   void rootPath
   throw new Error(
-    `Workspace isolation mode '${mode}' is not implemented yet — MVP only supports 'shared'`,
+    `Workspace isolation mode '${mode}' is not implemented yet – MVP only supports 'shared'`,
   )
 }
 

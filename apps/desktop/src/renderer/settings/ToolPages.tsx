@@ -93,7 +93,7 @@ export function CodingToolsPage() {
       <p className="settings-lede">
         The coding tools Anthill can hand a workflow to. Anthill looks for each one on this
         machine and asks it whether someone is signed in. It signs nobody in, handles no
-        credentials and installs nothing — signing in happens in the tool&rsquo;s own window.
+        credentials and installs nothing – signing in happens in the tool&rsquo;s own window.
       </p>
 
       <SettingGroup
@@ -218,11 +218,11 @@ function ChoiceSelect({
   return (
     <select aria-label={label} value={current} onChange={(event) => onChange(choiceOf(event.target.value))}>
       <option value="">{empty}</option>
-      <option value={HARNESS_DEFAULT}>Default — the session&rsquo;s model</option>
+      <option value={HARNESS_DEFAULT}>Default – the session&rsquo;s model</option>
       {/* A stored answer the list no longer offers stays visible rather than
           reading as though nothing were chosen. */}
       {current && current !== HARNESS_DEFAULT && !known.has(current) ? (
-        <option value={current}>{current.replace("::", " · ")} — not offered now</option>
+        <option value={current}>{current.replace("::", " · ")} – not offered now</option>
       ) : null}
       {items.map((item) => (
         <option key={item.value} value={item.value}>
@@ -349,7 +349,7 @@ export function ModelsPage() {
                     target === "codex"
                       ? "Anthill has not been given Codex's model list. Open Codex once, then refresh."
                       : target === "pi"
-                        ? "Anthill could not read a model list from Pi. Pi lists none until a provider is signed in — run /login in pi, then refresh."
+                        ? "Anthill could not read a model list from Pi. Pi lists none until a provider is signed in – run /login in pi, then refresh."
                         : `Anthill could not read ${harness.displayName}'s model list. Refresh to ask again.`
                   }
                 >
@@ -395,7 +395,7 @@ export function ModelsPage() {
                         note={
                           <>
                             <span className="mono">{option.id}</span>
-                            {option.hint ? ` — ${option.hint}` : ""}
+                            {option.hint ? ` – ${option.hint}` : ""}
                             {option.efforts.length > 0
                               ? ` · reasoning: ${option.efforts.map((effort) => effort.id).join(", ")}`
                               : ""}

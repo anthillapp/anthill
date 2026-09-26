@@ -266,7 +266,7 @@ describe("the page's read-only boundary", () => {
       // correctly for a finished run, not vanish with the button.
       await show([step("implement")], run({ state: "completed" }));
       expect(screen.queryByText("Anthill is observing, not running")).toBeNull();
-      expect(screen.getByText("Observation ended — Anthill never ran this session")).toBeTruthy();
+      expect(screen.getByText("Observation ended – Anthill never ran this session")).toBeTruthy();
     });
 
     it("says contact was lost, and keeps the Stop button while records may still arrive", async () => {
@@ -837,7 +837,7 @@ describe("looking again from the page", () => {
     expect(lookAgain).toHaveBeenCalledWith("ANT-1A2B3C4D");
   });
 
-  it("does not offer it while the run is still open — Anthill is already reading", async () => {
+  it("does not offer it while the run is still open – Anthill is already reading", async () => {
     await show([], run({ state: "observation_lost" }));
     expect(screen.queryByRole("button", { name: "Look again" })).toBeNull();
   });
@@ -909,7 +909,7 @@ describe("an ended session's report", () => {
     expect(line.textContent).toContain("2 done");
     openReport();
     expect(report().textContent).toContain("Finished is not the same as succeeded");
-    expect(report().textContent).not.toMatch(/succeeded\b(?! —)|success/i);
+    expect(report().textContent).not.toMatch(/succeeded\b(?! –)|success/i);
   });
 
   it("gives the agent's last words as the agent's, and says so", async () => {
@@ -1161,7 +1161,7 @@ describe("the session's own elapsed time", () => {
 
   it("says nothing at all before there is anything to measure", async () => {
     await show([], run());
-    expect(elapsed()).toBe("—");
+    expect(elapsed()).toBe("–");
   });
 });
 

@@ -80,11 +80,11 @@ const AFTER: { tone: string; text: string }[] = [
   { tone: "is-ok", text: "It appears under Sessions on the launch window the moment it is written." },
   {
     tone: "is-wait",
-    text: "Open it and the toolbar says where it stands — waiting for you, saved, or already pinned by a run.",
+    text: "Open it and the toolbar says where it stands – waiting for you, saved, or already pinned by a run.",
   },
   {
     tone: "is-quiet",
-    text: "If it is waiting, change what you want and press Save, then tell the session to go. Saving is a decision, not a start — the session picks it up when you tell it to.",
+    text: "If it is waiting, change what you want and press Save, then tell the session to go. Saving is a decision, not a start – the session picks it up when you tell it to.",
   },
   {
     tone: "is-quiet",
@@ -326,7 +326,7 @@ function Demo({ tool, surface }: { tool: Harness; surface: Surface }) {
       <div className="fs-result fs-demo-result">
         <AnthillMark size={18} />
         <span>
-          Anthill received <b>Checkout flow</b> — 5 steps, 2 agents. Review it before work starts.
+          Anthill received <b>Checkout flow</b> – 5 steps, 2 agents. Review it before work starts.
         </span>
         <span className="fs-demo-review">Review</span>
       </div>

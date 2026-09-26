@@ -515,7 +515,7 @@ describe("writing an agent", () => {
     await openAgents();
     fireEvent.click(await screen.findByText("Reviewer"));
 
-    fireEvent.change(screen.getByLabelText("Role — optional"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Role – optional"), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     // "role" gone, not "role: ''" — an empty string answers yes to every
@@ -707,7 +707,7 @@ describe("choosing a model before a tool is connected", () => {
     const cards = screen.getByRole("group", { name: "Model per coding tool" });
     expect(within(cards).getAllByRole("button", { name: "Check again" })).toHaveLength(3);
     expect(within(cards).queryByRole("combobox")).toBeNull();
-    expect(screen.queryByText("Opus — Deepest reasoning, slowest")).toBeNull();
+    expect(screen.queryByText("Opus – Deepest reasoning, slowest")).toBeNull();
     expect(screen.queryByText("Not chosen")).toBeNull();
   });
 
@@ -746,7 +746,7 @@ describe("choosing a model before a tool is connected", () => {
   it("keeps every unsaved field through opening and cancelling the connection", async () => {
     await withoutTools();
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Careful" } });
-    fireEvent.change(screen.getByLabelText("Role — optional"), { target: { value: "Reads" } });
+    fireEvent.change(screen.getByLabelText("Role – optional"), { target: { value: "Reads" } });
 
     fireEvent.click(screen.getAllByRole("button", { name: "Check again" })[0]);
     expect(screen.getByLabelText("Name")).toHaveProperty("value", "Careful");
@@ -754,7 +754,7 @@ describe("choosing a model before a tool is connected", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByLabelText("Name")).toHaveProperty("value", "Careful");
-    expect(screen.getByLabelText("Role — optional")).toHaveProperty("value", "Reads");
+    expect(screen.getByLabelText("Role – optional")).toHaveProperty("value", "Reads");
   });
 
   it("offers the tool's own sign-in when it is installed but signed out", async () => {

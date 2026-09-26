@@ -16,7 +16,7 @@ import { useEffect, useState } from "react";
 const TICK_MS = 5_000;
 
 export function relative(at: string | undefined, now: number = Date.now()): string {
-  if (!at) return "—";
+  if (!at) return "–";
   const seconds = Math.max(0, Math.round((now - Date.parse(at)) / 1000));
   if (seconds < 60) return `${seconds}s ago`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
@@ -36,10 +36,10 @@ export function relative(at: string | undefined, now: number = Date.now()): stri
  * lasted a real amount of time and rounding it to zero says otherwise.
  */
 export function spanned(from: string | undefined, to: string | number | undefined): string {
-  if (!from || to === undefined) return "—";
+  if (!from || to === undefined) return "–";
   const start = Date.parse(from);
   const end = typeof to === "number" ? to : Date.parse(to);
-  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return "—";
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return "–";
 
   const minutes = Math.floor((end - start) / 60_000);
   if (minutes < 1) return "under a minute";

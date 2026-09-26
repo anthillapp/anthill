@@ -62,7 +62,7 @@ const ASKS: Record<string, string> = {
   [WORKFLOWNER_VALIDATION_CODES.DUPLICATE_AGENT_ID]: "Which distinct id should each agent use?",
   // Workflow-level
   [WORKFLOWNER_VALIDATION_CODES.NO_TARGET]:
-    "Which coding tool should carry this out — Claude Code, Codex, or pi?",
+    "Which coding tool should carry this out – Claude Code, Codex, or pi?",
   [WORKFLOWNER_VALIDATION_CODES.NO_START_BLOCK]: "Where does this work begin?",
   [WORKFLOWNER_VALIDATION_CODES.MULTIPLE_START_BLOCKS]:
     "There is more than one place this could begin. Which one should it actually start at?",
@@ -71,13 +71,13 @@ const ASKS: Record<string, string> = {
   [WORKFLOWNER_VALIDATION_CODES.UNSUPPORTED_BLOCK_TYPE]:
     "This block is of a kind Anthill cannot hand over. Is it a piece of work someone does, or a decision you want to sign off yourself?",
   [WORKFLOWNER_VALIDATION_CODES.UNREACHABLE_BLOCK]:
-    "Nothing leads to this step, so it would never happen. Which step should come before it — or should it go?",
+    "Nothing leads to this step, so it would never happen. Which step should come before it – or should it go?",
   [WORKFLOWNER_VALIDATION_CODES.DEAD_END_BLOCK]:
     "What happens after this step? At the moment the work stops there without finishing.",
 
   // Steps
   [WORKFLOWNER_VALIDATION_CODES.STEP_MISSING_ACTION]:
-    "What kind of work is this step — finding something out, building something, checking something, or handing something over?",
+    "What kind of work is this step – finding something out, building something, checking something, or handing something over?",
   [WORKFLOWNER_VALIDATION_CODES.STEP_MISSING_TASK]:
     "What exactly should this step do? Say it the way you would to the person doing it.",
   [WORKFLOWNER_VALIDATION_CODES.STEP_MISSING_AGENT]: "Who should carry out this step?",
@@ -92,7 +92,7 @@ const ASKS: Record<string, string> = {
 
   // Control blocks
   [WORKFLOWNER_VALIDATION_CODES.APPROVAL_NO_PATH]:
-    "What should happen after you approve this — and what should happen if you do not?",
+    "What should happen after you approve this – and what should happen if you do not?",
   [WORKFLOWNER_VALIDATION_CODES.APPROVAL_UNLABELLED_PATHS]:
     "Which way out of this approval is which? Say which one means yes and which means no.",
 
@@ -118,7 +118,7 @@ const ASKS: Record<string, string> = {
   [WORKFLOWNER_ADVISORY_CODES.AGENT_NO_MODEL_FOR_TARGET]:
     "Which model should this agent use, or should it simply use whatever the session is on?",
   [WORKFLOWNER_ADVISORY_CODES.AGENT_NO_DESCRIPTION]:
-    "How should this agent go about its work across the steps it owns — what it is for, what it looks at, what it hands back, and how it knows it is done?",
+    "How should this agent go about its work across the steps it owns – what it is for, what it looks at, what it hands back, and how it knows it is done?",
   [WORKFLOWNER_ADVISORY_CODES.STEP_NO_EXPECTED_OUTPUT]:
     "What should this step hand back when it is done?",
   [WORKFLOWNER_ADVISORY_CODES.STEP_NO_SUCCESS_CRITERIA]:

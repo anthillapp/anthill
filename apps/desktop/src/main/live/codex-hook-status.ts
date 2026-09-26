@@ -136,7 +136,7 @@ export function classifyCodexHooks(
     return { state: "disabled", message: "Anthill’s hooks are switched off in Codex. In Codex, type /hooks, choose Review hooks, and switch on only the entries containing anthill-observation-hook." };
   }
   if (hooks.some((hook) => ["untrusted", "modified"].includes(hook.trustStatus))) {
-    return { state: "needs-trust", message: "Codex has not approved Anthill’s hooks yet. In Codex, type /hooks, choose Review hooks, and allow only the entries containing anthill-observation-hook — not Trust all. Anthill notices the change by itself." };
+    return { state: "needs-trust", message: "Codex has not approved Anthill’s hooks yet. In Codex, type /hooks, choose Review hooks, and allow only the entries containing anthill-observation-hook – not Trust all. Anthill notices the change by itself." };
   }
   if (hooks.some((hook) => hook.enabled !== true || !["trusted", "managed"].includes(hook.trustStatus))) {
     return { state: "unknown", message: "Codex returned an unfamiliar permission state. Review Anthill’s entries in /hooks." };

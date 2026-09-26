@@ -40,7 +40,7 @@ describe("the global agent library", () => {
     expect(written(library.all())).toHaveLength(1);
   });
 
-  it("keeps the id through a rename — references never break on a name", async () => {
+  it("keeps the id through a rename – references never break on a name", async () => {
     const { library } = await store();
     const created = await library.create({ name: "Reviewer", models: { "claude-code": { id: "sonnet" } } });
     const renamed = await library.update(created.id, { name: "Careful Reviewer" });
@@ -364,7 +364,7 @@ describe("the global agent library", () => {
     expect(created.name).toBe("   ");
   });
 
-  it("keeps a trailing space in a name — it is part of the name, not noise", async () => {
+  it("keeps a trailing space in a name – it is part of the name, not noise", async () => {
     // The regression for the trim-on-save bug: a space typed at the end of the
     // name is part of the name, so it is stored rather than trimmed on the way
     // in, on both create and update.

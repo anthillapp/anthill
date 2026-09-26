@@ -64,13 +64,13 @@ export function pluginCard(connection: PluginConnection | undefined, local: Loca
     ...extra,
   });
 
-  if (local.kind === "installing") return view("installing", `${label} may ask you to confirm — look for its prompt.`);
+  if (local.kind === "installing") return view("installing", `${label} may ask you to confirm – look for its prompt.`);
   if (local.kind === "failed") {
     const { result } = local;
     return view(
       "failed",
       result.changed
-        ? "The install didn't finish. Part of it ran — Settings ▸ Plugins shows where each tool now stands."
+        ? "The install didn't finish. Part of it ran – Settings ▸ Plugins shows where each tool now stands."
         : "The install didn't finish. Nothing on your machine was changed.",
       { detail: result.error, action: { kind: "install", label: "Try again" } },
     );
@@ -118,7 +118,7 @@ export function pluginCard(connection: PluginConnection | undefined, local: Loca
   if (!connection.source) {
     // Nothing to install from: the app does not ship the plugin yet. A button
     // that could only fail is not offered.
-    return view("available", `${tool} is installed. This build of Anthill can't add the plugin by itself yet — Settings ▸ Plugins has the steps.`, {
+    return view("available", `${tool} is installed. This build of Anthill can't add the plugin by itself yet – Settings ▸ Plugins has the steps.`, {
       action: { kind: "settings", label: "Show the steps", outlined: true },
     });
   }

@@ -55,7 +55,7 @@ export function pluginSteps(status: PluginHarnessStatus): PluginStep[] {
     case "no-tool":
       return [
         {
-          says: `${status.label} has not been used on this machine yet. Install it and sign in first — the Coding tools page walks through that — then come back here.`,
+          says: `${status.label} has not been used on this machine yet. Install it and sign in first – the Coding tools page walks through that – then come back here.`,
         },
       ];
 

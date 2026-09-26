@@ -500,7 +500,7 @@ describe("a request that does not say enough", () => {
   const asking = {
     version: 1,
     summary: "The request does not say which step to split.",
-    question: "Which step should be split — Implement, or Run tests?",
+    question: "Which step should be split – Implement, or Run tests?",
     ops: [],
   };
 
@@ -524,7 +524,7 @@ describe("a request that does not say enough", () => {
     mount();
     await ask("Split this task into subagents.");
     expect(
-      await screen.findByText("Which step should be split — Implement, or Run tests?"),
+      await screen.findByText("Which step should be split – Implement, or Run tests?"),
     ).toBeTruthy();
   });
 

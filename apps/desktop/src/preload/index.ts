@@ -64,6 +64,7 @@ const api: AnthillApi = {
   listRecentPlans: () => ipcRenderer.invoke(IpcChannel.recentsList),
   forgetRecentWorkflow: (path: string) => ipcRenderer.invoke(IpcChannel.recentsForget, path),
   chooseRunFolder: () => ipcRenderer.invoke(IpcChannel.folderChoose),
+  chooseWorkflowFolder: () => ipcRenderer.invoke(IpcChannel.workflowFolderChoose),
   signInToInterpreter: (id: InterpreterId) =>
     ipcRenderer.invoke(IpcChannel.interpreterSignIn, id),
   pathsExist: (paths: string[]) => ipcRenderer.invoke(IpcChannel.pathsCheck, paths),
@@ -106,6 +107,7 @@ const api: AnthillApi = {
   pluginConnections: () => ipcRenderer.invoke(IpcChannel.pluginConnections),
   pluginInstall: (harness) => ipcRenderer.invoke(IpcChannel.pluginInstall, harness),
   pluginGuide: (harness) => ipcRenderer.invoke(IpcChannel.pluginGuide, harness),
+  openLink: (name) => ipcRenderer.invoke(IpcChannel.linkOpen, name),
   settingsWrite: (patch: Partial<AppSettings>) =>
     ipcRenderer.invoke(IpcChannel.settingsWrite, patch),
   notificationsProbe: () => ipcRenderer.invoke(IpcChannel.notificationsProbe),

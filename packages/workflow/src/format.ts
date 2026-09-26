@@ -340,7 +340,7 @@ export function checkWorkflowCompatibility(workflow: unknown): WorkflowCompatibi
       ok: false,
       reason: "too-new",
       version,
-      message: `This workflow was saved by a newer version of Anthill (workflow format ${version}; this build understands ${WORKFLOW_FORMAT_VERSION}). Update Anthill to open it — opening it here would discard the parts this build does not understand.`,
+      message: `This workflow was saved by a newer version of Anthill (workflow format ${version}; this build understands ${WORKFLOW_FORMAT_VERSION}). Update Anthill to open it – opening it here would discard the parts this build does not understand.`,
     };
   }
 

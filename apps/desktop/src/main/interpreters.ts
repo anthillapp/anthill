@@ -269,7 +269,7 @@ export async function runDraft(options: DraftRunOptions): Promise<PromptDraftRes
         return {
           ok: false,
           signedOut: item.id,
-          error: `Your ${item.label} sign-in has expired, so Anthill could not ask it anything. Anthill never sees your sign-in — this opens ${item.label}'s own login in a terminal.`,
+          error: `Your ${item.label} sign-in has expired, so Anthill could not ask it anything. Anthill never sees your sign-in – this opens ${item.label}'s own login in a terminal.`,
           command,
         };
       }
@@ -335,7 +335,7 @@ export async function signInToInterpreter(
       [
         "#!/bin/sh",
         `echo "Signing in to ${item.label} for Anthill."`,
-        'echo "Anthill does not see your sign-in — this is the CLI\'s own login."',
+        'echo "Anthill does not see your sign-in – this is the CLI\'s own login."',
         "echo",
         item.signIn,
         "",

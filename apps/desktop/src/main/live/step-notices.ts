@@ -173,7 +173,7 @@ export function noticesFor(
       record.waitingAt = undefined;
       notices.push(
         pass > 1
-          ? { runId, kind: "loop", stepId, title: title(run), body: `Back to ${name} — pass ${pass}` }
+          ? { runId, kind: "loop", stepId, title: title(run), body: `Back to ${name} – pass ${pass}` }
           : { runId, kind: "step-started", stepId, title: title(run), body: `Started: ${name}` },
       );
       continue;
@@ -242,7 +242,7 @@ export function endingNotices(before: PendingRun, after: PendingRun): StepNotice
         runId,
         kind: "observation-lost",
         title: title(after),
-        body: "Observation lost — the session stopped writing anything Anthill can read.",
+        body: "Observation lost – the session stopped writing anything Anthill can read.",
       }];
     default:
       return [];

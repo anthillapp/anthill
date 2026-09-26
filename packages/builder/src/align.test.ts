@@ -32,7 +32,7 @@ function makeWorkflow(): Workflow {
   };
 }
 
-describe("centerOutputs — ports", () => {
+describe("centerOutputs – ports", () => {
   it("puts a port that drifted off the middle of a side back on it", () => {
     const workflow = makeWorkflow();
     // Near the top-left corner of the bottom edge.
@@ -83,7 +83,7 @@ describe("centerOutputs — ports", () => {
   });
 });
 
-describe("centerOutputs — arrowheads", () => {
+describe("centerOutputs – arrowheads", () => {
   it("puts a landing back on the middle of the side it arrives at", () => {
     const workflow = makeWorkflow();
     workflow.edges[0].anchor = { u: 0.02, v: 0.95 };
@@ -112,7 +112,7 @@ describe("centerOutputs — arrowheads", () => {
   });
 });
 
-describe("centerOutputs — scope", () => {
+describe("centerOutputs – scope", () => {
   it("touches only the block asked for", () => {
     const workflow = makeWorkflow();
     workflow.edges[0].port = { u: 0.1, v: 0.97 };

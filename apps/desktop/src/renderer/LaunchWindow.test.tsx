@@ -495,7 +495,7 @@ describe("the first run", () => {
 
   it("says a plugin is needed until one really answers", async () => {
     render0([], [connection("claude-code", false), connection("codex", false)]);
-    const note = await screen.findByText("Needs the plugin — you can add it in Settings");
+    const note = await screen.findByText("Needs the plugin – you can add it in Settings");
     expect(note.classList.contains("is-ready")).toBe(false);
   });
 

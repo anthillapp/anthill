@@ -444,7 +444,7 @@ function SignedOut({
       {opened === "opened" ? (
         <p className="hint">
           Your terminal is running <code>{item.signIn}</code>. Finish signing in
-          there and come back to this window — Anthill checks again when it has
+          there and come back to this window – Anthill checks again when it has
           your attention, and starts a fresh {item.command} for every draft, so
           there is nothing to restart.
         </p>
@@ -486,7 +486,7 @@ function Compose({
       <div>
         <h1>Describe the work</h1>
         <p className="lede">
-          Paste anything — a paragraph, a brief, a whole process document.
+          Paste anything – a paragraph, a brief, a whole process document.
           Nothing is created until you have seen what comes back.
         </p>
       </div>
@@ -516,11 +516,11 @@ function Compose({
               interpreterId={failure.interpreterId}
               lede={`Your prompt is untouched. ${
                 interpreterDefinition(failure.interpreterId).label
-              } is not signed in — this is not about the prompt, and rewording it will not help.`}
+              } is not signed in – this is not about the prompt, and rewording it will not help.`}
             />
           ) : (
             <p className="hint">
-              Your prompt is untouched. Try again, or reword it — asking for fewer,
+              Your prompt is untouched. Try again, or reword it – asking for fewer,
               clearer stages usually helps.
             </p>
           )}
@@ -591,10 +591,10 @@ function ChooseInterpreter({
     interpreters === null
       ? "Checking what is on your PATH."
       : installed.length === 0
-        ? "Neither Claude Code nor the Codex CLI was found on your PATH. Install one of them and sign in with it, then come back — or go back and build the workflow yourself, which needs no interpreter at all."
+        ? "Neither Claude Code nor the Codex CLI was found on your PATH. Install one of them and sign in with it, then come back – or go back and build the workflow yourself, which needs no interpreter at all."
         : only
-          ? `${only.label} is the only coding CLI installed, so it will read your prompt. Whatever it proposes, it only proposes a workflow — it does not do the work.`
-          : "Both of these are installed on this machine. Whichever you pick only proposes a workflow — it does not do the work.";
+          ? `${only.label} is the only coding CLI installed, so it will read your prompt. Whatever it proposes, it only proposes a workflow – it does not do the work.`
+          : "Both of these are installed on this machine. Whichever you pick only proposes a workflow – it does not do the work.";
 
   return (
     <>
@@ -646,7 +646,7 @@ function ChooseInterpreter({
           <ul className="plain">
             {interpreters.map((item) => (
               <li key={item.id}>
-                <strong>{item.label}</strong> — {item.reason}
+                <strong>{item.label}</strong> – {item.reason}
               </li>
             ))}
           </ul>
@@ -661,7 +661,7 @@ function ChooseInterpreter({
           <h2>{selected.label} is not signed in</h2>
           <SignedOut
             interpreterId={selected.id}
-            lede={`${selected.label} is installed, but nobody is signed in — a draft would run for a minute and then fail on that.`}
+            lede={`${selected.label} is installed, but nobody is signed in – a draft would run for a minute and then fail on that.`}
             looking={looking}
             onLookAgain={onLookAgain}
           />
@@ -674,7 +674,7 @@ function ChooseInterpreter({
           <pre className="command-line">{selected.command}</pre>
           <p className="hint">
             It reads the prompt and answers. It does not carry out the work, and
-            it is not given access to your project — Anthill runs it on this
+            it is not given access to your project – Anthill runs it on this
             machine with your own sign-in, so there is no API key to enter.
           </p>
         </div>
@@ -750,7 +750,7 @@ function Running({
         </ol>
         <p className="hint">
           Usually under a minute. Anthill is not showing the interpreter's
-          working — nothing counts as part of a workflow until a complete draft has
+          working – nothing counts as part of a workflow until a complete draft has
           been validated.
         </p>
       </div>

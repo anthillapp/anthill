@@ -93,7 +93,7 @@ export function connectScript(
     case "not-installed":
       return {
         title: `${short} was not found`,
-        body: `Anthill looked for ${short} on this machine and did not find it. Install it, then check again — nothing here is lost.`,
+        body: `Anthill looked for ${short} on this machine and did not find it. Install it, then check again – nothing here is lost.`,
         steps: [
           { label: FOUND, state: "bad", word: "Not found" },
           { label: SIGNED, state: "todo" },
@@ -242,8 +242,8 @@ export function ConnectHarness({ target, context = "agent", connection, onRechec
         {/* The sentence the whole containment exists to make true. */}
         <p className="connect-note">
           {context === "settings"
-            ? "Connecting changes nothing in your workflows or agents — you come back to this page when setup finishes."
-            : "Your unsaved changes to this agent are kept — you come back to this section when setup finishes."}
+            ? "Connecting changes nothing in your workflows or agents – you come back to this page when setup finishes."
+            : "Your unsaved changes to this agent are kept – you come back to this section when setup finishes."}
         </p>
 
         {connection.status === "signed-out" ? (

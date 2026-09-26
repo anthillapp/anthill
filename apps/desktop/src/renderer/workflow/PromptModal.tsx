@@ -416,9 +416,9 @@ export function PromptModal({
     observation === "ready" || observation === "passive"
       ? { tone: "ok", text: "Live progress on" }
       : observation === "awaiting-session"
-        ? { tone: "ok", text: "Detailed progress ready — start a new Codex session" }
+        ? { tone: "ok", text: "Detailed progress ready – start a new Codex session" }
         : observation === "unavailable"
-          ? { tone: "flat", text: `No live progress — ${harnessProfile.displayName} was not found` }
+          ? { tone: "flat", text: `No live progress – ${harnessProfile.displayName} was not found` }
           : { tone: "flat", text: "Basic progress on" };
 
   const title =
@@ -436,7 +436,7 @@ export function PromptModal({
       : step === 2
         ? "Optional. Skip it and the handover still works."
         : copiedPrompt
-          ? "The session is yours now — Anthill only watches."
+          ? "The session is yours now – Anthill only watches."
           : "Copy it, paste it, and Anthill takes it from there.";
 
   return (
@@ -507,7 +507,7 @@ export function PromptModal({
                 </p>
                 <p>
                   They cannot wait until the session starts. A harness fixes its list of
-                  callable agents at start-up, so anything written later is invisible to it —
+                  callable agents at start-up, so anything written later is invisible to it –
                   without these files a {files.length}-agent workflow runs as one agent doing
                   everything.
                 </p>
@@ -587,10 +587,10 @@ export function PromptModal({
                   : observation === "unavailable"
                     ? "There is nothing to install for a CLI Anthill cannot find."
                     : observation === "passive"
-                      ? "Nothing to install — this tool has no hook mechanism."
+                      ? "Nothing to install – this tool has no hook mechanism."
                       : observation === "needs-trust" || observation === "disabled" || observation === "check-failed"
                         ? "Basic progress remains available while you finish connecting."
-                        : "Already set up — nothing is written again."}
+                        : "Already set up – nothing is written again."}
               </span>
             </footer>
           </>
@@ -660,7 +660,7 @@ export function PromptModal({
                   <p className="state-note">
                     {detection === "ambiguous"
                       ? "Anthill will not pick one and claim it is yours. Close the others, or open the one you started and it will match on the run marker."
-                      : `Copying does not start anything. Paste the prompt into ${harnessProfile.displayName} and run it — when Anthill sees the run marker in what it writes, this closes and the workflow goes live.`}
+                      : `Copying does not start anything. Paste the prompt into ${harnessProfile.displayName} and run it – when Anthill sees the run marker in what it writes, this closes and the workflow goes live.`}
                   </p>
                 </section>
               ) : null}
@@ -672,8 +672,8 @@ export function PromptModal({
                     <i aria-hidden="true">1</i>
                     <span>
                       {copiedPrompt
-                        ? `The prompt is on your clipboard — the whole compiled workflow, ${words.toLocaleString()} words.`
-                        : `Copy the prompt — the whole compiled workflow, ${words.toLocaleString()} words.`}
+                        ? `The prompt is on your clipboard – the whole compiled workflow, ${words.toLocaleString()} words.`
+                        : `Copy the prompt – the whole compiled workflow, ${words.toLocaleString()} words.`}
                     </span>
                   </li>
                   <li>
@@ -757,9 +757,9 @@ export function PromptModal({
                     : placement === "failed"
                       ? "The prompt is already copied."
                       : !folder
-                        ? "Copied without the agent files — that session runs as one agent."
+                        ? "Copied without the agent files – that session runs as one agent."
                         : copiedPrompt
-                          ? "The session is yours now — Anthill only watches."
+                          ? "The session is yours now – Anthill only watches."
                           : "Files land first, then the clipboard."}
               </span>
             </footer>

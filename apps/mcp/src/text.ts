@@ -504,7 +504,7 @@ export function bindText(answer: BindAnswer): string {
     bulleted([`Run id: ${answer.runId}`, `Nonce: ${answer.nonce}`]),
     // Why the commands are not optional decoration: Anthill is not driving this
     // session and has no other way to learn which step the work is on.
-    "Run these as you work. They are the only thing that tells Anthill which step you are on, and they change nothing about the work itself — if one cannot be run, carry on without it.",
+    "Run these as you work. They are the only thing that tells Anthill which step you are on, and they change nothing about the work itself – if one cannot be run, carry on without it.",
     answer.reportingCommands ?? "",
     ...appText(answer.app),
     answer.url ?? "",
@@ -648,7 +648,7 @@ function unknownWorkflowText(workflowId: string): string {
 /** The shared words for a state, laid out as a short paragraph. */
 function stateText(state: RevisionState): string {
   const described = describeState(state);
-  return [`${described.label} — ${described.detail}`, described.next].filter(Boolean).join(" ");
+  return [`${described.label} – ${described.detail}`, described.next].filter(Boolean).join(" ");
 }
 
 function workflowSummary(workflow: Workflow, steps: readonly RunStep[]): string {

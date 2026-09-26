@@ -9,7 +9,7 @@ describe("createIsolatedWorkspace", () => {
   for (const mode of ISOLATED_MODES) {
     it(`throws a clear not-implemented error for '${mode}'`, async () => {
       await expect(createIsolatedWorkspace("/repo", mode)).rejects.toThrow(
-        `Workspace isolation mode '${mode}' is not implemented yet — MVP only supports 'shared'`,
+        `Workspace isolation mode '${mode}' is not implemented yet – MVP only supports 'shared'`,
       )
     })
 

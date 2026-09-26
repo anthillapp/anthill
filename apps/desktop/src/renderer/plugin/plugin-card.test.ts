@@ -78,7 +78,7 @@ describe("installing", () => {
   it("says the tool may ask to confirm, whatever main last said", () => {
     const view = pluginCard(connection(), { kind: "installing" }, "Codex");
     expect(view).toMatchObject({ state: "installing", badge: "Installing…" });
-    expect(view.note).toBe("Codex may ask you to confirm — look for its prompt.");
+    expect(view.note).toBe("Codex may ask you to confirm – look for its prompt.");
   });
 
   it("asks for a new session after an install, even though the server answered", () => {

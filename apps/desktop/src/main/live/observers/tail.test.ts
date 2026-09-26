@@ -23,7 +23,7 @@ describe("reading the new end of a growing file", () => {
     // against a byte size. One curly apostrophe is enough to make the two
     // disagree forever, so the file looked like it had grown on every poll.
     const path = await scratch();
-    await writeFile(path, '{"text":"I’ll run the tests — then stop"}\n', "utf8");
+    await writeFile(path, '{"text":"I’ll run the tests – then stop"}\n', "utf8");
 
     const cursor = newCursor();
     const first = await readNewLines(path, cursor);
@@ -59,8 +59,8 @@ describe("reading the new end of a growing file", () => {
     const cursor = newCursor();
     await readNewLines(path, cursor);
 
-    await appendFile(path, '{"b":"ü"}\n{"c":"—"}\n', "utf8");
-    expect((await readNewLines(path, cursor)).lines).toEqual(['{"b":"ü"}', '{"c":"—"}']);
+    await appendFile(path, '{"b":"ü"}\n{"c":"–"}\n', "utf8");
+    expect((await readNewLines(path, cursor)).lines).toEqual(['{"b":"ü"}', '{"c":"–"}']);
   });
 
   it("starts over when a file shrank, because it was replaced rather than appended to", async () => {

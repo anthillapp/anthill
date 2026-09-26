@@ -130,7 +130,7 @@ describe("the other moments", () => {
     const round = noticesFor(RUN, [marker("implement")], announced);
     expect(round.map((n) => [n.kind, n.body])).toEqual([
       ["step-finished", "Finished: Review the change"],
-      ["loop", "Back to Implement the change — pass 2"],
+      ["loop", "Back to Implement the change – pass 2"],
     ]);
   });
 
@@ -154,7 +154,7 @@ describe("the other moments", () => {
     expect(noticesFor(RUN, [waiting], announced)).toHaveLength(1);
   });
 
-  it("does not take a turn ending for a wait — Codex ends one whenever it stops", () => {
+  it("does not take a turn ending for a wait – Codex ends one whenever it stops", () => {
     const announced = fresh();
     noticesFor(RUN, [marker("implement")], announced);
     const turn: ObservationEvent = { ...marker("implement"), kind: "turn.end", blockId: undefined };

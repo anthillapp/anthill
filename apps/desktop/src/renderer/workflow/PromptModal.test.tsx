@@ -508,7 +508,7 @@ describe("writing the agent files", () => {
     // Step 1 also says a workflow without the files "runs as one agent", so
     // this waits on the footer's whole sentence — a looser match resolves
     // against the step the copy is supposed to leave.
-    await screen.findByText("Copied without the agent files — that session runs as one agent.");
+    await screen.findByText("Copied without the agent files – that session runs as one agent.");
     expect(document.querySelector(".handover-receipt")).toBeNull();
     expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
   });
@@ -566,7 +566,7 @@ describe("enabling live observation", () => {
     await screen.findByText("Live Observation is ready");
     expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Enable|Retry/ })).toBeNull();
-    expect(screen.getByText("Already set up — nothing is written again.")).toBeTruthy();
+    expect(screen.getByText("Already set up – nothing is written again.")).toBeTruthy();
   });
 
   /**

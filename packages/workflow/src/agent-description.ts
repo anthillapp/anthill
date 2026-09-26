@@ -103,7 +103,7 @@ export function describeAgent(
       const action = config.actionKind ? actionDefinition(config.actionKind) : undefined;
       const kind = action ? ` (${action.label.toLowerCase()})` : "";
       const what = config.purpose?.trim() || config.task?.trim();
-      return `${step.name || "an unnamed step"}${kind}${what ? ` — ${clause(what)}` : ""}`;
+      return `${step.name || "an unnamed step"}${kind}${what ? ` – ${clause(what)}` : ""}`;
     });
     paragraphs.push(
       `${configs.length === 1 ? "It carries out one step" : `It carries out ${configs.length} steps, in this order`}: ${duties.join("; ")}.`,

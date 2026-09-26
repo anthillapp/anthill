@@ -73,7 +73,7 @@ describe("folding the journal into cards", () => {
     expect(buildFeed(open, true)[0].state).toBe("unknown");
   });
 
-  it("does not call an unfinished call failed — nothing recorded a failure", () => {
+  it("does not call an unfinished call failed – nothing recorded a failure", () => {
     const cards = buildFeed([event({ kind: "tool.start", toolName: "Bash", toolUseId: "t1" })], true);
     expect(cards[0].state).not.toBe("failed");
   });
@@ -144,7 +144,7 @@ describe("a call whose end never arrived", () => {
     expect(cards[0].state).toBe("unknown");
   });
 
-  it("says unknown, not failed — nothing recorded a failure", () => {
+  it("says unknown, not failed – nothing recorded a failure", () => {
     const cards = buildFeed([event({ kind: "tool.start", toolName: "Bash", toolUseId: "t1" }), turnEnd()], false);
     expect(cards[0].state).not.toBe("failed");
     expect(cards[0].state).toBe("unknown");
@@ -199,7 +199,7 @@ describe("a call whose end never arrived", () => {
     expect(cards[0].state).toBe("failed");
   });
 
-  it("leaves an agent card to its own end — a delegate can outlive the turn that sent it", () => {
+  it("leaves an agent card to its own end – a delegate can outlive the turn that sent it", () => {
     const cards = buildFeed(
       [event({ kind: "subagent.start", agentName: "Tester", toolUseId: "a1" }), turnEnd()],
       false,

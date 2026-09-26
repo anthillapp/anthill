@@ -96,7 +96,7 @@ describe("canConnect", () => {
   });
 });
 
-describe("updateEdge — connection anchors", () => {
+describe("updateEdge – connection anchors", () => {
   it("records which side each end attaches to", () => {
     const next = updateEdge(graph(), "edge-1", {
       sourceHandle: "bottom",

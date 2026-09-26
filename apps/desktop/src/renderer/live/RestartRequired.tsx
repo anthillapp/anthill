@@ -66,7 +66,7 @@ export function RestartRequired({ health, feature }: RestartRequiredProps) {
         </div>
       ) : (
         <p className="hint">
-          Quit Anthill and open it again. Anthill cannot restart itself from here — the
+          Quit Anthill and open it again. Anthill cannot restart itself from here – the
           process that would have to do it is the one that is out of date.
         </p>
       )}

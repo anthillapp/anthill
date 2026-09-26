@@ -585,17 +585,17 @@ describe("reopening a run for another look", () => {
     expect(isWatching(reopened)).toBe(true);
   });
 
-  it("refuses a run that is still open — it is already being read", () => {
+  it("refuses a run that is still open – it is already being read", () => {
     const lost = { ...applyEvidence(run(), strongMatch), state: "observation_lost" as const };
     expect(reopenForAnotherLook(lost, later(1_000))).toBeUndefined();
   });
 
-  it("refuses a run that never matched — there is no session to look for", () => {
+  it("refuses a run that never matched – there is no session to look for", () => {
     const neverMatched = { ...run(), state: "failed" as const, closedAt: later(1_000) };
     expect(reopenForAnotherLook(neverMatched, later(2_000))).toBeUndefined();
   });
 
-  it("refuses a recorded failure — the tool's own word stands", () => {
+  it("refuses a recorded failure – the tool's own word stands", () => {
     const failed = {
       ...applyEvidence(run(), strongMatch),
       state: "failed" as const,
@@ -604,7 +604,7 @@ describe("reopening a run for another look", () => {
     expect(reopenForAnotherLook(failed, later(2_000))).toBeUndefined();
   });
 
-  it("refuses a dismissed run — the author put it away", () => {
+  it("refuses a dismissed run – the author put it away", () => {
     const dismissed = { ...lostAndClosed(), dismissedAt: later(41 * 60_000) };
     expect(reopenForAnotherLook(dismissed, later(60 * 60_000))).toBeUndefined();
   });

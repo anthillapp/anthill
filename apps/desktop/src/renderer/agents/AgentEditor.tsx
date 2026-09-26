@@ -202,14 +202,14 @@ export function AgentEditor({
               without a name. It is a note about how it reads in a list. */}
           <p className={`field-note${named ? "" : " needs-name"}`}>
             {named
-              ? "Renaming is safe — a workflow points at this agent by an id that never changes."
+              ? "Renaming is safe – a workflow points at this agent by an id that never changes."
               : "Until this has a name it reads as “Unnamed agent” everywhere."}
           </p>
         </div>
 
         <div className="agent-field">
           <label className="field-label" htmlFor="agent-role">
-            Role — optional
+            Role – optional
           </label>
           <input
             id="agent-role"
@@ -273,7 +273,7 @@ export function AgentEditor({
                 whether a copy has drifted from this profile, so nothing here
                 may suggest it knows. */}
             <p className="field-note">
-              Each holds its own copy, taken when it was added — editing this profile does
+              Each holds its own copy, taken when it was added – editing this profile does
               not reach them.
             </p>
           </>
@@ -303,7 +303,7 @@ export function AgentEditor({
           <p className="field-note is-warn">
             {usedBy.length} workflow{usedBy.length === 1 ? "" : "s"} took a copy of{" "}
             {draft.name.trim() || "this agent"}. {usedBy.length === 1 ? "It" : "They"} keep
-            working — the cop{usedBy.length === 1 ? "y is" : "ies are"} theirs — but{" "}
+            working – the cop{usedBy.length === 1 ? "y is" : "ies are"} theirs – but{" "}
             {usedBy.length === 1 ? "it" : "they"} will no longer point back at anything here.
           </p>
         ) : null}

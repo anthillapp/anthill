@@ -23,7 +23,7 @@ describe("saying how long ago something happened", () => {
   });
 
   it("says nothing rather than zero when there is no time to report", () => {
-    expect(relative(undefined, base)).toBe("—");
+    expect(relative(undefined, base)).toBe("–");
   });
 
   it("never counts backwards from a record written a moment ahead of the clock", () => {
@@ -90,10 +90,10 @@ describe("how long a run has lasted", () => {
   });
 
   it("says nothing when the record cannot support an answer", () => {
-    expect(spanned(undefined, after(60_000))).toBe("—");
-    expect(spanned(start, undefined)).toBe("—");
-    expect(spanned("not a date", after(60_000))).toBe("—");
+    expect(spanned(undefined, after(60_000))).toBe("–");
+    expect(spanned(start, undefined)).toBe("–");
+    expect(spanned("not a date", after(60_000))).toBe("–");
     // An end before the start is two clocks disagreeing, not a negative run.
-    expect(spanned(after(60_000), start)).toBe("—");
+    expect(spanned(after(60_000), start)).toBe("–");
   });
 });

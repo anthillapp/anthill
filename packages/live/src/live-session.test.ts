@@ -123,7 +123,7 @@ describe("attributing one event", () => {
     expect(mapping).toEqual({
       blockId: "test",
       confidence: "likely",
-      how: "test-runner — mapped by agent name",
+      how: "test-runner – mapped by agent name",
     });
   });
 
@@ -390,7 +390,7 @@ describe("folding a session", () => {
         expect(view.blocks.test.note).toBeUndefined();
       });
 
-      it("still says waiting on you while the run is live — the turn has only just ended", () => {
+      it("still says waiting on you while the run is live – the turn has only just ended", () => {
         const view = foldLiveSession(workflow, run(), [step("implement"), hookTurnEnd()]);
         expect(view.blocks.implement.state).toBe("needsYou");
       });
@@ -427,7 +427,7 @@ describe("folding a session", () => {
         expect(view.blocks.implement.state).toBe("running");
       });
 
-      it("leaves a lost run's step unknown — only a finish settles it", () => {
+      it("leaves a lost run's step unknown – only a finish settles it", () => {
         const view = foldLiveSession(workflow, run({ state: "observation_lost" }), [
           step("implement"),
           hookTurnEnd(),

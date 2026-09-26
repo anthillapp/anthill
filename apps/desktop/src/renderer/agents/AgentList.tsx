@@ -89,7 +89,7 @@ export function AgentList({
       {profiles !== null && yours.length === 0 && !needle ? (
         <p className="launch-note">
           No agents of your own yet. Write one here and it is ready to drop into any
-          workflow — or add one inside a workflow, where it stays that workflow&rsquo;s own.
+          workflow – or add one inside a workflow, where it stays that workflow&rsquo;s own.
         </p>
       ) : null}
       {rows(yours)}

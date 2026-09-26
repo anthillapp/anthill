@@ -110,7 +110,7 @@ describe("tokens from the harness's recordings", () => {
     expect(metrics.tokensRecorded).toEqual({ in: 3000, out: 200 });
   });
 
-  it("has no total at all when nothing was recorded — unavailable, not zero", () => {
+  it("has no total at all when nothing was recorded – unavailable, not zero", () => {
     const metrics = sessionMetrics([step("plan", 0)]);
     expect(metrics.tokensRecorded).toBeUndefined();
   });

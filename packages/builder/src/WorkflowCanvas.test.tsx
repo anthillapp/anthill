@@ -100,7 +100,7 @@ function renderWithRerender() {
   };
 }
 
-describe("WorkflowCanvas — rendering", () => {
+describe("WorkflowCanvas – rendering", () => {
   it("renders one element per block", () => {
     renderCanvas();
     expect(screen.getByTestId("workflow-block-start")).toBeInTheDocument();
@@ -140,7 +140,7 @@ describe("WorkflowCanvas — rendering", () => {
   });
 });
 
-describe("WorkflowCanvas — selection", () => {
+describe("WorkflowCanvas – selection", () => {
   it("selects a block when it is clicked", () => {
     const props = renderCanvas();
     fireEvent.click(screen.getByTestId("workflow-block-a"));
@@ -164,7 +164,7 @@ describe("WorkflowCanvas — selection", () => {
   });
 });
 
-describe("WorkflowCanvas — linking", () => {
+describe("WorkflowCanvas – linking", () => {
   it("starts linking when a port is pressed and released without moving", () => {
     const props = renderCanvas();
     fireEvent.pointerDown(screen.getByTestId("port-e2"), { clientX: 10, clientY: 10 });
@@ -241,7 +241,7 @@ describe("WorkflowCanvas — linking", () => {
   });
 });
 
-describe("WorkflowCanvas — deleting an arrow", () => {
+describe("WorkflowCanvas – deleting an arrow", () => {
   it("detaches the arrow but keeps the output and its port", () => {
     const props = renderCanvas({
       selection: { kind: "output", nodeId: "a", outputId: "e2" },
@@ -308,7 +308,7 @@ describe("WorkflowCanvas — deleting an arrow", () => {
   });
 });
 
-describe("WorkflowCanvas — re-routing by dragging the arrowhead", () => {
+describe("WorkflowCanvas – re-routing by dragging the arrowhead", () => {
   it("shows a grab handle only on the selected arrow", () => {
     const { rerender } = renderWithRerender();
     expect(screen.queryByTestId("arrow-handle-e2")).not.toBeInTheDocument();
@@ -326,7 +326,7 @@ describe("WorkflowCanvas — re-routing by dragging the arrowhead", () => {
   });
 });
 
-describe("WorkflowCanvas — bending a line", () => {
+describe("WorkflowCanvas – bending a line", () => {
   const selected = { kind: "output" as const, nodeId: "a", outputId: "e2" };
 
   it("shows a bend handle only on the selected line", () => {
@@ -375,7 +375,7 @@ describe("WorkflowCanvas — bending a line", () => {
   });
 });
 
-describe("WorkflowCanvas — deleting a block", () => {
+describe("WorkflowCanvas – deleting a block", () => {
   it("removes the block", () => {
     const props = renderCanvas({ selection: { kind: "block", nodeId: "a" } });
     fireEvent.keyDown(window, { key: "Backspace" });
@@ -407,7 +407,7 @@ describe("WorkflowCanvas — deleting a block", () => {
   });
 });
 
-describe("WorkflowCanvas — reconnecting with a generous target", () => {
+describe("WorkflowCanvas – reconnecting with a generous target", () => {
   const dragArrowheadTo = (x: number, y: number, overrides = {}) => {
     const props = renderCanvas({
       selection: { kind: "output", nodeId: "a", outputId: "e2" },
@@ -483,7 +483,7 @@ describe("WorkflowCanvas — reconnecting with a generous target", () => {
   });
 });
 
-describe("WorkflowCanvas — the arrow itself moves", () => {
+describe("WorkflowCanvas – the arrow itself moves", () => {
   const startDrag = (overrides = {}) => {
     const props = renderCanvas({
       selection: { kind: "output", nodeId: "a", outputId: "e2" },
@@ -514,7 +514,7 @@ describe("WorkflowCanvas — the arrow itself moves", () => {
     expect(screen.getByTestId("live-edge").getAttribute("d")).not.toBe(first);
   });
 
-  it("shows one arrow, not two — the real one stands aside", () => {
+  it("shows one arrow, not two – the real one stands aside", () => {
     startDrag();
     fireEvent.pointerMove(screen.getByTestId("workflow-canvas"), { clientX: 600, clientY: 400 });
     // The static path for this output is suppressed while the live one stands
@@ -555,7 +555,7 @@ describe("WorkflowCanvas — the arrow itself moves", () => {
   });
 });
 
-describe("WorkflowCanvas — zoom shortcuts", () => {
+describe("WorkflowCanvas – zoom shortcuts", () => {
   const zoomLabel = () => screen.getByTestId("zoom-level").textContent;
 
   it("zooms in on ⌘+", () => {
@@ -617,7 +617,7 @@ describe("WorkflowCanvas — zoom shortcuts", () => {
   });
 });
 
-describe("WorkflowCanvas — navigation controls", () => {
+describe("WorkflowCanvas – navigation controls", () => {
   it("says what the fit button does in words", () => {
     renderCanvas();
     expect(screen.getByText("Show whole workflow")).toBeInTheDocument();

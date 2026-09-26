@@ -74,7 +74,7 @@ describe("extractDraftJson", () => {
   });
 });
 
-describe("parseDraftResponse — refusing what cannot be mapped", () => {
+describe("parseDraftResponse – refusing what cannot be mapped", () => {
   it("reports a reply with no JSON in it", () => {
     const result = parseDraftResponse("I'd rather not.");
     expect(result.ok).toBe(false);
@@ -122,7 +122,7 @@ describe("parseDraftResponse — refusing what cannot be mapped", () => {
   });
 });
 
-describe("parseDraftResponse — accepting what can be", () => {
+describe("parseDraftResponse – accepting what can be", () => {
   it("reads a well-formed draft", () => {
     const result = parseDraftResponse(JSON.stringify(minimal()));
     expect(result.ok).toBe(true);
@@ -161,7 +161,7 @@ describe("parseDraftResponse — accepting what can be", () => {
   });
 });
 
-describe("validateDraft — warnings rather than refusals", () => {
+describe("validateDraft – warnings rather than refusals", () => {
   const warningsFor = (draft: unknown): string[] => {
     const result = validateDraft(draft);
     return result.ok ? result.warnings.map((warning) => warning.message) : [];
@@ -284,7 +284,7 @@ describe("the drafting instruction", () => {
     // A role on a step with nothing in "agents" is how a draft arrives
     // describing work with nobody assigned to any of it.
     expect(instruction).toContain('"agents" must describe every agent any step names');
-    expect(instruction).toContain("a developer, a reviewer, a researcher — list all");
+    expect(instruction).toContain("a developer, a reviewer, a researcher – list all");
     // And the shape shows more than one, so a multi-agent answer looks ordinary.
     expect(instruction).toContain('"id": "reviewer", "name": "Reviewer"');
   });

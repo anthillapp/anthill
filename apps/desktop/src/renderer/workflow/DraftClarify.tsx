@@ -212,7 +212,7 @@ export function DraftClarify({
               {queue.length === 1 ? "Your answer is in." : `All ${countWord(queue.length)} answers are in.`}
             </p>
             <p className="clarify-done-note">
-              They go into the brief and the steps they were asked about — what you typed is
+              They go into the brief and the steps they were asked about – what you typed is
               what the workflow says. Nothing is sent back to {interpreterLabel}.
             </p>
             <button type="button" className="primary" onClick={() => onOpen(answers)}>
@@ -235,7 +235,7 @@ export function DraftClarify({
                 answer. The consequence it names is true — the questions are
                 persisted with the workflow either way. */}
             <button type="button" className="link clarify-skip" onClick={() => onOpen(answers)}>
-              Skip — open it as drafted, unanswered questions stay with the workflow
+              Skip – open it as drafted, unanswered questions stay with the workflow
             </button>
           </footer>
         ) : null}

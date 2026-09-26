@@ -111,7 +111,7 @@ function verifyLoop(): Workflow {
   return workflow;
 }
 
-describe("compile — agent files", () => {
+describe("compile – agent files", () => {
   it("writes one file per role for Claude Code", () => {
     const { files } = compile(reviewLoop());
     expect(files.map((f) => f.path)).toEqual([
@@ -321,11 +321,11 @@ describe("compile — agent files", () => {
   });
 });
 
-describe("compile — prompt", () => {
+describe("compile – prompt", () => {
   it("numbers steps by their own name, skipping start and end", () => {
     const { prompt } = compile(reviewLoop());
-    expect(prompt).toContain("### 1. Implement — delegate to the `developer` subagent");
-    expect(prompt).toContain("### 2. Review — delegate to the `reviewer` subagent");
+    expect(prompt).toContain("### 1. Implement – delegate to the `developer` subagent");
+    expect(prompt).toContain("### 2. Review – delegate to the `reviewer` subagent");
     expect(prompt).not.toContain("### 3.");
   });
 
@@ -338,9 +338,9 @@ describe("compile — prompt", () => {
   it("lists the agents with their roles and models", () => {
     const { prompt } = compile(reviewLoop());
     expect(prompt).toContain("## Agents");
-    expect(prompt).toContain("`developer` (Developer) — model: sonnet");
+    expect(prompt).toContain("`developer` (Developer) – model: sonnet");
     expect(prompt).toContain(
-      "`reviewer` (Reviewer) — Reads the diff as a careful reader would — model: opus",
+      "`reviewer` (Reviewer) – Reads the diff as a careful reader would – model: opus",
     );
   });
 
@@ -349,7 +349,7 @@ describe("compile — prompt", () => {
     // Point the review step at the developer too: one agent, two steps.
     (workflow.nodes[2].config as Record<string, unknown>).agentId = "agent-dev";
     const { prompt } = compile(workflow);
-    expect(prompt).toContain("`developer` (Developer) — 2 steps");
+    expect(prompt).toContain("`developer` (Developer) – 2 steps");
   });
 
   it("names the action each step performs", () => {
@@ -372,7 +372,7 @@ describe("compile — prompt", () => {
 
   it("renders the end block as a stop rather than a step", () => {
     const { prompt } = compile(reviewLoop());
-    expect(prompt).toContain("stop — the workflow is complete (Done)");
+    expect(prompt).toContain("stop – the workflow is complete (Done)");
   });
 
   it("includes the workflow name and description", () => {
@@ -397,7 +397,7 @@ describe("compile — prompt", () => {
   });
 });
 
-describe("compile — outcome kinds", () => {
+describe("compile – outcome kinds", () => {
   it("says work is being sent back, not merely routed, for a rework output", () => {
     const workflow = reviewLoop();
     const loopBack = workflow.edges.find((edge) => edge.id === "e3")!;
@@ -422,7 +422,7 @@ describe("compile — outcome kinds", () => {
   });
 });
 
-describe("compile — honesty", () => {
+describe("compile – honesty", () => {
   it("says in the output that Anthill does not run the workflow", () => {
     const { prompt } = compile(reviewLoop());
     expect(prompt).toContain("Anthill does");
@@ -445,7 +445,7 @@ describe("compile — honesty", () => {
   });
 });
 
-describe("compile — brief", () => {
+describe("compile – brief", () => {
   it("gathers everything workflow-wide into one shared-context block", () => {
     const { prompt } = compile(reviewLoop());
     expect(prompt).toContain("## Shared context");
@@ -526,7 +526,7 @@ describe("compile — brief", () => {
   });
 });
 
-describe("compile — loops", () => {
+describe("compile – loops", () => {
   it("describes the feedback loop as a cycle of work", () => {
     const { prompt } = compile(reviewLoop());
     expect(prompt).toContain("## Loops");
@@ -574,7 +574,7 @@ describe("compile — loops", () => {
   });
 });
 
-describe("compile — refusal", () => {
+describe("compile – refusal", () => {
   it("throws rather than producing a prompt from an invalid diagram", () => {
     const workflow = reviewLoop();
     workflow.nodes[1].config.task = "";

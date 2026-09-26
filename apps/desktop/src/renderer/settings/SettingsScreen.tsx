@@ -24,6 +24,7 @@ import { useSetupPoll } from "../live/use-setup-poll.js";
 import { CHIP, hookState } from "./hook-state.js";
 import { CodingToolsPage, ModelsPage, PluginsPage } from "./ToolPages.js";
 
+import { DEFAULT_WORKFLOW_FOLDER } from "../../shared/ipc.js";
 import type {
   AppSettings,
   MarkerCli,
@@ -39,17 +40,18 @@ import {
   StateChip,
 } from "./SettingRow.js";
 
-/** The pages, in the two groups the rail shows them in. */
+/** The pages, in the three groups the rail shows them in. */
 const NAV = [
   {
     label: "Anthill",
     items: [
+      { id: "general", label: "General" },
       { id: "notifications", label: "Notifications" },
       { id: "privacy", label: "Privacy" },
     ],
   },
   {
-    label: "Coding tools",
+    label: "Tools",
     items: [
       { id: "tools", label: "Coding tools" },
       { id: "models", label: "Models" },
@@ -68,6 +70,7 @@ const NAV = [
 export type PageId = (typeof NAV)[number]["items"][number]["id"];
 
 const TITLES: Record<PageId, string> = {
+  general: "General",
   notifications: "Notifications",
   privacy: "Privacy",
   tools: "Coding tools",
@@ -79,7 +82,7 @@ const TITLES: Record<PageId, string> = {
 
 export function SettingsScreen({
   onLeave,
-  initialPage = "notifications",
+  initialPage = "general",
 }: {
   onLeave: () => void;
   /** Where to open, when Settings was asked for about one thing in particular. */
@@ -149,6 +152,33 @@ export function SettingsScreen({
             ))}
           </div>
 
+          {/* With the footer rather than the pages: a quiet link out, not a
+              setting and not a call to action. */}
+          <button
+            type="button"
+            className="settings-coffee on-dark"
+            onClick={() => void window.anthill.openLink?.("support")}
+          >
+            {/* Lucide's `coffee`: a cup, not anybody's logo. */}
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M10 2v2" />
+              <path d="M14 2v2" />
+              <path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1" />
+              <path d="M6 2v2" />
+            </svg>
+            <span>Buy me a coffee</span>
+          </button>
+
           <p className="settings-rail-foot">
             Anthill reads what your session writes on this machine. It does not
             start, stop or answer one.
@@ -160,6 +190,7 @@ export function SettingsScreen({
             <h1>{TITLES[page]}</h1>
           </header>
           <div className="settings-body">
+            {page === "general" ? <GeneralPage /> : null}
             {page === "notifications" ? <NotificationsPage /> : null}
             {page === "privacy" ? <PrivacyPage /> : null}
             {page === "tools" ? <CodingToolsPage /> : null}
@@ -184,7 +215,77 @@ const ALL_OFF: AppSettings = {
   needsYouNotifications: false,
   finishedNotifications: false,
   observationLostNotifications: false,
+  workflowFolder: "",
 };
+
+/**
+ * General: where new workflows are saved.
+ *
+ * The folder is where the save dialog opens for a workflow that has never
+ * been saved. It is not a place Anthill moves files to, so the note says
+ * exactly that: changing it moves nothing, a saved workflow keeps saving where
+ * it is, and the old files stay under Recent. The CLI saves into the workspace
+ * it was started with, so there the row says so instead of offering a change
+ * it would ignore.
+ */
+export function GeneralPage() {
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [cli, setCli] = useState(false);
+  const [unsaved, setUnsaved] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    void window.anthill.settingsRead().then(
+      (value) => { if (live) setSettings(value); },
+      () => { if (live) setSettings({ ...ALL_OFF }); },
+    );
+    void window.anthill.capabilities?.().then(
+      (capabilities) => { if (live) setCli(capabilities.shell === "cli"); },
+      () => undefined,
+    );
+    return () => { live = false; };
+  }, []);
+
+  const change = async () => {
+    setUnsaved(false);
+    try {
+      const next = await window.anthill.chooseWorkflowFolder();
+      if (next) setSettings(next);
+    } catch {
+      setUnsaved(true);
+    }
+  };
+
+  const folder = settings?.workflowFolder || DEFAULT_WORKFLOW_FOLDER;
+
+  return (
+    <SettingGroup
+      title="Workflows"
+      footer={
+        cli
+          ? "The Anthill CLI saves new workflows into the workspace it was started with."
+          : "Changing the folder moves nothing that is already saved. A new workflow opens its first save here; one saved before keeps saving where it is, and still shows under Recent."
+      }
+    >
+      <SettingRow
+        label="Workflow folder"
+        note="Where your saved workflows are kept. Each one is an ordinary JSON file you can commit next to the code it is about."
+      >
+        {cli ? null : (
+          <>
+            <span className="set-path mono" title={folder}>
+              {folder}
+            </span>
+            <button type="button" className="set-btn" disabled={settings === null} onClick={() => void change()}>
+              Change…
+            </button>
+          </>
+        )}
+      </SettingRow>
+      {unsaved ? <p className="set-result" role="alert">This folder was not saved.</p> : null}
+    </SettingGroup>
+  );
+}
 
 /** Exported with `available` so tests can render the release build's page. */
 export function PrivacyPage({ available = __ANTHILL_DIAGNOSTICS__ }: { available?: boolean }) {

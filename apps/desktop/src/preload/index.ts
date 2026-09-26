@@ -64,6 +64,7 @@ const api: AnthillApi = {
   listRecentPlans: () => ipcRenderer.invoke(IpcChannel.recentsList),
   forgetRecentWorkflow: (path: string) => ipcRenderer.invoke(IpcChannel.recentsForget, path),
   chooseRunFolder: () => ipcRenderer.invoke(IpcChannel.folderChoose),
+  chooseWorkflowFolder: () => ipcRenderer.invoke(IpcChannel.workflowFolderChoose),
   signInToInterpreter: (id: InterpreterId) =>
     ipcRenderer.invoke(IpcChannel.interpreterSignIn, id),
   pathsExist: (paths: string[]) => ipcRenderer.invoke(IpcChannel.pathsCheck, paths),

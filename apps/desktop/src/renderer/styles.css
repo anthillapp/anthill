@@ -7851,6 +7851,35 @@ button.presence-chip {
   color: #7d7979;
 }
 
+/* Quiet, not a button: it sits with the footer, not with the pages. */
+.settings-rail .settings-coffee {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 2px 10px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 12.5px;
+  white-space: nowrap;
+  color: #bab6b6;
+  text-align: left;
+}
+.settings-rail .settings-coffee svg { width: 15px; height: 15px; flex: none; stroke: #e8c675; }
+.settings-rail .settings-coffee:hover { background: rgba(255, 255, 255, 0.06); color: #f8f4f4; }
+
+/* A folder, as a value: one line, cut from the left edge's side if long. */
+.set-path {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
 .settings-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; background: #fff; }
 
 .settings-header {
@@ -7922,7 +7951,9 @@ button.presence-chip {
  * right. align-items: flex-start so a two-line description does not drag the
  * control down with it.
  */
-.set-row { display: flex; align-items: flex-start; gap: 20px; padding: 15px 16px; }
+/* The control on the right sits level with the row's middle (v8), so a chip
+   or a button reads as belonging to the whole row, not to its first line. */
+.set-row { display: flex; align-items: center; gap: 20px; padding: 15px 16px; }
 .set-row-main { flex: 1; min-width: 0; }
 .set-row-side { display: flex; align-items: center; gap: 9px; flex: none; }
 

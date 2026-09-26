@@ -13,7 +13,7 @@ import { join } from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { DEFAULT_SETTINGS, SettingsStore, SETTINGS_VERSION, reportingConsentOnDisk } from "./settings.js";
+import { DEFAULT_SETTINGS, SettingsStore, SETTINGS_VERSION, reportingConsentOnDisk, workflowFolderPath } from "./settings.js";
 
 let dir = "";
 let path = "";
@@ -38,6 +38,26 @@ describe("the preferences", () => {
     expect(await store.read()).toEqual(DEFAULT_SETTINGS);
     expect(DEFAULT_SETTINGS.stepNotifications).toBe(false);
     expect(reportingConsentOnDisk(path)).toEqual({ errorReportingEnabled: false, nativeCrashReportingEnabled: false });
+  });
+
+  it("keep the workflow folder, which defaults to ~/Documents/Anthill and must be absolute", async () => {
+    const store = new SettingsStore(path);
+    expect((await store.read()).workflowFolder).toBe("");
+    expect(workflowFolderPath(await store.read(), "/Users/me")).toBe("/Users/me/Documents/Anthill");
+
+    await store.write({ workflowFolder: "/Users/me/flows" });
+    expect((await new SettingsStore(path).read()).workflowFolder).toBe("/Users/me/flows");
+    expect(workflowFolderPath(await store.read(), "/Users/me")).toBe("/Users/me/flows");
+
+    await expect(store.write({ workflowFolder: "relative/place" })).rejects.toThrow(/absolute/);
+    expect((await store.read()).workflowFolder).toBe("/Users/me/flows");
+  });
+
+  it("ignore a folder of the wrong type or a relative one on disk", async () => {
+    await writeFile(path, JSON.stringify({ version: SETTINGS_VERSION, settings: { workflowFolder: "rel", stepNotifications: "yes" } }));
+    const settings = await new SettingsStore(path).read();
+    expect(settings.workflowFolder).toBe("");
+    expect(settings.stepNotifications).toBe(false);
   });
 
   it("keeps diagnostics off for old files and reads explicit launch consent", async () => {

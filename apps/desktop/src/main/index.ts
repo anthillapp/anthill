@@ -10,7 +10,8 @@ import { installedObservationRuntime } from "./live/installed-runtime.js";
 
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
 import { basename, dirname, join, resolve } from "node:path";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 
 import { parseWorkflow } from "@anthill/workflow-schema";
@@ -71,7 +72,7 @@ import { AssistantThreadStore } from "./assistant-threads.js";
 import { ModelPreferencesStore } from "./model-preferences.js";
 import { pluginStatus } from "./plugin-status.js";
 import { devCheckout, INSTALL_GUIDES, installPlugin, pluginConnections, type Harness } from "./plugin-connect.js";
-import { SettingsStore, reportingConsentOnDisk } from "./settings.js";
+import { SettingsStore, reportingConsentOnDisk, workflowFolderPath } from "./settings.js";
 import { DesktopAnalytics } from "./analytics.js";
 import { SENTRY_DSN, sanitizeErrorEvent } from "../shared/error-reporting.js";
 import { externalLink } from "../shared/links.js";
@@ -1090,9 +1091,17 @@ function registerIpcHandlers(): void {
       } catch (error) {
         return { kind: "failed", error: String(error) };
       }
+      // A first save opens in the workflow folder from Settings, made if it
+      // is not there yet. A failure to make it only costs the suggestion: the
+      // dialog then opens where the platform chooses.
+      let folder: string | undefined;
+      if (!request.path) {
+        const wanted = workflowFolderPath(await settings().read(), homedir());
+        folder = await mkdir(wanted, { recursive: true }).then(() => wanted, () => undefined);
+      }
       const destination = exchangeCopy && request.path
         ? { kind: "write" as const, path: request.path }
-        : saveDestination(request.workflow.name ?? "", request.path, saved);
+        : saveDestination(request.workflow.name ?? "", request.path, saved, folder);
       let path = request.path;
       if (destination.kind === "ask") {
         const result = await dialog.showSaveDialog({
@@ -1179,6 +1188,20 @@ function registerIpcHandlers(): void {
   */
   // Naming a folder is not writing to it: the author picks here, sees what is
   // about to be put there, and only the copy writes.
+  // Where a first save opens. Its own dialog, asking its own question, and
+  // no export grant: this folder is a starting place for the save dialog,
+  // not a root anything is written into on Anthill's own authority.
+  handle(IpcChannel.workflowFolderChoose, async () => {
+    const current = workflowFolderPath(await settings().read(), homedir());
+    const result = await dialog.showOpenDialog({
+      title: "Choose where new workflows are saved",
+      defaultPath: current,
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return settings().write({ workflowFolder: result.filePaths[0] });
+  });
+
   handle(IpcChannel.folderChoose, async (): Promise<string | null> => {
     const result = await dialog.showOpenDialog({
       title: "Choose the repository the session will run in",

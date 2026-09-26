@@ -13,7 +13,7 @@
  */
 
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { readFileSync } from "node:fs";
 
 /** Bumped when the file's shape changes. A version this one cannot read is defaulted. */
@@ -52,6 +52,13 @@ export type Settings = {
   finishedNotifications: boolean;
   /** Anthill can no longer read the session. */
   observationLostNotifications: boolean;
+  /**
+   * Where the save dialog opens for a workflow never saved before: an absolute
+   * path, or empty for `~/Documents/Anthill`. Only the starting folder of a
+   * first save — nothing already saved is moved, and a saved workflow keeps
+   * saving where it is.
+   */
+  workflowFolder: string;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -64,7 +71,15 @@ export const DEFAULT_SETTINGS: Settings = {
   needsYouNotifications: false,
   finishedNotifications: false,
   observationLostNotifications: false,
+  workflowFolder: "",
 };
+
+/** The folder a first save opens in: the one chosen, or `~/Documents/Anthill`. */
+export function workflowFolderPath(settings: Pick<Settings, "workflowFolder">, home: string): string {
+  return settings.workflowFolder && isAbsolute(settings.workflowFolder)
+    ? settings.workflowFolder
+    : join(home, "Documents", "Anthill");
+}
 
 export const SETTING_KEYS = Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[];
 
@@ -92,8 +107,13 @@ function parse(text: string): Settings {
   const stored = isRecord(value.settings) ? value.settings : {};
   const settings = { ...DEFAULT_SETTINGS };
   for (const key of SETTING_KEYS) {
-    if (typeof stored[key] === "boolean") settings[key] = stored[key];
+    // Each value only in the type its default has: a string where a switch
+    // belongs, or the reverse, is a value this version does not understand.
+    if (typeof stored[key] === typeof DEFAULT_SETTINGS[key]) {
+      (settings as Record<string, unknown>)[key] = stored[key];
+    }
   }
+  if (settings.workflowFolder && !isAbsolute(settings.workflowFolder)) settings.workflowFolder = "";
   return settings;
 }
 
@@ -140,6 +160,11 @@ export class SettingsStore {
    * setting cannot erase another it has never heard of.
    */
   async write(patch: Partial<Settings>): Promise<Settings> {
+    // A folder has to be a real absolute path, or empty for the default; the
+    // renderer cannot set the save dialog loose on a relative one.
+    if (patch.workflowFolder !== undefined && patch.workflowFolder !== "" && !isAbsolute(patch.workflowFolder)) {
+      throw new Error("The workflow folder has to be an absolute path.");
+    }
     const written = this.writing.then(async () => {
       const next = { ...await this.read(), ...patch };
       await this.persist(JSON.stringify({ version: SETTINGS_VERSION, settings: next } satisfies Stored, null, 2));

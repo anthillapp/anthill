@@ -85,6 +85,15 @@ describe("the name offered in the dialog", () => {
     expect(suggestedPath("...")).toBe("workflow.workflow.json");
     expect(suggestedPath("   ")).toBe("workflow.workflow.json");
   });
+
+  it("opens a first save in the workflow folder, and a later one where it already lives", () => {
+    expect(saveDestination("Fresh", undefined, { kind: "missing" }, "/Users/me/flows")).toEqual({
+      kind: "ask",
+      suggested: "/Users/me/flows/Fresh.workflow.json",
+    });
+    // The folder never moves a workflow that has a home already.
+    expect(dirname(suggestedPath("Renamed", PATH, "/Users/me/flows"))).toBe(FOLDER);
+  });
 });
 
 describe("reading the name out of a saved file", () => {

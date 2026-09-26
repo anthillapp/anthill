@@ -14,7 +14,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ObservationHarnessSetup } from "../../shared/ipc.js";
-import { PrivacyPage, SettingsScreen } from "./SettingsScreen.js";
+import { PrivacyPage, SettingsScreen, type PageId } from "./SettingsScreen.js";
 
 const HARNESS: ObservationHarnessSetup = {
   id: "claude-code" as const,
@@ -67,8 +67,9 @@ function stub(
   return api;
 }
 
-const show = (onLeave = vi.fn()) => {
-  render(<SettingsScreen onLeave={onLeave} />);
+/** Settings as it opens: on General, unless a test is about another page. */
+const show = (onLeave = vi.fn(), initialPage?: PageId) => {
+  render(<SettingsScreen onLeave={onLeave} {...(initialPage ? { initialPage } : {})} />);
   return { onLeave };
 };
 
@@ -82,11 +83,30 @@ afterEach(() => {
 describe("the page owns itself", () => {
   it("has exactly one heading at the top of the outline", async () => {
     stub();
-    show();
+    show(undefined, "notifications");
     await waitFor(() => expect(screen.getAllByRole("switch")[0]).toBeTruthy());
     // One h1, and nothing nested brings a rival.
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Notifications");
+  });
+
+  it("opens on General, in three groups: Anthill, Tools, Sessions", async () => {
+    stub();
+    show();
+    await waitFor(() => expect(page("General").getAttribute("aria-current")).toBe("page"));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("General");
+    const rail = screen.getByRole("navigation", { name: "Settings" });
+    for (const group of ["Anthill", "Tools", "Sessions"]) expect(within(rail).getByText(group)).toBeTruthy();
+    expect(within(rail).queryByText("Coding tools", { selector: "span:not(.label)" })).toBeNull();
+  });
+
+  it("keeps a quiet coffee link in the rail's footer, opening the support page by name", async () => {
+    const api = stub() as ReturnType<typeof stub> & { openLink?: ReturnType<typeof vi.fn> };
+    api.openLink = vi.fn(async () => undefined);
+    show();
+    const rail = screen.getByRole("navigation", { name: "Settings" });
+    fireEvent.click(within(rail).getByRole("button", { name: "Buy me a coffee" }));
+    expect(api.openLink).toHaveBeenCalledWith("support");
   });
 
   it("offers exactly one way out", async () => {
@@ -106,12 +126,12 @@ describe("the page owns itself", () => {
   it("marks the page you are on, and moves when you move", async () => {
     stub();
     show();
-    await waitFor(() => expect(page("Notifications")).toBeTruthy());
-    expect(page("Notifications").getAttribute("aria-current")).toBe("page");
+    await waitFor(() => expect(page("General")).toBeTruthy());
+    expect(page("General").getAttribute("aria-current")).toBe("page");
 
     fireEvent.click(page("About"));
     expect(page("About").getAttribute("aria-current")).toBe("page");
-    expect(page("Notifications").getAttribute("aria-current")).toBeNull();
+    expect(page("General").getAttribute("aria-current")).toBeNull();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("About");
   });
 
@@ -121,6 +141,41 @@ describe("the page owns itself", () => {
     fireEvent.change(screen.getByLabelText("Search settings"), { target: { value: "obs" } });
     expect(screen.queryByRole("button", { name: "Notifications" })).toBeNull();
     expect(page("Live observation")).toBeTruthy();
+  });
+});
+
+/**
+ * General: the folder a first save opens in. It is only a starting place for
+ * the save dialog, and the note says exactly that — nothing already saved
+ * moves.
+ */
+describe("the General page", () => {
+  it("shows the default folder, and keeps the one chosen in the dialog", async () => {
+    const api = stub() as ReturnType<typeof stub> & { chooseWorkflowFolder?: ReturnType<typeof vi.fn> };
+    api.chooseWorkflowFolder = vi.fn(async () => ({ workflowFolder: "/Users/me/work/flows" }));
+    show();
+    expect(await screen.findByText("~/Documents/Anthill")).toBeTruthy();
+    expect(screen.getByText(/moves nothing that is already saved/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Change…" }));
+    expect(await screen.findByText("/Users/me/work/flows")).toBeTruthy();
+    expect(api.chooseWorkflowFolder).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the folder alone when the dialog is cancelled", async () => {
+    const api = stub() as ReturnType<typeof stub> & { chooseWorkflowFolder?: ReturnType<typeof vi.fn> };
+    api.chooseWorkflowFolder = vi.fn(async () => null);
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: "Change…" }));
+    await waitFor(() => expect(api.chooseWorkflowFolder).toHaveBeenCalled());
+    expect(screen.getByText("~/Documents/Anthill")).toBeTruthy();
+  });
+
+  it("offers no change in the CLI, which saves into its workspace", async () => {
+    const api = stub() as ReturnType<typeof stub> & { capabilities?: ReturnType<typeof vi.fn> };
+    api.capabilities = vi.fn(async () => ({ contract: 24, channels: [], shell: "cli" }));
+    show();
+    expect(await screen.findByText(/saves new workflows into the workspace/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Change…" })).toBeNull();
   });
 });
 
@@ -137,7 +192,9 @@ describe("the About page", () => {
       ["getanthill.ai", "website"],
       ["Buy me a coffee", "support"],
     ]) {
-      fireEvent.click(await screen.findByRole("button", { name: text }));
+      // In the page, not the rail, which has a coffee link of its own.
+      const body = document.querySelector(".settings-body") as HTMLElement;
+      fireEvent.click(await within(body).findByRole("button", { name: text }));
       expect(openLink).toHaveBeenLastCalledWith(name);
     }
     expect(screen.queryByText(/Nothing here is sent anywhere/)).toBeNull();
@@ -181,7 +238,7 @@ describe("the notification setting", () => {
 
   it("is a switch rather than a checkbox, so the global input rule cannot stretch it", async () => {
     stub();
-    show();
+    show(undefined, "notifications");
     await waitFor(() => expect(theSwitch()).toBeTruthy());
     expect(theSwitch().tagName).toBe("BUTTON");
     expect(screen.queryByRole("checkbox")).toBeNull();
@@ -190,7 +247,7 @@ describe("the notification setting", () => {
   // ANT-132: one switch per moment, each asked for on its own.
   it("offers one switch per kind of moment, each writing its own preference", async () => {
     const api = stub();
-    show();
+    show(undefined, "notifications");
     await waitFor(() => expect(screen.getAllByRole("switch")).toHaveLength(6));
     fireEvent.click(screen.getByRole("switch", { name: "A loop comes back round" }));
     await waitFor(() => expect(api.settingsWrite).toHaveBeenCalledWith({ loopNotifications: true }));
@@ -202,7 +259,7 @@ describe("the notification setting", () => {
 
   it("shows what is stored and writes what is changed", async () => {
     const api = stub();
-    show();
+    show(undefined, "notifications");
     await waitFor(() => expect(theSwitch().getAttribute("aria-checked")).toBe("false"));
     fireEvent.click(theSwitch());
     await waitFor(() => expect(api.settingsWrite).toHaveBeenCalledWith({ stepNotifications: true }));
@@ -212,7 +269,7 @@ describe("the notification setting", () => {
   it("asks about macOS permission only once something would be sent", async () => {
     // A permission row while nothing would be sent is a question nobody asked.
     stub();
-    show();
+    show(undefined, "notifications");
     await waitFor(() => expect(theSwitch()).toBeTruthy());
     expect(screen.queryByRole("button", { name: "Send a test" })).toBeNull();
 
@@ -223,7 +280,7 @@ describe("the notification setting", () => {
 
   it("names the likely culprit honestly when a test is sent", async () => {
     stub({ settings: { stepNotifications: true } });
-    show();
+    show(undefined, "notifications");
     fireEvent.click(await screen.findByRole("button", { name: "Send a test" }));
     expect(
       await screen.findByText(/macOS is holding it back rather than Anthill/),
@@ -232,7 +289,7 @@ describe("the notification setting", () => {
 
   it("drops a stale test result when the switch is turned off", async () => {
     stub({ settings: { stepNotifications: true } });
-    show();
+    show(undefined, "notifications");
     fireEvent.click(await screen.findByRole("button", { name: "Send a test" }));
     await screen.findByText(/macOS is holding it back/);
     fireEvent.click(theSwitch());
@@ -328,7 +385,7 @@ it("says a preference was not saved, and leaves the switch where it is", async (
     throw new Error("ENOSPC: no space left on device");
   });
   const theSwitch = () => screen.getAllByRole("switch")[0];
-  show();
+  show(undefined, "notifications");
   await waitFor(() => expect(theSwitch().getAttribute("aria-checked")).toBe("false"));
 
   fireEvent.click(theSwitch());

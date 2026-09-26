@@ -1061,3 +1061,81 @@ describe("deleting an agent", () => {
     await waitFor(() => expect(api.agentsRemove).toHaveBeenCalledWith("agent-1"));
   });
 });
+
+/**
+ * The author's model preferences, followed by the editor (ANT-135): hidden
+ * models stay out of the pickers, a new agent starts with the starting
+ * answers, and a tier writes one model into every tool it maps.
+ */
+describe("following the model preferences", () => {
+  const preferences = {
+    hidden: { "claude-code": ["haiku"] },
+    defaults: { "claude-code": { id: "sonnet" } },
+    tiers: {
+      fast: { "claude-code": { id: "haiku" } },
+      strong: { "claude-code": { id: "sonnet" }, codex: { id: "gpt-5.5", reasoningEffort: "high" } },
+      deep: {},
+    },
+  };
+
+  function withPreferences(initial: GlobalAgentProfile[]) {
+    const stubbed = stub(initial);
+    Object.assign(stubbed.api, { modelPreferencesRead: vi.fn(async () => preferences) });
+    return stubbed;
+  }
+
+  const offered = (select: HTMLElement) =>
+    [...(select as HTMLSelectElement).options].map((option) => option.value);
+
+  it("leaves a hidden model out of the picker", async () => {
+    withPreferences([profile()]);
+    await openAgents();
+    fireEvent.click(await screen.findByText("Reviewer"));
+    const picker = await screen.findByLabelText("Claude Code model for this agent");
+    await waitFor(() => expect(offered(picker)).not.toContain("haiku"));
+    expect(offered(picker)).toContain("opus");
+  });
+
+  it("still shows a hidden model an agent already uses", async () => {
+    withPreferences([profile({ models: { "claude-code": { id: "haiku" } } })]);
+    await openAgents();
+    fireEvent.click(await screen.findByText("Reviewer"));
+    const picker = (await screen.findByLabelText("Claude Code model for this agent")) as HTMLSelectElement;
+    await waitFor(() => expect(offered(picker)).toContain("haiku"));
+    expect(picker.value).toBe("haiku");
+  });
+
+  it("starts a new agent with the starting answers", async () => {
+    const { api } = withPreferences([]);
+    await openAgents();
+    await screen.findByText(/No agents of your own yet/);
+    fireEvent.click(screen.getByRole("button", { name: "+ New agent" }));
+    await waitFor(() =>
+      expect(api.agentsCreate).toHaveBeenCalledWith({ name: "", models: { "claude-code": { id: "sonnet" } } }),
+    );
+  });
+
+  it("writes a tier's model into every tool it maps, and reads the tier back", async () => {
+    const { held } = withPreferences([profile()]);
+    await openAgents();
+    fireEvent.click(await screen.findByText("Reviewer"));
+    const strong = await screen.findByRole("button", { name: "Strong" });
+    await waitFor(() => expect((strong as HTMLButtonElement).disabled).toBe(false));
+    // A tier nobody mapped cannot be pressed.
+    expect((screen.getByRole("button", { name: "Deep reasoning" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(strong);
+    expect(strong.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(held()[0].models).toEqual({
+        "claude-code": { id: "sonnet" },
+        codex: { id: "gpt-5.5", reasoningEffort: "high" },
+      }),
+    );
+
+    // One slot changed by hand takes the agent off the tier.
+    fireEvent.change(screen.getByLabelText("Claude Code model for this agent"), { target: { value: "opus" } });
+    expect(strong.getAttribute("aria-pressed")).toBe("false");
+  });
+});

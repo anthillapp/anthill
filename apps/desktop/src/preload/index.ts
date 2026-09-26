@@ -93,6 +93,9 @@ const api: AnthillApi = {
   assistantThreadClear: (workflowId: string) =>
     ipcRenderer.invoke(IpcChannel.assistantThreadClear, workflowId),
   settingsRead: () => ipcRenderer.invoke(IpcChannel.settingsRead),
+  modelPreferencesRead: () => ipcRenderer.invoke(IpcChannel.modelPreferencesRead),
+  modelPreferencesWrite: (next) => ipcRenderer.invoke(IpcChannel.modelPreferencesWrite, next),
+  pluginStatus: () => ipcRenderer.invoke(IpcChannel.pluginStatus),
   settingsWrite: (patch: Partial<AppSettings>) =>
     ipcRenderer.invoke(IpcChannel.settingsWrite, patch),
   notificationsProbe: () => ipcRenderer.invoke(IpcChannel.notificationsProbe),

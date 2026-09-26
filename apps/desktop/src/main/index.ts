@@ -68,6 +68,8 @@ import type { NoticeKind } from "./live/step-notices.js";
 import { ObservationSetupService } from "./live/setup.js";
 import { AgentLibraryStore } from "./agent-library.js";
 import { AssistantThreadStore } from "./assistant-threads.js";
+import { ModelPreferencesStore } from "./model-preferences.js";
+import { pluginStatus } from "./plugin-status.js";
 import { SettingsStore } from "./settings.js";
 import { claimScheme } from "./url-scheme.js";
 import { PendingRunStore } from "./live/store.js";
@@ -355,6 +357,13 @@ function workflowStatus(): WorkflowStatusStore {
 function settings(): SettingsStore {
   settingsStore ??= new SettingsStore(join(app.getPath("userData"), "settings.json"));
   return settingsStore;
+}
+
+let modelPreferencesStore: ModelPreferencesStore | undefined;
+
+function modelPreferences(): ModelPreferencesStore {
+  modelPreferencesStore ??= new ModelPreferencesStore(join(app.getPath("userData"), "model-preferences.json"));
+  return modelPreferencesStore;
 }
 
 /**
@@ -1266,6 +1275,11 @@ function registerIpcHandlers(): void {
     assistantThreadStore().clear(workflowId),
   );
 
+  handle(IpcChannel.modelPreferencesRead, async () => modelPreferences().read());
+  handle(IpcChannel.modelPreferencesWrite, async (_event, next: unknown) => modelPreferences().write(next));
+  // Read from the tools' own records on every ask: installing a plugin happens
+  // in a terminal, and the page has to be right the next time it is opened.
+  handle(IpcChannel.pluginStatus, async () => pluginStatus());
   handle(IpcChannel.settingsRead, async () => settings().read());
   handle(IpcChannel.settingsWrite, async (_event, patch: Partial<AppSettings>) =>
     settings().write(patch ?? {}),

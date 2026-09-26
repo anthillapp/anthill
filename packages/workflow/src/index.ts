@@ -31,6 +31,19 @@ export {
   type HarnessModelChoice,
 } from "./agent-models.js";
 
+export {
+  DEFAULT_MODEL_PREFERENCES,
+  MODEL_TIERS,
+  MODEL_TIER_LABELS,
+  applyTier,
+  readModelPreferences,
+  startingModels,
+  tierOf,
+  visibleModelIds,
+  type ModelPreferences,
+  type ModelTierId,
+} from "./model-preferences.js";
+
 export { tomlMultiline, tomlString, tomlTable } from "./toml.js";
 
 export {

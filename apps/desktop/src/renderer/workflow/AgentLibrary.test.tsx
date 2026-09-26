@@ -296,3 +296,84 @@ describe("the workflow agent editor and a discovered catalogue", () => {
     expect(screen.getByText(/\.codex\/agents\/operator\.toml/)).toBeTruthy();
   });
 });
+
+/**
+ * The author's model preferences, inside a workflow (ANT-135).
+ */
+describe("the workflow agent editor and the model preferences", () => {
+  const preferences = {
+    hidden: { "claude-code": ["haiku"] },
+    defaults: { "claude-code": { id: "opus" } },
+    tiers: {
+      fast: { "claude-code": { id: "haiku" } },
+      strong: { "claude-code": { id: "sonnet" }, codex: { id: "gpt-5-codex", reasoningEffort: "high" } },
+      deep: {},
+    },
+  };
+
+  function bridge() {
+    (window as unknown as { anthill: unknown }).anthill = {
+      agentsList: vi.fn(async () => []),
+      codexModels: vi.fn(async () => undefined),
+      piModels: vi.fn(async () => undefined),
+      modelPreferencesRead: vi.fn(async () => preferences),
+    };
+  }
+
+  function renderEditor(workflow: Workflow, agentId: string, onChange: (next: Workflow) => void) {
+    const profile = agentProfiles(workflow).find((item) => item.id === agentId) as AgentProfile;
+    render(
+      <AgentEditor
+        workflow={workflow}
+        profile={profile}
+        onChange={onChange}
+        onSelect={() => undefined}
+        onSelectStep={() => undefined}
+      />,
+    );
+  }
+
+  it("leaves a hidden model out of the picker", async () => {
+    bridge();
+    const { workflow, agentId } = addAgentProfile(base, { name: "Operator" });
+    renderEditor(workflow, agentId, () => undefined);
+    const picker = screen.getByLabelText("Model") as HTMLSelectElement;
+    await waitFor(() => expect([...picker.options].map((option) => option.value)).not.toContain("haiku"));
+    expect([...picker.options].map((option) => option.value)).toContain("opus");
+  });
+
+  it("applies a tier to every tool it maps, not only this workflow's", async () => {
+    bridge();
+    const { workflow, agentId } = addAgentProfile(base, { name: "Operator" });
+    let saved: Workflow | undefined;
+    renderEditor(workflow, agentId, (next) => {
+      saved = next;
+    });
+    const strong = screen.getByRole("button", { name: "Strong" }) as HTMLButtonElement;
+    await waitFor(() => expect(strong.disabled).toBe(false));
+    fireEvent.click(strong);
+    expect(agentProfiles(saved!).find((item) => item.id === agentId)?.models).toEqual({
+      "claude-code": { id: "sonnet" },
+      codex: { id: "gpt-5-codex", reasoningEffort: "high" },
+    });
+  });
+
+  it("starts a new agent with the starting answers", async () => {
+    bridge();
+    let saved: Workflow | undefined;
+    render(
+      <AgentRail
+        workflow={base}
+        onChange={(next) => {
+          saved = next;
+        }}
+        onSelect={() => undefined}
+      />,
+    );
+    // The preferences arrive asynchronously; wait until they have.
+    await waitFor(() => expect(window.anthill.modelPreferencesRead).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fireEvent.click(screen.getByRole("button", { name: /New agent/ }));
+    expect(agentProfiles(saved!)[0].models).toEqual({ "claude-code": { id: "opus" } });
+  });
+});

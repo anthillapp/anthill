@@ -27,12 +27,14 @@
  * about — which is exactly why the two are kept apart and never translated.
  */
 
-import { HARNESS_DEFAULT, harnessProfile, type AgentModels } from "@anthill/workflow";
+import { HARNESS_DEFAULT, harnessProfile, visibleModelIds, type AgentModels } from "@anthill/workflow";
 import { HARNESS_TARGETS, type HarnessTarget } from "@anthill/workflow-schema";
 
 import type { CodexModelCatalog, PiModelCatalog } from "../../shared/ipc.js";
 import { interpreterLogo } from "../workflow/interpreter-logos.js";
 import { modelOptionsFor, retiredChoice } from "./model-catalogues.js";
+import { ModelTierBar } from "./ModelTierBar.js";
+import { useModelPreferences } from "./useModelPreferences.js";
 import { isConnected, type HarnessConnections, type ToolStatus } from "../harness/useHarnessConnections.js";
 
 /** What a picker carries when nobody has answered. Never stored. */
@@ -45,7 +47,7 @@ export const UNSET = "__unset__";
  * be taught, and the states it would have to teach include two ambers that mean
  * different things.
  */
-const BADGE: Record<ToolStatus, { word: string; tone: string }> = {
+export const BADGE: Record<ToolStatus, { word: string; tone: string }> = {
   off: { word: "Not connected", tone: "off" },
   checking: { word: "Checking…", tone: "checking" },
   on: { word: "Connected", tone: "on" },
@@ -111,6 +113,10 @@ export function AgentModelFields({
     onChange(bag);
   };
 
+  // Hidden models, and the tiers (ANT-135). The author's own preferences on
+  // this machine; nothing about them is written into the agent.
+  const { preferences } = useModelPreferences();
+
   const anyConnected = HARNESS_TARGETS.some((target) => isConnected(connections.of(target)));
 
   /*
@@ -148,6 +154,10 @@ export function AgentModelFields({
         </p>
       ) : null}
 
+      {anyConnected ? (
+        <ModelTierBar models={models} preferences={preferences} onChange={onChange} />
+      ) : null}
+
       <div className="agent-models" role="group" aria-label="Model per coding tool">
         {HARNESS_TARGETS.map((target) => {
           const harness = harnessProfile(target);
@@ -163,11 +173,15 @@ export function AgentModelFields({
              and the card says the difference rather than showing a picker
              with nothing in it. The same rule the workflow's own editor
              reads (ANT-127). */
-          const options = modelOptionsFor(target, { codex, pi });
+          const offered = modelOptionsFor(target, { codex, pi });
+          // The author's hidden models are left out — except the one already
+          // chosen, which a picker must always be able to show.
+          const visible = new Set(visibleModelIds(offered.map((option) => option.id), target, preferences, chosen?.id));
+          const options = offered.filter((option) => visible.has(option.id));
 
           const picked = options.find((option) => option.id === chosen?.id);
           const efforts = picked?.efforts ?? [];
-          const retired = retiredChoice(chosen?.id, options, HARNESS_DEFAULT);
+          const retired = retiredChoice(chosen?.id, offered, HARNESS_DEFAULT);
 
           return (
             <div className={`tool-card${live ? " is-connected" : ""}`} key={target}>

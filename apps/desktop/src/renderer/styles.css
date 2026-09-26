@@ -8123,7 +8123,7 @@ button.presence-chip {
   color: #7d7979;
 }
 
-.settings-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #fff; }
+.settings-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; background: #fff; }
 
 .settings-header {
   height: 56px;
@@ -8178,7 +8178,8 @@ button.presence-chip {
   overflow: hidden;
 }
 
-.set-group + .set-group-title { margin-top: 26px; }
+.set-group + .set-group-title,
+.set-group-foot + .set-group-title { margin-top: 26px; }
 
 .set-group-foot {
   margin: 10px 2px 0;
@@ -8834,3 +8835,65 @@ button.presence-chip {
 .canvas-origin i { width: 7px; height: 7px; flex: none; border-radius: 50%; }
 .canvas-origin.from-template i { background: var(--accent); }
 .canvas-origin.from-session i { background: var(--ink-dim); }
+
+/* ==================================================================
+   4 · Settings — Coding tools, Models, Plugins (ANT-135)
+   ================================================================== */
+
+/* A tool row is a settings row with the tool's mark in front of it. */
+.tool-row { display: flex; align-items: flex-start; }
+.tool-row > .tool-logo { margin: 15px 0 0 16px; }
+.tool-row > .set-row { flex: 1; min-width: 0; }
+
+/* One small labelled select per tool, side by side on a tier's row. */
+.tier-maps { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+.tier-map { display: flex; flex-direction: column; gap: 4px; }
+.tier-map > span { font-size: 11px; color: var(--ink-dim); }
+.tier-map select { max-width: 220px; }
+
+.plugin-row + .plugin-row { border-top: 1px solid #efeded; }
+
+.plugin-steps {
+  margin: 0 16px 16px;
+  padding: 12px 14px 12px 32px;
+  border-radius: 9px;
+  background: var(--canvas);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.plugin-steps li + li { margin-top: 10px; }
+
+.plugin-command { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+.plugin-command code {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* The tier control, in both agent editors. Pressed is the tier the agent is
+   on, read back by comparison; a tier nobody has mapped cannot be pressed. */
+.tier-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 12px; }
+.tier-bar-label { margin-right: 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
+.tier-chip {
+  width: auto;
+  padding: 4px 11px;
+  border: 1px solid var(--field-border);
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+}
+.tier-chip:hover:not(:disabled) { border-color: var(--accent-300); }
+.tier-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: #fff; }
+.tier-chip:disabled { opacity: 0.45; cursor: default; }
+.tier-bar-note { font-size: 11.5px; color: var(--ink-dim); }

@@ -20,6 +20,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { CodexHookHelp } from "../live/CodexHookHelp.js";
 import { useSetupPoll } from "../live/use-setup-poll.js";
+import { CHIP, hookState } from "./hook-state.js";
+import { CodingToolsPage, ModelsPage, PluginsPage } from "./ToolPages.js";
 
 import type {
   AppSettings,
@@ -43,6 +45,14 @@ const NAV = [
     items: [{ id: "notifications", label: "Notifications" }],
   },
   {
+    label: "Coding tools",
+    items: [
+      { id: "tools", label: "Coding tools" },
+      { id: "models", label: "Models" },
+      { id: "plugins", label: "Plugins" },
+    ],
+  },
+  {
     label: "Sessions",
     items: [
       { id: "observation", label: "Live observation" },
@@ -55,45 +65,12 @@ type PageId = (typeof NAV)[number]["items"][number]["id"];
 
 const TITLES: Record<PageId, string> = {
   notifications: "Notifications",
+  tools: "Coding tools",
+  models: "Models",
+  plugins: "Plugins",
   observation: "Live observation",
   about: "About",
 };
-
-/**
- * What the card can honestly claim about a harness's hooks.
- *
- * Each state is a different claim. Entries in a config file are not
- * hooks that run (ANT-23), and hooks that run are not hooks the harness calls
- * (ANT-42) — Codex had six entries, a handler that ran on demand and, across
- * eight sessions, not one event, while the card said Enabled.
- */
-type HookState = "enabled" | "silent" | "broken" | "available" | "needs-trust" | "disabled" | "unknown" | "ready";
-
-function hookState(harness: ObservationHarnessSetup): HookState {
-  if (!harness.hookEntriesPresent) return "available";
-  if (!harness.hookInstalled) return "broken";
-  if (harness.id === "codex") {
-    switch (harness.codexHooks?.state) {
-      case "needs-trust": return "needs-trust";
-      case "disabled": return "disabled";
-      case "ready": return harness.hookLastEventAt ? "enabled" : "ready";
-      default: return "unknown";
-    }
-  }
-  return harness.hookLastEventAt ? "enabled" : "silent";
-}
-
-const CHIP: Record<HookState, { label: string; tone: "on" | "quiet" | "off" }> =
-  {
-    enabled: { label: "Enabled", tone: "on" },
-    "needs-trust": { label: "Needs permission", tone: "quiet" },
-    disabled: { label: "Disabled in Codex", tone: "quiet" },
-    unknown: { label: "Not verified", tone: "quiet" },
-    ready: { label: "Ready for next session", tone: "on" },
-    silent: { label: "Not seen firing", tone: "quiet" },
-    broken: { label: "Not working", tone: "quiet" },
-    available: { label: "Available", tone: "off" },
-  };
 
 export function SettingsScreen({ onLeave }: { onLeave: () => void }) {
   const [page, setPage] = useState<PageId>("notifications");
@@ -172,6 +149,9 @@ export function SettingsScreen({ onLeave }: { onLeave: () => void }) {
           </header>
           <div className="settings-body">
             {page === "notifications" ? <NotificationsPage /> : null}
+            {page === "tools" ? <CodingToolsPage /> : null}
+            {page === "models" ? <ModelsPage /> : null}
+            {page === "plugins" ? <PluginsPage /> : null}
             {page === "observation" ? <ObservationPage /> : null}
             {page === "about" ? <AboutPage /> : null}
           </div>

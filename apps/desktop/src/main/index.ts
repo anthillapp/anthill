@@ -1467,7 +1467,17 @@ void lockHeld.then((held) => {
     // An app on its way out does not open a window for a newcomer: that is
     // the replacement asking for the lock, and a window reopened here would
     // keep this process alive in its way.
-    if (quitting) return;
+    if (quitting) {
+      // In a development run that newcomer is the watcher's restart, and it
+      // gives up after five seconds — taking the dev server with it. This
+      // process may be stuck on "Discard changes?" for an unsaved workflow:
+      // the signal handlers below never ran, because Chromium takes SIGTERM
+      // itself and turns it into an ordinary quit (ANT-150). Nobody asked to
+      // keep this build; the one replacing it is what the developer is
+      // waiting for. A packaged app is never replaced this way.
+      if (!app.isPackaged) app.exit(0);
+      return;
+    }
     for (const link of linksFromArgv(argv)) receiveLink(link);
     workflowWindow();
     if (mainWindow) {
@@ -1490,6 +1500,12 @@ app.on("before-quit", () => {
   and the working copy are for. If the orderly quit is still in progress
   after three seconds, the process ends anyway: a signal that is ignored is
   the bug this replaces.
+
+  Not to be relied on alone: on macOS, Electron 42's Chromium handles
+  SIGTERM itself — `before-quit` and the window's `close` arrive, and these
+  handlers never run (measured with a bare probe, ANT-150). The dev restart is
+  therefore also recognised by the replacement asking for the lock; see the
+  `second-instance` handler.
 */
 for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
   process.on(signal, () => {

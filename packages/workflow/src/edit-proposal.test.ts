@@ -515,6 +515,58 @@ describe("agents", () => {
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.error).toContain("add-agent");
   });
+
+  /*
+    ANT-69. An agentId that is neither a profile the workflow has nor a ref
+    this proposal added used to be written straight into the document — an
+    interpreter reasonably guessing "developer" from the listing left a step
+    pointing at nobody, and the author with a problem they did not cause.
+  */
+  describe("an agent that is not there", () => {
+    it("refuses a new step assigned to an agent the workflow does not have", () => {
+      const parsed = propose([
+        { op: "add-block", ref: "qa", blockType: "agent", name: "Run the suite",
+          config: { actionKind: "agent-step", task: "Run it", agentId: "developer" } },
+      ]);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      const source = workflow();
+      const applied = applyEditProposal(source, parsed.proposal);
+      expect(applied.ok).toBe(false);
+      if (!applied.ok) {
+        expect(applied.error).toContain('"developer"');
+        expect(applied.error).toContain("agent-1");
+      }
+      // Nothing applied: the input is untouched.
+      expect(source.nodes.some((node) => node.name === "Run the suite")).toBe(false);
+    });
+
+    it("refuses reassigning an existing step to an agent that is not there", () => {
+      const parsed = propose([{ op: "update-block", id: "implement", config: { agentId: "agent-9" } }]);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      const applied = applyEditProposal(workflow(), parsed.proposal);
+      expect(applied.ok).toBe(false);
+      if (!applied.ok) expect(applied.error).toContain('"agent-9"');
+    });
+
+    it("refuses a ref named before the agent it stands for is added", () => {
+      // Order matters, as with connections: a ref resolves once it exists.
+      const parsed = propose([
+        { op: "add-block", ref: "step", blockType: "agent", name: "Review",
+          config: { actionKind: "llm-review", task: "Review it", agentId: "rev" } },
+        { op: "add-agent", ref: "rev", name: "Reviewer" },
+      ]);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(applyEditProposal(workflow(), parsed.proposal).ok).toBe(false);
+    });
+
+    it("has no operation for removing an agent, so a step cannot be left without one", () => {
+      const parsed = propose([{ op: "remove-agent", id: "agent-1" }]);
+      expect(parsed.ok).toBe(false);
+    });
+  });
 });
 
 /**

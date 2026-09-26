@@ -31,7 +31,7 @@ import type { Workflow, WorkflowNode, WorkflowEdge } from "@anthill/workflow-sch
 import { WorkflowSchema } from "@anthill/workflow-schema";
 
 import { nextIdFor, rememberIds } from "./id-counter.js";
-import { addAgentProfile } from "./agents.js";
+import { addAgentProfile, agentProfiles } from "./agents.js";
 
 /** The version this module writes and the only one it accepts. */
 export const EDIT_PROPOSAL_VERSION = 1;
@@ -434,10 +434,28 @@ export function applyEditProposal(workflow: Workflow, proposal: EditProposal): E
    * so the block that uses it names the ref instead — exactly as a connection
    * names a ref for a block added beside it.
    */
-  const withAgentRef = (config: Record<string, unknown> | undefined) => {
-    if (!config || typeof config.agentId !== "string") return config;
+  /*
+   * And an `agentId` that is neither is refused, the way a connection to a
+   * block that is not there is refused (ANT-69). Written through, it was a
+   * step pointing at nobody — an interpreter guessing "developer" from the
+   * listing — and a problem the author had not caused and the assistant did
+   * not know it had made.
+   */
+  const withAgentRef = (
+    config: Record<string, unknown> | undefined,
+  ): { ok: true; config: Record<string, unknown> | undefined } | { ok: false; error: string } => {
+    if (!config || typeof config.agentId !== "string") return { ok: true, config };
     const resolved = refs.get(config.agentId);
-    return resolved ? { ...config, agentId: resolved } : config;
+    if (resolved) return { ok: true, config: { ...config, agentId: resolved } };
+    const known = agentProfiles(carrier).map((profile) => profile.id);
+    if (known.includes(config.agentId)) return { ok: true, config };
+    return {
+      ok: false,
+      error:
+        `The proposal assigns a step to the agent "${config.agentId}", which this workflow does not have` +
+        (known.length ? ` (it has ${known.join(", ")})` : "") +
+        `. Use one of those ids, or add the agent with "add-agent" first and name its ref.`,
+    };
   };
 
   for (const op of proposal.ops) {
@@ -480,6 +498,8 @@ export function applyEditProposal(workflow: Workflow, proposal: EditProposal): E
          * With no positions the new block gets none either, and the canvas
          * places all of them together.
          */
+        const assigned = withAgentRef(op.config);
+        if (!assigned.ok) return assigned;
         const anchor = op.near ? nodeById(resolve(op.near) ?? "") : undefined;
         const base = anchor?.position ?? furthestRight(nodes);
         const position = base ? freeSpot(base, nodes) : undefined;
@@ -488,7 +508,7 @@ export function applyEditProposal(workflow: Workflow, proposal: EditProposal): E
           id,
           type: op.blockType,
           name: op.name,
-          config: withAgentRef(op.config) ?? (op.blockType === "agent" ? { actionKind: "agent-step" } : {}),
+          config: assigned.config ?? (op.blockType === "agent" ? { actionKind: "agent-step" } : {}),
           ...(position ? { position } : {}),
         };
         nodes.push(node);
@@ -500,7 +520,11 @@ export function applyEditProposal(workflow: Workflow, proposal: EditProposal): E
         const node = nodeById(op.id);
         if (!node) return { ok: false, error: `There is no block "${op.id}" to update.` };
         if (op.name) node.name = op.name;
-        if (op.config) node.config = { ...node.config, ...withAgentRef(op.config) };
+        if (op.config) {
+          const assigned = withAgentRef(op.config);
+          if (!assigned.ok) return assigned;
+          node.config = { ...node.config, ...assigned.config };
+        }
         changes.push({ kind: "block-updated", id: node.id, name: node.name });
         break;
       }

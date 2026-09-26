@@ -70,6 +70,7 @@ import { AgentLibraryStore } from "./agent-library.js";
 import { AssistantThreadStore } from "./assistant-threads.js";
 import { ModelPreferencesStore } from "./model-preferences.js";
 import { pluginStatus } from "./plugin-status.js";
+import { devCheckout, INSTALL_GUIDES, installPlugin, pluginConnections, type Harness } from "./plugin-connect.js";
 import { SettingsStore } from "./settings.js";
 import { claimScheme } from "./url-scheme.js";
 import { PendingRunStore } from "./live/store.js";
@@ -1280,6 +1281,27 @@ function registerIpcHandlers(): void {
   // Read from the tools' own records on every ask: installing a plugin happens
   // in a terminal, and the page has to be right the next time it is opened.
   handle(IpcChannel.pluginStatus, async () => pluginStatus());
+  // The plugin card: the records, plus the two things records cannot say —
+  // whether the CLI runs, and whether the installed plugin's server answers.
+  const appRoot = devCheckout(app.getAppPath(), app.isPackaged);
+  const connectDeps = () => ({ ...(appRoot ? { appRoot } : {}), interpreters: detectInterpreters });
+  handle(IpcChannel.pluginConnections, async () => {
+    await userPath;
+    return pluginConnections(connectDeps());
+  });
+  // Runs the tool's own plugin commands, and only on the author's click.
+  handle(IpcChannel.pluginInstall, async (_event, harness: unknown) => {
+    if (harness !== "claude-code" && harness !== "codex") {
+      return { ok: false, changed: false, error: "Unknown coding tool." };
+    }
+    await userPath;
+    return installPlugin(harness, connectDeps());
+  });
+  // A fixed page per tool. The renderer names the tool, never the address.
+  handle(IpcChannel.pluginGuide, async (_event, harness: unknown) => {
+    const url = INSTALL_GUIDES[harness as Harness];
+    if (url) await shell.openExternal(url);
+  });
   handle(IpcChannel.settingsRead, async () => settings().read());
   handle(IpcChannel.settingsWrite, async (_event, patch: Partial<AppSettings>) =>
     settings().write(patch ?? {}),

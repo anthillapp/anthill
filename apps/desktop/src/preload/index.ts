@@ -96,6 +96,9 @@ const api: AnthillApi = {
   modelPreferencesRead: () => ipcRenderer.invoke(IpcChannel.modelPreferencesRead),
   modelPreferencesWrite: (next) => ipcRenderer.invoke(IpcChannel.modelPreferencesWrite, next),
   pluginStatus: () => ipcRenderer.invoke(IpcChannel.pluginStatus),
+  pluginConnections: () => ipcRenderer.invoke(IpcChannel.pluginConnections),
+  pluginInstall: (harness) => ipcRenderer.invoke(IpcChannel.pluginInstall, harness),
+  pluginGuide: (harness) => ipcRenderer.invoke(IpcChannel.pluginGuide, harness),
   settingsWrite: (patch: Partial<AppSettings>) =>
     ipcRenderer.invoke(IpcChannel.settingsWrite, patch),
   notificationsProbe: () => ipcRenderer.invoke(IpcChannel.notificationsProbe),

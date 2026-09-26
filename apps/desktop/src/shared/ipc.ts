@@ -57,6 +57,9 @@ export const IpcChannel = {
   modelPreferencesRead: "model-preferences:read",
   modelPreferencesWrite: "model-preferences:write",
   pluginStatus: "plugins:status",
+  pluginConnections: "plugins:connections",
+  pluginInstall: "plugins:install",
+  pluginGuide: "plugins:open-guide",
   settingsRead: "settings:read",
   settingsWrite: "settings:write",
   notificationsProbe: "settings:notifications-probe",
@@ -107,7 +110,11 @@ export const IpcChannel = {
  * 22: model preferences (read, write) and the plugin status, for the three
  * Settings pages ANT-135 added.
  */
-export const IPC_CONTRACT = 22;
+/*
+ * 23: the plugin connections, the install that runs the tools' own plugin
+ * commands, and the install guide a missing tool opens (From a session).
+ */
+export const IPC_CONTRACT = 23;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -560,6 +567,44 @@ export type PluginStatus = {
   server: PluginServerStatus;
 };
 
+/**
+ * Everything one plugin card needs to say where a tool stands, in one answer.
+ *
+ * The records (`status`) say what the tool wrote down; the rest is what those
+ * records cannot: whether the CLI actually runs, whether Anthill has somewhere
+ * to install the plugin *from*, and whether the server the installed plugin
+ * launches really answers. A card that turned green on an install record alone
+ * would be claiming a connection nobody tested.
+ */
+export type PluginConnection = {
+  harness: "claude-code" | "codex";
+  label: string;
+  /** The tool's CLI runs on this machine, and says which version it is. */
+  cli: { available: boolean; version?: string };
+  status: PluginHarnessStatus;
+  /**
+   * A local Anthill checkout Anthill can install the plugin from.
+   *
+   * Absent when there is none. The app does not ship the plugin yet (ANT-136),
+   * so without a checkout there is nothing an install button could honestly
+   * run, and the card says so instead of offering one.
+   */
+  source?: string;
+  /**
+   * Whether the installed plugin's launcher started Anthill's server and it
+   * answered an MCP handshake. Absent when there was nothing to ask — the
+   * plugin is not installed, or not switched on.
+   */
+  serverAnswers?: boolean;
+  /** Why the server did not answer, in the launcher's own words when it gave any. */
+  serverProblem?: string;
+};
+
+/** What an install did. `changed` says whether anything moved on disk before it stopped. */
+export type PluginInstallResult =
+  | { ok: true }
+  | { ok: false; error: string; changed: boolean };
+
 export type CodexModelCatalog = {
   models: CodexModelOption[];
   fetchedAt?: string;
@@ -981,6 +1026,15 @@ export interface AnthillApi {
   modelPreferencesWrite(next: ModelPreferences): Promise<ModelPreferences>;
   /** Whether Anthill's plugin is installed in Claude Code and Codex. Read-only. */
   pluginStatus(): Promise<PluginStatus>;
+  /** Each tool's plugin, with its CLI and a live check of the server it launches. */
+  pluginConnections(): Promise<PluginConnection[]>;
+  /**
+   * Install (or switch back on) Anthill's plugin in one tool, by running that
+   * tool's own plugin commands. The tool may still ask for confirmation.
+   */
+  pluginInstall(harness: "claude-code" | "codex"): Promise<PluginInstallResult>;
+  /** Open the tool's own install guide in the browser: one fixed page per tool. */
+  pluginGuide(harness: "claude-code" | "codex"): Promise<void>;
   /**
    * Send one notification now, so the author can see for themselves whether
    * they arrive.

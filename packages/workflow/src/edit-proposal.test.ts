@@ -104,7 +104,7 @@ describe("parsing a reply", () => {
 });
 
 describe("applying a proposal", () => {
-  it("splits one block into scoped steps with handoffs — the issue's own example", () => {
+  it("splits one block into scoped steps with handoffs – the issue's own example", () => {
     const result = applyEditProposal(
       workflow(),
       proposal([
@@ -332,7 +332,7 @@ describe("a reply that asks instead of proposing", () => {
     JSON.stringify({
       version: EDIT_PROPOSAL_VERSION,
       summary: "The request does not say which step to split.",
-      question: "Which step should be split — Implement, or Run tests?",
+      question: "Which step should be split – Implement, or Run tests?",
       ops: [],
       ...extra,
     });
@@ -341,7 +341,7 @@ describe("a reply that asks instead of proposing", () => {
     const parsed = parseEditProposal(ask());
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.proposal.question).toBe("Which step should be split — Implement, or Run tests?");
+    expect(parsed.proposal.question).toBe("Which step should be split – Implement, or Run tests?");
     expect(parsed.proposal.ops).toEqual([]);
   });
 

@@ -195,7 +195,7 @@ describe("agents as a library", () => {
     expect(row.querySelector(".rail-agent-steps")?.textContent).toBe("2 steps");
   });
 
-  it("survives a canvas selection — the library does not navigate away", async () => {
+  it("survives a canvas selection – the library does not navigate away", async () => {
     await workflow();
     const rail = document.querySelector(".libraries") as HTMLElement;
     fireEvent.click(within(rail).getByRole("tab", { name: /Agents/ }));

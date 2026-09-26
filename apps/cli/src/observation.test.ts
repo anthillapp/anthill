@@ -76,7 +76,7 @@ describe("plugin observation onboarding", () => {
   });
 
   // ANT-138: what the agent is told to ask, in one field it acts on.
-  it("asks to connect, then for trust, then nothing — and hints rather than accusing", async () => {
+  it("asks to connect, then for trust, then nothing – and hints rather than accusing", async () => {
     expect((await observationCommand("status", service().api)).result).toMatchObject({ ask: "connect" });
     const trust = (await observationCommand("status", service({ hookInstalled: true, hookEntriesPresent: true, codexHooks: { state: "needs-trust", message: "x" } }).api)).result as any;
     expect(trust).toMatchObject({ ask: "trust", offer: false });

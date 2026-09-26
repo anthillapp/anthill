@@ -74,6 +74,7 @@ import { devCheckout, INSTALL_GUIDES, installPlugin, pluginConnections, type Har
 import { SettingsStore, reportingConsentOnDisk } from "./settings.js";
 import { DesktopAnalytics } from "./analytics.js";
 import { SENTRY_DSN, sanitizeErrorEvent } from "../shared/error-reporting.js";
+import { externalLink } from "../shared/links.js";
 import { writeSettingsWithConsent, type ReportingGate } from "./diagnostics-consent.js";
 import * as Sentry from "@sentry/electron/main";
 import { claimScheme } from "./url-scheme.js";
@@ -483,7 +484,7 @@ function showNotification(
       const settle = (outcome: string, result: { kind: "sent" } | { kind: "unsupported"; reason: string }) => {
         if (settled) return;
         settled = true;
-        noteNotification(`${new Date().toISOString()} ${outcome} — ${title}: ${body}`);
+        noteNotification(`${new Date().toISOString()} ${outcome} – ${title}: ${body}`);
         resolve(result);
       };
       notification.once("show", () => settle("shown", { kind: "sent" }));
@@ -1350,6 +1351,11 @@ function registerIpcHandlers(): void {
     await userPath;
     return installPlugin(harness, connectDeps());
   });
+  // The same rule for Anthill's own pages: a name in, a listed address out.
+  handle(IpcChannel.linkOpen, async (_event, name: unknown) => {
+    const url = externalLink(name);
+    if (url) await shell.openExternal(url);
+  });
   // A fixed page per tool. The renderer names the tool, never the address.
   handle(IpcChannel.pluginGuide, async (_event, harness: unknown) => {
     const url = INSTALL_GUIDES[harness as Harness];
@@ -1460,7 +1466,7 @@ function registerIpcHandlers(): void {
             rolledBack: outcome.rolledBack,
             error: outcome.rolledBack
               ? `${outcome.error} The folder is as it was.`
-              : `${outcome.error} Some files may have been replaced — check ${root} before using it.`,
+              : `${outcome.error} Some files may have been replaced – check ${root} before using it.`,
           };
         }
         return { ok: true, directory: root, written: outcome.written };

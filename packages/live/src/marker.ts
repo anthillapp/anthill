@@ -147,7 +147,7 @@ export function echoInstruction(
       "",
       "Use exactly these step ids:",
       "",
-      ...steps.map((step) => `- \`${step.id}\` — ${step.name}`),
+      ...steps.map((step) => `- \`${step.id}\` – ${step.name}`),
     );
   }
 
@@ -215,7 +215,7 @@ export function cliInstruction(
       "",
       "Use exactly these step ids:",
       "",
-      ...steps.map((step) => `- \`${step.id}\` — ${step.name}`),
+      ...steps.map((step) => `- \`${step.id}\` – ${step.name}`),
     );
   }
 

@@ -374,7 +374,7 @@ export function BlockInspector({
                         </button>
                       </span>
                     ))}{" "}
-                    — one agent, several stages, one generated file.
+                    – one agent, several stages, one generated file.
                   </>
                 ) : (
                   <>
@@ -429,7 +429,7 @@ export function BlockInspector({
       <div {...sectionProps("data")}>
         <span className="section-label">Data</span>
           <label className="field">
-            <span>Inputs — one per line{fieldHint("inputs")}</span>
+            <span>Inputs – one per line{fieldHint("inputs")}</span>
             <textarea
               rows={3}
               value={toLines(config.inputs)}
@@ -451,7 +451,7 @@ export function BlockInspector({
           </label>
 
           <label className="field">
-            <span>Succeeds when — one per line{fieldHint("successCriteria")}</span>
+            <span>Succeeds when – one per line{fieldHint("successCriteria")}</span>
             <textarea
               rows={3}
               value={toLines(config.successCriteria)}
@@ -516,7 +516,7 @@ export function BlockInspector({
           </p>
 
           <label className="field">
-            <span>Constraints for this step — one per line{fieldHint("constraints")}</span>
+            <span>Constraints for this step – one per line{fieldHint("constraints")}</span>
             <textarea
               rows={3}
               value={toLines(config.constraints)}
@@ -575,7 +575,7 @@ function OutputsList({
 
   return (
     <>
-      <span className="field-label">In — {incoming.length}</span>
+      <span className="field-label">In – {incoming.length}</span>
       {incoming.length === 0 && node.type !== "start" ? (
         <p className="empty">Nothing points here yet, so the workflow never reaches this step.</p>
       ) : null}
@@ -590,7 +590,7 @@ function OutputsList({
         </button>
       ))}
 
-      <span className="field-label">Out — {outputs.length}</span>
+      <span className="field-label">Out – {outputs.length}</span>
       <p className="hint">
         An arrow always leaves from an output and may land anywhere on the block
         it points at.

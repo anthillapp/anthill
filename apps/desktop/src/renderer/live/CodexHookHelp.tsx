@@ -30,7 +30,7 @@ export function CodexHookHelp({ status }: { status: CodexHookStatus }) {
     <div className="state-panel tone-unsure" role="status">
       <p>{status.message}</p>
       <ol>
-        <li>Start Codex. It shows <strong>Hooks need review</strong> — or, in a session already open, type <code>/hooks</code>.</li>
+        <li>Start Codex. It shows <strong>Hooks need review</strong> – or, in a session already open, type <code>/hooks</code>.</li>
         <li>Choose <strong>Review hooks</strong>, not Trust all: the list also holds other tools’ hooks.</li>
         <li>{status.state === "disabled" ? "Switch on" : "Allow"} only the entries containing <code>anthill-observation-hook</code>.</li>
       </ol>

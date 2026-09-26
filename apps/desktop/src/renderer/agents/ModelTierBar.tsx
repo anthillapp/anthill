@@ -49,7 +49,7 @@ export function ModelTierBar({
           </button>
         );
       })}
-      <span className="tier-bar-note">{current ? "" : "Custom — chosen per tool"}</span>
+      <span className="tier-bar-note">{current ? "" : "Custom – chosen per tool"}</span>
     </div>
   );
 }

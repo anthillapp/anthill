@@ -95,7 +95,7 @@ export function SessionStartedDialog({
           <dd>{run.workflowName ?? workflowName}</dd>
           <dt>Session</dt>
           <dd>
-            <code>{run.detectedSessionId ?? "—"}</code>
+            <code>{run.detectedSessionId ?? "–"}</code>
           </dd>
           <dt>Evidence</dt>
           <dd>{run.evidenceChannel === "anthill:report" ? "run ID and nonce in a CLI report" : "run marker in the session record · confirmed"}</dd>

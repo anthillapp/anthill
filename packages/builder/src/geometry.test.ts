@@ -58,7 +58,7 @@ describe("portPoint", () => {
   });
 });
 
-describe("entryPoint — with an anchor", () => {
+describe("entryPoint – with an anchor", () => {
   const rect = block(100, 100);
 
   it("lands on the side nearest the anchored point", () => {
@@ -91,7 +91,7 @@ describe("entryPoint — with an anchor", () => {
   });
 });
 
-describe("entryPoint — without an anchor", () => {
+describe("entryPoint – without an anchor", () => {
   const rect = block(100, 100);
 
   it("comes in at the top when the source is well above", () => {
@@ -273,7 +273,7 @@ describe("portFromAnchor", () => {
   });
 });
 
-describe("curve — leaving from a moved port", () => {
+describe("curve – leaving from a moved port", () => {
   it("sets off upwards from a port on the top of a block", () => {
     const geometry = curve({ x: 100, y: 100, side: "top" }, { x: 300, y: 100, side: "left" });
     const firstControl = geometry.path.split("C ")[1].split(",")[0];
@@ -287,7 +287,7 @@ describe("curve — leaving from a moved port", () => {
   });
 });
 
-describe("curve — bend", () => {
+describe("curve – bend", () => {
   const from = { x: 0, y: 100, side: "right" as const };
   const to = { x: 300, y: 100, side: "left" as const };
 
@@ -385,7 +385,7 @@ describe("elbow", () => {
   });
 });
 
-describe("bendFromPoint — stepped lines", () => {
+describe("bendFromPoint – stepped lines", () => {
   const from = { x: 0, y: 100, side: "right" as const };
   const to = { x: 300, y: 200, side: "left" as const };
 
@@ -571,7 +571,7 @@ describe("getting a line past what is in its way", () => {
   });
 });
 
-describe("unconnectedStub — from a moved port", () => {
+describe("unconnectedStub – from a moved port", () => {
   it("points the way the port faces", () => {
     expect(unconnectedStub({ x: 100, y: 50, side: "top" }).path).toBe("M 100 50 L 100 -4");
     expect(unconnectedStub({ x: 100, y: 50, side: "left" }).label).toEqual({ x: 12, y: 50 });

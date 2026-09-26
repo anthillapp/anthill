@@ -94,8 +94,8 @@ describe("a selected block", () => {
 
   it("lists what points at the block as well as what leaves it", () => {
     const { onSelectOutput } = block("check");
-    expect(screen.getByText("In — 1")).toBeTruthy();
-    expect(screen.getByText("Out — 1")).toBeTruthy();
+    expect(screen.getByText("In – 1")).toBeTruthy();
+    expect(screen.getByText("Out – 1")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Build it/ }));
     expect(onSelectOutput).toHaveBeenCalledWith("build", "e2");

@@ -237,7 +237,7 @@ export function CanvasTour({ steps, onClose }: CanvasTourProps) {
         </div>
         <p id={textId} className="text" aria-live="polite">
           {copy.text}
-          <span className="sr-only"> Highlighted: {copy.title}{targetName !== copy.title ? ` — ${targetName}` : ""}.</span>
+          <span className="sr-only"> Highlighted: {copy.title}{targetName !== copy.title ? ` – ${targetName}` : ""}.</span>
         </p>
         <div className="foot">
           <span className="count">

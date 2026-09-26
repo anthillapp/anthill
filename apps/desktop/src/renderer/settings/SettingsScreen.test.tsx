@@ -124,6 +124,26 @@ describe("the page owns itself", () => {
   });
 });
 
+describe("the About page", () => {
+  it("opens each listed page by name", async () => {
+    stub();
+    const openLink = vi.fn(async () => undefined);
+    (window.anthill as unknown as { openLink: typeof openLink }).openLink = openLink;
+    show();
+    fireEvent.click(page("About"));
+    for (const [text, name] of [
+      ["github.com/nstr/anthill", "source"],
+      ["r/AnthillApp", "community"],
+      ["getanthill.ai", "website"],
+      ["Buy me a coffee", "support"],
+    ]) {
+      fireEvent.click(await screen.findByRole("button", { name: text }));
+      expect(openLink).toHaveBeenLastCalledWith(name);
+    }
+    expect(screen.queryByText(/Nothing here is sent anywhere/)).toBeNull();
+  });
+});
+
 describe("privacy controls", () => {
   it("cannot be turned on outside the release build", async () => {
     const api = stub();
@@ -228,7 +248,7 @@ describe("live observation", () => {
     return screen.findByRole("button", { name: "Review setup" });
   };
 
-  it("brings no heading of its own — the page already has one", async () => {
+  it("brings no heading of its own – the page already has one", async () => {
     await observation();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Live observation");

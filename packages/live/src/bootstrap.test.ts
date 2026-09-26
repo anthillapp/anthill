@@ -112,12 +112,12 @@ describe("the copied bootstrap prompt", () => {
     // The ids sit next to the instruction, not several sections away: an agent
     // asked to print an id it has to hunt for usually does not print it.
     const instruction = bootstrapPrompt.indexOf("Use exactly these step ids");
-    const ids = bootstrapPrompt.indexOf("`read` — Read the note");
+    const ids = bootstrapPrompt.indexOf("`read` – Read the note");
     expect(instruction).toBeGreaterThan(0);
     expect(ids).toBeGreaterThan(instruction);
     expect(ids).toBeLessThan(bootstrapPrompt.indexOf("# Read the note"));
     // Start and end carry no work, so they are not steps anyone announces.
-    expect(bootstrapPrompt).not.toContain("`start` —");
+    expect(bootstrapPrompt).not.toContain("`start` –");
   });
 });
 
@@ -177,7 +177,7 @@ describe("the progress channel", () => {
 
   it("lists the step ids in the CLI instruction too", () => {
     const { bootstrapPrompt } = buildBootstrapPrompt(workflow("claude-code"), marker, { reportViaCli: true });
-    expect(bootstrapPrompt).toContain("`read` — Read the note");
+    expect(bootstrapPrompt).toContain("`read` – Read the note");
   });
 });
 

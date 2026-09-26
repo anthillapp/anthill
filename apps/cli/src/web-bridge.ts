@@ -1,3 +1,4 @@
+import { externalLink } from "../../desktop/src/shared/links.js";
 import type { InterpreterId } from "@anthill/workflow";
 import {
   IPC_CONTRACT,
@@ -236,6 +237,12 @@ export function installWebBridge(): Promise<AnthillApi> {
         ),
       settingsRead: () => invoke(IpcChannel.settingsRead),
       reportRendererError: (event: unknown) => invoke(IpcChannel.diagnosticsRendererError, event),
+      // The page is already in a browser: a listed page opens in a new tab,
+      // with no way back to this one.
+      openLink: async (name: unknown) => {
+        const url = externalLink(name);
+        if (url) window.open(url, "_blank", "noopener,noreferrer");
+      },
       settingsWrite: (patch: unknown) => invoke(IpcChannel.settingsWrite, patch),
       notificationsProbe: () => invoke(IpcChannel.notificationsProbe),
       pluginStatus: () => invoke(IpcChannel.pluginStatus),

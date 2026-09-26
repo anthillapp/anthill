@@ -10,6 +10,7 @@
  * reachable only through the channels named here.
  */
 
+import type { ExternalLink } from "./links.js";
 import type { Workflow, WorkflowRun, NodeRun } from "@anthill/workflow-schema";
 import type { AgentModels, InterpreterId, ModelPreferences } from "@anthill/workflow";
 import type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun } from "@anthill/live";
@@ -60,6 +61,7 @@ export const IpcChannel = {
   pluginConnections: "plugins:connections",
   pluginInstall: "plugins:install",
   pluginGuide: "plugins:open-guide",
+  linkOpen: "link:open",
   settingsRead: "settings:read",
   settingsWrite: "settings:write",
   diagnosticsRendererError: "diagnostics:renderer-error",
@@ -1055,6 +1057,8 @@ export interface AnthillApi {
   pluginInstall(harness: "claude-code" | "codex"): Promise<PluginInstallResult>;
   /** Open the tool's own install guide in the browser: one fixed page per tool. */
   pluginGuide(harness: "claude-code" | "codex"): Promise<void>;
+  /** Open one of Anthill's own pages (`shared/links.ts`) in the default browser. */
+  openLink?(name: ExternalLink): Promise<void>;
   /**
    * Send one notification now, so the author can see for themselves whether
    * they arrive.

@@ -247,7 +247,7 @@ describe("checkCompleteness", () => {
       (problem) => problem.code === WORKFLOWNER_VALIDATION_CODES.STEP_MISSING_TASK,
     );
     expect(missing?.message).toBe(
-      "Describe what this step must do — an empty task produces an empty prompt.",
+      "Describe what this step must do – an empty task produces an empty prompt.",
     );
     expect(missing?.nodeId).toBe("step-1");
   });

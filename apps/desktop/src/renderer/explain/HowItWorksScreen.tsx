@@ -93,7 +93,7 @@ export function HowItWorksScreen({ onBack, onCreate, onFromSession }: HowItWorks
                 title="Start in your coding session"
                 tag="Recommended"
                 recommended
-                body="Describe the task in Claude Code or Codex. The plugin hands the workflow to Anthill — review the plan first, or follow the work as it happens."
+                body="Describe the task in Claude Code or Codex. The plugin hands the workflow to Anthill – review the plan first, or follow the work as it happens."
                 action="Set up the plugin"
                 primary
                 onAction={onFromSession}

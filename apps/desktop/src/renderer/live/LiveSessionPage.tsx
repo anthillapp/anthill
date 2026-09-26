@@ -410,8 +410,8 @@ function LiveSessionContent({
   const plaqueNote =
     (presence === "quiet" || presence === "lost") && view.lastSeenAt
       ? presence === "quiet"
-        ? `quiet for ${relative(view.lastSeenAt, now).replace(" ago", "")} — the session is still there`
-        : `nothing read for ${relative(view.lastSeenAt, now).replace(" ago", "")} — it may still be running`
+        ? `quiet for ${relative(view.lastSeenAt, now).replace(" ago", "")} – the session is still there`
+        : `nothing read for ${relative(view.lastSeenAt, now).replace(" ago", "")} – it may still be running`
       : undefined;
 
   const agentLabel = useCallback(
@@ -523,7 +523,7 @@ function LiveSessionContent({
       </dd>
       <dt>Evidence</dt>
       <dd>
-        <code>{run.evidenceChannel ?? "—"}</code>
+        <code>{run.evidenceChannel ?? "–"}</code>
         {run.confidence ? <span className={`conf conf-${run.confidence}`}>{run.confidence}</span> : null}
       </dd>
     </>
@@ -545,7 +545,7 @@ function LiveSessionContent({
           {end === "lost"
             ? "Anthill lost contact with the session"
             : end
-              ? "Observation ended — Anthill never ran this session"
+              ? "Observation ended – Anthill never ran this session"
               : watching
                 ? "Anthill is observing, not running"
                 : "Anthill observed this session; it never ran it"}
@@ -573,7 +573,7 @@ function LiveSessionContent({
                 fold away into Technical details below. */}
             {end ? null : technical}
             <dt>Started</dt>
-            <dd>{view.startedAt ? clock(view.startedAt) : "—"}</dd>
+            <dd>{view.startedAt ? clock(view.startedAt) : "–"}</dd>
             {/*
               How long the run has been going, and no longer than that.
 
@@ -613,14 +613,14 @@ function LiveSessionContent({
               {delegated && !readsDelegates ? (
                 <li>
                   What a subagent said. This session delegated work, and the record keeps the
-                  delegation and the moment it ended — never the delegate&rsquo;s own turns.
+                  delegation and the moment it ended – never the delegate&rsquo;s own turns.
                   The steps it announced still count; its messages were not written down to
                   show.
                 </li>
               ) : null}
               {handedOff ? (
                 <li>
-                  What another agent did with the work this session handed over — the record
+                  What another agent did with the work this session handed over – the record
                   has the handover, not the work. While that is outstanding, a quiet session
                   is a session Anthill cannot see, not one that has finished.
                 </li>
@@ -636,7 +636,7 @@ function LiveSessionContent({
               <p className="hint">
                 Anthill keeps checking this session&rsquo;s records every half-minute for a day
                 and picks the session back up by itself if they grow. Look again reads them
-                right now instead of waiting. Nothing is sent to the session — it never knew
+                right now instead of waiting. Nothing is sent to the session – it never knew
                 Anthill was reading.
               </p>
             </div>
@@ -708,7 +708,7 @@ function LiveSessionContent({
           {!runsWorkflow ? null : feed.kind === "restart-required" || feed.kind === "failed" ? (
             <p className="live-stage-note warn">
               The diagram cannot be trusted while Anthill is unable to read this session's
-              activity. Nothing below has been ruled out — it simply has not been read.
+              activity. Nothing below has been ruled out – it simply has not been read.
             </p>
           ) : !mapped && feed.kind !== "loading" ? (
             <p className="live-stage-note">
@@ -801,7 +801,7 @@ function LiveSessionContent({
             <div className="live-activity-body">
             <p className="live-note">
               Event metadata written by {CLI_LABEL[run.selectedCli]} on this machine, plus one
-              line of each message the agent addressed to you — code, credential-shaped text and
+              line of each message the agent addressed to you – code, credential-shaped text and
               Anthill's own markers removed. No full transcript, and none of the model's
               reasoning.
             </p>
@@ -822,7 +822,7 @@ function LiveSessionContent({
             {feed.kind === "unobservable" ? (
               <p className="live-feed-problem" role="alert">
                 {feed.detail} Anthill cannot observe this session, so there is nothing to
-                show here — which is not the same as nothing happening.
+                show here – which is not the same as nothing happening.
               </p>
             ) : null}
 

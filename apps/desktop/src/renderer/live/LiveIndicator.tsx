@@ -216,7 +216,7 @@ export function LiveIndicator({ workflowId, onOpenSession }: LiveIndicatorProps 
 
           <dl>
             <dt>Workflow</dt>
-            <dd>{run.workflowName ?? "—"}</dd>
+            <dd>{run.workflowName ?? "–"}</dd>
             <dt>Anthill run</dt>
             <dd>
               <code>{run.anthillRunId}</code>

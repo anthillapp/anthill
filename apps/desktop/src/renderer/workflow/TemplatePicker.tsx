@@ -71,7 +71,7 @@ export function TemplatePicker({
       <div className="template-body">
         <h1>Start a workflow</h1>
         <p className="lede">
-          Pick a shape to start from. Everything in it is editable — templates
+          Pick a shape to start from. Everything in it is editable – templates
           are ordinary workflows, not a special mode.
         </p>
 

@@ -101,12 +101,12 @@ export function buildDraftInstruction(prompt: string): string {
   const actions = ACTION_CATEGORY_ORDER.map((category) => {
     const items = Object.values(ACTION_LIBRARY)
       .filter((action) => action.category === category)
-      .map((action) => `  ${action.kind} — ${action.summary}`)
+      .map((action) => `  ${action.kind} – ${action.summary}`)
       .join("\n");
     return `${ACTION_CATEGORY_LABELS[category]}:\n${items}`;
   }).join("\n\n");
   const kinds = Object.entries(OUTCOME_MEANINGS)
-    .map(([kind, meaning]) => `  ${kind} — ${meaning}`)
+    .map(([kind, meaning]) => `  ${kind} – ${meaning}`)
     .join("\n");
 
   return `You are being used by Anthill as a workflow drafter. Read a description of some
@@ -150,7 +150,7 @@ ${kinds}
 
 A condition, when a branch needs one, uses the grammar
   <agent-id>.<field> == "value"
-where <agent-id> is the "id" of one of the agents you listed above — not a word
+where <agent-id> is the "id" of one of the agents you listed above – not a word
 you have chosen for the occasion. If the agent's id is "qa-agent", the condition
 is qa-agent.decision == "failed". A condition naming anything else reads a
 result nobody produces.
@@ -160,13 +160,13 @@ the fallback.
 
 Every step with "kind": "step" must have an "agent", and it must be the "id" of
 one of the agents you listed. A step with no agent is a step nobody carries out.
-Several steps may share one agent — that is how one agent working through
+Several steps may share one agent – that is how one agent working through
 several stages is expressed, and it is usually right for a small workflow.
 
 "agents" must describe every agent any step names. Naming a role on a step and
 leaving it out of "agents" is the commonest way a draft arrives with nobody
 described: the reader gets a diagram of work with no one assigned to it. If the
-text describes several roles — a developer, a reviewer, a researcher — list all
+text describes several roles – a developer, a reviewer, a researcher – list all
 of them, each with its own "id", "name", "role" and "description".
 
 The "role" is one line: what the agent is. The "description" is the job, and
@@ -174,13 +174,13 @@ it is what the coding agent reads before any step, so write it for that reader:
 what the agent is for, how it should approach the steps it owns and in what
 order, what it inspects, what it hands back and in what form, how it tells the
 work is done, and what it must not do. Several sentences, specific to this
-workflow, covering every step the agent carries out — not the first one, and
+workflow, covering every step the agent carries out – not the first one, and
 not a restatement of the name.
 
 A step must not point an output at its own id. To say a step repeats, point a
 later step's output back at it and give it "maxIterations".
 
-If the work has a loop — build, check, fix, check again — model it by pointing a
+If the work has a loop – build, check, fix, check again – model it by pointing a
 "rework" output back at the earlier step, and set "maxIterations" on the steps in
 the loop. A workflow with a loop must have "doneCriteria", or nothing says when to
 stop going round.
@@ -196,7 +196,7 @@ guess at or leave open. Ask it where it belongs:
 "field" is one of: goal, context, assumptions, verification, doneCriteria,
 constraints, prohibitedActions, finalAction.
 
-Give two or three "options" whenever you can see plausible answers — they become
+Give two or three "options" whenever you can see plausible answers – they become
 one-click choices for the author, and choosing beats typing. Leave "options"
 empty when you genuinely cannot guess. Ask few questions: only what would change
 the shape of the workflow, not everything that could be more specific.

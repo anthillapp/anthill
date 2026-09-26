@@ -256,7 +256,7 @@ describe("the workflow agent editor and a discovered catalogue", () => {
 
     await waitFor(() => expect(within(modelPicker()).getByText(/GPT-5 Codex/)).toBeTruthy());
     expect(modelPicker().value).toBe("o3-retired");
-    expect(within(modelPicker()).getByText(/o3-retired — no longer offered/)).toBeTruthy();
+    expect(within(modelPicker()).getByText(/o3-retired – no longer offered/)).toBeTruthy();
     expect(screen.getByText(/no longer offers/)).toBeTruthy();
   });
 

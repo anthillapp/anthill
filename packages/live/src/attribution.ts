@@ -95,7 +95,7 @@ export function attribute(
     const wanted = normalizeAgent(event.agentName);
     const owners = index.byAgent.get(wanted);
     if (owners?.length === 1) {
-      return { blockId: owners[0], confidence: "likely", how: `${event.agentName} — mapped by agent name` };
+      return { blockId: owners[0], confidence: "likely", how: `${event.agentName} – mapped by agent name` };
     }
     if (owners && owners.length > 1) {
       return {

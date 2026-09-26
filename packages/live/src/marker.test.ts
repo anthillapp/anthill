@@ -186,7 +186,7 @@ describe("the CLI instruction", () => {
       { id: "review", name: "Review it" },
     ]);
     const instruction = text.indexOf("Use exactly these step ids");
-    const ids = text.indexOf("`read` — Read the note");
+    const ids = text.indexOf("`read` – Read the note");
     expect(instruction).toBeGreaterThan(0);
     expect(ids).toBeGreaterThan(instruction);
   });

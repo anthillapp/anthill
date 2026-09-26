@@ -356,7 +356,7 @@ function openEnvelope(text: string, where: string): RecordRead<Record<string, un
       ok: false,
       problem: storeProblem(
         EXCHANGE_STORE_PROBLEM_CODES.STORE_RECORD_TOO_NEW,
-        `${where} was written by a newer Anthill (store version ${value.version}; this build reads ${EXCHANGE_STORE_VERSION}). It is left alone rather than opened — reading it here would drop whatever this build does not know about, and writing it back would make the loss permanent.`,
+        `${where} was written by a newer Anthill (store version ${value.version}; this build reads ${EXCHANGE_STORE_VERSION}). It is left alone rather than opened – reading it here would drop whatever this build does not know about, and writing it back would make the loss permanent.`,
         { field: where },
       ),
     };

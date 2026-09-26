@@ -317,7 +317,7 @@ export function mapDraftToWorkflow(
       warn({
         where: `step "${step.id}"`,
         message:
-          "No action was chosen for it, so it was set to Agent Step — the general-purpose one. Change it if another fits better.",
+          "No action was chosen for it, so it was set to Agent Step – the general-purpose one. Change it if another fits better.",
       });
     }
 
@@ -404,7 +404,7 @@ export function mapDraftToWorkflow(
         warn({
           where: `step "${step.id}"`,
           message:
-            "It pointed one of its outputs back at itself to mean “repeat”. Anthill draws a loop as a path back from a later step — add one, or set a pass limit and describe the repetition in the task.",
+            "It pointed one of its outputs back at itself to mean “repeat”. Anthill draws a loop as a path back from a later step – add one, or set a pass limit and describe the repetition in the task.",
         });
         outputNumber -= 1;
         continue;

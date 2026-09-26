@@ -102,7 +102,7 @@ describe("what a message cannot do", () => {
     expect(root.textContent).toContain("<script>");
   });
 
-  it("renders no anchors at all — a link is shown, never followed", () => {
+  it("renders no anchors at all – a link is shown, never followed", () => {
     const root = show("See [the report](https://example.com/r) for details.");
     expect(root.querySelector("a")).toBeNull();
     expect(root.textContent).toContain("the report");
@@ -291,7 +291,7 @@ describe("a path an agent wrote", () => {
     expect(api.pathsExist).not.toHaveBeenCalled();
   });
 
-  it("asks about a relative path not at all — it is nobody's path", async () => {
+  it("asks about a relative path not at all – it is nobody's path", async () => {
     // Relative to which directory? Anthill did not start the session and does
     // not know its working directory.
     const api = paths([]);

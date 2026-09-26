@@ -71,7 +71,7 @@ describe("buildPromptEnvelope", () => {
     ]);
   });
 
-  it("is pure — identical contexts produce identical prompts", () => {
+  it("is pure – identical contexts produce identical prompts", () => {
     expect(buildPromptEnvelope(ctx)).toBe(buildPromptEnvelope({ ...ctx }));
   });
 });

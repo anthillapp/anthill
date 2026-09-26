@@ -1035,7 +1035,7 @@ describe("a finished session stays finished", () => {
     const dir = await root();
     const body = codexRollout("sess-cx", { marked: true, complete: true }).replace(
       "Read the note.",
-      "Read the note — I’ll wait.",
+      "Read the note – I’ll wait.",
     );
     await writeCodex(dir, "sess-cx", body);
 
@@ -1329,7 +1329,7 @@ describe("a session that delegates and then waits", () => {
     expect(evidence.some((item) => item.kind === "completed")).toBe(false);
   });
 
-  it("says nothing rather than the wrong thing — the quiet path handles it", async () => {
+  it("says nothing rather than the wrong thing – the quiet path handles it", async () => {
     // Anthill has no record of the delegate's work, so the honest report is
     // that it cannot see anything, which is recoverable and says so.
     const { evidence } = await look(dispatched("sess-1", "SendMessage"), 12 * 60_000);
@@ -1857,7 +1857,7 @@ describe("token usage, as the harness recorded it", () => {
     expect(usage[0].tokens).toEqual({ in: 1000, out: 55 });
   });
 
-  it("emits nothing where a record carries no usage — unavailable, not zero", async () => {
+  it("emits nothing where a record carries no usage – unavailable, not zero", async () => {
     const dir = await root();
     await writeClaude(
       dir,

@@ -81,7 +81,7 @@ const PRESENCE: Record<PresenceKey, PresenceStyle> = {
   },
   quiet: {
     label: "Live",
-    note: "quiet for a moment — the session is still there",
+    note: "quiet for a moment – the session is still there",
     tone: "#ec3013",
     noteInk: "#ae1800",
     perimeter: "breathe",
@@ -97,7 +97,7 @@ const PRESENCE: Record<PresenceKey, PresenceStyle> = {
   },
   lost: {
     label: "Observation lost",
-    note: "nothing read for a while — it may still be running",
+    note: "nothing read for a while – it may still be running",
     tone: "#d8a21a",
     noteInk: "#8a6a08",
     perimeter: "still",

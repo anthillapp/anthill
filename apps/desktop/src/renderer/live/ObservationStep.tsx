@@ -96,7 +96,7 @@ export const OBSERVATION_FACE: Record<ObservationState, Face> = {
     tone: "ok",
     install: false,
     primary: "Continue",
-    note: "Hooks are installed for this tool. Nothing to do — the workflow will show progress once the session starts.",
+    note: "Hooks are installed for this tool. Nothing to do – the workflow will show progress once the session starts.",
   },
   silent: {
     title: "Installed, but nothing has come through yet",
@@ -129,7 +129,7 @@ export const OBSERVATION_FACE: Record<ObservationState, Face> = {
    * would be a button that does nothing.
    */
   passive: {
-    title: "Live progress is on — nothing to set up",
+    title: "Live progress is on – nothing to set up",
     chip: "Passive",
     tone: "ok",
     install: false,
@@ -204,9 +204,9 @@ export function ObservationStep({
           question about installing something on this machine. */}
       <p>
         {state === "passive"
-          ? `Anthill watches ${label} by reading the session file it writes on this machine — there is nothing to install, ${label} has no hook mechanism. `
+          ? `Anthill watches ${label} by reading the session file it writes on this machine – there is nothing to install, ${label} has no hook mechanism. `
           : `Anthill can install local observation hooks for ${label}. `}
-        It only observes the session you start yourself — it does not run it, control it, or
+        It only observes the session you start yourself – it does not run it, control it, or
         answer it.
       </p>
 
@@ -248,21 +248,21 @@ export function ObservationStep({
             <dl className="tech-rows">
               <dt>Config file</dt>
               <dd>
-                <code>{harness?.configPath ?? "—"}</code>
+                <code>{harness?.configPath ?? "–"}</code>
               </dd>
               <dt>Handler</dt>
               <dd>
-                <code>{harness?.hookHandlerPath ?? "—"}</code>
+                <code>{harness?.hookHandlerPath ?? "–"}</code>
               </dd>
               <dt>Entries</dt>
               <dd>
-                {harness ? `${harness.hookCommands.length} owned by Anthill` : "—"}
+                {harness ? `${harness.hookCommands.length} owned by Anthill` : "–"}
                 {harness?.hookLastEventAt ? ` · last event ${harness.hookLastEventAt}` : ""}
               </dd>
               <dt>Events</dt>
-              <dd>{harness ? harness.eventCategories.join(", ") : "—"}</dd>
+              <dd>{harness ? harness.eventCategories.join(", ") : "–"}</dd>
               <dt>Changes</dt>
-              <dd>{harness ? harness.changes.join(" ") : "—"}</dd>
+              <dd>{harness ? harness.changes.join(" ") : "–"}</dd>
             </dl>
           ) : null}
         </>

@@ -42,7 +42,7 @@ export function saveMessage(status: SaveStatus): string | undefined {
   if (status.kind === "saved") return "Saved";
   // The reason, not a restatement of the obvious: the author can act on "no
   // space left on device" and can do nothing whatever with "save failed".
-  if (status.kind === "failed") return `Not saved — ${status.error}`;
+  if (status.kind === "failed") return `Not saved – ${status.error}`;
   return undefined;
 }
 

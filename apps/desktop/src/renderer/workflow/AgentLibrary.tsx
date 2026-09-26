@@ -261,7 +261,7 @@ export function AgentEditor({
         />
       </label>
       <p className="hint">
-        Renaming is safe — steps point at this agent by an id that never
+        Renaming is safe – steps point at this agent by an id that never
         changes, so nothing comes unstuck.
       </p>
 
@@ -281,11 +281,11 @@ export function AgentEditor({
             <option value="">Default ({harness.defaultModel})</option>
             {/* So the field shows what is stored rather than appearing to
                 have been set to something else. */}
-            {retired ? <option value={retired}>{retired} — no longer offered</option> : null}
+            {retired ? <option value={retired}>{retired} – no longer offered</option> : null}
             {options.map((model) => (
               <option key={model.id} value={model.id}>
                 {model.label}
-                {model.hint ? ` — ${model.hint}` : ""}
+                {model.hint ? ` – ${model.hint}` : ""}
               </option>
             ))}
           </select>
@@ -314,7 +314,7 @@ export function AgentEditor({
               {efforts.map((effort) => (
                 <option key={effort.id} value={effort.id}>
                   {effort.id}
-                  {effort.hint ? ` — ${effort.hint}` : ""}
+                  {effort.hint ? ` – ${effort.hint}` : ""}
                 </option>
               ))}
             </select>
@@ -322,7 +322,7 @@ export function AgentEditor({
         ) : null}
 
         <label className="field">
-          <span>Role — optional</span>
+          <span>Role – optional</span>
           <input
             value={profile.role ?? ""}
             placeholder="e.g. Backend implementation"
@@ -387,7 +387,7 @@ export function AgentEditor({
         <p className="hint">
           Generated as <code>{agentFileName(harness, profile)}</code>
           {users.length > 1
-            ? ` — one file covering all ${users.length} of its steps.`
+            ? ` – one file covering all ${users.length} of its steps.`
             : "."}
         </p>
       ) : null}
@@ -411,7 +411,7 @@ export function AgentEditor({
       <p className="hint">
         Permissions, tool access and MCP servers will live here once Anthill can
         run a workflow. There is nothing to set yet, and nothing here is sent
-        anywhere — Anthill writes workflows, it does not run them.
+        anywhere – Anthill writes workflows, it does not run them.
       </p>
 
       <div className="row">

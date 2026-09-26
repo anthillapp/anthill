@@ -118,7 +118,7 @@ export function SessionReport({ workflow, run, view, end, usage, endedAt, onPick
                   report does not print raw Markdown and local links (ANT-148). */}
               <MessageMarkup text={words.text} />
               <span className="session-report-caveat">
-                In the agent&rsquo;s words, as {cli} recorded them — Anthill did not check them.
+                In the agent&rsquo;s words, as {cli} recorded them – Anthill did not check them.
               </span>
             </blockquote>
           ) : (
@@ -172,9 +172,9 @@ export function SessionReport({ workflow, run, view, end, usage, endedAt, onPick
               : `no tokens recorded by ${cli}`}
             .{" "}
             {end === "completed"
-              ? "Finished is not the same as succeeded — check the result before accepting it."
+              ? "Finished is not the same as succeeded – check the result before accepting it."
               : end === "failed"
-                ? "The session recorded an error — the failed step's events say what the record holds about it."
+                ? "The session recorded an error – the failed step's events say what the record holds about it."
                 : "Anthill stopped being able to read the session. It may have carried on working where Anthill cannot see."}
           </p>
         </div>

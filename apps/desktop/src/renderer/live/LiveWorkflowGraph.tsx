@@ -540,7 +540,7 @@ export function LiveWorkflowGraph({
               if (event.key === "Enter" || event.key === " ") onSelect(selected ? undefined : node.id);
             }}
           >
-            <title>{`${node.name} — ${style.label}${block?.note ? `. ${block.note}` : ""}`}</title>
+            <title>{`${node.name} – ${style.label}${block?.note ? `. ${block.note}` : ""}`}</title>
 
             {/*
               One border, and it is the block's own.
@@ -698,7 +698,7 @@ export function LiveWorkflowGraph({
             onMouseLeave={() => setHoveredTrail(undefined)}
           >
             <title>
-              {`The agent ${trail.backwards ? "went back" : "moved"} to ${to.name} from ${from.name} on its own — the workflow has no connection between them.`}
+              {`The agent ${trail.backwards ? "went back" : "moved"} to ${to.name} from ${from.name} on its own – the workflow has no connection between them.`}
             </title>
             <path
               className="live-detour-trail"

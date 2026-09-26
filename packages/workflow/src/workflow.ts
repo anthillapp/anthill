@@ -378,7 +378,7 @@ export function validateWorkflow(workflow: Workflow): ValidationResult {
   if (looping.size > 0 && doneCriteria.length === 0) {
     push(
       WORKFLOWNER_VALIDATION_CODES.LOOP_WITHOUT_DONE_CRITERIA,
-      "This diagram loops, so the brief needs done criteria — otherwise nothing defines when the loop should stop.",
+      "This diagram loops, so the brief needs done criteria – otherwise nothing defines when the loop should stop.",
     );
   }
 
@@ -452,7 +452,7 @@ export function validateWorkflow(workflow: Workflow): ValidationResult {
     if (!config.actionKind) {
       push(
         WORKFLOWNER_VALIDATION_CODES.STEP_MISSING_ACTION,
-        "Choose what this step does — pick an action from the library.",
+        "Choose what this step does – pick an action from the library.",
         { nodeId: node.id },
       );
     }
@@ -460,7 +460,7 @@ export function validateWorkflow(workflow: Workflow): ValidationResult {
     if (!config.task) {
       push(
         WORKFLOWNER_VALIDATION_CODES.STEP_MISSING_TASK,
-        "Describe what this step must do — an empty task produces an empty prompt.",
+        "Describe what this step must do – an empty task produces an empty prompt.",
         { nodeId: node.id },
       );
     }
@@ -468,7 +468,7 @@ export function validateWorkflow(workflow: Workflow): ValidationResult {
     if (!config.agentId) {
       push(
         WORKFLOWNER_VALIDATION_CODES.STEP_MISSING_AGENT,
-        "Assign this step to an agent — the agent is who carries it out.",
+        "Assign this step to an agent – the agent is who carries it out.",
         { nodeId: node.id },
       );
     } else if (!profilesById.has(config.agentId)) {
@@ -525,7 +525,7 @@ export function validateWorkflow(workflow: Workflow): ValidationResult {
     if (slugify(profile.name).length === 0) {
       push(
         WORKFLOWNER_VALIDATION_CODES.AGENT_MISSING_NAME,
-        "The agent doing this step has no name. Give it one containing letters or numbers — it becomes the generated file name.",
+        "The agent doing this step has no name. Give it one containing letters or numbers – it becomes the generated file name.",
         where,
       );
       continue;

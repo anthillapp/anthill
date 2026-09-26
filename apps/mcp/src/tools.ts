@@ -77,11 +77,11 @@ The result also carries the workflow id and, where something was stored, the
 revision the content is now at and an anthill:// link the user can open. A
 refusal carries no link, because there would be nothing of yours behind it.
 
-Pass open: false to store the workflow without opening Anthill yet — when there
-is something to ask the user first — and call open_workflow afterwards.
+Pass open: false to store the workflow without opening Anthill yet – when there
+is something to ask the user first – and call open_workflow afterwards.
 
-Every handover carries idempotencyKey, mode, source — harness, sessionId and
-taskText — and workflow. A call that leaves one of them out is answered with
+Every handover carries idempotencyKey, mode, source – harness, sessionId and
+taskText – and workflow. A call that leaves one of them out is answered with
 which one, and nothing is stored.`,
       inputSchema: {
         open: z
@@ -100,7 +100,7 @@ which one, and nothing is stored.`,
           .unknown()
           .optional()
           .describe(
-            'Which of the two things the user asked for. "design" means they want a workflow of their own: Anthill opens it in the editor, and they read, change and save it. "watch" means they want to see the work happen: you composed the graph yourself and are already doing the work, so Anthill opens the Live Session and there is no editing step. It chooses which screen the handover lands on and holds no work back — nothing here can stop a harness working, and what decides whether work starts is the user telling you to. The older names "show-and-go" and "approval-gate" are still accepted and both read as "design".',
+            'Which of the two things the user asked for. "design" means they want a workflow of their own: Anthill opens it in the editor, and they read, change and save it. "watch" means they want to see the work happen: you composed the graph yourself and are already doing the work, so Anthill opens the Live Session and there is no editing step. It chooses which screen the handover lands on and holds no work back – nothing here can stop a harness working, and what decides whether work starts is the user telling you to. The older names "show-and-go" and "approval-gate" are still accepted and both read as "design".',
           ),
         source: z
           .object({
@@ -169,7 +169,7 @@ description of the change.
 Returns an outcome of:
   revised           stored as a new revision, and Anthill was asked to show it.
   unchanged         Anthill already held exactly this content. Nothing was added,
-                    and nothing needed to be — a retry, or a change the user had
+                    and nothing needed to be – a retry, or a change the user had
                     already made.
   incomplete        nothing was stored; the questions have to be answered first.
   no_such_workflow  nothing of that id has been handed over to this Anthill.
@@ -178,7 +178,7 @@ Returns an outcome of:
 
 A revision is not a decision, and this tool makes none. The revision a run is
 bound to never changes, so a workflow being worked on right now carries on
-exactly as it was — your revision does not reach it. And nothing here approves
+exactly as it was – your revision does not reach it. And nothing here approves
 anything: tell the user what you changed and let them say whether to work from
 it. Writing a revision and then binding it is approving your own work.`,
       inputSchema: {
@@ -212,8 +212,8 @@ Launches Anthill if it is closed, brings it to the front if it is open, and asks
 it to show the workflow's head revision. Asking twice for the same revision does
 not open it twice. It takes the workflowId and nothing else.
 
-Returns open_requested, with the app's own outcome in "app" — opened, or a
-message to pass on — or not_found for an id this machine has never stored.`,
+Returns open_requested, with the app's own outcome in "app" – opened, or a
+message to pass on – or not_found for an id this machine has never stored.`,
       inputSchema: { workflowId: WORKFLOW_ID },
       annotations: { readOnlyHint: false, openWorldHint: false },
     },
@@ -242,7 +242,7 @@ looking anything up.`,
     {
       title: "Find the revision to work from",
       description: `The revision that may be worked on, under the mode this handover was stored with,
-together with its content — which may not be what you submitted, because the user
+together with its content – which may not be what you submitted, because the user
 can edit it.
 
 Returns an outcome of:
@@ -286,7 +286,7 @@ Returns an outcome of:
 
 On success the result also carries a run id, a nonce, and the exact shell commands
 to run as you work. Those commands are the only thing that tells Anthill which
-step you are on — it is not driving your session and has no other way to know.
+step you are on – it is not driving your session and has no other way to know.
 
 Retry with the same idempotencyKey, revision, digest and session after a lost reply.
 Use a new key only for an intentional new run. Binding does not start the agent

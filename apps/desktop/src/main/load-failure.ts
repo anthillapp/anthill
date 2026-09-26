@@ -57,8 +57,8 @@ export type LoadFailure = {
  */
 export function loadFailureAdvice(failure: LoadFailure): string {
   return failure.dev
-    ? "The development server is not answering. It stops when `npm run dev:desktop` stops — including when only the Electron window was closed and restarted. Start it again, then press ⌘R here."
-    : "Anthill could not read its own files. The installation looks incomplete — replacing the app is the fix. Pressing ⌘R will try again in case this was momentary.";
+    ? "The development server is not answering. It stops when `npm run dev:desktop` stops – including when only the Electron window was closed and restarted. Start it again, then press ⌘R here."
+    : "Anthill could not read its own files. The installation looks incomplete – replacing the app is the fix. Pressing ⌘R will try again in case this was momentary.";
 }
 
 /** A page that can render when nothing else on this machine will. */
@@ -83,7 +83,7 @@ export function loadFailurePage(failure: LoadFailure): string {
     `<dt>Tried</dt><dd>${escapeHtml(failure.url)}</dd>`,
     `<dt>Result</dt><dd>${escapeHtml(failure.error)}</dd>`,
     "</dl>",
-    "<p>Nothing has been lost. This window holds no unsaved work — it never got as far as opening any.</p>",
+    "<p>Nothing has been lost. This window holds no unsaved work – it never got as far as opening any.</p>",
     "</body></html>",
   ].join("");
 }

@@ -277,7 +277,7 @@ describe("the Live Session zoom controls", () => {
     expect(onSelect).toHaveBeenCalledWith(undefined);
   });
 
-  it("puts it down for a click on a connection too — nothing there is selectable", () => {
+  it("puts it down for a click on a connection too – nothing there is selectable", () => {
     const { onSelect } = show("implement");
     const graph = document.querySelector(".live-graph") as unknown as HTMLElement;
     fireEvent.click(graph.querySelector(".live-edge") as Element);
@@ -369,7 +369,7 @@ describe("a finished step's elapsed time", () => {
  * the platform's focus ring was drawn around.
  */
 describe("a step whose name does not fit", () => {
-  const long = "Этап 2 — локальное понимание экрана";
+  const long = "Этап 2 – локальное понимание экрана";
 
   function draw() {
     const renamed = {
@@ -495,7 +495,7 @@ describe("the Start block before any step is announced", () => {
 
   it("carries its meaning in words, not only in colour or motion", () => {
     const { start } = draw([event("tool.start", "Read", "2026-08-29T10:00:05.000Z")]);
-    expect(start.querySelector("title")?.textContent).toBe("Start — Waiting for the first step");
+    expect(start.querySelector("title")?.textContent).toBe("Start – Waiting for the first step");
   });
 });
 
@@ -890,7 +890,7 @@ describe("only the connection that carried control last pulses", () => {
     unmount();
   });
 
-  it("still shows the other as travelled, because it was — earlier", () => {
+  it("still shows the other as travelled, because it was – earlier", () => {
     const { tone, unmount } = draw(both());
     expect(tone("second-checkpoint")).toBe("tone-seen");
     unmount();

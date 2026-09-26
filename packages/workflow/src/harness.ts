@@ -60,7 +60,7 @@ const CLAUDE_CODE: HarnessProfile = {
     // CLI resolves each to the current model of that name (ANT-68).
     { id: "fable", label: "Fable", hint: "Most capable, for the hardest steps" },
     { id: "opus", label: "Opus", hint: "Deepest reasoning, slowest" },
-    { id: "sonnet", label: "Sonnet", hint: "Balanced — a good default" },
+    { id: "sonnet", label: "Sonnet", hint: "Balanced – a good default" },
     { id: "haiku", label: "Haiku", hint: "Fastest, for simple steps" },
     { id: "inherit", label: "Inherit", hint: "Use the main session's model" },
   ],

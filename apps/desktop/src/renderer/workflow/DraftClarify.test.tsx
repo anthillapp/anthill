@@ -64,7 +64,7 @@ describe("what the screen shows", () => {
     expect(screen.queryByText("Should it retry automatically?")).toBeNull();
   });
 
-  it("never dumps the draft — no brief, no agents, no step list", () => {
+  it("never dumps the draft – no brief, no agents, no step list", () => {
     show([question()]);
     // The things the previous design put on screen and this one deliberately does not.
     expect(screen.queryByText(/Make checkout survive/)).toBeNull();

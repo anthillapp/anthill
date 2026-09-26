@@ -227,7 +227,7 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
           ref={sourceButton}
           aria-expanded={showSource}
           onClick={() => setShowSource((open) => !open)}
-          title={`This workflow came from ${HARNESS_PROFILES[handover.source.harness].displayName} and is for ${HARNESS_PROFILES[handover.source.harness].displayName} — the harness cannot be changed, because the revision could then never be bound. Opens the original task.`}
+          title={`This workflow came from ${HARNESS_PROFILES[handover.source.harness].displayName} and is for ${HARNESS_PROFILES[handover.source.harness].displayName} – the harness cannot be changed, because the revision could then never be bound. Opens the original task.`}
         >
           <span
             className="logo"
@@ -320,7 +320,7 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
         title={
           saveBlocked
             ? `${props.problemCount} ${props.problemCount === 1 ? "problem" : "problems"} in the workflow. ` +
-              "Saving now would hand your session a graph it cannot follow — fix them first."
+              "Saving now would hand your session a graph it cannot follow – fix them first."
             : undefined
         }
       >

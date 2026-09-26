@@ -278,7 +278,7 @@ export function OutputInspector({
         className="prompt"
         style={{ maxHeight: "none", marginBottom: 12, padding: "9px 11px" }}
       >
-        {output.condition ?? "always — this connection is followed whenever the step finishes"}
+        {output.condition ?? "always – this connection is followed whenever the step finishes"}
       </div>
 
       {sourceAction?.decisionValues?.length ? (

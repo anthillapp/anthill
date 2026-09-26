@@ -310,7 +310,7 @@ describe("migrating a version 3 workflow's open questions", () => {
   });
 });
 
-describe("version 4 to 5 — the rename that reached the file", () => {
+describe("version 4 to 5 – the rename that reached the file", () => {
   /**
    * This is the migration that could have cost someone their work. Every
    * workflow saved before it keeps its agents and its version under

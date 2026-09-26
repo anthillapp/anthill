@@ -219,7 +219,7 @@ describe("validateWorkflow", () => {
     expect(codes).toContain(WORKFLOWNER_VALIDATION_CODES.STEP_MISSING_TASK);
   });
 
-  it("lets several steps share one agent — that is a one-agent workflow", () => {
+  it("lets several steps share one agent – that is a one-agent workflow", () => {
     const workflow = makeWorkflow(
       [
         node("s", "start", "Start"),

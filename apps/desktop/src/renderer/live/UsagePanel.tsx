@@ -86,8 +86,8 @@ export function UsagePanel({ usage, cli, onPickBlock, onPickAgent }: UsagePanelP
                             {block.name}
                           </button>
                         </th>
-                        <td>{reached ? (block.durationMs !== undefined ? readDuration(block.durationMs) : "no end") : "—"}</td>
-                        <td>{reached || block.tokens ? tokenLine(block.tokens, true) : "—"}</td>
+                        <td>{reached ? (block.durationMs !== undefined ? readDuration(block.durationMs) : "no end") : "–"}</td>
+                        <td>{reached || block.tokens ? tokenLine(block.tokens, true) : "–"}</td>
                         <td className="passes">×{block.passes.length}</td>
                         <td className="outcome">{OUTCOME_LABEL[block.outcome]}</td>
                       </tr>

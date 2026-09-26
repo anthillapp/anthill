@@ -87,7 +87,7 @@ export function buildBootstrapPrompt(
         "They define the agents the workflow refers to. Do not change their contents.",
         "",
         "Your own list of callable agents was fixed when this session started, so the",
-        "files you create now may not be callable here — they are for later sessions",
+        "files you create now may not be callable here – they are for later sessions",
         "in this repository. Where a step below says to delegate to one of these",
         "agents and your harness does not recognise it, do not substitute a different",
         "agent. Carry the step out yourself, following that agent's file above as if",

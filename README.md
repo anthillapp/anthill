@@ -60,6 +60,12 @@ portable, but nothing has been verified there, the packaging targets do not exis
 and the paths below are macOS paths. Treat running it elsewhere as unexplored
 rather than as a supported setup.
 
+## Community and support
+
+- Website: [getanthill.ai](https://getanthill.ai/)
+- Community: [r/AnthillApp](https://www.reddit.com/r/AnthillApp/)
+- If Anthill saves you time, you can [buy me a coffee](https://buymeacoffee.com/anthill).
+
 ## Install
 
 ### From a release

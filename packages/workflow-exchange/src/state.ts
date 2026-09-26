@@ -62,6 +62,6 @@ export function describeState(state: RevisionState): StateDescription {
     label: "Draft",
     detail:
       "The workflow has been handed over, and the work may begin on it as soon as it is complete.",
-    next: "Change whatever is not right — every change is saved, and the next run picks up the latest.",
+    next: "Change whatever is not right – every change is saved, and the next run picks up the latest.",
   };
 }

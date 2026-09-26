@@ -62,7 +62,7 @@ export function checkExchangeVersion(submitted: number): ExchangeProblem | undef
   if (submitted > EXCHANGE_VERSION) {
     return {
       code: EXCHANGE_PROBLEM_CODES.EXCHANGE_VERSION_UNSUPPORTED,
-      message: `This handover uses exchange version ${submitted}; this build of Anthill understands ${EXCHANGE_VERSION}. Update Anthill to accept it — reading it here would silently drop whatever this build does not know about.`,
+      message: `This handover uses exchange version ${submitted}; this build of Anthill understands ${EXCHANGE_VERSION}. Update Anthill to accept it – reading it here would silently drop whatever this build does not know about.`,
       field: "exchangeVersion",
     };
   }
@@ -255,7 +255,7 @@ function readSource(value: unknown, problems: ExchangeProblem[]): ExchangeSource
         value.taskText,
         "source.taskText",
         "a string",
-        "It is what the user asked for, in the user's own words — not a summary of it.",
+        "It is what the user asked for, in the user's own words – not a summary of it.",
       ),
     );
   }

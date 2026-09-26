@@ -17,6 +17,7 @@
  * from somewhere, and you were in the middle of something there.
  */
 
+import type { ExternalLink } from "../../shared/links.js";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { CodexHookHelp } from "../live/CodexHookHelp.js";
 import { useSetupPoll } from "../live/use-setup-poll.js";
@@ -288,12 +289,12 @@ const NOTICE_ROWS: { key: keyof AppSettings; label: string; note: string }[] = [
   {
     key: "stepFinishedNotifications",
     label: "A step finishes",
-    note: "The session moved on to the next step, or said the work is done — which is as finished as Anthill can say.",
+    note: "The session moved on to the next step, or said the work is done – which is as finished as Anthill can say.",
   },
   {
     key: "loopNotifications",
     label: "A loop comes back round",
-    note: "The session announced a step it had already been through — a rework loop, or a return of its own.",
+    note: "The session announced a step it had already been through – a rework loop, or a return of its own.",
   },
   {
     key: "needsYouNotifications",
@@ -486,7 +487,7 @@ function ObservationPage() {
           paragraphs. The page owns it now. */}
       <p className="settings-lede">
         Anthill can watch the Codex or Claude Code session you start yourself
-        from a copied prompt. This is optional — designing workflows and copying
+        from a copied prompt. This is optional – designing workflows and copying
         prompts work without it. Hooks add permission and notification events
         and real tool durations on top of the session records Anthill already
         reads.
@@ -503,7 +504,7 @@ function ObservationPage() {
         title="Hooks"
         footer={
           <>
-            Anthill reads event metadata only — no transcript, no file
+            Anthill reads event metadata only – no transcript, no file
             contents, and none of the model&rsquo;s reasoning. A hook writes
             down which tool ran, when, and what it was aimed at; the command
             itself, the contents it wrote and the answer it got are not kept,
@@ -627,7 +628,7 @@ function Harness({
                 is exactly what a wall hides. */}
             <dd className="mono">
               {harness.hookCommands.length === 0 ? (
-                "—"
+                "–"
               ) : (
                 <ul className="harness-entries">
                   {harness.hookCommands.map((command) => (
@@ -682,12 +683,21 @@ function Harness({
   );
 }
 
+/** A listed page, opened by name in the default browser. */
+function AboutLink({ name, children }: { name: ExternalLink; children: string }) {
+  return (
+    <button type="button" className="set-link" onClick={() => void window.anthill.openLink?.(name)}>
+      {children}
+    </button>
+  );
+}
+
 function AboutPage() {
   return (
     <SettingGroup title="Anthill">
       <SettingRow
         label="Version"
-        note="Local-first. Nothing here is sent anywhere."
+        note="Local-first. Nothing is sent anywhere unless you turn it on under Privacy."
       >
         <span className="set-note">{__ANTHILL_VERSION__}</span>
       </SettingRow>
@@ -696,7 +706,19 @@ function AboutPage() {
         label="Source"
         note="Anthill designs workflows and watches the session you start yourself. It never runs one."
       >
-        <span className="set-note mono">github.com/nstr/anthill</span>
+        <AboutLink name="source">github.com/nstr/anthill</AboutLink>
+      </SettingRow>
+      <SettingDivider />
+      <SettingRow label="Community" note="Questions, ideas and workflows from other people using Anthill.">
+        <AboutLink name="community">r/AnthillApp</AboutLink>
+      </SettingRow>
+      <SettingDivider />
+      <SettingRow label="Website" note="News, releases and how to get in touch.">
+        <AboutLink name="website">getanthill.ai</AboutLink>
+      </SettingRow>
+      <SettingDivider />
+      <SettingRow label="Support Anthill" note="If Anthill saves you time, a coffee helps keep it going.">
+        <AboutLink name="support">Buy me a coffee</AboutLink>
       </SettingRow>
     </SettingGroup>
   );

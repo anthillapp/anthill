@@ -715,7 +715,7 @@ function FirstRunCard({ onDescribe, onDraw }: { onDescribe: () => void; onDraw: 
   const note =
     ready.length > 0
       ? `${ready.join(" and ")} ${ready.length > 1 ? "are" : "is"} connected`
-      : "Needs the plugin — you can add it in Settings";
+      : "Needs the plugin – you can add it in Settings";
 
   return (
     <section className="first-run-card" aria-labelledby="first-run-title" data-tour="launch-create" data-tour-kind="first-run">

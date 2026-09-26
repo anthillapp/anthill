@@ -148,7 +148,7 @@ export function AgentModelFields({
       {/* Explains the section, and would be noise once there is a picker. */}
       {!anyConnected ? (
         <p className="agent-models-intro">
-          Connect a coding tool to choose models for this agent. One is enough to start —
+          Connect a coding tool to choose models for this agent. One is enough to start –
           you can add the others later. This agent keeps a separate model for each, because
           you start the session yourself and the tool you start is what decides.
         </p>
@@ -213,7 +213,7 @@ export function AgentModelFields({
                 <p className="tool-note is-warn">
                   Update {harness.displayName} to use custom agents. The version installed
                   here does not read <code>.codex/agents</code>, so a model chosen for it
-                  will be saved but not applied — a session will run this agent on its own
+                  will be saved but not applied – a session will run this agent on its own
                   model.
                 </p>
               ) : null}
@@ -236,14 +236,14 @@ export function AgentModelFields({
                     <option value={UNSET}>Not chosen</option>
                     {/* An explicit decision to take whatever the session uses,
                         which is a different answer from not having chosen. */}
-                    <option value={HARNESS_DEFAULT}>Default — inherit from the session</option>
+                    <option value={HARNESS_DEFAULT}>Default – inherit from the session</option>
                     {/* So the field shows what is stored rather than appearing
                         to have been set to something else. */}
-                    {retired ? <option value={retired}>{retired} — no longer offered</option> : null}
+                    {retired ? <option value={retired}>{retired} – no longer offered</option> : null}
                     {options.map((option) => (
                       <option key={option.id} value={option.id}>
                         {option.label}
-                        {option.hint ? ` — ${option.hint}` : ""}
+                        {option.hint ? ` – ${option.hint}` : ""}
                       </option>
                     ))}
                   </select>
@@ -273,7 +273,7 @@ export function AgentModelFields({
                       {efforts.map((effort) => (
                         <option key={effort.id} value={effort.id}>
                           Reasoning: {effort.id}
-                          {effort.hint ? ` — ${effort.hint}` : ""}
+                          {effort.hint ? ` – ${effort.hint}` : ""}
                         </option>
                       ))}
                     </select>
@@ -363,7 +363,7 @@ export function AgentModelFields({
       <p className="agent-models-note">
         You start the session yourself, so the tool you start decides which of these
         applies: hand this agent to Claude Code and it uses the Claude Code answer, hand it
-        to Codex and it uses the Codex one. Leaving one unchosen is fine — that tool falls
+        to Codex and it uses the Codex one. Leaving one unchosen is fine – that tool falls
         back to its own default, the workflow will say so when it needs it, and neither
         answer is ever borrowed for the other.
       </p>

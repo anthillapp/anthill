@@ -1845,6 +1845,35 @@ describe("the author of a message", () => {
     expect(message?.author).toEqual({ kind: "subagent", name: "Reviewer" });
   });
 
+  // ANT-60: a delegate's turn ending is signed, so it is not read as the session's.
+  it("signs a subagent's turn ending, and leaves the session's own unsigned", async () => {
+    const ending = (text: string, extra: Record<string, unknown> = {}) => {
+      const at = when();
+      return [
+        { type: "user", sessionId: "sess-1", timestamp: at, cwd: "/tmp/scratch", message: { role: "user", content: MARKED_PROMPT } },
+        {
+          type: "assistant",
+          sessionId: "sess-1",
+          timestamp: at,
+          ...extra,
+          message: { id: `msg-${text}`, role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text }] },
+        },
+      ].map((row) => JSON.stringify(row)).join("\n") + "\n";
+    };
+
+    const sub = await root();
+    await writeClaude(sub, "-tmp-scratch", "sess-1", ending("Handled it.", { isSidechain: true, agentName: "Reviewer" }));
+    const delegated = (await new ClaudeCodeObserver(sub).poll(pending("claude-code"), when())).events;
+    expect(delegated.find((event) => event.kind === "turn.end")?.author).toEqual({ kind: "subagent", name: "Reviewer" });
+
+    const main = await root();
+    await writeClaude(main, "-tmp-scratch", "sess-1", ending("Done."));
+    const own = (await new ClaudeCodeObserver(main).poll(pending("claude-code"), when())).events;
+    const ended = own.find((event) => event.kind === "turn.end");
+    expect(ended).toBeDefined();
+    expect(ended?.author).toBeUndefined();
+  });
+
   it("is a nameless subagent rather than a guessed one", async () => {
     const dir = await root();
     await writeClaude(

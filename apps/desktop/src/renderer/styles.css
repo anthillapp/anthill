@@ -8717,8 +8717,11 @@ button.presence-chip {
 /* ------------------------------------------------------------------ */
 
 /* The window's height, like the launcher: the root is a block, so `flex: 1`
-   alone left the bar and the scrolling body to the page's own height. */
-.from-session { height: 100vh; display: flex; flex-direction: column; min-height: 0; background: var(--canvas); }
+   alone left the bar and the scrolling body to the page's own height.
+   `-screen`, because the bare `from-session` already names the canvas's
+   "Handed over" chip, which took this rule's 100vh and covered the diagram
+   (ANT-143). */
+.from-session-screen { height: 100vh; display: flex; flex-direction: column; min-height: 0; background: var(--canvas); }
 .from-session-bar {
   height: 52px;
   flex: none;
@@ -8746,7 +8749,7 @@ button.presence-chip {
   justify-content: center;
 }
 .from-session-inner { width: 760px; max-width: 100%; display: flex; flex-direction: column; gap: 20px; }
-.from-session h1 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -0.025em; }
+.from-session-screen h1 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -0.025em; }
 .from-session-lede { margin: 12px 0 0; font-size: 14.5px; line-height: 1.65; color: var(--ink-2); text-wrap: pretty; }
 .from-session-note { margin: 10px 0 0; font-size: 13px; line-height: 1.65; color: var(--ink-dim); }
 .from-session-tabs { display: flex; gap: 3px; padding: 3px; border-radius: 9px; background: #efeded; }

@@ -101,7 +101,7 @@ export function FromSessionScreen({ onBack, onSettings }: FromSessionScreenProps
   const t = TOOL[tool];
 
   return (
-    <div className="from-session">
+    <div className="from-session-screen">
       <div className="from-session-bar">
         <button type="button" className="icon-button on-dark" onClick={onBack} title="Back" aria-label="Back">
           ←

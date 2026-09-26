@@ -62,6 +62,7 @@ export const IpcChannel = {
   pluginGuide: "plugins:open-guide",
   settingsRead: "settings:read",
   settingsWrite: "settings:write",
+  diagnosticsRendererError: "diagnostics:renderer-error",
   notificationsProbe: "settings:notifications-probe",
   liveEvents: "live:events",
   liveSetupStatus: "live-setup:status",
@@ -133,6 +134,12 @@ export type IpcCapabilities = {
    * old main process that does not send it is read as `desktop`.
    */
   shell?: "desktop" | "cli";
+  /**
+   * Whether this shell started with error reporting on. The CLI's page reads
+   * it to decide whether to catch its own errors; the desktop tells its
+   * renderer through the preload instead.
+   */
+  errorReports?: boolean;
 };
 
 /**
@@ -1028,6 +1035,11 @@ export interface AnthillApi {
   settingsRead(): Promise<AppSettings>;
   /** Change some of them; the rest are left alone. Returns what they now are. */
   settingsWrite(patch: Partial<AppSettings>): Promise<AppSettings>;
+  /**
+   * A browser page's error, already sanitized, for the CLI to report. Only the
+   * CLI shell answers it; the desktop renderer reports through Sentry's IPC.
+   */
+  reportRendererError?(event: unknown): Promise<void>;
   /** The author's model preferences: hidden models, starting answers, tiers. */
   modelPreferencesRead(): Promise<ModelPreferences>;
   /** Replaces them, normalised. Rejects when the disk refused the write. */

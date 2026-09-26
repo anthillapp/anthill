@@ -136,6 +136,14 @@ describe("privacy controls", () => {
     expect(screen.getByText(/This build never sends diagnostics/)).toBeTruthy();
   });
 
+  it("offers no native crash reports in the CLI's browser page", async () => {
+    const api = stub();
+    (api as unknown as { capabilities: () => Promise<unknown> }).capabilities = async () => ({ contract: 0, channels: [], shell: "cli" });
+    render(<PrivacyPage available />);
+    await screen.findByText(/never from this page/);
+    expect(screen.queryByRole("switch", { name: "Native crash reports" })).toBeNull();
+  });
+
   it("starts with sharing off and writes analytics consent only after a click", async () => {
     const api = stub();
     render(<PrivacyPage available />);

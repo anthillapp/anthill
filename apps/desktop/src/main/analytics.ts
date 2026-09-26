@@ -14,6 +14,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 
 export type AnalyticsEvent =
   | "desktop_opened"
+  | "cli_opened"
   | "analytics_enabled"
   | "workflow_opened"
   | "workflow_saved"

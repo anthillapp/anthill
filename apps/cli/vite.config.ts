@@ -27,7 +27,8 @@ const { version } = createRequire(import.meta.url)("./package.json") as {
 export default defineConfig({
   root: resolve(__dirname, "../desktop/src/renderer"),
   plugins: [react()],
-  define: { __ANTHILL_VERSION__: JSON.stringify(version) },
+  // Every built CLI may report, once its author opts in (see diagnostics.ts).
+  define: { __ANTHILL_VERSION__: JSON.stringify(version), __ANTHILL_DIAGNOSTICS__: "true" },
   build: {
     outDir: resolve(__dirname, "out/renderer"),
     emptyOutDir: true,

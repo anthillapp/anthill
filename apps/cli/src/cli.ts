@@ -11,6 +11,7 @@ import { startServer } from "./server.js";
 import { createBridge } from "./bridge.js";
 import { appendReport } from "./report.js";
 import { observationCommand } from "./observation.js";
+import { reportFatal, startCliDiagnostics } from "./diagnostics.js";
 import type { HarnessReport } from "@anthill/live";
 
 /**
@@ -528,6 +529,9 @@ export async function main(): Promise<void> {
   const paths = await resolvePaths({ dataDir: options.dataDir });
   await ensureDataDir(paths);
   const releaseLock = await acquireInstanceLock(paths, options.port, options.host);
+  // Only the long-running server reports; the `run`/`step`/`done` commands a
+  // harness runs mid-step, and `observation`, never do.
+  const diagnostics = startCliDiagnostics(paths.userData);
 
   // The web server: serves the renderer from `rendererDir` and answers
   // /health and the /api WebSocket on the loopback interface.
@@ -546,7 +550,11 @@ export async function main(): Promise<void> {
     workspace: options.workspace,
     broadcast: server.broadcast,
     onMessage: server.onMessage,
+    diagnostics,
   });
+  if ((await bridge.api.settingsRead()).analyticsEnabled) {
+    await diagnostics.analytics.enable().then(() => diagnostics.analytics.capture("cli_opened")).catch(() => undefined);
+  }
 
   const url = `http://${options.host}:${server.port}/?token=${server.token}`;
   if (options.openBrowser) {
@@ -566,8 +574,9 @@ export async function main(): Promise<void> {
 const invokedDirectly = process.argv[1] !== undefined && existsSync(process.argv[1]) &&
   realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
 if (invokedDirectly) {
-  void main().catch((error) => {
+  void main().catch(async (error) => {
     console.error(error);
+    await reportFatal(error);
     process.exit(1);
   });
 }

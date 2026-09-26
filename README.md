@@ -238,12 +238,13 @@ else into your repository.
 
 ## Where Anthill keeps things
 
-Workflows and session data stay local. Anthill has no account or sync. The
-packaged macOS app offers three independent controls under **Settings → Privacy**;
+Workflows and session data stay local. Anthill has no account or sync. Both the
+macOS app and the Linux CLI offer independent controls under **Settings → Privacy**;
 all are off by default:
 
 - **Anonymous product analytics** sends a random app identifier and the
-  names of five app actions to PostHog, along with the SDK name and version.
+  names of a few app actions (opening Anthill, enabling analytics, opening or
+  saving a workflow, starting live observation) to PostHog, along with the SDK name and version.
   PostHog discards the sender's IP address. It sends no prompts, workflow contents,
   paths, clicks, page views, or recordings. Turning it off stops future events
   and deletes the local identifier.
@@ -251,13 +252,17 @@ all are off by default:
   messages, user data, breadcrumbs, and runtime context removed; Sentry is told
   not to infer, and set not to store, the sender's IP address. Turning it on
   takes effect after a restart; turning it off stops new reports immediately.
-- **Native crash reports** separately permit Electron memory dumps to Sentry.
-  A dump may contain private data from memory. This requires error reporting
-  and a restart. Turning it off stops new uploads immediately.
+- **Native crash reports** (macOS only) separately permit Electron memory dumps
+  to Sentry. A dump may contain private data from memory. This requires error
+  reporting and a restart. Turning it off stops new uploads immediately.
 
-Only tagged releases built by the release workflow can send diagnostics: the
-CLI, development runs, manual workflow runs and locally built packages have
-it compiled out. Session replay is off.
+On macOS, only tagged releases built by the release workflow can send
+diagnostics: development runs, manual workflow runs and locally built packages
+have it compiled out. On Linux, any built CLI can, once you opt in; the
+`run`, `step`, `done` and `observation` commands never report. The browser page
+the CLI serves sends nothing itself: its errors go to the CLI process over the
+local bridge and leave from there, through the same consent check. Session
+replay is off.
 
 Release builds need no PostHog or Sentry credentials to send opted-in events;
 their project token and DSN are public client configuration. To upload private

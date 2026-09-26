@@ -235,6 +235,7 @@ export function installWebBridge(): Promise<AnthillApi> {
           listener(payload as LiveSnapshot),
         ),
       settingsRead: () => invoke(IpcChannel.settingsRead),
+      reportRendererError: (event: unknown) => invoke(IpcChannel.diagnosticsRendererError, event),
       settingsWrite: (patch: unknown) => invoke(IpcChannel.settingsWrite, patch),
       notificationsProbe: () => invoke(IpcChannel.notificationsProbe),
       pluginStatus: () => invoke(IpcChannel.pluginStatus),

@@ -50,4 +50,22 @@ describe("outbound error reports", () => {
     const event = { type: undefined, exception: { values: [{ type: "TypeError", value: "x of /Users/me" }] } } as unknown as ErrorEvent;
     expect(sanitizeErrorEvent(event).exception?.values?.[0]).toEqual({ type: "TypeError", value: "[redacted]" });
   });
+
+  it("keeps the CLI's own locations and drops its checkout path, host and port", () => {
+    const frame = (filename: string) => ({ exception: { values: [{ type: "Error", stacktrace: { frames: [{ filename }] } }] } }) as unknown as ErrorEvent;
+    const located = (filename: string) => sanitizeErrorEvent(frame(filename)).exception?.values?.[0].stacktrace?.frames?.[0].filename;
+    expect(located("/home/someone/src/anthill/apps/cli/out/cli/src/bridge.js")).toBe("app:///cli/cli/src/bridge.js");
+    expect(located("http://192.168.1.20:4173/assets/index-Ab12.js")).toBe("app:///cli/renderer/assets/index-Ab12.js");
+    expect(located("/home/someone/src/anthill/apps/cli/out/node_modules/x/index.js")).toBe("[external]");
+    expect(located("http://127.0.0.1:4173/private/workflow.json")).toBe("[external]");
+  });
+
+  it("cuts an oversized report instead of sending it whole", () => {
+    const frames = Array.from({ length: 500 }, (_, i) => ({ filename: "out/main/index.js", lineno: i }));
+    const values = Array.from({ length: 20 }, () => ({ type: "Error", stacktrace: { frames } }));
+    const clean = sanitizeErrorEvent({ exception: { values } } as unknown as ErrorEvent);
+    expect(clean.exception?.values).toHaveLength(5);
+    expect(clean.exception?.values?.[0].stacktrace?.frames).toHaveLength(100);
+    expect(clean.exception?.values?.[0].stacktrace?.frames?.at(-1)?.lineno).toBe(499);
+  });
 });

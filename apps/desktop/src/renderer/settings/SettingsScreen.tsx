@@ -190,12 +190,18 @@ export function PrivacyPage({ available = __ANTHILL_DIAGNOSTICS__ }: { available
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [busy, setBusy] = useState(false);
   const [unsaved, setUnsaved] = useState(false);
+  // The CLI serves this page to a browser: there is no Electron to dump.
+  const [cli, setCli] = useState(false);
 
   useEffect(() => {
     let live = true;
     void window.anthill.settingsRead().then(
       (value) => { if (live) setSettings(value); },
       () => { if (live) setSettings({ ...ALL_OFF }); },
+    );
+    void window.anthill.capabilities?.().then(
+      (capabilities) => { if (live) setCli(capabilities.shell === "cli"); },
+      () => undefined,
     );
     return () => { live = false; };
   }, []);
@@ -215,9 +221,11 @@ export function PrivacyPage({ available = __ANTHILL_DIAGNOSTICS__ }: { available
   return (
     <SettingGroup
       title="Optional diagnostics"
-      footer={available
-        ? "All sharing is off until you turn it on. The CLI and development builds do not send diagnostics."
-        : "This build never sends diagnostics. Only the released macOS app can, and only after you turn them on."}
+      footer={!available
+        ? "This build never sends diagnostics. Only the released macOS app and the Anthill CLI can, and only after you turn them on."
+        : cli
+          ? "All sharing is off until you turn it on. Reports leave from the Anthill CLI process, never from this page."
+          : "All sharing is off until you turn it on. Development builds do not send diagnostics."}
     >
       <SettingRow
         label="Anonymous product analytics"
@@ -242,18 +250,22 @@ export function PrivacyPage({ available = __ANTHILL_DIAGNOSTICS__ }: { available
           onChange={(next) => void set("errorReportingEnabled", next)}
         />
       </SettingRow>
-      <SettingDivider />
-      <SettingRow
-        label="Native crash reports"
-        note="Separately allows Electron memory dumps to be sent after a crash. A dump may contain private text or credentials from memory. Requires JavaScript error reports and a restart."
-      >
-        <SettingSwitch
-          on={settings?.nativeCrashReportingEnabled === true}
-          label="Native crash reports"
-          disabled={!available || settings === null || busy || !settings.errorReportingEnabled}
-          onChange={(next) => void set("nativeCrashReportingEnabled", next)}
-        />
-      </SettingRow>
+      {cli ? null : (
+        <>
+          <SettingDivider />
+          <SettingRow
+            label="Native crash reports"
+            note="Separately allows Electron memory dumps to be sent after a crash. A dump may contain private text or credentials from memory. Requires JavaScript error reports and a restart."
+          >
+            <SettingSwitch
+              on={settings?.nativeCrashReportingEnabled === true}
+              label="Native crash reports"
+              disabled={!available || settings === null || busy || !settings.errorReportingEnabled}
+              onChange={(next) => void set("nativeCrashReportingEnabled", next)}
+            />
+          </SettingRow>
+        </>
+      )}
       {unsaved ? <p className="set-result" role="alert">This preference was not saved.</p> : null}
     </SettingGroup>
   );

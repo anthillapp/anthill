@@ -73,7 +73,8 @@ import { pluginStatus } from "./plugin-status.js";
 import { devCheckout, INSTALL_GUIDES, installPlugin, pluginConnections, type Harness } from "./plugin-connect.js";
 import { SettingsStore, reportingConsentOnDisk } from "./settings.js";
 import { DesktopAnalytics } from "./analytics.js";
-import { sanitizeErrorEvent } from "../shared/error-reporting.js";
+import { SENTRY_DSN, sanitizeErrorEvent } from "../shared/error-reporting.js";
+import { writeSettingsWithConsent, type ReportingGate } from "./diagnostics-consent.js";
 import * as Sentry from "@sentry/electron/main";
 import { claimScheme } from "./url-scheme.js";
 import { PendingRunStore } from "./live/store.js";
@@ -93,14 +94,14 @@ import {
 // a `--data-dir` this build will not accept, or one the filesystem will not
 // create, threw out of module evaluation with these handlers six lines beneath
 // it and no window anywhere, and the app died without printing a word.
-let reportErrorsAllowed = false;
+const reporting: ReportingGate = { errors: false, nativeCrashes: false };
 process.on("uncaughtException", (error) => {
   console.error("[anthill] uncaught exception:", error);
-  if (reportErrorsAllowed) Sentry.captureException(error);
+  if (reporting.errors) Sentry.captureException(error);
 });
 process.on("unhandledRejection", (reason) => {
   console.error("[anthill] unhandled rejection:", reason);
-  if (reportErrorsAllowed) Sentry.captureException(reason instanceof Error ? reason : new Error("Unhandled rejection"));
+  if (reporting.errors) Sentry.captureException(reason instanceof Error ? reason : new Error("Unhandled rejection"));
 });
 
 /**
@@ -137,11 +138,10 @@ const diagnosticsAvailable = __ANTHILL_DIAGNOSTICS__ && app.isPackaged && proces
 const analytics = new DesktopAnalytics(USER_DATA_DIR, diagnosticsAvailable);
 const launchConsent = reportingConsentOnDisk(join(USER_DATA_DIR, "settings.json"));
 let reportErrorsAtLaunch = false;
-let nativeCrashAllowed = launchConsent.nativeCrashReportingEnabled;
 if (diagnosticsAvailable && launchConsent.errorReportingEnabled) {
   try {
     Sentry.init({
-      dsn: "https://0d9d9c4af97fd9088c38cf794e2ef71d@o4512154362183680.ingest.us.sentry.io/4512154370834432",
+      dsn: SENTRY_DSN,
       ipcMode: Sentry.IPCMode.Classic,
       defaultIntegrations: launchConsent.nativeCrashReportingEnabled
         ? [Sentry.sentryMinidumpIntegration()]
@@ -162,11 +162,12 @@ if (diagnosticsAvailable && launchConsent.errorReportingEnabled) {
         stackFrameVariables: false,
         frameContextLines: 0,
       },
-      beforeSend: (event) => reportErrorsAllowed && (event.platform !== "native" || nativeCrashAllowed)
+      beforeSend: (event) => reporting.errors && (event.platform !== "native" || reporting.nativeCrashes)
         ? sanitizeErrorEvent(event)
         : null,
     });
-    reportErrorsAllowed = true;
+    reporting.errors = true;
+    reporting.nativeCrashes = launchConsent.nativeCrashReportingEnabled;
     reportErrorsAtLaunch = true;
   } catch (error) {
     console.error("[anthill] error reporting could not start:", error);
@@ -1355,39 +1356,12 @@ function registerIpcHandlers(): void {
     if (url) await shell.openExternal(url);
   });
   handle(IpcChannel.settingsRead, async () => settings().read());
-  handle(IpcChannel.settingsWrite, async (_event, patch: Partial<AppSettings>) => {
-    const previous = await settings().read();
-    const requested = { ...patch };
-    if (requested.errorReportingEnabled === false) requested.nativeCrashReportingEnabled = false;
-    if (requested.nativeCrashReportingEnabled === true && !(requested.errorReportingEnabled ?? previous.errorReportingEnabled)) {
-      requested.nativeCrashReportingEnabled = false;
-    }
-    if (requested.analyticsEnabled === false && previous.analyticsEnabled) await analytics.disable();
-    let next: AppSettings;
-    try {
-      next = await settings().write(requested);
-    } catch (error) {
-      if (previous.analyticsEnabled) await analytics.enable().catch(() => undefined);
-      throw error;
-    }
-    if (next.analyticsEnabled && !previous.analyticsEnabled) {
-      try {
-        await analytics.enable();
-        analytics.capture("analytics_enabled");
-      } catch (error) {
-        await settings().write({ analyticsEnabled: false });
-        throw error;
-      }
-    }
-    if (previous.nativeCrashReportingEnabled && !next.nativeCrashReportingEnabled) {
-      nativeCrashAllowed = false;
-    }
-    if (previous.errorReportingEnabled && !next.errorReportingEnabled) {
-      reportErrorsAllowed = false;
-      nativeCrashAllowed = false;
-    }
-    return next;
-  });
+  handle(IpcChannel.settingsWrite, async (_event, patch: Partial<AppSettings>) =>
+    writeSettingsWithConsent(settings(), analytics, reporting, patch ?? {}, { nativeCrashes: true }),
+  );
+  // The CLI's browser page forwards its errors; the desktop renderer reports
+  // through Sentry's own IPC, so there is nothing to do here.
+  handle(IpcChannel.diagnosticsRendererError, async () => undefined);
   // Sent on demand, because "are notifications allowed" has no answer to read:
   // the author is being asked to look at their own screen.
   handle(IpcChannel.notificationsProbe, async () =>

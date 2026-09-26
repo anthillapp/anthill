@@ -26,6 +26,7 @@
     "@anthill/workflow-exchange": "*",
     "@anthill/workflow-schema": "*",
     "@anthill/workspace": "*",
+    "@sentry/browser": "10.75.0",
     "@sentry/electron": "~7.20.0",
     "better-sqlite3": "^11.5.0",
     "posthog-node": "~5.54.1"

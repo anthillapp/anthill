@@ -60,6 +60,12 @@ type FileState = {
   completedAt?: string;
   reportedComplete: boolean;
   failure?: string;
+  /**
+   * The last step announced in this file, and where it was read: the reply
+   * text, or the output of a command the session ran. The same announcement
+   * seen in both places is one announcement, not a second pass (ANT-147).
+   */
+  lastStep?: { blockId: string; from: "reply" | "command" };
 };
 
 export class CodexObserver implements LiveSessionObserver {
@@ -344,6 +350,42 @@ function messageText(payload: Record<string, unknown>): string {
 }
 
 /**
+ * The text a tool call gave back. `function_call_output` carries a string;
+ * `custom_tool_call_output` carries an array of `{ type, text }` parts, and
+ * the exec tool nests the command's own stdout as JSON inside one of them.
+ * The markers are searched as text, so the JSON escapes are undone first.
+ */
+function outputText(output: unknown): string {
+  const parts = typeof output === "string"
+    ? [output]
+    : Array.isArray(output)
+      ? output.map((part) => (isRecord(part) ? str(part.text) : undefined)).filter((text): text is string => text !== undefined)
+      : isRecord(output) && str(output.content) ? [str(output.content) as string] : [];
+  return parts.join("\n").replace(/\\n/g, "\n").replace(/\\t/g, "\t");
+}
+
+/**
+ * Every step the text announces, as events. An announcement repeated from the
+ * other place — printed by a command and then echoed in the reply, or the
+ * reverse — is dropped, because the metrics count each announcement as a new
+ * pass of the step and a loop must not appear where none happened.
+ */
+function announceSteps(
+  text: string,
+  from: "reply" | "command",
+  state: FileState,
+  marker: { runId: string; nonce: string },
+  base: Omit<ObservationEventDraft, "kind" | "title">,
+  events: ObservationEventDraft[],
+): void {
+  for (const blockId of parseStepMarkers(text, marker)) {
+    if (state.lastStep?.blockId === blockId && state.lastStep.from !== from) continue;
+    state.lastStep = { blockId, from };
+    events.push({ ...base, kind: "step.marker", title: "Step announced", detail: blockId, blockId });
+  }
+}
+
+/**
  * Read only what matters: the session id, the user's message, any step the
  * agent announced, tool calls, the turn-completion record, and errors.
  */
@@ -428,15 +470,7 @@ function scan(
       }
       if (payload.role === "assistant") {
         const text = messageText(payload);
-        for (const blockId of parseStepMarkers(text, marker)) {
-          events.push({
-            ...base,
-            kind: "step.marker",
-            title: "Step announced",
-            detail: blockId,
-            blockId,
-          });
-        }
+        announceSteps(text, "reply", state, marker, base, events);
         // And one cut-down line of what it said. Codex writes its reasoning to
         // a different record type entirely, which this branch never sees.
         const said = messageExcerpt(text, marker);
@@ -474,6 +508,12 @@ function scan(
           title: "Tool finished",
           ...(str(payload.call_id) ? { toolUseId: str(payload.call_id) as string } : {}),
         });
+        // Asked to "print" a marker, an agent whose only way to print is a
+        // shell prints it with one: Codex Desktop writes `printf 'ANTHILL-STEP
+        // …'`, and the line exists only in the command's output (ANT-147).
+        // Only the output is read — the command itself merely names the line,
+        // and a command that fails to print it has not announced anything.
+        announceSteps(outputText(payload.output), "command", state, marker, base, events);
       }
       continue;
     }

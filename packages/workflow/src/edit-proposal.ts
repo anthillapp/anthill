@@ -32,6 +32,7 @@ import { WorkflowSchema } from "@anthill/workflow-schema";
 
 import { nextIdFor, rememberIds } from "./id-counter.js";
 import { addAgentProfile, agentProfiles } from "./agents.js";
+import { ACTION_KINDS, DEFAULT_ACTION_KIND } from "./actions.js";
 
 /** The version this module writes and the only one it accepts. */
 export const EDIT_PROPOSAL_VERSION = 1;
@@ -508,7 +509,7 @@ export function applyEditProposal(workflow: Workflow, proposal: EditProposal): E
           id,
           type: op.blockType,
           name: op.name,
-          config: assigned.config ?? (op.blockType === "agent" ? { actionKind: "agent-step" } : {}),
+          config: op.blockType === "agent" ? withAction(assigned.config) : (assigned.config ?? {}),
           ...(position ? { position } : {}),
         };
         nodes.push(node);
@@ -523,7 +524,10 @@ export function applyEditProposal(workflow: Workflow, proposal: EditProposal): E
         if (op.config) {
           const assigned = withAgentRef(op.config);
           if (!assigned.ok) return assigned;
-          node.config = { ...node.config, ...assigned.config };
+          // An action the catalogue does not know does not overwrite the one
+          // the step has; it would only turn a valid step into a broken one.
+          const { actionKind, ...rest } = assigned.config ?? {};
+          node.config = { ...node.config, ...rest, ...(isActionKind(actionKind) ? { actionKind } : {}) };
         }
         changes.push({ kind: "block-updated", id: node.id, name: node.name });
         break;
@@ -597,6 +601,12 @@ export function applyEditProposal(workflow: Workflow, proposal: EditProposal): E
     }
   }
 
+  keepEndLast(
+    nodes,
+    edges,
+    new Set(changes.flatMap((change) => (change.kind === "block-added" ? [change.id] : []))),
+  );
+
   // Every id this application issued is remembered, so a block the author
   // deletes afterwards does not hand its number back out.
   const next: Workflow = rememberIds(
@@ -620,6 +630,44 @@ export function applyEditProposal(workflow: Workflow, proposal: EditProposal): E
     };
   }
   return { ok: true, workflow: next, changes };
+}
+
+const isActionKind = (value: unknown): value is string =>
+  typeof value === "string" && (ACTION_KINDS as readonly string[]).includes(value);
+
+/**
+ * An agent block's config with an action it can validate with.
+ *
+ * An interpreter that sends `agentId` and `task` but no `actionKind` — or one
+ * the catalogue does not have — used to produce a step that failed with
+ * STEP_MISSING_ACTION the moment it was applied, and the proposal the author
+ * accepted as offered left Prompt disabled (ANT-149). The generic step is what
+ * a draft falls back to for the same reason (`draft-mapping`), and what a new
+ * block gets when nobody has chosen.
+ */
+function withAction(config: Record<string, unknown> | undefined): Record<string, unknown> {
+  const base = config ?? {};
+  return isActionKind(base.actionKind) ? base : { ...base, actionKind: DEFAULT_ACTION_KIND };
+}
+
+/**
+ * Keep End at the end.
+ *
+ * A block appended after the last step lands to the right of everything —
+ * including End, which it now leads into — so the diagram read Start … End …
+ * new step, with the connection into End running backwards across it
+ * (ANT-149). An End that a new block leads into moves past the new blocks.
+ */
+function keepEndLast(nodes: WorkflowNode[], edges: readonly WorkflowEdge[], added: ReadonlySet<string>): void {
+  for (const end of nodes) {
+    if (end.type !== "end" || !end.position) continue;
+    const fedByNew = edges.some((edge) => edge.target === end.id && added.has(edge.source));
+    if (!fedByNew) continue;
+    const others = nodes.filter((node) => node.id !== end.id);
+    const right = furthestRight(others);
+    if (!right || right.x < end.position.x) continue;
+    end.position = { x: right.x + BLOCK_W + GAP, y: end.position.y };
+  }
 }
 
 function furthestRight(nodes: readonly WorkflowNode[]): { x: number; y: number } | undefined {

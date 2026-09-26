@@ -130,8 +130,9 @@ npm run dev:desktop
 ```
 
 This builds every workspace package and then opens the Electron window. Expect
-about a minute the first time. The window is the Anthill launcher: the app mark
-and three ways to start on the left, your workflows and agents on the right.
+about a minute the first time. The window is the Anthill launcher: the app mark,
+three ways to start and a fourth for a workflow a coding session hands over on
+the left, your workflows and agents on the right.
 
 Development uses a separate application profile. On macOS, its data lives in
 `~/Library/Application Support/@anthill/desktop-dev`; the installed application

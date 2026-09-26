@@ -1,5 +1,6 @@
 /**
- * The first screen: what you already have, and three ways to start.
+ * The first screen: what you already have, three ways to start, and the one
+ * way a workflow arrives on its own — from a coding session.
  *
  * It replaces a mode picker that asked the author to choose between a finished
  * mode and an unfinished one — which is not a choice — and hid the thing they
@@ -43,6 +44,8 @@ export type LaunchWindowProps = {
   onOpenLive?: (path: string, run: PendingRun) => void;
   /** Open the explainer screen. */
   onExplain: () => void;
+  /** How a Claude Code or Codex session hands a workflow over. */
+  onFromSession: () => void;
   onSettings: () => void;
 };
 
@@ -112,6 +115,7 @@ export function LaunchWindow({
   onOpen,
   onOpenLive,
   onExplain,
+  onFromSession,
   onSettings,
 }: LaunchWindowProps) {
   /**
@@ -373,6 +377,7 @@ export function LaunchWindow({
             onFromPrompt={onFromPrompt}
             onOpen={onOpen}
             onExplain={onExplain}
+            onFromSession={onFromSession}
             onSettings={onSettings}
           />
         )}
@@ -522,12 +527,14 @@ function LaunchIntro({
   onFromPrompt,
   onOpen,
   onExplain,
+  onFromSession,
   onSettings,
 }: {
   onNewWorkflow: () => void;
   onFromPrompt: () => void;
   onOpen: (path?: string) => void;
   onExplain: () => void;
+  onFromSession: () => void;
   onSettings: () => void;
 }) {
   /*
@@ -580,8 +587,7 @@ function LaunchIntro({
         {import.meta.env.DEV ? <span className="launch-dev">dev build</span> : null}
       </p>
       <p className="launch-blurb">
-        Design a workflow for AI coding agents, then hand the workflow to the agent
-        that carries it out.
+        Design a workflow, hand it to your agent, and follow its progress.
       </p>
 
       <div className="launch-actions">
@@ -603,6 +609,15 @@ function LaunchIntro({
           subtitle="A .workflow.json file on this machine"
           onClick={() => void onChooseFile()}
         />
+        {/* Dashed, and with an arrow: the other three are things you start
+            here, and this one is something that arrives from elsewhere. */}
+        <LaunchAction
+          glyph="⌘"
+          title="From a Coding Session"
+          subtitle="Let Claude Code or Codex hand one over"
+          arrives
+          onClick={onFromSession}
+        />
       </div>
 
       {/* Two doors, side by side: what this is, and how it behaves. Settings
@@ -616,8 +631,6 @@ function LaunchIntro({
           Settings
         </button>
       </div>
-
-      <p className="launch-foot">Turn an idea into a workflow</p>
 
       {pickerCandidates && (
         <WorkflowPicker
@@ -753,20 +766,28 @@ function LaunchAction({
   glyph,
   title,
   subtitle,
+  arrives = false,
   onClick,
 }: {
   glyph: string;
   title: string;
   subtitle: string;
+  /** Something that comes from outside Anthill rather than starting here. */
+  arrives?: boolean;
   onClick: () => void;
 }) {
   return (
-    <button className="launch-action" onClick={onClick}>
+    <button className={`launch-action${arrives ? " is-arriving" : ""}`} onClick={onClick}>
       <i aria-hidden="true">{glyph}</i>
       <span>
         <span className="launch-action-title">{title}</span>
         <span className="launch-action-sub">{subtitle}</span>
       </span>
+      {arrives ? (
+        <span className="launch-action-go" aria-hidden="true">
+          →
+        </span>
+      ) : null}
     </button>
   );
 }

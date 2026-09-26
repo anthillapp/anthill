@@ -2801,16 +2801,15 @@ button.link.clarify-skip:hover {
   color: var(--ink-dim);
 }
 
-.launch-foot {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 20px;
-  margin: 0;
-  text-align: center;
-  font-size: 11.5px;
-  color: #bab6b6;
+/* The row for a workflow that arrives rather than starts here: dashed tile,
+   and an arrow, because it leads somewhere that explains the rest. */
+.launch-action.is-arriving > i {
+  border-style: dashed;
+  border-color: #cfcaca;
+  font-size: 13px;
 }
+.launch-action.is-arriving > span:not(.launch-action-go) { flex: 1; }
+.launch-action-go { flex: none; font-size: 11px; line-height: 1; color: var(--ink-dim); }
 
 .launch-right {
   flex: 1;
@@ -6449,140 +6448,88 @@ button.state-chip {
   color: var(--ink-2);
 }
 
-/* ------------------------------------------------------------------ */
-/* The step list                                                       */
-/*                                                                     */
-/* A real button per step, because the list is the navigation. The      */
-/* active row carries `aria-current="step"`; the accent rule and the    */
-/* darker title are the visual half of that same fact, never the only   */
-/* half.                                                               */
-/* ------------------------------------------------------------------ */
-
-.how-steps {
-  display: flex;
-  flex-direction: column;
-  margin-top: 30px;
-}
-
-.how-step {
-  display: flex;
-  gap: 15px;
-  width: 100%;
-  padding: 17px 14px 17px 12px;
-  background: transparent;
-  cursor: pointer;
-  font: inherit;
-  border: 0;
-  border-radius: 0;
-  border-top: 1px solid var(--border);
-  border-left: 2px solid transparent;
-}
-
-.how-step:hover {
-  background: var(--row-hover);
-}
-
-.how-step[aria-current="step"] {
-  border-left-color: var(--accent);
-}
-
-.how-step-no {
-  width: 22px;
-  flex: none;
-  padding-top: 3px;
-  font-size: 13px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-quiet);
-}
-
-.how-step[aria-current="step"] .how-step-no {
-  color: var(--accent-700);
-}
-
-.how-step-text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  text-align: left;
-}
-
-.how-step-title {
-  font-size: 16.5px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--ink-2);
-}
-
-.how-step[aria-current="step"] .how-step-title {
-  color: var(--ink);
-}
-
-.how-step-body {
-  font-size: 13.5px;
-  line-height: 1.7;
-  color: var(--ink-3);
-}
-
-/* The same choice again, under the illustration, for a reader whose eye is on
-   the left pane. */
-.how-dots {
+/* Above and below the scene: what the path looks like from outside Anthill. */
+.how-slot {
+  width: 400px;
+  height: 40px;
+  margin-bottom: 16px;
   display: flex;
   align-items: center;
-  gap: 7px;
-  margin-top: 26px;
 }
-
-.how-dot {
-  width: 7px;
-  height: 7px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  cursor: pointer;
-  background: var(--field-border);
-}
-
-.how-dot[aria-current="step"] {
-  background: var(--accent);
-}
-
-/* Neutral, not red: this is how the product works, not a warning. */
-.how-boundary {
-  margin-top: 30px;
-  padding: 19px 21px;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--ink-quiet);
-  border-radius: var(--radius-slab);
-  background: var(--canvas);
-}
-
-.how-boundary h2 {
-  margin: 0 0 10px;
-  font-size: 15px;
+.how-slot.is-below { margin: 16px 0 0; }
+.how-caption {
+  font-size: 12px;
   font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
 }
+.how-prompt {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #17171b;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #ecebf0;
+}
+.how-prompt .dim { color: #7a7884; }
+.how-prompt b { font-weight: 600; color: #d97757; }
+.how-copybar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 12.5px;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+.how-copybar .chip { padding: 3px 10px; border-radius: 6px; background: var(--accent); font-weight: 600; color: #fff; }
 
-.how-boundary p {
-  margin: 0 0 11px;
-  font-size: 13.5px;
-  line-height: 1.7;
+/* The two ways in. Choosing one takes the accent border, once. */
+.how-paths { display: flex; flex-direction: column; gap: 12px; margin-top: 26px; }
+.how-path {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 18px 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.how-path.is-current { border-color: var(--accent-300); box-shadow: 0 8px 22px rgba(236, 48, 19, 0.08); }
+.how-path-head { display: flex; align-items: center; gap: 8px; }
+.how-path h2 { margin: 0; font-size: 15.5px; font-weight: 700; letter-spacing: -0.01em; }
+.how-path-tag {
+  flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--chip);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
   color: var(--ink-3);
 }
-
-.how-boundary p:last-child {
-  margin: 0;
-  font-size: 13px;
-}
+.how-path-tag.is-recommended { background: var(--accent-100); color: var(--accent-700); }
+.how-path p { margin: 0; font-size: 13.5px; line-height: 1.65; color: var(--ink-3); text-wrap: pretty; }
+.how-path > button { align-self: flex-start; padding: 9px 15px; font-size: 13px; font-weight: 600; }
+.how-foot { margin: 18px 0 0; font-size: 13px; line-height: 1.65; color: var(--ink-dim); }
 
 .how-actions {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 28px;
+  margin-top: 24px;
 }
+.how-actions > button { padding: 10px 15px; font-size: 13.5px; }
 
 /* ------------------------------------------------------------------ */
 /* The illustration's card — the canvas's own shape                    */
@@ -6723,114 +6670,6 @@ button.state-chip {
 }
 
 /* ------------------------------------------------------------------ */
-/* Scene 2 — the prompt, the pill, and the window you start yourself   */
-/* ------------------------------------------------------------------ */
-
-.ex-sheet {
-  position: absolute;
-  left: 14px;
-  top: 34px;
-  width: 186px;
-  height: 222px;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 14px 15px;
-  border-radius: var(--radius-slab);
-  background: var(--surface);
-  border: 1px solid var(--field-border);
-  box-shadow: var(--shadow-card);
-}
-
-.ex-line {
-  height: 5px;
-  border-radius: 3px;
-  background: #f0eeee;
-}
-
-.ex-line.is-dim {
-  background: rgba(255, 255, 255, 0.07);
-}
-
-.ex-line.is-typed {
-  width: 70%;
-  background: var(--ink-3);
-}
-
-.ex-marker {
-  margin-top: auto;
-  font-family: var(--mono);
-  font-size: 9.5px;
-  color: var(--ink-3);
-}
-
-/* It travels to the window and fades. A pill parked on that window would read
-   as "started", which is the one thing this screen exists to deny. */
-.ex-copied {
-  position: absolute;
-  left: 150px;
-  top: 126px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 11px;
-  border-radius: 999px;
-  background: var(--ink);
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-  color: var(--on-dark);
-}
-
-.ex-cli {
-  position: absolute;
-  left: 228px;
-  top: 74px;
-  width: 158px;
-  height: 142px;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 13px 14px;
-  border-radius: var(--radius-slab);
-  background: var(--chrome-panel);
-  border: 1px solid var(--ink);
-}
-
-/* On the dark card the labels go the other way: light enough to read on it. */
-.ex-cli-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ink-quiet);
-}
-
-.ex-cli-logo {
-  width: 14px;
-  height: 14px;
-  flex: none;
-  border-radius: 4px;
-  background-size: contain;
-  background-repeat: no-repeat;
-  background-position: center;
-}
-
-.ex-cli-foot {
-  margin-top: auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10.5px;
-  color: var(--ink-quiet);
-}
-
-/* ------------------------------------------------------------------ */
 /* Motion                                                              */
 /*                                                                     */
 /* Each scene mounts fresh when the step changes, so the entrances run  */
@@ -6860,34 +6699,6 @@ button.state-chip {
   to {
     stroke-dashoffset: 0;
     opacity: 1;
-  }
-}
-
-@keyframes ex-fly {
-  0% {
-    opacity: 0;
-    transform: translate(0, 0) scale(0.9);
-  }
-  22% {
-    opacity: 1;
-    transform: translate(0, 0) scale(1);
-  }
-  70% {
-    opacity: 1;
-    transform: translate(96px, -34px) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(96px, -34px) scale(0.94);
-  }
-}
-
-@keyframes ex-type {
-  from {
-    width: 0;
-  }
-  to {
-    width: 70%;
   }
 }
 
@@ -6942,14 +6753,6 @@ button.state-chip {
   animation-delay: 1020ms;
 }
 
-.ex-fly {
-  animation: ex-fly 2.6s ease-in-out 700ms infinite both;
-}
-
-.ex-type {
-  animation: ex-type 1.6s ease-in-out 1.2s infinite alternate both;
-}
-
 .live-flow {
   animation: ex-flow 1s linear infinite;
 }
@@ -6967,8 +6770,6 @@ button.state-chip {
 @media (prefers-reduced-motion: reduce) {
   .ex-node,
   .ex-edge,
-  .ex-fly,
-  .ex-type,
   .live-flow,
   .live-bar {
     animation: none !important;
@@ -8897,3 +8698,320 @@ button.presence-chip {
 .tier-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: #fff; }
 .tier-chip:disabled { opacity: 0.45; cursor: default; }
 .tier-bar-note { font-size: 11.5px; color: var(--ink-dim); }
+
+/* ------------------------------------------------------------------ */
+/* The plugin card: one tool, where it stands, one thing to do          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Drawn on Onboarding and on From a session. Green is earned: the border and
+ * the badge go green only for `is-ready`, which means the installed plugin's
+ * server answered — never for an install record, a click, or a listing.
+ */
+.plugin-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 168px;
+  padding: 18px 18px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.plugin-card.is-ready { border-color: #cfe6d8; }
+.plugin-card-head { display: flex; align-items: center; gap: 11px; }
+.plugin-card-logo {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--canvas);
+  background-size: 22px 22px;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.plugin-card.is-missing .plugin-card-logo { opacity: 0.55; filter: grayscale(1); }
+.plugin-card-name { flex: 1; min-width: 0; font-size: 16px; font-weight: 600; }
+.plugin-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--chip);
+  color: var(--ink-3);
+}
+.plugin-badge > i { width: 6px; height: 6px; flex: none; display: block; border-radius: 50%; background: currentColor; }
+.plugin-badge.is-missing,
+.plugin-badge.is-checking { color: var(--ink-dim); }
+.plugin-badge.is-installing { background: #eaf4fb; color: #2f6d99; }
+.plugin-badge.is-reload { background: #f7ecd0; color: #8a6a08; }
+.plugin-badge.is-ready { background: #e6f3ec; color: #2f6b48; }
+.plugin-badge.is-failed,
+.plugin-badge.is-silent { background: var(--accent-100); color: var(--accent-700); }
+.plugin-card-note { margin: 0; min-height: 40px; font-size: 13px; line-height: 1.55; color: var(--ink-3); }
+.plugin-card-detail {
+  margin: -6px 0 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  color: var(--ink-dim);
+}
+.plugin-card-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: auto; }
+.plugin-card-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 15px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #fff;
+}
+.plugin-card-btn:hover:not(:disabled) { background: var(--accent-600); }
+.plugin-card-btn.is-outlined { border: 1px solid var(--field-border); background: var(--surface); color: var(--ink-2); }
+.plugin-card-btn.is-outlined:hover { background: var(--row-hover); }
+.plugin-card-btn.is-busy,
+.plugin-card-btn.is-busy:disabled { background: var(--border); color: var(--ink-dim); opacity: 1; cursor: progress; }
+.plugin-spin { display: inline-block; margin-right: 7px; animation: plugin-spin 0.9s linear infinite; }
+@keyframes plugin-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .plugin-spin { animation: none; } }
+
+/* ------------------------------------------------------------------ */
+/* From a coding session                                                */
+/* ------------------------------------------------------------------ */
+
+.from-session { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--canvas); }
+.from-session-bar {
+  height: 52px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 20px;
+  background: var(--chrome-bar);
+  color: var(--on-dark);
+}
+.from-session-bar .icon-button {
+  border-color: var(--dark-border);
+  background: transparent;
+  color: var(--on-dark-2);
+}
+.from-session-bar .icon-button:hover { background: rgba(255, 255, 255, 0.1); }
+.from-session-title { font-size: 14px; font-weight: 600; white-space: nowrap; }
+.from-session-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 34px 24px 44px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.from-session-inner { width: 760px; max-width: 100%; display: flex; flex-direction: column; gap: 20px; }
+.from-session h1 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -0.025em; }
+.from-session-lede { margin: 12px 0 0; font-size: 14.5px; line-height: 1.65; color: var(--ink-2); text-wrap: pretty; }
+.from-session-note { margin: 10px 0 0; font-size: 13px; line-height: 1.65; color: var(--ink-dim); }
+.from-session-tabs { display: flex; gap: 3px; padding: 3px; border-radius: 9px; background: #efeded; }
+.from-session-tabs > button {
+  flex: 1;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 13px;
+  color: #7d7979;
+}
+.from-session-tabs > button[aria-pressed="true"] {
+  background: var(--surface);
+  font-weight: 600;
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(32, 30, 29, 0.1);
+}
+.from-session-step { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
+.from-session-step .no { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); }
+.from-session-step h2 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.from-session-step > i { flex: 1; height: 1px; background: var(--border); }
+.from-session-step-lede { margin: -8px 0 0; font-size: 13px; line-height: 1.65; color: var(--ink-3); }
+.from-session-surface { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12.5px; line-height: 1.55; color: var(--ink-3); }
+.segmented { display: inline-flex; gap: 3px; padding: 3px; border-radius: 9px; background: #efeded; }
+.segmented > button {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 12.5px;
+  color: #7d7979;
+}
+.segmented > button[aria-pressed="true"] {
+  background: var(--surface);
+  font-weight: 600;
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(32, 30, 29, 0.1);
+}
+.from-session-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.from-session-modes > div {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.from-session-modes strong { font-size: 14px; }
+.from-session-modes code {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: var(--chip);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.from-session-modes span { font-size: 13px; line-height: 1.6; color: var(--ink-3); }
+.from-session-after { padding: 18px 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.from-session-kicker {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.from-session-after ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.from-session-after li { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.6; color: var(--ink-2); }
+.from-session-after li > i { width: 7px; height: 7px; flex: none; margin-top: 7px; border-radius: 2px; background: #7d7979; }
+.from-session-after li > i.is-ok { background: #2f8f5f; }
+.from-session-after li > i.is-wait { background: #d8a21a; }
+.from-session-foot { margin: 0; font-size: 12.5px; line-height: 1.7; color: var(--ink-dim); }
+
+/* The typed request. Hidden from assistive tech; the line above says it. */
+.fs-demo {
+  position: relative;
+  min-height: 250px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: #17171b;
+  box-shadow: 0 14px 34px rgba(32, 30, 29, 0.22);
+}
+.fs-demo-head { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; font-size: 12.5px; font-weight: 600; color: #c9c7ce; }
+.fs-demo-head > i {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 5px;
+  background-color: var(--canvas);
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.fs-demo-head .spacer { flex: 1; }
+.fs-demo-meta { font-family: var(--mono); font-size: 11.5px; font-weight: 400; color: #7a7884; }
+.fs-demo-term,
+.fs-demo-composer {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.8;
+  color: #ecebf0;
+}
+.fs-demo-term { padding: 12px 14px; border: 1px solid #3a3a44; border-radius: 10px; background: #101013; }
+.fs-demo-composer { padding: 14px 15px; border: 1px solid #3a3a44; border-radius: 12px; background: #23232a; line-height: 1.75; }
+.fs-demo-composer.is-claude { min-height: 84px; border-radius: 14px; }
+.fs-demo .line { display: flex; align-items: center; flex-wrap: nowrap; }
+.fs-demo .dim { color: #7a7884; }
+.fs-demo-chip { display: inline-flex; align-items: center; gap: 6px; font-family: inherit; font-weight: 600; color: #f0775f; }
+.fs-demo-chip-mark {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 4px;
+  background: #0b0b0e;
+  color: #f4f1ee;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.fs-demo-chip-mark.is-large { width: 20px; height: 20px; border-radius: 5px; }
+.fs-demo-menu {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: 132px;
+  z-index: 2;
+  padding: 6px;
+  border: 1px solid #3a3a44;
+  border-radius: 12px;
+  background: #2a2a32;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+.fs-demo-menu > div { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; background: #3a3a46; }
+.fs-demo-menu strong { font-size: 13px; color: #ecebf0; }
+.fs-demo-menu span { font-size: 12px; color: #9b99a6; }
+.fs-demo-result {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-top: 12px;
+  padding: 11px 13px;
+  border-radius: 10px;
+  background: var(--canvas);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.fs-demo-result > span:first-of-type { flex: 1; min-width: 0; }
+.fs-demo-review {
+  flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--accent-100);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-700);
+}
+
+/* One 10s loop: the task types, then the command, then the result arrives. */
+.fs-cut { display: inline-block; overflow: hidden; white-space: nowrap; vertical-align: bottom; }
+@keyframes fs-pre { 0%, 2% { opacity: 0; } 5%, 100% { opacity: 1; } }
+@keyframes fs-pre2 { 0%, 8% { opacity: 0; } 11%, 100% { opacity: 1; } }
+@keyframes fs-ta { 0%, 14% { width: 0; } 46%, 100% { width: var(--n, 0ch); } }
+@keyframes fs-tb { 0%, 50% { width: 0; } 58%, 100% { width: var(--n, 0ch); } }
+@keyframes fs-tc { 0%, 62% { width: 0; } 67%, 100% { width: var(--n, 0ch); } }
+@keyframes fs-cq { 0%, 49% { width: 0; } 51%, 59.9% { width: 2ch; } 60%, 100% { width: 0; } }
+@keyframes fs-cmenu { 0%, 51.5% { opacity: 0; transform: translateY(6px); } 53%, 59% { opacity: 1; transform: none; } 60.5%, 100% { opacity: 0; transform: none; } }
+@keyframes fs-cchip { 0%, 59.9% { opacity: 0; max-width: 0; } 61.5%, 100% { opacity: 1; max-width: 120px; } }
+@keyframes fs-result { 0%, 80% { opacity: 0; transform: translateY(8px); } 84%, 100% { opacity: 1; transform: none; } }
+@keyframes fs-whole { 0%, 93% { opacity: 1; } 98%, 100% { opacity: 0; } }
+@keyframes fs-caret { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+.fs-pre { animation: fs-pre 10s linear infinite both; }
+.fs-pre2 { animation: fs-pre2 10s linear infinite both; }
+.fs-ta { animation: fs-ta 10s infinite both; }
+.fs-tb { animation: fs-tb 10s infinite both; }
+.fs-tc { animation: fs-tc 10s infinite both; }
+.fs-cq { animation: fs-cq 10s steps(2, end) infinite both; }
+.fs-cmenu { animation: fs-cmenu 10s ease-out infinite both; }
+.fs-cchip { animation: fs-cchip 10s ease-out infinite both; }
+.fs-result { animation: fs-result 10s ease-out infinite both; }
+.fs-whole { animation: fs-whole 10s linear infinite both; }
+.fs-caret { margin-left: 1px; animation: fs-caret 1s step-end infinite; }
+/* Motion off: the finished request, chip in place, result shown. */
+@media (prefers-reduced-motion: reduce) {
+  .fs-pre, .fs-pre2, .fs-result, .fs-whole, .fs-caret, .fs-cchip { animation: none !important; opacity: 1 !important; }
+  .fs-ta, .fs-tb, .fs-tc { animation: none !important; width: var(--n, auto) !important; }
+  .fs-cchip { max-width: 120px !important; }
+  .fs-cq, .fs-cmenu { animation: none !important; display: none !important; }
+}

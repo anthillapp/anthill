@@ -1,43 +1,44 @@
 /**
- * "How Anthill works" — the one screen that answers the three first-run
- * questions and stops: what do I build here, what do I do with it, and what do
- * I get back?
+ * "How Anthill works" — the two ways in, and what each looks like.
  *
- * It is also the one place the product's boundary can be stated plainly rather
- * than as a caveat in the corner of a working screen. **Anthill does not run
- * the session.** The whole screen is shaped around leaving that unmistakable,
- * which is why the second scene ends at "you start it" and the third shows a
- * step Anthill could not draw a conclusion about.
+ * It used to walk three steps of one path: design here, copy a prompt, watch.
+ * Since the plugin, most work reaches Anthill the other way round — a session
+ * hands the workflow over — so the screen now offers the two paths side by
+ * side and lets the reader pick one to see it. The coding-session path is
+ * first and marked Recommended because it is the shorter one for anyone who
+ * already works in Claude Code or Codex; designing here stays a full path, not
+ * a fallback.
  *
- * The split is the launch window's own 52%, with the canvas ground and its
- * dotted grid: this screen sits at the same level of the app as the launcher,
- * not inside a workflow, and reusing the split says so before a word is read.
+ * The left pane is the launch window's own 52% split on the canvas's dotted
+ * ground, and it draws the path selected on the right: the live workflow under
+ * a session's prompt, or the same three steps being designed with the prompt
+ * that gets copied out. Nothing moves on its own; choosing a card is the only
+ * thing that changes it.
  *
- * No auto-advance. The reader is reading body copy beside the illustration,
- * and a carousel that moves under them takes away the control it appears to
- * offer.
+ * The boundary is said once, plainly, under the cards: Anthill shows and
+ * follows the work, and the agent runs it.
  */
 
 import { useState } from "react";
 
 import { AnthillMark } from "../AnthillMark.js";
 
-import { EXPLAIN_STEPS } from "./steps.js";
 import { DesignScene } from "./scenes/DesignScene.js";
-import { HandoverScene } from "./scenes/HandoverScene.js";
 import { WatchScene } from "./scenes/WatchScene.js";
 
 export type HowItWorksScreenProps = {
   onBack: () => void;
+  /** Design in Anthill: start a new workflow. */
   onCreate: () => void;
+  /** Start in your coding session: how to set up and use the plugin. */
+  onFromSession: () => void;
 };
 
-const SCENES = [DesignScene, HandoverScene, WatchScene];
+type Path = "session" | "design";
 
-export function HowItWorksScreen({ onBack, onCreate }: HowItWorksScreenProps) {
-  /** The whole screen's state. No timers, no scene state, nothing persisted. */
-  const [step, setStep] = useState(0);
-  const Scene = SCENES[step];
+export function HowItWorksScreen({ onBack, onCreate, onFromSession }: HowItWorksScreenProps) {
+  /** The whole screen's state. No timers, nothing persisted. */
+  const [path, setPath] = useState<Path>("session");
 
   return (
     <div className="how-screen">
@@ -49,83 +50,70 @@ export function HowItWorksScreen({ onBack, onCreate }: HowItWorksScreenProps) {
           <AnthillMark size={18} />
         </div>
 
-        {/*
-          Fixed 400×290, and the scenes are hand-placed inside it — the
-          coordinates assume that box, so it must not scale.
-
-          The key is the step, so each scene mounts fresh when the step
-          changes: the entrances replay on every switch without any JS.
-        */}
-        <div className="how-scene">
-          <Scene key={step} />
+        <div className="how-slot">
+          {path === "session" ? (
+            <div className="how-prompt" aria-hidden="true">
+              <span className="dim">&gt;&nbsp;</span>Checkout flow… <b>/anthill:workflow</b> design workflow
+            </div>
+          ) : (
+            <span className="how-caption">Design on the canvas</span>
+          )}
         </div>
 
-        <div className="how-dots" role="group" aria-label="Choose a step">
-          {EXPLAIN_STEPS.map((item, index) => (
-            <button
-              key={item.title}
-              type="button"
-              className="how-dot"
-              aria-label={`Step ${index + 1}: ${item.title}`}
-              {...(index === step ? { "aria-current": "step" as const } : {})}
-              onClick={() => setStep(index)}
-            />
-          ))}
+        {/* Fixed 400×290, and the scenes are hand-placed inside it. The key is
+            the path, so a scene mounts fresh and its entrance replays. */}
+        <div className="how-scene">{path === "session" ? <WatchScene key="session" /> : <DesignScene key="design" />}</div>
+
+        <div className="how-slot is-below">
+          {path === "session" ? (
+            <span className="how-caption">Anthill follows the work</span>
+          ) : (
+            <div className="how-copybar" aria-hidden="true">
+              <span className="chip">Copy prompt</span>
+              <span>→ paste into Claude Code, Codex or Pi</span>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="how-copy">
         <div className="how-copy-inner">
           <div>
-            <h1 className="how-title">Anthill plans the work. You run it.</h1>
+            <h1 className="how-title">See the plan. Follow the work.</h1>
             <p className="how-lede">
-              You design a workflow here — the steps, who carries each one out, and what
-              happens when work comes back. Anthill compiles it into a prompt you paste into
-              Claude Code, Codex, or Pi yourself, then watches what that session writes on this
-              machine and shows you where it got to.
+              Start in Claude Code or Codex with the Anthill plugin, or design a workflow here and
+              copy the prompt into your coding tool. Your agent does the work; Anthill shows the
+              workflow and its progress.
             </p>
 
-            <div className="how-steps">
-              {EXPLAIN_STEPS.map((item, index) => (
-                <button
-                  key={item.title}
-                  type="button"
-                  className="how-step"
-                  {...(index === step ? { "aria-current": "step" as const } : {})}
-                  onClick={() => setStep(index)}
-                >
-                  <span className="how-step-no">{index + 1}</span>
-                  <span className="how-step-text">
-                    <span className="how-step-title">{item.title}</span>
-                    <span className="how-step-body">{item.body}</span>
-                  </span>
-                </button>
-              ))}
+            <div className="how-paths">
+              <PathCard
+                current={path === "session"}
+                onPick={() => setPath("session")}
+                title="Start in your coding session"
+                tag="Recommended"
+                recommended
+                body="Describe the task in Claude Code or Codex. The plugin hands the workflow to Anthill — review the plan first, or follow the work as it happens."
+                action="Set up the plugin"
+                primary
+                onAction={onFromSession}
+              />
+              <PathCard
+                current={path === "design"}
+                onPick={() => setPath("design")}
+                title="Design in Anthill"
+                tag="Copy Prompt"
+                body="Build and edit the workflow on the canvas, copy the finished prompt and paste it into your tool. Works with Claude Code, Codex and Pi."
+                action="Create a workflow"
+                onAction={onCreate}
+              />
             </div>
 
-            {/* Neutral, not red: this is how the product works, not a warning. */}
-            <section className="how-boundary">
-              <h2>What Anthill does not do</h2>
-              <p>
-                It never starts, stops, answers or steers an agent. It has no terminal and no
-                model of its own. Everything it shows you is read from records the CLI already
-                writes on this machine — never its private reasoning, and never anything sent
-                anywhere.
-              </p>
-              {/* The sentence most likely to be cut as redundant, and the most
-                  important one here: it is what stops a reader believing
-                  Anthill enforces the diagram they just drew. */}
-              <p>
-                Which means a workflow is a set of instructions for whoever reads it. The
-                order, the conditions and the limits are things Anthill asks for — not things
-                it can enforce.
-              </p>
-            </section>
+            <p className="how-foot">
+              Anthill shows the workflow and follows progress. Your coding agent runs the work.
+            </p>
 
             <div className="how-actions">
-              <button type="button" className="primary" onClick={onCreate}>
-                Create a workflow
-              </button>
               <button type="button" onClick={onBack}>
                 Back
               </button>
@@ -133,6 +121,60 @@ export function HowItWorksScreen({ onBack, onCreate }: HowItWorksScreenProps) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * One way in. The whole card chooses what the left pane shows; its button
+ * goes there. Focusing the button chooses it too, so a keyboard reader sees
+ * the same picture a pointer does.
+ */
+function PathCard({
+  current,
+  onPick,
+  title,
+  tag,
+  recommended = false,
+  body,
+  action,
+  primary = false,
+  onAction,
+}: {
+  current: boolean;
+  onPick: () => void;
+  title: string;
+  tag: string;
+  recommended?: boolean;
+  body: string;
+  action: string;
+  primary?: boolean;
+  onAction: () => void;
+}) {
+  return (
+    <div
+      className={`how-path${current ? " is-current" : ""}`}
+      role="group"
+      aria-label={title}
+      {...(current ? { "aria-current": "true" as const } : {})}
+      onClick={onPick}
+      onFocus={onPick}
+    >
+      <div className="how-path-head">
+        <h2>{title}</h2>
+        <span className={`how-path-tag${recommended ? " is-recommended" : ""}`}>{tag}</span>
+      </div>
+      <p>{body}</p>
+      <button
+        type="button"
+        className={primary ? "primary" : undefined}
+        onClick={(event) => {
+          event.stopPropagation();
+          onAction();
+        }}
+      >
+        {action}
+      </button>
     </div>
   );
 }

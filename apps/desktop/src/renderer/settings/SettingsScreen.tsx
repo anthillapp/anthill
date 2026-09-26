@@ -61,7 +61,7 @@ const NAV = [
   },
 ] as const;
 
-type PageId = (typeof NAV)[number]["items"][number]["id"];
+export type PageId = (typeof NAV)[number]["items"][number]["id"];
 
 const TITLES: Record<PageId, string> = {
   notifications: "Notifications",
@@ -72,8 +72,15 @@ const TITLES: Record<PageId, string> = {
   about: "About",
 };
 
-export function SettingsScreen({ onLeave }: { onLeave: () => void }) {
-  const [page, setPage] = useState<PageId>("notifications");
+export function SettingsScreen({
+  onLeave,
+  initialPage = "notifications",
+}: {
+  onLeave: () => void;
+  /** Where to open, when Settings was asked for about one thing in particular. */
+  initialPage?: PageId;
+}) {
+  const [page, setPage] = useState<PageId>(initialPage);
   const [query, setQuery] = useState("");
 
   const nav = useMemo(() => {

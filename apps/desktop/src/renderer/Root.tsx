@@ -11,9 +11,10 @@ import { flushSync } from "react-dom";
 import type { PendingRun } from "@anthill/live";
 
 import { HowItWorksScreen } from "./explain/HowItWorksScreen.js";
+import { FromSessionScreen } from "./handoff/FromSessionScreen.js";
 import { explainerDue, markExplainerSeen } from "./explain/first-run.js";
 import { LaunchWindow } from "./LaunchWindow.js";
-import { SettingsScreen } from "./settings/SettingsScreen.js";
+import { SettingsScreen, type PageId } from "./settings/SettingsScreen.js";
 import { WorkflowScreen } from "./workflow/WorkflowScreen.js";
 
 type Start =
@@ -32,6 +33,11 @@ export function Root() {
    */
   const [explaining, setExplaining] = useState(() => explainerDue());
   /**
+   * "From a coding session" — a screen at the launcher's level, like the
+   * explainer, because it is reached from both and returns to the launcher.
+   */
+  const [fromSession, setFromSession] = useState(false);
+  /**
    * Settings is a screen, and it remembers where it came from.
    *
    * It was a modal over whatever was showing, which is what let a card nested
@@ -44,7 +50,14 @@ export function Root() {
    * different values.
    */
   const [settingsFrom, setSettingsFrom] = useState<"launch" | "workflow" | null>(null);
+  /** The page Settings opens on, when it was asked for about one thing. */
+  const [settingsPage, setSettingsPage] = useState<PageId | undefined>();
   const openSettings = useCallback(() => {
+    setSettingsPage(undefined);
+    setSettingsFrom((current) => current ?? (start ? "workflow" : "launch"));
+  }, [start]);
+  const openPluginSettings = useCallback(() => {
+    setSettingsPage("plugins");
     setSettingsFrom((current) => current ?? (start ? "workflow" : "launch"));
   }, [start]);
   useEffect(() => window.anthill.onOpenSettings(openSettings), [openSettings]);
@@ -79,6 +92,7 @@ export function Root() {
       setHandedOver((count) => count + 1);
       setSettingsFrom(null);
       setExplaining(false);
+      setFromSession(false);
     });
   }, []);
 
@@ -108,12 +122,18 @@ export function Root() {
     setExplaining(false);
   };
 
-  const screen = explaining ? (
+  const screen = fromSession ? (
+    <FromSessionScreen onBack={() => setFromSession(false)} onSettings={openPluginSettings} />
+  ) : explaining ? (
     <HowItWorksScreen
       onBack={leaveExplainer}
       onCreate={() => {
         leaveExplainer();
         setStart({ kind: "templates" });
+      }}
+      onFromSession={() => {
+        leaveExplainer();
+        setFromSession(true);
       }}
     />
   ) : start ? (
@@ -132,6 +152,7 @@ export function Root() {
       // what the author clicked it for.
       onOpenLive={(path, run) => setStart({ kind: "open", path, live: run })}
       onExplain={() => setExplaining(true)}
+      onFromSession={() => setFromSession(true)}
       onSettings={openSettings}
     />
   );
@@ -150,7 +171,12 @@ export function Root() {
   return (
     <>
       <div style={{ display: settingsFrom ? "none" : "contents" }}>{screen}</div>
-      {settingsFrom ? <SettingsScreen onLeave={() => setSettingsFrom(null)} /> : null}
+      {settingsFrom ? (
+        <SettingsScreen
+          onLeave={() => setSettingsFrom(null)}
+          {...(settingsPage ? { initialPage: settingsPage } : {})}
+        />
+      ) : null}
     </>
   );
 }

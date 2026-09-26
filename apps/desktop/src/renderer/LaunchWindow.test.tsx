@@ -69,6 +69,7 @@ async function show(recents: RecentWorkflow[], runs: PendingRun[] = [], events: 
       onOpen={onOpen}
       onOpenLive={onOpenLive}
       onExplain={() => undefined}
+      onFromSession={() => undefined}
       onSettings={() => undefined}
     />,
   );
@@ -352,6 +353,7 @@ describe("the three list states survive", () => {
     render(
       <LaunchWindow onNewWorkflow={() => undefined} onFromPrompt={() => undefined} onOpen={() => undefined}
       onExplain={() => undefined}
+      onFromSession={() => undefined}
       onSettings={() => undefined} />,
     );
     expect(screen.getByText("Looking for your workflows…")).toBeTruthy();
@@ -400,7 +402,8 @@ describe("the way to the explainer", () => {
         onFromPrompt={() => undefined}
         onOpen={() => undefined}
         onExplain={onExplain}
-      onSettings={() => undefined}
+        onFromSession={() => undefined}
+        onSettings={() => undefined}
       />,
     );
     await waitFor(() => expect(api.listRecentPlans).toHaveBeenCalled());
@@ -408,6 +411,36 @@ describe("the way to the explainer", () => {
     fireEvent.click(screen.getByRole("button", { name: "How Anthill works" }));
     expect(onExplain).toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+/**
+ * The fourth start row, and the one that is not a start: a workflow that
+ * arrives from Claude Code or Codex. It says so, and it opens the screen that
+ * explains how, rather than a file dialog or a template picker.
+ */
+describe("a workflow from a coding session", () => {
+  it("is offered under the tagline, and asks for the From a session screen", async () => {
+    const onFromSession = vi.fn();
+    const api = stub([]);
+    render(
+      <LaunchWindow
+        onNewWorkflow={() => undefined}
+        onFromPrompt={() => undefined}
+        onOpen={() => undefined}
+        onExplain={() => undefined}
+        onFromSession={onFromSession}
+        onSettings={() => undefined}
+      />,
+    );
+    await waitFor(() => expect(api.listRecentPlans).toHaveBeenCalled());
+
+    expect(screen.getByText("Design a workflow, hand it to your agent, and follow its progress.")).toBeTruthy();
+    const row = screen.getByRole("button", { name: /From a Coding Session/ });
+    expect(row.textContent).toContain("Let Claude Code or Codex hand one over");
+    expect(row.classList.contains("is-arriving")).toBe(true);
+    fireEvent.click(row);
+    expect(onFromSession).toHaveBeenCalled();
   });
 });
 

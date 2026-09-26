@@ -45,6 +45,8 @@ import { readCodexModels } from "../../desktop/src/main/codex-models.js";
 import { readPiModels } from "../../desktop/src/main/pi-models.js";
 import { readCodexAgentSupport } from "../../desktop/src/main/codex-capability.js";
 import { adoptUserPath } from "../../desktop/src/main/user-path.js";
+import { pluginStatus } from "../../desktop/src/main/plugin-status.js";
+import { checkoutAbove, installPlugin, pluginConnections } from "../../desktop/src/main/plugin-connect.js";
 import {
   nameInSavedFile,
   saveDestination,
@@ -540,6 +542,21 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   register(IpcChannel.settingsWrite, async (args) => settings.write(args[0] ?? {}));
   register(IpcChannel.notificationsProbe, async () => ({ kind: "unsupported", reason: "Native notifications are available in the desktop app." }));
 
+  // The plugin card. This shell runs out of a checkout, which is also what
+  // the plugin installs from. No install guide is opened from here: this shell
+  // has no browser of its own to open it in, and the card's line says where it is.
+  const pluginDeps = () => {
+    const appRoot = checkoutAbove(dirname(fileURLToPath(import.meta.url)));
+    return { ...(appRoot ? { appRoot } : {}), interpreters: detectInterpreters };
+  };
+  register(IpcChannel.pluginStatus, async () => pluginStatus());
+  register(IpcChannel.pluginConnections, async () => pluginConnections(pluginDeps()));
+  register(IpcChannel.pluginInstall, async (args) =>
+    args[0] === "claude-code" || args[0] === "codex"
+      ? installPlugin(args[0], pluginDeps())
+      : { ok: false, changed: false, error: "Unknown coding tool." },
+  );
+
   register(IpcChannel.liveSetupStatus, async (args) => liveSetupService().status(args[0] as string | undefined, args[1] === true));
   register(IpcChannel.liveSetupDecline, async (args) => liveSetupService().decline(args[0] as MarkerCli));
   register(IpcChannel.liveSetupDismiss, async () => liveSetupService().dismiss());
@@ -753,6 +770,9 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     settingsRead: () => handle(IpcChannel.settingsRead),
     settingsWrite: (patch) => handle(IpcChannel.settingsWrite, patch),
     notificationsProbe: () => handle(IpcChannel.notificationsProbe),
+    pluginStatus: () => handle(IpcChannel.pluginStatus),
+    pluginConnections: () => handle(IpcChannel.pluginConnections),
+    pluginInstall: (harness: string) => handle(IpcChannel.pluginInstall, harness),
     liveSetupStatus: (cwd?: string, refreshOnly?: boolean) => handle(IpcChannel.liveSetupStatus, cwd, refreshOnly),
     liveSetupDecline: (harness: MarkerCli) => handle(IpcChannel.liveSetupDecline, harness),
     liveSetupDismiss: () => handle(IpcChannel.liveSetupDismiss),

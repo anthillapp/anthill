@@ -641,3 +641,81 @@ describe("placing a block the assistant adds", () => {
     }
   });
 });
+
+/*
+ * ANT-149. An interpreter sent `agentId` and `task` for a new step but no
+ * `actionKind`, and the accepted proposal left the workflow with a step
+ * failing STEP_MISSING_ACTION and Prompt disabled. It also appended the step
+ * after End, so the diagram read Start … Done … new step.
+ */
+describe("a step the assistant adds without an action", () => {
+  const propose = (ops: unknown[]) => {
+    const parsed = parseEditProposal(JSON.stringify({ version: EDIT_PROPOSAL_VERSION, summary: "Add a step.", ops }));
+    if (!parsed.ok) throw new Error(parsed.error);
+    return parsed.proposal;
+  };
+  const added = (applied: ReturnType<typeof applyEditProposal>, name: string) =>
+    applied.ok ? applied.workflow.nodes.find((node) => node.name === name) : undefined;
+
+  it("gets the generic step action instead of none", () => {
+    const applied = applyEditProposal(workflow(), propose([
+      { op: "add-block", ref: "sum", blockType: "agent", name: "Write summary",
+        config: { task: "Summarise what changed", agentId: "agent-1" } },
+    ]));
+    expect(applied.ok).toBe(true);
+    expect(added(applied, "Write summary")?.config).toMatchObject({
+      actionKind: "agent-step", task: "Summarise what changed", agentId: "agent-1",
+    });
+  });
+
+  it("gets it too when the action it names is not in the catalogue", () => {
+    const applied = applyEditProposal(workflow(), propose([
+      { op: "add-block", ref: "sum", blockType: "agent", name: "Write summary",
+        config: { actionKind: "summarise-everything", task: "Summarise", agentId: "agent-1" } },
+    ]));
+    expect(added(applied, "Write summary")?.config).toMatchObject({ actionKind: "agent-step" });
+  });
+
+  it("keeps an action the catalogue has", () => {
+    const applied = applyEditProposal(workflow(), propose([
+      { op: "add-block", ref: "rev", blockType: "agent", name: "Review security",
+        config: { actionKind: "security-privacy-review", task: "Review", agentId: "agent-1" } },
+    ]));
+    expect(added(applied, "Review security")?.config).toMatchObject({ actionKind: "security-privacy-review" });
+  });
+
+  it("does not let an update overwrite a step's action with one the catalogue lacks", () => {
+    const applied = applyEditProposal(workflow(), propose([
+      { op: "update-block", id: "implement", config: { actionKind: "summarise-everything", task: "Write it well" } },
+    ]));
+    expect(applied.ok).toBe(true);
+    const node = applied.ok ? applied.workflow.nodes.find((item) => item.id === "implement") : undefined;
+    expect(node?.config).toMatchObject({ actionKind: "agent-step", task: "Write it well" });
+  });
+
+  it("moves End past a new last step that leads into it, and leaves the rest where they were", () => {
+    const applied = applyEditProposal(workflow(), propose([
+      { op: "disconnect", edgeId: "e3" },
+      { op: "add-block", ref: "sum", blockType: "agent", name: "Write summary", near: "check",
+        config: { actionKind: "summarize", task: "Summarise", agentId: "agent-1" } },
+      { op: "connect", source: "check", target: "sum" },
+      { op: "connect", source: "sum", target: "end" },
+    ]));
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    const at = (id: string) => applied.workflow.nodes.find((node) => node.id === id)?.position;
+    const summary = added(applied, "Write summary")?.position;
+    expect(summary).toBeTruthy();
+    expect(at("end")!.x).toBeGreaterThan(summary!.x);
+    expect(at("start")).toEqual({ x: 0, y: 0 });
+    expect(at("check")).toEqual({ x: 600, y: 0 });
+  });
+
+  it("leaves End alone when no new block leads into it", () => {
+    const applied = applyEditProposal(workflow(), propose([
+      { op: "add-block", ref: "side", blockType: "agent", name: "Side note", near: "check",
+        config: { actionKind: "summarize", task: "Note it", agentId: "agent-1" } },
+    ]));
+    expect(applied.ok && applied.workflow.nodes.find((node) => node.id === "end")?.position).toEqual({ x: 900, y: 0 });
+  });
+});

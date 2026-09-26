@@ -19,6 +19,7 @@ import type { Workflow } from "@anthill/workflow-schema";
 
 import { agentProfiles } from "./agents.js";
 import { agentConfig } from "./node-config.js";
+import { ACTION_KINDS } from "./actions.js";
 import { EDIT_PROPOSAL_VERSION } from "./edit-proposal.js";
 
 /** Delimiters, so the author's request cannot read as instruction text. */
@@ -171,7 +172,9 @@ export function buildEditInstruction(
     "- Do not touch blocks or connections the request is not about.",
     "- blockType is one of: agent, approval, condition. Start and end blocks",
     "  cannot be added or removed.",
-    '- An agent block\'s config should carry "actionKind" and "task".',
+    '- An agent block\'s config must carry "actionKind" and "task". actionKind is',
+    `  one of: ${ACTION_KINDS.join(", ")}.`,
+    '  Pick the closest; use "agent-step" when nothing else fits.',
     "- An agent step needs an agent, and a step without one does not validate.",
     '  Put the agent\'s id in the block config as "agentId". Use an id from the',
     "  Agents list below when one of them fits.",

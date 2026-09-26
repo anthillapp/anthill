@@ -851,6 +851,9 @@ function scan(
           kind: "turn.end",
           title: "The agent finished its turn",
           ...(messageId ? { toolUseId: messageId } : {}),
+          // A delegate's turn ending is not the session's: the session may
+          // still be mid-turn around it. Signed, so a reader can tell (ANT-60).
+          ...(author.kind === "subagent" ? { author } : {}),
         });
       }
     }

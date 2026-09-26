@@ -65,6 +65,8 @@ export type FeedCard = {
    */
   channels: string[];
   toolUseId?: string;
+  /** The session the action happened in, so a turn ending closes only its own. */
+  sessionId?: string;
   /** The raw event kinds folded into this card, in order. */
   events: string[];
 };
@@ -137,6 +139,32 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
     const kind = kindOf(event);
     const pairKey = event.toolUseId;
 
+    /*
+      The agent ended its turn, so the calls it made in that turn are over.
+
+      A card stayed "Running…" until an end paired with it, and one that never
+      paired said so for the rest of the session — the ANT-45 report showed
+      seven Bash commands "running" at once (ANT-60). Measured across 54 real
+      journals: 103 of 6630 calls never paired, almost all from the hook log's
+      PreToolUse with no PostToolUse, and 90 of those 103 were followed by the
+      session's own turn ending. That is the evidence, rather than a guessed
+      duration: the main agent does not end a turn while one of its calls is
+      still out. What the card becomes is `unknown` — Anthill did not see it
+      end, which is not the same as seeing it fail. It stays pairable, so an
+      end that does arrive later (a background delegate's call, say, which can
+      outlive the turn around it) still settles it as done or failed.
+
+      Only the main agent's turn: a delegate's turn ending says nothing about
+      the session's calls around it.
+    */
+    if (event.kind === "turn.end" && event.author?.kind !== "subagent") {
+      for (const card of open.values()) {
+        if (card.kind === "tool" && card.state === "working" && card.sessionId === event.sessionId) {
+          card.state = "unknown";
+        }
+      }
+    }
+
     if (isClosing(event) && pairKey) {
       const card = open.get(pairKey);
       if (card) {
@@ -184,6 +212,7 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
       how: event.mapping.how,
       channels: [event.channel, ...(event.alsoFrom ?? [])],
       ...(event.toolUseId ? { toolUseId: event.toolUseId } : {}),
+      ...(event.sessionId ? { sessionId: event.sessionId } : {}),
       events: [event.kind],
     };
 

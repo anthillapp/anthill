@@ -126,6 +126,88 @@ describe("folding the journal into cards", () => {
   });
 });
 
+/*
+  ANT-60. A call whose end never arrived said "Running…" for the rest of the
+  session — the ANT-45 report showed seven Bash commands running at once. The
+  trigger is a record, not a duration: the main agent does not end a turn
+  while one of its calls is still out.
+*/
+describe("a call whose end never arrived", () => {
+  const turnEnd = (partial: Partial<AttributedEvent> = {}) =>
+    event({ kind: "turn.end", title: "The agent finished its turn", ...partial });
+
+  it("is no longer called working once the session's turn has ended", () => {
+    const cards = buildFeed(
+      [event({ kind: "tool.start", toolName: "Bash", toolUseId: "t1", channel: "claude-code:hook" }), turnEnd()],
+      false,
+    );
+    expect(cards[0].state).toBe("unknown");
+  });
+
+  it("says unknown, not failed — nothing recorded a failure", () => {
+    const cards = buildFeed([event({ kind: "tool.start", toolName: "Bash", toolUseId: "t1" }), turnEnd()], false);
+    expect(cards[0].state).not.toBe("failed");
+    expect(cards[0].state).toBe("unknown");
+  });
+
+  it("still settles if its end turns up after the turn", () => {
+    // A background delegate's call can outlive the turn around it.
+    const cards = buildFeed(
+      [
+        event({ kind: "tool.start", toolName: "Bash", toolUseId: "t1" }),
+        turnEnd(),
+        event({ kind: "tool.end", toolUseId: "t1", title: "Tool finished", ok: true }),
+      ],
+      false,
+    );
+    expect(cards[0].state).toBe("done");
+  });
+
+  it("stays working while the turn is still going", () => {
+    const cards = buildFeed([event({ kind: "tool.start", toolName: "Bash", toolUseId: "t1" })], false);
+    expect(cards[0].state).toBe("working");
+  });
+
+  it("is not closed by a delegate's turn ending", () => {
+    const cards = buildFeed(
+      [
+        event({ kind: "tool.start", toolName: "Bash", toolUseId: "t1" }),
+        turnEnd({ author: { kind: "subagent", name: "Tester" } }),
+      ],
+      false,
+    );
+    expect(cards[0].state).toBe("working");
+  });
+
+  it("is not closed by another session's turn ending", () => {
+    const cards = buildFeed(
+      [event({ kind: "tool.start", toolName: "Bash", toolUseId: "t1" }), turnEnd({ sessionId: "sess-2" })],
+      false,
+    );
+    expect(cards[0].state).toBe("working");
+  });
+
+  it("leaves a call that did pair exactly as it was", () => {
+    const cards = buildFeed(
+      [
+        event({ kind: "tool.start", toolName: "Bash", toolUseId: "t1" }),
+        event({ kind: "tool.end", toolUseId: "t1", title: "Tool finished", ok: false }),
+        turnEnd(),
+      ],
+      false,
+    );
+    expect(cards[0].state).toBe("failed");
+  });
+
+  it("leaves an agent card to its own end — a delegate can outlive the turn that sent it", () => {
+    const cards = buildFeed(
+      [event({ kind: "subagent.start", agentName: "Tester", toolUseId: "a1" }), turnEnd()],
+      false,
+    );
+    expect(cards[0].state).toBe("working");
+  });
+});
+
 describe("the filters", () => {
   const cards = buildFeed(
     [

@@ -67,3 +67,17 @@ it("puts a refused data directory in front of the user and then quits", () => {
   expect(body).toContain("app.exit(1)");
   expect(body.indexOf("dialog.showErrorBox")).toBeLessThan(body.indexOf("app.exit(1)"));
 });
+
+/*
+ * A channel the preload bridges and main never serves fails only when someone
+ * uses it, with "No handler registered" swallowed by the page's catch. The
+ * handover sheet's decline was that for a whole release (ANT-146). So every
+ * channel the preload invokes must have a handler in the main process.
+ */
+it("serves every channel the preload invokes", () => {
+  const preload = readFileSync(resolve("src/preload/index.ts"), "utf8");
+  const invoked = [...preload.matchAll(/invoke\(\s*IpcChannel\.(\w+)/g)].map((match) => match[1]);
+  expect(invoked.length).toBeGreaterThan(0);
+  const unserved = invoked.filter((channel) => !new RegExp(`handle\\(\\s*IpcChannel\\.${channel}\\b`).test(main));
+  expect(unserved).toEqual([]);
+});

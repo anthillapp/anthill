@@ -218,7 +218,7 @@ function PrivacyPage() {
     >
       <SettingRow
         label="Anonymous product analytics"
-        note="Sends a random app identifier and the names of these actions: opening Anthill, enabling analytics, opening or saving a workflow, and starting live observation. PostHog also receives SDK and connection metadata. No workflow content, prompts, paths, clicks, pageviews, or recordings. Turning this off removes the local identifier."
+        note="Sends a random app identifier and the names of these actions: opening Anthill, enabling analytics, opening or saving a workflow, and starting live observation. PostHog also receives the SDK name and version, and discards your IP address. No workflow content, prompts, paths, clicks, pageviews, or recordings. Turning this off removes the local identifier."
       >
         <SettingSwitch
           on={settings?.analyticsEnabled === true}

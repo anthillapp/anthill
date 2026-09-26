@@ -243,12 +243,13 @@ packaged macOS app offers three independent controls under **Settings → Privac
 all are off by default:
 
 - **Anonymous product analytics** sends a random app identifier and the
-  names of five app actions to PostHog, along with SDK and connection metadata.
-  It sends no prompts, workflow contents,
+  names of five app actions to PostHog, along with the SDK name and version.
+  PostHog discards the sender's IP address. It sends no prompts, workflow contents,
   paths, clicks, page views, or recordings. Turning it off stops future events
   and deletes the local identifier.
 - **JavaScript error reports** send sanitized stack locations to Sentry, with
-  messages, user data, breadcrumbs, and runtime context removed. Turning it on
+  messages, user data, breadcrumbs, and runtime context removed; Sentry is told
+  not to infer, and set not to store, the sender's IP address. Turning it on
   takes effect after a restart; turning it off stops new reports immediately.
 - **Native crash reports** separately permit Electron memory dumps to Sentry.
   A dump may contain private data from memory. This requires error reporting

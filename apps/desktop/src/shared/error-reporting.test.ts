@@ -7,6 +7,7 @@ describe("outbound error reports", () => {
     const event = {
       type: "error",
       message: "secret prompt",
+      sdk: { name: "sentry.javascript.electron", version: "7.20.0", settings: { infer_ip: "auto" }, integrations: ["private"] },
       user: { email: "person@example.com" },
       breadcrumbs: [{ message: "private click" }],
       request: { url: "https://example.com/private" },
@@ -31,6 +32,8 @@ describe("outbound error reports", () => {
     const clean = sanitizeErrorEvent(event);
     const serialized = JSON.stringify(clean);
     expect(clean.exception?.values?.[0].value).toBe("[redacted]");
+    expect(clean.exception?.values?.[0].type).toBe("Error");
+    expect(clean.sdk).toEqual({ name: "sentry.javascript.electron", version: "7.20.0", settings: { infer_ip: "never" } });
     expect(clean.exception?.values?.[0].stacktrace?.frames?.[0].filename).toBe("app:///out/renderer/assets/index.js");
     expect(clean.exception?.values?.[0].stacktrace?.frames?.[1].filename).toBe("[external]");
     expect(clean.debug_meta?.images).toEqual([{
@@ -41,5 +44,10 @@ describe("outbound error reports", () => {
     for (const privateText of ["secret", "person@", "private", "context_line", "sensitive", "/Users/"]) {
       expect(serialized).not.toContain(privateText);
     }
+  });
+
+  it("keeps built-in error class names, which say what failed without saying about what", () => {
+    const event = { type: undefined, exception: { values: [{ type: "TypeError", value: "x of /Users/me" }] } } as unknown as ErrorEvent;
+    expect(sanitizeErrorEvent(event).exception?.values?.[0]).toEqual({ type: "TypeError", value: "[redacted]" });
   });
 });

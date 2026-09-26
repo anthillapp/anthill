@@ -1,5 +1,17 @@
 import type { ErrorEvent } from "@sentry/electron/main";
 
+/** Built-in error classes: they name a kind of failure and carry no user data. */
+const BUILT_IN_ERRORS = new Set([
+  "Error",
+  "TypeError",
+  "RangeError",
+  "ReferenceError",
+  "SyntaxError",
+  "URIError",
+  "EvalError",
+  "AggregateError",
+]);
+
 /** Only packaged Anthill bundle locations may leave the machine in a stack. */
 function bundleLocation(value: string | undefined): string {
   if (!value) return "[external]";
@@ -14,7 +26,7 @@ function bundleLocation(value: string | undefined): string {
  */
 export function sanitizeErrorEvent(event: ErrorEvent): ErrorEvent {
   const values = event.exception?.values?.map((value) => ({
-    type: "Error",
+    type: value.type && BUILT_IN_ERRORS.has(value.type) ? value.type : "Error",
     value: "[redacted]",
     ...(value.stacktrace ? {
       stacktrace: {
@@ -36,6 +48,13 @@ export function sanitizeErrorEvent(event: ErrorEvent): ErrorEvent {
     level: event.level,
     release: event.release,
     environment: event.environment,
+    // Without `infer_ip: "never"` Sentry falls back to storing the sender's IP
+    // for JavaScript events, so the SDK block is kept with that setting forced.
+    sdk: event.sdk ? {
+      name: event.sdk.name,
+      version: event.sdk.version,
+      settings: { infer_ip: "never" },
+    } : undefined,
     exception: values ? { values } : undefined,
     debug_meta: event.debug_meta ? {
       images: event.debug_meta.images?.filter((entry) => entry.type === "sourcemap").map((entry) => ({

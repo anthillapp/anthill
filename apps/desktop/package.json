@@ -65,6 +65,7 @@
     },
     "files": [
       "out/**/*",
+      "!**/*.map",
       "package.json",
       "native/**/*"
     ],

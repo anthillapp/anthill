@@ -99,6 +99,14 @@ jobs:
           chmod 600 "$KEY"
           echo "path=$KEY" >> "$GITHUB_OUTPUT"
 
+      # Built on its own so the Sentry token reaches only the bundler, which
+      # uploads the hidden source maps and deletes them. Packaging and signing
+      # below never see it. Without the secret, no maps are made at all.
+      - name: Build the app bundles
+        run: npm run build --workspace=@anthill/desktop
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
       # Credentials reach electron-builder through the environment and appear
       # nowhere in the repository. Absent, it skips notarising and says so; the
       # build still succeeds.
@@ -111,13 +119,23 @@ jobs:
           export APPLE_API_KEY_ID=$(printf '%s' "$RAW_KEY_ID" | tr -d '[:space:]')
           export APPLE_API_ISSUER=$(printf '%s' "$RAW_ISSUER" | tr -d '[:space:]')
           export APPLE_TEAM_ID=$(printf '%s' "$RAW_TEAM_ID" | tr -d '[:space:]')
-          npm run dist --workspace=@anthill/desktop
+          npm exec --workspace=@anthill/desktop -- electron-builder --mac
         env:
           RAW_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           RAW_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           RAW_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_API_KEY: ${{ steps.notary.outputs.path }}
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
+      # The source maps are the private source. They go to Sentry and nowhere
+      # else: electron-builder leaves them out, and this fails the release if
+      # one ever reaches the archive anyway.
+      - name: Check that no source map ships in the app
+        run: |
+          ASAR=apps/desktop/release/mac-arm64/Anthill.app/Contents/Resources/app.asar
+          if npx --no-install asar list "$ASAR" | grep -E '\.map$'; then
+            echo "::error::Source maps found in app.asar."
+            exit 1
+          fi
 
       # Says plainly which of the two kinds of build this is, so a failure to
       # sign cannot be discovered later by somebody downloading it.

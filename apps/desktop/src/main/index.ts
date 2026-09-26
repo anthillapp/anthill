@@ -1326,6 +1326,13 @@ function registerIpcHandlers(): void {
     IpcChannel.liveSetupDismiss,
     async (): Promise<ObservationSetupStatus> => liveSetupService().dismiss(),
   );
+  // "Continue with basic progress" in the handover sheet. Declared in the
+  // contract and bridged by the preload from the start, and never served, so
+  // every decline failed and the same question came back next time (ANT-146).
+  handle(
+    IpcChannel.liveSetupDecline,
+    async (_event, harness: MarkerCli): Promise<void> => liveSetupService().decline(harness),
+  );
   handle(
     IpcChannel.liveSetupInstall,
     async (_event, harness: MarkerCli, cwd?: string): Promise<ObservationSetupActionResult> =>

@@ -1,0 +1,76 @@
+name: Windows issue (experimental build)
+description: Something did not work in an Anthill source build on Windows.
+title: "[Windows] "
+labels: ["windows"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Windows support is coming soon.** Building from source is possible for experimentation, but Windows is not yet officially supported and some features may not work.
+
+        Reports are welcome and help decide what native Windows support needs. While Windows is unsupported, a response or a fix is not guaranteed.
+
+        **Please do not paste secrets.** Remove tokens, API keys, credentials, private paths and project contents from anything below.
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows edition and version
+      description: From Settings ▸ System ▸ About, or `winver`.
+      placeholder: Windows 11 Pro 24H2 (build 26100.2605)
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Native Windows or WSL
+      description: WSL is optional experimentation, never a requirement.
+      options:
+        - Native Windows
+        - WSL (which distribution goes in the details below)
+    validations:
+      required: true
+  - type: input
+    id: anthill-version
+    attributes:
+      label: Anthill commit or version
+      description: "`git rev-parse --short HEAD` in your checkout, or the version in Settings ▸ About."
+      placeholder: 0.7.11 · 0cd6060
+    validations:
+      required: true
+  - type: dropdown
+    id: launch
+    attributes:
+      label: How you launched it
+      options:
+        - Desktop app, `npm run dev:desktop`
+        - Desktop app, a local package
+        - CLI (`anthill`), web page in a browser
+        - Something else (say how in the details)
+    validations:
+      required: true
+  - type: input
+    id: feature
+    attributes:
+      label: The feature you were using
+      placeholder: "Live observation of a Claude Code session, installing the plugin, saving a workflow…"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: Include the exact message you saw, if any.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs (sanitised)
+      description: Terminal output or the part of a log that shows the failure. Remove secrets, tokens and private paths first.
+      render: text

@@ -12,10 +12,12 @@ import { createBridge } from "./bridge.js";
 import { appendReport } from "./report.js";
 import { observationCommand } from "./observation.js";
 import { reportFatal, startCliDiagnostics } from "./diagnostics.js";
+import { PLATFORM_HELP, platformWarning } from "./platform.js";
 import type { HarnessReport } from "@anthill/live";
 
 /**
- * `anthill` — run Anthill on Linux as a CLI that opens a web interface.
+ * `anthill` — run Anthill as a CLI that opens a web interface: supported on
+ * Linux and macOS, experimental and unsupported on Windows (ANT-154).
  *
  * One process, one loopback server, one browser tab. Argument parsing is
  * hand-rolled (no dependencies):
@@ -69,6 +71,8 @@ function usage(): string {
     "  The report subcommands (run, step, done) also accept --data-dir <p>",
     "  after the command, so a server started with --data-dir X reads the",
     "  reports from X, where `anthill run --data-dir X …` writes them.",
+    "",
+    `  ${PLATFORM_HELP}`,
   ].join("\n");
 }
 
@@ -506,6 +510,14 @@ function waitForSignal(): Promise<void> {
  * The CLI entry point.
  */
 export async function main(): Promise<void> {
+  // Windows: say it is unsupported and carry on (ANT-154). Not for the report
+  // subcommands, which a harness runs on every step: the person saw this when
+  // they started the server, and repeating it into the agent's tool output
+  // helps nobody.
+  const warning = platformWarning();
+  const reporting = ["run", "step", "done"].includes(process.argv[2] ?? "");
+  if (warning && !reporting) console.error(warning);
+
   if (process.argv[2] === "observation") {
     const reply = await observationCommand(process.argv.length === 4 ? process.argv[3] : undefined);
     console.log(JSON.stringify(reply.result));

@@ -34,6 +34,7 @@ import { AnthillMark } from "./AnthillMark.js";
 import { readyTools } from "./plugin/plugin-card.js";
 import { HARNESSES, usePluginConnections } from "./plugin/usePluginConnections.js";
 import { WorkflowPicker } from "./workflow/WorkflowPicker.js";
+import { UnsupportedWindowsChip } from "./windows/unsupported-windows.js";
 import { CanvasTour } from "./tour/CanvasTour.js";
 import { LAUNCH_TOUR, askForLaunchTour, launchTourDue, markLaunchTourSeen } from "./tour/tour-steps.js";
 
@@ -609,6 +610,10 @@ function LaunchIntro({
 
   return (
     <>
+      {/* Top corner of the intro pane: chrome, not content (ANT-154). */}
+      <div className="win-chip-launch">
+        <UnsupportedWindowsChip skin="on-light" />
+      </div>
       <AnthillMark className="launch-mark" size={104} />
       <h1>Anthill</h1>
       {/* From package.json at build time. It was a literal, and it drifted —

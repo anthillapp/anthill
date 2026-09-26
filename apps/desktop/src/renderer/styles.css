@@ -9551,3 +9551,98 @@ button.presence-chip {
   .tour-ring { animation: none; transition: none; }
   .tour-card { transition: none; }
 }
+
+/* ------------------------------------------------------------------ */
+/* An unsupported Windows build (ANT-154)                              */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Tone is the whole point: a support boundary, not an error. No red, no
+ * warning icon, no alert colour anywhere here but the accent on the one
+ * primary action.
+ */
+.win-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(32, 30, 29, 0.46);
+}
+.win-gate .dialog {
+  width: 520px;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  padding: 28px 30px 24px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 24px 60px rgba(32, 30, 29, 0.34);
+}
+/* Grey, not amber: "experimental" is a fact about the build, not a problem. */
+.win-gate .kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--chip);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--ink-3);
+}
+.win-gate .kicker i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-dim); }
+.win-gate h2 { margin: 16px 0 0; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
+.win-gate p { margin: 12px 0 0; font-size: 14px; line-height: 1.65; color: var(--ink-2); }
+.win-gate ul { margin: 14px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.75; color: var(--ink-3); }
+.win-gate .actions { margin-top: 22px; display: flex; align-items: center; gap: 9px; }
+.win-gate .continue {
+  padding: 9px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #fff;
+}
+.win-gate .continue:hover:not(:disabled) { background: var(--accent-600); }
+.win-gate .report { padding: 9px 14px; border-radius: 8px; font-size: 13.5px; white-space: nowrap; color: var(--ink-2); }
+.win-gate .exit {
+  margin-left: auto;
+  padding: 9px 6px;
+  border: 0;
+  background: transparent;
+  font-size: 13.5px;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+.win-gate .exit:hover:not(:disabled) { background: transparent; color: var(--ink); }
+.win-gate button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The chip: one component, a skin for dark chrome and one for a light pane. */
+.win-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.win-chip i { width: 5px; height: 5px; border-radius: 50%; background: var(--ink-dim); }
+.win-chip.on-dark { border: 1px solid rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.06); color: #bab6b6; }
+.win-chip.on-dark:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
+.win-chip.on-light { border: 1px solid var(--border); background: var(--surface); color: var(--ink-3); }
+.win-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Where it sits in chrome that has no row of its own for it. */
+.win-chip-launch { position: absolute; left: 16px; top: 12px; }
+.win-chip-corner { position: absolute; right: 20px; top: 20px; }
+.win-chip-rail { padding: 0 8px 8px; }
+.win-chip-launch:empty,
+.win-chip-corner:empty,
+.win-chip-rail:empty { display: none; }

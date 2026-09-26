@@ -56,6 +56,7 @@ import { SessionReport } from "./SessionReport.js";
 import { UsagePanel } from "./UsagePanel.js";
 import { RestartRequired } from "./RestartRequired.js";
 import { RUN_STATE } from "./run-state.js";
+import { UnsupportedWindowsChip } from "../windows/unsupported-windows.js";
 
 export type LiveSessionPageProps = {
   storageError?: string;
@@ -558,6 +559,7 @@ function LiveSessionContent({
             Stop observing in Anthill
           </button>
         ) : null}
+        <UnsupportedWindowsChip skin="on-dark" />
       </header>
 
       <div className="live-page-body">

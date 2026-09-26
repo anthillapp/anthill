@@ -25,6 +25,7 @@ export type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun };
 export const IpcChannel = {
   appCapabilities: "app:capabilities",
   appRelaunch: "app:relaunch",
+  appQuit: "app:quit",
   workflowOpen: "workflow:open",
   workflowPendingOpen: "workflow:pending-open",
   workflowOpened: "workflow:opened",
@@ -119,7 +120,8 @@ export const IpcChannel = {
  * commands, and the install guide a missing tool opens (From a session).
  */
 // 24: choosing the workflow folder on Settings ▸ General, and the setting it writes.
-export const IPC_CONTRACT = 24;
+// 25: the platform in the capabilities, and quitting from the Windows gate (ANT-154).
+export const IPC_CONTRACT = 25;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -138,6 +140,13 @@ export type IpcCapabilities = {
    * old main process that does not send it is read as `desktop`.
    */
   shell?: "desktop" | "cli";
+  /**
+   * The operating system the shell runs on, as Node names it (`darwin`,
+   * `linux`, `win32`). Windows is an unsupported, experimental source build
+   * (ANT-154), and the renderer says so; absent from an older shell, which is
+   * read as nothing to say.
+   */
+  platform?: string;
   /**
    * Whether this shell started with error reporting on. The CLI's page reads
    * it to decide whether to catch its own errors; the desktop tells its
@@ -899,6 +908,11 @@ export interface AnthillApi {
    * than waiting for something that is not coming.
    */
   relaunch(): Promise<boolean>;
+  /**
+   * Quit Anthill, through the same unsaved-workflow guard as closing the
+   * window. Only the desktop shell serves it; the CLI's page has nothing to quit.
+   */
+  quit?(): Promise<boolean>;
   /** With a path, opens that workflow; without one, asks the author to pick. */
   openWorkflow(path?: string): Promise<OpenWorkflowResult>;
   /**

@@ -3,7 +3,7 @@
   "version": "0.7.11",
   "private": true,
   "type": "module",
-  "description": "Anthill on Linux: a CLI that opens the app as a web interface on 127.0.0.1.",
+  "description": "Anthill as a CLI that opens the app as a web interface on 127.0.0.1. Supported on macOS and Linux; experimental and unsupported on Windows.",
   "main": "out/cli/src/cli.js",
   "bin": {
     "anthill": "out/cli/src/cli.js"

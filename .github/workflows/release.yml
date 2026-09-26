@@ -169,6 +169,8 @@ jobs:
           body: |
             macOS, Apple Silicon.
 
+            macOS: desktop app and CLI. Linux: CLI. Windows support is coming soon – building from source is possible for experimentation, but Windows is not yet officially supported and some features may not work.
+
             A signed, notarised build opens on a double-click. If this one was
             built without the signing secrets, macOS refuses it on the first
             try — let it be refused, then allow it once:

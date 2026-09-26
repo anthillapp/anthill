@@ -38,7 +38,7 @@ is not part of the current product, and it is not reachable from the app.
 
 | | |
 | --- | --- |
-| **Platform** | macOS (Apple Silicon). See *Platform status* below. |
+| **Platform** | macOS (Apple Silicon) for the desktop app; macOS and Linux for the CLI. Windows is experimental. See *Platform status* below. |
 | **Node.js** | Developed and tested on 22.23. There is no `engines` pin, so older majors are untried rather than refused. |
 | **npm** | 10.9 (the one that ships with Node 22). The repo is npm workspaces. |
 | **Claude Code** | Optional. `claude` on your `PATH`, signed in. |
@@ -51,14 +51,31 @@ that is the CLI you paste the prompt into.
 
 ### Platform status
 
-Anthill is developed and tested on macOS on Apple Silicon, and that is the only
-configuration packaged today (`npm run package` builds `--mac --dir` for
-`arm64`).
+**macOS: desktop app and CLI. Linux: CLI. Windows support is coming soon –
+building from source is possible for experimentation, but Windows is not yet
+officially supported and some features may not work.**
 
-Windows and Linux are **not supported**. The app is Electron and much of it is
-portable, but nothing has been verified there, the packaging targets do not exist,
-and the paths below are macOS paths. Treat running it elsewhere as unexplored
-rather than as a supported setup.
+- **macOS** (Apple Silicon) is where Anthill is developed and tested, and the
+  only configuration packaged and released (`npm run package` builds `--mac
+  --dir` for `arm64`; releases are a signed `.dmg`).
+- **Linux** is supported for the CLI (`apps/cli`), which serves the same app
+  as a web page on `127.0.0.1`. There is no Linux desktop package.
+- **Windows** has no release, no installer and no support yet. The source is
+  not blocked from building or running there: the desktop app shows a one-time
+  notice that this is an unsupported, experimental build, then keeps an
+  *Unsupported Windows build* chip in view; the CLI prints the same warning and
+  carries on. Anything verified not to work is turned off where it is, with its
+  own explanation. Nothing guarantees compatibility, data safety or support.
+  WSL is optional experimentation, never a requirement or the advertised path.
+  [Report a Windows issue](https://github.com/nstr/anthill/issues/new?template=windows.yml)
+  — reports are welcome, a response is not guaranteed while Windows is
+  unsupported.
+
+A Windows CI build, if one is added, only catches compile and packaging
+regressions. It is not evidence of support: Windows becomes supported only
+after real-machine testing of the desktop app, the CLI, storage, hooks,
+harness discovery, deep links and installation, and a decision to publish a
+Windows artifact. Until then the paths in this README are macOS paths.
 
 ## Community and support
 

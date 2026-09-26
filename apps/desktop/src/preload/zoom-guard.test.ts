@@ -19,11 +19,13 @@ describe("the preload's window-zoom guard", () => {
       ipcRenderer: { invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() },
       webFrame: { setVisualZoomLevelLimits },
     }));
+    vi.doMock("@sentry/electron/preload-namespaced", () => ({ hookupIpc: vi.fn() }));
 
     await import("./index.js");
 
     expect(setVisualZoomLevelLimits).toHaveBeenCalledWith(1, 1);
     expect(exposeInMainWorld).toHaveBeenCalledWith("anthill", expect.any(Object));
     vi.doUnmock("electron");
+    vi.doUnmock("@sentry/electron/preload-namespaced");
   });
 });

@@ -35,6 +35,30 @@ describe("privileged CLI bridge boundaries", () => {
     expect(await bridge.api.settingsRead()).toMatchObject({ stepNotifications: true });
     expect(await bridge.api.notificationsProbe()).toMatchObject({ kind: "unsupported" });
   });
+  it("sends nothing without diagnostics, forwards page errors through the gate with them", async () => {
+    const { bridge } = await fixture();
+    expect(await bridge.handle("app:capabilities")).toMatchObject({ shell: "cli", errorReports: false });
+    await bridge.api.settingsWrite({ errorReportingEnabled: true, nativeCrashReportingEnabled: true });
+    expect(await bridge.api.settingsRead()).toMatchObject({ errorReportingEnabled: true, nativeCrashReportingEnabled: false });
+    await expect(bridge.api.reportRendererError?.({ exception: {} })).resolves.toBeUndefined();
+
+    const root = await mkdtemp(join(tmpdir(), "anthill-bridge-"));
+    const reportRendererError = vi.fn();
+    const analytics = { enable: vi.fn(async () => undefined), disable: vi.fn(async () => undefined), capture: vi.fn() };
+    const gate = { errors: true, nativeCrashes: false };
+    const reporting = await createBridge({
+      paths: { userData: join(root, "data"), home: root },
+      broadcast: () => undefined,
+      onMessage: () => undefined,
+      diagnostics: { analytics, gate, errorReportsAtLaunch: true, reportRendererError } as never,
+    });
+    fixtures.push({ bridge: reporting, root });
+    expect(await reporting.handle("app:capabilities")).toMatchObject({ errorReports: true });
+    await reporting.api.reportRendererError?.({ exception: {} });
+    expect(reportRendererError).toHaveBeenCalledWith({ exception: {} });
+    await reporting.api.settingsWrite({ errorReportingEnabled: false });
+    expect(gate.errors).toBe(false);
+  });
   it("exposes history reads but not runner controls, without initializing history at startup", async () => {
     const { bridge, userData } = await fixture();
     const { channels } = await bridge.capabilities();

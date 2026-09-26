@@ -14,6 +14,7 @@
 
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { readFileSync } from "node:fs";
 
 /** Bumped when the file's shape changes. A version this one cannot read is defaulted. */
 export const SETTINGS_VERSION = 1;
@@ -33,6 +34,12 @@ export const SETTINGS_VERSION = 1;
  * a new step.
  */
 export type Settings = {
+  /** Anonymous, content-free product analytics. Off until the author opts in. */
+  analyticsEnabled: boolean;
+  /** JavaScript error reports. Applied at the next launch. */
+  errorReportingEnabled: boolean;
+  /** Native memory dumps, separately consented to. Applied at the next launch. */
+  nativeCrashReportingEnabled: boolean;
   /** A step the session announced it is starting. */
   stepNotifications: boolean;
   /** A step the session left, which is as finished as Anthill can say. */
@@ -48,6 +55,9 @@ export type Settings = {
 };
 
 export const DEFAULT_SETTINGS: Settings = {
+  analyticsEnabled: false,
+  errorReportingEnabled: false,
+  nativeCrashReportingEnabled: false,
   stepNotifications: false,
   stepFinishedNotifications: false,
   loopNotifications: false,
@@ -85,6 +95,22 @@ function parse(text: string): Settings {
     if (typeof stored[key] === "boolean") settings[key] = stored[key];
   }
   return settings;
+}
+
+/** Read only launch consent before Electron's ready event, as Sentry requires. */
+export function reportingConsentOnDisk(path: string): Pick<Settings, "errorReportingEnabled" | "nativeCrashReportingEnabled"> {
+  try {
+    const settings = parse(readFileSync(path, "utf8"));
+    return {
+      errorReportingEnabled: settings.errorReportingEnabled,
+      nativeCrashReportingEnabled: settings.nativeCrashReportingEnabled,
+    };
+  } catch {
+    return {
+      errorReportingEnabled: false,
+      nativeCrashReportingEnabled: false,
+    };
+  }
 }
 
 export class SettingsStore {

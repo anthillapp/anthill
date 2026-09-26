@@ -15,7 +15,7 @@ const { version } = createRequire(import.meta.url)("./package.json") as { versio
  */
 export default defineConfig({
   plugins: [react()],
-  define: { __ANTHILL_VERSION__: JSON.stringify(version) },
+  define: { __ANTHILL_VERSION__: JSON.stringify(version), __ANTHILL_DIAGNOSTICS__: "false" },
   test: {
     globals: true,
     environment: "node",

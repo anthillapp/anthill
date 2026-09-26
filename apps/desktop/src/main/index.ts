@@ -71,7 +71,11 @@ import { AssistantThreadStore } from "./assistant-threads.js";
 import { ModelPreferencesStore } from "./model-preferences.js";
 import { pluginStatus } from "./plugin-status.js";
 import { devCheckout, INSTALL_GUIDES, installPlugin, pluginConnections, type Harness } from "./plugin-connect.js";
-import { SettingsStore } from "./settings.js";
+import { SettingsStore, reportingConsentOnDisk } from "./settings.js";
+import { DesktopAnalytics } from "./analytics.js";
+import { SENTRY_DSN, sanitizeErrorEvent } from "../shared/error-reporting.js";
+import { writeSettingsWithConsent, type ReportingGate } from "./diagnostics-consent.js";
+import * as Sentry from "@sentry/electron/main";
 import { claimScheme } from "./url-scheme.js";
 import { PendingRunStore } from "./live/store.js";
 import { WorkflowStatusStore } from "./live/workflow-status.js";
@@ -90,11 +94,14 @@ import {
 // a `--data-dir` this build will not accept, or one the filesystem will not
 // create, threw out of module evaluation with these handlers six lines beneath
 // it and no window anywhere, and the app died without printing a word.
+const reporting: ReportingGate = { errors: false, nativeCrashes: false };
 process.on("uncaughtException", (error) => {
   console.error("[anthill] uncaught exception:", error);
+  if (reporting.errors) Sentry.captureException(error);
 });
 process.on("unhandledRejection", (reason) => {
   console.error("[anthill] unhandled rejection:", reason);
+  if (reporting.errors) Sentry.captureException(reason instanceof Error ? reason : new Error("Unhandled rejection"));
 });
 
 /**
@@ -125,6 +132,47 @@ process.on("unhandledRejection", (reason) => {
 const USER_DATA_DIR = chooseDataDirectory();
 app.setName("Anthill");
 app.setPath("userData", USER_DATA_DIR);
+
+/** Only the released macOS app reports anything; see `__ANTHILL_DIAGNOSTICS__`. */
+const diagnosticsAvailable = __ANTHILL_DIAGNOSTICS__ && app.isPackaged && process.platform === "darwin";
+const analytics = new DesktopAnalytics(USER_DATA_DIR, diagnosticsAvailable);
+const launchConsent = reportingConsentOnDisk(join(USER_DATA_DIR, "settings.json"));
+let reportErrorsAtLaunch = false;
+if (diagnosticsAvailable && launchConsent.errorReportingEnabled) {
+  try {
+    Sentry.init({
+      dsn: SENTRY_DSN,
+      ipcMode: Sentry.IPCMode.Classic,
+      defaultIntegrations: launchConsent.nativeCrashReportingEnabled
+        ? [Sentry.sentryMinidumpIntegration()]
+        : [],
+      sendDefaultPii: false,
+      sendClientReports: false,
+      tracesSampleRate: 0,
+      attachScreenshot: false,
+      dataCollection: {
+        userInfo: false,
+        cookies: false,
+        httpHeaders: false,
+        httpBodies: [],
+        urlQueryParams: false,
+        graphQL: { document: false, variables: false },
+        genAI: { inputs: false, outputs: false },
+        databaseQueryData: false,
+        stackFrameVariables: false,
+        frameContextLines: 0,
+      },
+      beforeSend: (event) => reporting.errors && (event.platform !== "native" || reporting.nativeCrashes)
+        ? sanitizeErrorEvent(event)
+        : null,
+    });
+    reporting.errors = true;
+    reporting.nativeCrashes = launchConsent.nativeCrashReportingEnabled;
+    reportErrorsAtLaunch = true;
+  } catch (error) {
+    console.error("[anthill] error reporting could not start:", error);
+  }
+}
 
 /**
  * The data directory, or a box saying why there is not going to be one.
@@ -577,6 +625,7 @@ function createWindow(): void {
     // Windows and Linux take the icon from the window; macOS from the dock.
     ...(process.platform === "darwin" ? {} : { icon: iconPath() }),
     webPreferences: {
+      additionalArguments: reportErrorsAtLaunch ? ["--anthill-report-errors"] : [],
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
@@ -723,6 +772,7 @@ async function openWorkflowAt(path: string): Promise<OpenWorkflowResult> {
     const workflow = parseWorkflow(migration.workflow);
     await workflowFiles.grant(path);
     await rememberRecent(path);
+    analytics.capture("workflow_opened");
     return {
       ok: true,
       opened: {
@@ -1079,6 +1129,7 @@ function registerIpcHandlers(): void {
       // Saving is how a workflow gets into the launch window's list in the first
       // place: a workflow drafted from a prompt has never been opened from a file.
       await rememberRecent(path);
+      analytics.capture("workflow_saved");
 
       return { kind: "saved", path };
     },
@@ -1232,7 +1283,9 @@ function registerIpcHandlers(): void {
   handle(IpcChannel.liveObserve, async (_event, request: LiveObserveRequest) => {
     const service = liveService();
     await service.start();
-    return service.startObservation(request);
+    const result = await service.startObservation(request);
+    analytics.capture("live_observation_started");
+    return result;
   });
   handle(IpcChannel.liveSnapshot, async () => liveService().start());
   handle(IpcChannel.liveCancel, async (_event, runId: string) =>
@@ -1304,8 +1357,11 @@ function registerIpcHandlers(): void {
   });
   handle(IpcChannel.settingsRead, async () => settings().read());
   handle(IpcChannel.settingsWrite, async (_event, patch: Partial<AppSettings>) =>
-    settings().write(patch ?? {}),
+    writeSettingsWithConsent(settings(), analytics, reporting, patch ?? {}, { nativeCrashes: true }),
   );
+  // The CLI's browser page forwards its errors; the desktop renderer reports
+  // through Sentry's own IPC, so there is nothing to do here.
+  handle(IpcChannel.diagnosticsRendererError, async () => undefined);
   // Sent on demand, because "are notifications allowed" has no answer to read:
   // the author is being asked to look at their own screen.
   handle(IpcChannel.notificationsProbe, async () =>
@@ -1598,6 +1654,9 @@ void app.whenReady().then(async () => {
   applyMenu();
   setRecentsPaths({ userData: app.getPath("userData"), home: app.getPath("home") });
   registerIpcHandlers();
+  if ((await settings().read()).analyticsEnabled) {
+    await analytics.enable().then(() => analytics.capture("desktop_opened")).catch(() => undefined);
+  }
   createWindow();
 
   // Reading what a coding harness left in the exchange, from here on. Started

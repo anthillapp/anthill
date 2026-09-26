@@ -26,9 +26,13 @@
     "@anthill/workflow-exchange": "*",
     "@anthill/workflow-schema": "*",
     "@anthill/workspace": "*",
-    "better-sqlite3": "^11.5.0"
+    "@sentry/browser": "10.75.0",
+    "@sentry/electron": "~7.20.0",
+    "better-sqlite3": "^11.5.0",
+    "posthog-node": "~5.54.1"
   },
   "devDependencies": {
+    "@sentry/vite-plugin": "~5.4.0",
     "@testing-library/react": "^16.0.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
@@ -47,13 +51,22 @@
   "build": {
     "appId": "com.anthill.desktop",
     "productName": "Anthill",
-    "protocols": [{ "name": "Anthill workflow", "schemes": ["anthill"], "role": "Viewer" }],
+    "protocols": [
+      {
+        "name": "Anthill workflow",
+        "schemes": [
+          "anthill"
+        ],
+        "role": "Viewer"
+      }
+    ],
     "directories": {
       "buildResources": "build",
       "output": "release"
     },
     "files": [
       "out/**/*",
+      "!**/*.map",
       "package.json",
       "native/**/*"
     ],

@@ -26,6 +26,7 @@ import {
   type AnthillApi,
   type WorkspaceInfo,
   type StartRunRequest,
+  type AppSettings,
   type SaveWorkflowRequest,
   type ExportWorkflowRequest,
   type ApprovalResponse,
@@ -65,6 +66,8 @@ import {
 } from "../../desktop/src/main/recents.js";
 import type { Paths } from "./paths.js";
 import { reportPath } from "./report.js";
+import type { CliDiagnostics } from "./diagnostics.js";
+import { writeSettingsWithConsent } from "../../desktop/src/main/diagnostics-consent.js";
 
 const moduleDir = fileURLToPath(new URL(".", import.meta.url));
 
@@ -84,6 +87,11 @@ const moduleDir = fileURLToPath(new URL(".", import.meta.url));
  */
 export type BridgeOptions = {
   paths: Paths;
+  /**
+   * Opt-in analytics and error reports. Only the CLI entry point passes it;
+   * a bridge built without it (every test) sends nothing and records nothing.
+   */
+  diagnostics?: CliDiagnostics;
   /** The workspace the CLI was started with, if any. */
   workspace?: string;
   /** Broadcast a push-channel message to every connected client. */
@@ -125,7 +133,7 @@ export type Bridge = {
 type Push = (channel: string, payload: unknown) => void;
 
 export async function createBridge(options: BridgeOptions): Promise<Bridge> {
-  const { paths, workspace } = options;
+  const { paths, workspace, diagnostics } = options;
   const notify = options.notify ?? console.log;
 
   // The recents store is the one reused module that used to read its location
@@ -261,6 +269,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     contract: IPC_CONTRACT,
     channels: [...registered],
     shell: "cli",
+    errorReports: diagnostics?.errorReportsAtLaunch ?? false,
   }));
 
   // No relaunch in the CLI: there is nothing to restart. Returning false lets
@@ -395,6 +404,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
       if (!written.ok) throw new Error(written.error);
       await workflowFiles.grant(path);
       await rememberRecent(path);
+      diagnostics?.analytics.capture("workflow_saved");
       return { kind: "saved" as const, path };
     } catch (error) {
       return {
@@ -506,7 +516,9 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     const request = args[0] as LiveObserveRequest;
     const service = liveService();
     await service.start();
-    return service.startObservation(request);
+    const result = await service.startObservation(request);
+    diagnostics?.analytics.capture("live_observation_started");
+    return result;
   });
 
   register(IpcChannel.liveSnapshot, async () => liveService().start());
@@ -539,7 +551,15 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   );
 
   register(IpcChannel.settingsRead, async () => settings.read());
-  register(IpcChannel.settingsWrite, async (args) => settings.write(args[0] ?? {}));
+  register(IpcChannel.settingsWrite, async (args) => {
+    const patch = (args[0] ?? {}) as Partial<AppSettings>;
+    return diagnostics
+      ? writeSettingsWithConsent(settings, diagnostics.analytics, diagnostics.gate, patch, { nativeCrashes: false })
+      : settings.write({ ...patch, nativeCrashReportingEnabled: false });
+  });
+  register(IpcChannel.diagnosticsRendererError, async (args) => {
+    diagnostics?.reportRendererError(args[0]);
+  });
   register(IpcChannel.notificationsProbe, async () => ({ kind: "unsupported", reason: "Native notifications are available in the desktop app." }));
 
   // The plugin card. This shell runs out of a checkout, which is also what
@@ -630,6 +650,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
       const workflow = parseWorkflow(migration.workflow);
       await workflowFiles.grant(path);
       await rememberRecent(path);
+      diagnostics?.analytics.capture("workflow_opened");
       return {
         ok: true as const,
         opened: {
@@ -769,6 +790,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     onOpenSettings: (listener) => on(OPEN_SETTINGS_CHANNEL, () => listener()),
     settingsRead: () => handle(IpcChannel.settingsRead),
     settingsWrite: (patch) => handle(IpcChannel.settingsWrite, patch),
+    reportRendererError: (event: unknown) => handle(IpcChannel.diagnosticsRendererError, event),
     notificationsProbe: () => handle(IpcChannel.notificationsProbe),
     pluginStatus: () => handle(IpcChannel.pluginStatus),
     pluginConnections: () => handle(IpcChannel.pluginConnections),

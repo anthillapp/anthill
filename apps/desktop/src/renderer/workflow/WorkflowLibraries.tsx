@@ -62,6 +62,7 @@ export function WorkflowLibraries({
         </button>
         <button
           role="tab"
+          data-tour="lib-agents"
           aria-selected={tab === "agents"}
           className={tab === "agents" ? "active" : ""}
           onClick={() => onTabChange("agents")}

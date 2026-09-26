@@ -9425,3 +9425,78 @@ button.presence-chip {
 .live-rail-details { padding: 0 4px; color: var(--on-dark-dim); }
 .live-rail-details > summary { cursor: pointer; font-size: 12px; }
 .live-rail-details[open] > summary { margin-bottom: 8px; }
+
+/* ------------------------------------------------------------------ */
+/* The canvas tour (ANT-141)                                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The window itself: nothing the tour draws lands outside it. It catches no
+ * clicks — only the card does — so the highlighted control stays usable.
+ */
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  overflow: hidden;
+  pointer-events: none;
+}
+/*
+ * The spotlight, drawn inward so a panel flush with the window edge is
+ * outlined inside the window. The huge outer shadow is the dim — just enough
+ * to make the target clear; the rest of the app stays readable.
+ */
+.tour-ring {
+  position: absolute;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 2px var(--accent),
+    inset 0 0 0 4px rgba(255, 255, 255, 0.9),
+    0 0 0 9999px rgba(32, 30, 29, 0.32);
+  transition: left 200ms ease, top 200ms ease, width 200ms ease, height 200ms ease;
+  animation: tour-in 180ms ease both;
+}
+@keyframes tour-in { from { opacity: 0; } to { opacity: 1; } }
+.tour-card {
+  position: absolute;
+  width: 300px;
+  box-sizing: border-box;
+  padding: 14px 15px 13px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 14px 34px rgba(32, 30, 29, 0.22);
+  color: var(--ink);
+  pointer-events: auto;
+  transition: left 200ms ease, top 200ms ease;
+}
+.tour-card .head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.tour-card .title {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-700);
+}
+.tour-card .skip { margin-left: auto; padding: 0; border: 0; background: transparent; font-size: 12px; color: var(--ink-dim); }
+.tour-card .skip:hover:not(:disabled) { background: transparent; color: var(--ink); }
+.tour-card .text { margin: 0; font-size: 13.5px; line-height: 1.55; }
+.tour-card .foot { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.tour-card .count { font-size: 11.5px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.tour-card .back { margin-left: auto; padding: 6px 12px; border-radius: 7px; font-size: 12.5px; color: var(--ink-2); }
+.tour-card .count + .next { margin-left: auto; }
+.tour-card .next { padding: 6px 13px; border: 0; border-radius: 7px; background: var(--accent); font-size: 12.5px; font-weight: 600; color: #fff; }
+.tour-card .next:hover:not(:disabled) { background: var(--accent-600); }
+.tour-card button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tour-card .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tour-ring { animation: none; transition: none; }
+  .tour-card { transition: none; }
+}

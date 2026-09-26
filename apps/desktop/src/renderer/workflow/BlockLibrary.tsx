@@ -171,7 +171,7 @@ export function BlockLibrary({ custom, onAddCustom, onAdd }: BlockLibraryProps) 
   };
 
   return (
-    <div className="library">
+    <div className="library" data-tour="library">
       <div className="kicker">
         <span>Block library</span>
         <span>{totalBlockCount(custom)}</span>

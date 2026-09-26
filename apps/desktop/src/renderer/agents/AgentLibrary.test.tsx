@@ -205,7 +205,7 @@ async function openAgents() {
       onFromPrompt={() => undefined}
       onOpen={() => undefined}
       onExplain={() => undefined}
-      onFromSession={() => undefined} onWelcomeTour={() => undefined}
+      onFromSession={() => undefined} onWelcomeTour={() => undefined} onShowTips={() => undefined}
       onSettings={() => undefined}
     />,
   );

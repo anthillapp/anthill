@@ -34,8 +34,6 @@ function draw(over: Partial<Parameters<typeof WorkflowToolbar>[0]> = {}) {
       canStepBack={false}
       canStepForward={false}
       onStep={vi.fn()}
-      onNew={vi.fn()}
-      onOpen={vi.fn()}
       onSave={vi.fn()}
       onPrompt={onPrompt}
       {...over}

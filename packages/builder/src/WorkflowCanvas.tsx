@@ -847,6 +847,9 @@ export function WorkflowCanvas({
             className={assembly ? "canvas-assemble" : undefined}
             data-testid={`workflow-block-${node.id}`}
             data-snap-target={isTarget ? "true" : undefined}
+            // What the canvas tour points at when it says what a block is: a
+            // step, never the Start or End pill, which carry no work.
+            data-tour={isPill ? undefined : "block"}
             onPointerDown={(event) => onBlockPointerDown(event, node)}
             onClick={(event) => {
               event.stopPropagation();

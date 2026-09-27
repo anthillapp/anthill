@@ -108,10 +108,14 @@ export function renderMarker(marker: RunMarker): string {
 /**
  * The lines the agent is asked to print.
  *
- * Optional by design. The run marker already reaches the session file through
- * the user's own pasted message, so detection never depends on this; and a workflow
- * whose steps are never announced still shows a live session, just without
- * per-step progress. An agent that ignores all of it costs nothing.
+ * Detection never depends on these: the run marker already reaches the session
+ * file through the user's own pasted message, and a workflow whose steps are
+ * never announced still shows a live session, just without per-step progress.
+ * But the section used to end by saying so to the agent — "ignore this section
+ * entirely if you cannot print such lines" — and agents took the offer: in a
+ * measured run Claude Code printed the run and done lines every time and never
+ * the step it delegated (ANT-162). So there is no way out offered any more,
+ * only a second way in: a line printed by a command is read as well (ANT-147).
  *
  * The step line is what makes per-block progress *authoritative* rather than
  * guessed. Anthill has no other way to know which step a session is on — it is
@@ -127,7 +131,8 @@ export function echoInstruction(
     "",
     "Print these lines exactly, each on a line of its own, as plain output. They",
     "are correlation markers for the Anthill window on this machine and change",
-    "nothing about the work itself.",
+    "nothing about the work itself. Print them yourself, in this session: a",
+    "subagent's output does not count, so never leave one to a subagent.",
     "",
     `**Once, before you begin:**`,
     "",
@@ -161,8 +166,51 @@ export function echoInstruction(
     "",
     `    ${DONE_TOKEN} ${marker.runId} ${marker.nonce}`,
   );
-  lines.push("", "Ignore this section entirely if you cannot print such lines.");
+  lines.push(
+    "",
+    "Each step below opens with the command that prints its line, so a step line",
+    "can come from a command's output as well as from your reply; either is read the",
+    "same way. The same goes for these two lines if you cannot put them in a reply.",
+  );
   return lines.join("\n");
+}
+
+/**
+ * What a step opens with in the compiled workflow: its own announcement.
+ *
+ * The section above lists every id, but it is read once, long before the
+ * steps, and a step that says only "delegate to the developer subagent" gave
+ * the agent nothing to remember it by at the moment that mattered. Measured
+ * on the "Implement, test, fix" template, Claude Code announced `test` in five
+ * runs of five and the delegated `implement` in none (ANT-162).
+ *
+ * Putting the line in the step was not enough by itself: run non-interactively,
+ * Claude Code goes from one tool call to the next without writing any text, so
+ * "print this line before the step" had no message to land in — the same
+ * measurement after that change still found `implement` in none of five. A
+ * command is something it does at every step. So the step opens with one, the
+ * same `printf` Codex already chose for itself (ANT-147); both observers read
+ * a command's output, and Claude Code runs `printf` without asking.
+ */
+export function stepOpening(
+  marker: Pick<RunMarker, "runId" | "nonce">,
+  step: { id: string; delegated: boolean },
+  via: "echo" | "cli" = "echo",
+): string[] {
+  const command =
+    via === "cli"
+      ? `${CLI_NAME} step ${marker.runId} ${marker.nonce} ${step.id}`
+      : `printf '${STEP_TOKEN} ${marker.runId} ${marker.nonce} ${step.id}\\n'`;
+  const lines = [
+    "Your first action in this step, and again each time you come back to it: run",
+    "this command, which tells the Anthill window the step has begun.",
+    "",
+    `    ${command}`,
+  ];
+  if (step.delegated) {
+    lines.push("", "Run it yourself before you hand the step to the subagent; do not ask the subagent to.");
+  }
+  return lines;
 }
 
 /**

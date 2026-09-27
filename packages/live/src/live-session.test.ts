@@ -95,8 +95,15 @@ function event(partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind
   };
 }
 
-const step = (blockId: string) =>
+const announce = (blockId: string) =>
   event({ kind: "step.marker", title: `Step ${blockId}`, blockId, source: "transcript", channel: "claude-code:transcript" });
+/**
+ * A step line, as a session writes one: followed by some work in the step.
+ * A step left with nothing done in it is a different case (ANT-164) that the
+ * tests for it build by hand with `announce`.
+ */
+const step = (blockId: string) => announce(blockId);
+const worked = () => event({ kind: "tool.start", title: "Bash", source: "transcript", channel: "claude-code:transcript" });
 
 describe("attributing one event", () => {
   it("takes an announced step as authoritative", () => {
@@ -177,7 +184,7 @@ describe("folding a session", () => {
   });
 
   it("runs the announced step and finishes the one it left", () => {
-    const view = foldLiveSession(workflow, run(), [step("implement"), step("test")]);
+    const view = foldLiveSession(workflow, run(), [step("implement"), worked(), step("test")]);
     expect(view.blocks.implement.state).toBe("done");
     expect(view.blocks.test.state).toBe("running");
     expect(view.blocks.test.confidence).toBe("exact");
@@ -194,14 +201,17 @@ describe("folding a session", () => {
   it("records a move the workflow has no connection for", () => {
     const view = foldLiveSession(workflow, run(), [
       step("implement"),
+      worked(),
       step("test"),
+      worked(),
       step("fix"),
+      worked(),
       step("implement"),
     ]);
     expect(view.detours).toEqual([
       expect.objectContaining({ from: "fix", to: "implement", pass: 2 }),
     ]);
-    expect(view.detours[0].at).toBe(view.events[3].at);
+    expect(view.detours[0].at).toBe(view.events[6].at);
   });
 
   it("leaves a rework loop the workflow drew alone", () => {
@@ -220,12 +230,15 @@ describe("folding a session", () => {
   });
 
   it("keeps a finished step counted while the agent is back in it", () => {
-    const before = foldLiveSession(workflow, run(), [step("implement"), step("test"), step("fix")]);
+    const before = foldLiveSession(workflow, run(), [step("implement"), worked(), step("test"), worked(), step("fix")]);
     expect(finishedSteps(before)).toBe(2);
     const again = foldLiveSession(workflow, run(), [
       step("implement"),
+      worked(),
       step("test"),
+      worked(),
       step("fix"),
+      worked(),
       step("implement"),
     ]);
     // "implement" finished once already; being back in it does not undo that.
@@ -512,10 +525,12 @@ describe("what a finished step cost", () => {
   const T0 = Date.parse("2026-08-29T10:00:00.000Z");
   const at = (ms: number) => new Date(T0 + ms).toISOString();
   const marker = (blockId: string, when: number) => ({ ...step(blockId), at: at(when) });
+  const work = (when: number) => ({ ...worked(), at: at(when) });
 
   it("measures from this step's announcement to the next", () => {
     const view = foldLiveSession(workflow, run(), [
       marker("implement", 60_000),
+      work(61_000),
       marker("test", 5 * 60_000),
     ]);
     expect(view.blocks.implement.spentMs).toBe(4 * 60_000);
@@ -530,8 +545,11 @@ describe("what a finished step cost", () => {
   it("adds the passes up, because a loop is still one step's cost", () => {
     const view = foldLiveSession(workflow, run(), [
       marker("implement", 0),
+      work(1_000),
       marker("test", 60_000),
+      work(61_000),
       marker("implement", 120_000),
+      work(121_000),
       marker("test", 300_000),
     ]);
     // A minute the first time round, three minutes the second.
@@ -542,6 +560,7 @@ describe("what a finished step cost", () => {
   it("counts a step's own waiting, which is time it took even so", () => {
     const view = foldLiveSession(workflow, run(), [
       marker("implement", 0),
+      work(1_000),
       { ...event({ kind: "turn.end", title: "The agent finished its turn" }), at: at(30_000) },
       marker("test", 120_000),
     ]);
@@ -566,6 +585,7 @@ describe("what a finished step cost", () => {
     const view = foldLiveSession(workflow, run(), [
       marker("implement", 300_000),
       marker("test", 60_000),
+      work(61_000),
     ]);
     expect(view.blocks.test.state).toBe("done");
     expect(view.blocks.test.spentMs).toBe(240_000);
@@ -575,6 +595,7 @@ describe("what a finished step cost", () => {
   it("leaves the total alone when a stamp cannot be read", () => {
     const view = foldLiveSession(workflow, run(), [
       marker("implement", 60_000),
+      work(61_000),
       { ...marker("test", 120_000), at: "not a time" },
     ]);
     expect(view.blocks.implement.state).toBe("done");
@@ -607,7 +628,7 @@ describe("a diagram folded from a record that lost its beginning", () => {
   /** Two steps announced early, then a great deal of ordinary tool activity. */
   function wholeRun(): ObservationEvent[] {
     const noise = Array.from({ length: 1200 }, (_, index) =>
-      event({ kind: "tool.start", title: "Bash", toolUseId: `t${index}`, at: at(600_000 + index * 1000) }),
+      event({ kind: "tool.start", title: "Bash", toolUseId: `t${index}`, source: "transcript", channel: "claude-code:transcript", at: at(600_000 + index * 1000) }),
     );
     return [marker("implement", 0), marker("test", 300_000), ...noise];
   }
@@ -921,6 +942,7 @@ describe("telling blocks apart", () => {
       mark("implement", 0),
       dispatch("call-a", 1),
       mark("test", 2),
+      tx({ kind: "tool.start", title: "Bash", toolUseId: "own-1", at: T(3) }),
       result("call-a", 10),
       mark("fix", 12),
     ]);
@@ -1016,7 +1038,12 @@ describe("telling blocks apart", () => {
     });
 
     it("names a finished step without reopening it", () => {
-      const view = foldLiveSession(workflow, run(), [mark("implement", 1), mark("test", 5), said("implement", 6)]);
+      const view = foldLiveSession(workflow, run(), [
+        mark("implement", 1),
+        tx({ kind: "tool.start", title: "Bash", toolUseId: "own-1", at: T(2) }),
+        mark("test", 5),
+        said("implement", 6),
+      ]);
       expect(view.blocks.implement.state).toBe("done");
       expect(view.blocks.test.state).toBe("running");
       expect(view.events.at(-1)?.mapping).toMatchObject({ blockId: "implement", confidence: "exact" });
@@ -1031,5 +1058,133 @@ describe("telling blocks apart", () => {
       ]);
       expect(view.blocks.implement.passes).toBe(1);
     });
+  });
+});
+
+/*
+  ANT-164. Claude Code announces every parallel step first and only then
+  starts their subagents. The step it left with nothing done in it used to be
+  drawn done — with a detour — for the seconds until its subagent started.
+*/
+describe("a step left with nothing done in it", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-27T06:00:00.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const printed = (blockId: string, call: string, s: number) => [
+    tx({ kind: "tool.start", title: "Bash", toolUseId: call, at: T(s) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: call, at: T(s + 0.3) }),
+    tx({ kind: "step.marker", title: `Step ${blockId}`, blockId, printedBy: call, at: T(s + 0.3) }),
+  ];
+  const dispatch = (id: string, tag: string, s: number) =>
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: id, stepTag: tag, background: true, at: T(s) });
+  const receipt = (id: string, s: number) => tx({ kind: "tool.end", title: "Tool finished", toolUseId: id, at: T(s) });
+  const own = (s: number) => tx({ kind: "tool.start", title: "Edit", toolUseId: `own-${s}`, at: T(s) });
+
+  it("stays running, with no detour, from its line until its subagent starts", () => {
+    // implement → fix is no connection: the batch looked like a jump.
+    const journal = [
+      ...printed("implement", "p1", 1),
+      ...printed("fix", "p2", 2),
+      dispatch("call-a", "implement", 7),
+      receipt("call-a", 7.2),
+      dispatch("call-b", "fix", 8),
+      receipt("call-b", 8.2),
+    ];
+    for (let n = 1; n <= journal.length; n += 1) {
+      const view = foldLiveSession(workflow, run(), journal.slice(0, n));
+      if (view.blocks.fix.state !== "queued") {
+        expect(view.blocks.implement.state).toBe("running");
+        expect(view.detours).toEqual([]);
+      }
+    }
+  });
+
+  it("is closed as of when it was left once the session gets on with work elsewhere", () => {
+    const view = foldLiveSession(workflow, run(), [
+      ...printed("implement", "p1", 1),
+      ...printed("fix", "p2", 2),
+      own(9),
+    ]);
+    expect(view.blocks.implement).toMatchObject({ state: "done", spentMs: 1_000 });
+    expect(view.spans[0]).toEqual({ blockId: "implement", pass: 1, startedAt: T(1.3), endedAt: T(2.3) });
+    // Nothing started it, so it was a move away after all.
+    expect(view.detours).toEqual([expect.objectContaining({ from: "implement", to: "fix", at: T(2.3) })]);
+  });
+
+  it("is closed as of when it was left if the session ends", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      ...printed("implement", "p1", 1),
+      ...printed("test", "p2", 2),
+      tx({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", at: T(20) }),
+    ]);
+    expect(view.blocks.implement).toMatchObject({ state: "done", spentMs: 1_000 });
+    expect(view.blocks.test.state).toBe("done");
+  });
+
+  it("does not count set-up done under a step's tag, before its line, as work in it", () => {
+    // Measured: the session's first message, while it wrote the agent files,
+    // already carried the first step's tag.
+    const view = foldLiveSession(workflow, run(), [
+      tx({ kind: "message", title: "Message", detail: "Setting up.", author: { kind: "main" }, stepTag: "implement", at: T(0) }),
+      own(0.5),
+      ...printed("implement", "p1", 1),
+      ...printed("fix", "p2", 2),
+    ]);
+    expect(view.blocks.implement.state).toBe("running");
+    expect(view.detours).toEqual([]);
+  });
+
+  it("holds a step open for a subagent Claude Code sent off on its own, known only from the receipt", () => {
+    // Measured (ANT-8CF59ECF): no run_in_background on the call, and the
+    // result "Async agent launched" 0.3 s later.
+    const view = foldLiveSession(workflow, run(), [
+      ...printed("implement", "p1", 1),
+      tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "call-a", stepTag: "implement", at: T(3) }),
+      tx({ kind: "tool.end", title: "Tool finished", toolUseId: "call-a", background: true, at: T(3.3) }),
+      ...printed("test", "p2", 4),
+      own(5),
+    ]);
+    expect(view.blocks.implement.state).toBe("running");
+  });
+
+  it("does not count the step the session is on, said again, as another pass", () => {
+    // A Stop hook reads the line out of the last message, ten seconds after
+    // the command that printed it.
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      ...printed("test", "p1", 1),
+      own(2),
+      tx({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", at: T(9) }),
+      event({ kind: "step.marker", title: "Step test", blockId: "test", channel: "claude-code:hook", at: T(11) }),
+    ]);
+    expect(view.blocks.test).toMatchObject({ state: "done", passes: 1 });
+  });
+
+  it("does not take the hook for starting a subagent, arriving before the transcript, for work elsewhere", () => {
+    // Measured (ANT-56CA4FED): the PreToolUse hook for A's Agent call was read
+    // five seconds before the transcript wrote the call.
+    const hook = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+      event({ source: "hook", channel: "claude-code:hook", ...partial });
+    const view = foldLiveSession(workflow, run(), [
+      ...printed("implement", "p1", 1),
+      ...printed("fix", "p2", 2),
+      hook({ kind: "tool.start", title: "Agent", toolName: "Agent", toolUseId: "call-a", at: T(7) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("running");
+    expect(view.detours).toEqual([]);
+  });
+
+  it("does not take a subagent's own calls, read before its start was, for the session's work", () => {
+    const view = foldLiveSession(workflow, run(), [
+      ...printed("implement", "p1", 1),
+      ...printed("fix", "p2", 2),
+      tx({ kind: "tool.start", title: "Edit", toolUseId: "sub-1", parentToolUseId: "call-a", at: T(8) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("running");
+    expect(view.detours).toEqual([]);
+  });
+
+  it("closes a step that had work in it as soon as it is left, as before", () => {
+    const view = foldLiveSession(workflow, run(), [...printed("implement", "p1", 1), own(1.5), ...printed("test", "p2", 2)]);
+    expect(view.blocks.implement.state).toBe("done");
   });
 });

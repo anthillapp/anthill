@@ -103,6 +103,7 @@ function absorb(into: ObservationEvent, from: ObservationEvent): ObservationEven
       ? { parentToolUseId: from.parentToolUseId }
       : {}),
     ...(into.stepTag === undefined && from.stepTag !== undefined ? { stepTag: from.stepTag } : {}),
+    ...(into.printedBy === undefined && from.printedBy !== undefined ? { printedBy: from.printedBy } : {}),
     ...(into.background === undefined && from.background !== undefined
       ? { background: from.background }
       : {}),

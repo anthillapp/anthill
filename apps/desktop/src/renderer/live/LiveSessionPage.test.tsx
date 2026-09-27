@@ -475,7 +475,7 @@ describe("the activity feed", () => {
 
 describe("how the edges are drawn", () => {
   it("greens the edge out of a step the run has left", async () => {
-    await show([step("implement"), step("test")]);
+    await show([step("implement"), event({ kind: "tool.start", title: "Bash" }), step("test")]);
     // start → implement is travelled; implement → test is the live one; and
     // test → end has not been taken, so it stays idle.
     expect(document.querySelectorAll(".live-edge.tone-seen").length).toBe(1);

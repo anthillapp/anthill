@@ -220,6 +220,16 @@ export function foldLiveSession(
   const delegatedFrom = new Map<string, string>();
   const spans: BlockSpanView[] = [];
   /**
+   * Whether the session did any work in the announced step before it moved
+   * on. A step left with none was announced in a batch — Claude Code prints
+   * every parallel step's line and only then starts their subagents — and is
+   * not finished yet: it waits, still running, for the session's next real
+   * action to say what it was (ANT-164).
+   */
+  let workSinceEntered = false;
+  /** Steps left with no work done, by when they were left and the move that left them. */
+  const pendingClose = new Map<string, { leftAt: string; detour?: Detour }>();
+  /**
    * Whether the hook channel wrote anything for this run.
    *
    * The hooks are what can tell "waiting on you" from "done": they write a
@@ -275,22 +285,40 @@ export function foldLiveSession(
   /**
    * The session moves to another step. The one it leaves is done — unless a
    * subagent it started is still working for it, in which case it goes on
-   * running until the last of them comes back (ANT-163).
+   * running until the last of them comes back (ANT-163), or unless nothing was
+   * done in it at all, in which case it waits to see (ANT-164).
    */
-  const leave = (id: string, at: string) => {
-    if (!isOpen(id)) return;
-    if (outstanding(id)) {
+  const leave = (id: string, at: string): "closed" | "kept" | "pending" => {
+    if (!isOpen(id)) return "closed";
+    if (outstanding(id) || (id === announced && !workSinceEntered)) {
       const { note: _note, waitReason: _why, ...rest } = blocks[id];
       blocks[id] = { ...rest, state: "running" };
-    } else {
-      finish(id, at);
+      if (outstanding(id)) return "kept";
+      pendingClose.set(id, { leftAt: at });
+      return "pending";
     }
+    finish(id, at);
+    return "closed";
+  };
+
+  /**
+   * A step left with no work done turns out to have been finished after all:
+   * closed as of the moment it was left, and the move that left it counted.
+   */
+  const closePending = (id: string) => {
+    const pending = pendingClose.get(id);
+    if (!pending) return;
+    pendingClose.delete(id);
+    finish(id, pending.leftAt);
+    if (pending.detour) detours.push(pending.detour);
   };
 
   const enter = (id: string, at: string, viaTag: boolean) => {
     const fanOut = announced !== undefined && announced !== id && outstanding(announced);
-    if (announced && announced !== id) leave(announced, at);
-    // Coming back to a step still open ends the pass it was on.
+    const left = announced && announced !== id ? leave(announced, at) : "closed";
+    // Coming back to a step still open ends the pass it was on — as of when
+    // it was left, if it was left with nothing done.
+    if (pendingClose.has(id)) closePending(id);
     if (isOpen(id)) finish(id, at);
     const entering = blocks[id];
     const pass = (entering?.passes ?? 0) + 1;
@@ -308,11 +336,22 @@ export function foldLiveSession(
     // step came from nowhere the fold can see, a step announced again is not
     // a move at all, and a step started while the last one's subagents are
     // still at work is the session fanning out, not leaving it.
-    if (announced && announced !== id && !fanOut && !planned.has(`${announced}→${id}`)) {
-      detours.push({ from: announced, to: id, at, pass });
+    if (
+      announced &&
+      announced !== id &&
+      !fanOut &&
+      !planned.has(`${announced}→${id}`)
+    ) {
+      const detour = { from: announced, to: id, at, pass };
+      // A step left with nothing done may yet turn out to be a fan-out; the
+      // move counts only if it is closed after all.
+      const pending = left === "pending" ? pendingClose.get(announced) : undefined;
+      if (pending) pending.detour = detour;
+      else detours.push(detour);
     }
     announced = id;
     enteredByTag = viaTag;
+    workSinceEntered = false;
     askedSinceEntered = false;
     finishedAt = undefined;
   };
@@ -351,7 +390,19 @@ export function foldLiveSession(
   // iterates: the same step announced once arrived twice and was drawn as a
   // second pass through the block (ANT-48).
   // And in the order it happened rather than the order it was read (ANT-159).
-  for (const event of projectJournal(events)) {
+  const journal = projectJournal(events);
+  /*
+    Calls that are not work in any step: the commands that printed step lines,
+    and the calls that started subagents (their receipts included). Known from
+    the whole journal up front, because a command's call is recorded before
+    the line it printed (ANT-164).
+  */
+  const plumbing = new Set<string>();
+  for (const event of journal) {
+    if (event.printedBy) plumbing.add(event.printedBy);
+    if (event.kind === "subagent.start" && event.toolUseId) plumbing.add(event.toolUseId);
+  }
+  for (const event of journal) {
     const mapping = attribute(event, index, announced, delegatedFrom);
     attributed.push({ ...event, mapping });
     // Usage is bookkeeping, not activity; counting it against "events not
@@ -368,8 +419,12 @@ export function foldLiveSession(
       not the session waiting for a person, and its tool calls are not the
       session going on (ANT-161, ANT-163).
     */
+    // A record naming the call that started it is a subagent's, even before
+    // that call has been read: Claude Code writes the message holding the
+    // Agent calls only once the last is made, and the subagents are already
+    // at work by then (ANT-164).
     const via = event.parentToolUseId ? delegations.get(event.parentToolUseId) : undefined;
-    if (via || event.author?.kind === "subagent") {
+    if (via || event.parentToolUseId || event.author?.kind === "subagent") {
       if (via && event.kind === "turn.end") {
         via.delegateEnded = true;
         release(via.blockId, event.at);
@@ -377,12 +432,46 @@ export function foldLiveSession(
       continue;
     }
 
+    // The session's own work. It is what tells a step left with nothing done
+    // apart from a finished one: work elsewhere means those steps are over.
+    //
+    // Only what the transcript records counts. A hook alone cannot tell the
+    // session's own call from a subagent's, or the call that starts a
+    // subagent from any other — and it arrives first: Claude Code writes the
+    // message holding the Agent calls only once the last of them is made, so
+    // for seconds the hook for starting A's subagent looked like work
+    // elsewhere and closed A, with a detour, until the transcript caught up.
+    const hookOnly = event.channel.endsWith(":hook") && !(event.alsoFrom ?? []).some((c) => !c.endsWith(":hook"));
+    if (
+      (event.kind === "tool.start" || event.kind === "tool.end") &&
+      !hookOnly &&
+      !(event.toolUseId && plumbing.has(event.toolUseId))
+    ) {
+      workSinceEntered = true;
+      for (const id of [...pendingClose.keys()]) closePending(id);
+    }
+    // Starting a subagent, or saying something, is work in the step too — a
+    // step done in words alone was done — but neither closes a batch-announced
+    // step: the first is how such a step goes on, the second says nothing
+    // about where the session is.
+    if (event.kind === "subagent.start" || event.kind === "message") workSinceEntered = true;
+
     // Only a step line moves the graph. A tag and a subagent's work say which
     // step something belongs to; they are not the agent saying where it is.
     if (event.kind === "step.marker" && mapping.confidence === "exact" && mapping.blockId) {
+      if (mapping.blockId === announced && !enteredByTag) {
+        // The step the session is already on, said again — a Stop hook reads
+        // the same line out of the last message long after the command that
+        // printed it. Coming back to a step means coming from another one;
+        // this is not another pass (ANT-164).
+        continue;
+      }
       if (mapping.blockId === announced && enteredByTag) {
-        // The line confirming a step its messages had already named.
+        // The line confirming a step its messages had already named. It is
+        // where the step properly begins: what was done under the tag before
+        // it — setting up, as often as not — is not work in the step (ANT-164).
         enteredByTag = false;
+        workSinceEntered = false;
       } else {
         enter(mapping.blockId, event.at, false);
       }
@@ -419,6 +508,8 @@ export function foldLiveSession(
           delegateEnded: false,
         });
         delegatedFrom.set(event.toolUseId, target);
+        // A step announced in a batch, now started: a fan-out, not a move away.
+        pendingClose.delete(target);
         // A step left a moment before its subagent was started was not
         // finished: the same pass goes on.
         if (target !== announced && blocks[target].state === "done" && !finishedAt) reopen(target);
@@ -432,9 +523,15 @@ export function foldLiveSession(
     }
 
     // And its result coming back to the session.
-    const returning = event.kind === "tool.end" && event.toolUseId ? delegations.get(event.toolUseId) : undefined;
+    // Read from the transcript, which says whether the subagent was sent off
+    // on its own; a hook alone cannot, and would call the launch receipt the
+    // subagent coming back (ANT-164).
+    const returning =
+      event.kind === "tool.end" && event.toolUseId && !hookOnly ? delegations.get(event.toolUseId) : undefined;
     if (returning) {
       returning.returned = true;
+      // The receipt of a subagent sent off on its own: it is not back yet.
+      if (event.background) returning.background = true;
       release(returning.blockId, event.at);
     }
 
@@ -446,6 +543,7 @@ export function foldLiveSession(
     const completion = completionOf(event);
     if (completion) {
       finishedAt = event.at;
+      for (const id of [...pendingClose.keys()]) closePending(id);
       for (const id of Object.keys(blocks)) finish(id, event.at);
       delegations.clear();
       askedSinceEntered = false;
@@ -547,6 +645,9 @@ export function foldLiveSession(
       finish(announced, lastSeenAt ?? run.createdAt, "unknown", "Anthill stopped being able to read this session.");
     }
   }
+  // A step left with nothing done, never started after: over as of leaving.
+  if (run.state === "completed") for (const id of [...pendingClose.keys()]) closePending(id);
+  detours.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   // Steps a subagent was still holding open when the run settled: the run's
   // word goes for them too, not only for the step the session was last on.
   for (const id of Object.keys(blocks)) {

@@ -718,12 +718,22 @@ function scan(
           if (isRecord(block) && block.type === "tool_result") {
             const id = str(block.tool_use_id);
             if (id) state.awaiting.delete(id);
+            // A subagent launched to run on its own returns this receipt at
+            // once, whether or not the call asked for the background — Claude
+            // Code decides — so it is read here as well as from the call
+            // (ANT-164).
+            const receipt = isRecord(row.toolUseResult) ? row.toolUseResult : undefined;
+            const launched =
+              receipt?.isAsync === true ||
+              receipt?.status === "async_launched" ||
+              resultText(block.content).startsWith("Async agent launched");
             events.push({
               ...base,
               kind: "tool.end",
               title: "Tool finished",
               ok: block.is_error !== true,
               ...(id ? { toolUseId: id } : {}),
+              ...(launched ? { background: true } : {}),
             });
             // The prompt tells an agent that cannot put a line in its reply to
             // print it with a command, so a result is read for the markers too
@@ -731,7 +741,7 @@ function scan(
             // it (ANT-162, as ANT-147 did for Codex).
             const output = resultText(block.content);
             if (!textCarriesMarker(output, marker)) {
-              announceSteps(output, "command", state, marker, base, events);
+              announceSteps(output, "command", state, marker, id ? { ...base, printedBy: id } : base, events);
               if (parseDoneMarker(output, marker)) {
                 state.doneAt = at;
                 if (!state.delegate) {

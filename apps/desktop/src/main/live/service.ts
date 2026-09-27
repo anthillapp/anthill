@@ -506,7 +506,7 @@ export class LiveSessionService {
     // Hooks are read separately because the log is machine-wide and only
     // becomes relevant once another channel has matched the run to a session.
     try {
-      const hooked = await this.hooks.poll(run, now);
+      const hooked = await this.hooks.poll(withSessionFrom(run, evidence), now);
       evidence = [...evidence, ...hooked.evidence];
       drafts = [...drafts, ...hooked.events];
     } catch {
@@ -668,4 +668,27 @@ export class LiveSessionService {
     if (added.length === 0) return;
     for (const notice of noticesFor(run, added, this.announced, was)) this.onStepNotice(notice);
   }
+}
+
+/**
+ * The run as the hook reader should see it this poll.
+ *
+ * The hooks only read for a session the run already names, and the run only
+ * names one once this poll's evidence has been folded in — after the hooks
+ * were read. So on the poll that found the session the hooks were handed a
+ * run with no session and read nothing, and everything they had waited a
+ * poll longer (ANT-161). A single strong match this poll names the session
+ * for them now; ambiguity, or a match that contradicts a binding, does not.
+ */
+export function withSessionFrom(run: PendingRun, evidence: readonly Evidence[]): PendingRun {
+  if (run.detectedSessionId) return run;
+  if (evidence.some((item) => item.kind === "ambiguous")) return run;
+  const matches = new Set(
+    evidence.flatMap((item) => (item.kind === "match" && item.confidence === "strong" ? [item.sessionId] : [])),
+  );
+  if (matches.size !== 1) return run;
+  const [sessionId] = matches;
+  const bound = boundSessionId(run);
+  if (bound && bound !== sessionId) return run;
+  return { ...run, detectedSessionId: sessionId };
 }

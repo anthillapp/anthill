@@ -341,7 +341,14 @@ function LiveSessionContent({
    * and a restart rebuilds identical numbers.
    */
   const end = endStateOf(run);
-  const endedAt = end ? (view.lastSeenAt ?? run.lastObservedAt ?? run.closedAt) : undefined;
+  /*
+    One end for the header, the report, the elapsed clock and the metrics
+    (ANT-159): the moment the session said it was over when it said so, else
+    the latest thing recorded. `closedAt` is when Anthill stopped reading,
+    not when the work stopped, and is the last resort.
+  */
+  const lastRecordedAt = view.endedAt ?? view.lastSeenAt ?? run.lastObservedAt;
+  const endedAt = end ? (lastRecordedAt ?? run.closedAt) : undefined;
   const metrics = useMemo(() => sessionMetrics(view.events, endedAt), [view.events, endedAt]);
   const usage = useMemo(
     () => sessionUsage(workflow, view, metrics, endedAt),
@@ -586,7 +593,7 @@ function LiveSessionContent({
               nobody watched.
             */}
             <dt>Elapsed</dt>
-            <dd>{spanned(view.startedAt, settled ? (view.lastSeenAt ?? run.lastObservedAt) : now)}</dd>
+            <dd>{spanned(view.startedAt, settled ? lastRecordedAt : now)}</dd>
             <dt>Last seen</dt>
             <dd>{relative(view.lastSeenAt ?? run.lastObservedAt, now)}</dd>
           </dl>

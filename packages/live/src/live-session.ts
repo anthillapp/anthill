@@ -19,8 +19,8 @@
 import type { Workflow } from "@anthill/workflow-schema";
 
 import { attribute, buildWorkflowIndex, type BlockMapping, type WorkflowIndex } from "./attribution.js";
-import { mergeChannels } from "./channels.js";
-import type { ObservationEvent } from "./observation-event.js";
+import { projectJournal } from "./channels.js";
+import { completionOf, type ObservationEvent } from "./observation-event.js";
 import type { PendingRun } from "./pending-run.js";
 
 /** How a block is drawn while a session is being observed. */
@@ -58,6 +58,13 @@ export type BlockView = {
   passes: number;
   /** A short reason, for `failed` and `needsYou`. */
   note?: string;
+  /**
+   * For `needsYou`, what put it there: the CLI's own record of a request for
+   * a person (`asked`), or only a turn ending with nothing since (`yielded`).
+   * The second is the cautious reading of a silence and says nothing about a
+   * question having been put, so nothing may present it as one (ANT-158).
+   */
+  waitReason?: "asked" | "yielded";
 };
 
 export type AttributedEvent = ObservationEvent & { mapping: BlockMapping };
@@ -91,8 +98,19 @@ export type LiveSessionView = {
   events: AttributedEvent[];
   /** Events no block could be claimed for. Shown as session-level activity. */
   unmappedCount: number;
+  /**
+   * When the workflow's part of the session began: the first record that is
+   * not the CLI session's own opening, which can predate the paste by hours.
+   */
   startedAt?: string;
+  /** The latest moment anything was recorded — the latest, not the last read. */
   lastSeenAt?: string;
+  /**
+   * When the session said the work was over, if the last word it had was that:
+   * Codex's `task_complete`, or the harness's own done. Absent for a run that
+   * only went quiet, which has no end moment of its own to show.
+   */
+  endedAt?: string;
   /** True while nothing has been observed at all. Drives the empty state. */
   empty: boolean;
 };
@@ -176,6 +194,14 @@ export function foldLiveSession(
   const hooksCarried = events.some((event) => event.channel.endsWith(":hook"));
   /** Whether the CLI said it was waiting for a person since the announced step began. */
   let askedSinceEntered = false;
+  /**
+   * When the session last said the work was over, while nothing has resumed
+   * since. An explicit ending settles the step it lands on without the
+   * hooks' help, and a generic turn end after it cannot reopen it (ANT-158,
+   * ANT-161).
+   */
+  let finishedAt: string | undefined;
+  let sessionOpenedAt: string | undefined;
   let startedAt: string | undefined;
   let lastSeenAt: string | undefined;
   let unmappedCount = 0;
@@ -188,15 +214,17 @@ export function foldLiveSession(
   // installed is described twice over, and everything below counts what it
   // iterates: the same step announced once arrived twice and was drawn as a
   // second pass through the block (ANT-48).
-  for (const event of mergeChannels(events)) {
+  // And in the order it happened rather than the order it was read (ANT-159).
+  for (const event of projectJournal(events)) {
     const mapping = attribute(event, index, announced);
     attributed.push({ ...event, mapping });
     // Usage is bookkeeping, not activity; counting it against "events not
     // mapped to a step" would make every quiet turn look like a mystery.
     if (mapping.confidence === "unmapped" && event.kind !== "usage") unmappedCount += 1;
 
-    startedAt ??= event.at;
-    lastSeenAt = event.at;
+    if (event.kind === "session.start") sessionOpenedAt ??= event.at;
+    else startedAt ??= event.at;
+    if (!lastSeenAt || Date.parse(event.at) > Date.parse(lastSeenAt)) lastSeenAt = event.at;
 
     // Only an exact marker moves the graph.
     if (mapping.confidence === "exact" && mapping.blockId) {
@@ -235,10 +263,51 @@ export function foldLiveSession(
       }
       announced = mapping.blockId;
       askedSinceEntered = false;
+      finishedAt = undefined;
+      continue;
+    }
+
+    // The session saying the work is over. It settles the step it lands on
+    // outright: it is the record the hooks' silence was only ever standing in
+    // for (ANT-78), so it needs no hooks to be believed. A failure already
+    // recorded stays a failure, and steps nobody announced stay unreached —
+    // the session ending does not prove every branch of the workflow ran.
+    const completion = completionOf(event);
+    if (completion) {
+      finishedAt = event.at;
+      const current = announced ? blocks[announced] : undefined;
+      if (announced && current && (current.state === "running" || current.state === "needsYou")) {
+        const { note: _yield, waitReason: _why, ...rest } = current;
+        const spent = spentBy(current, event.at);
+        blocks[announced] = {
+          ...rest,
+          state: "done",
+          ...(spent !== undefined ? { spentMs: spent } : {}),
+        };
+      }
+      askedSinceEntered = false;
       continue;
     }
 
     if (event.kind === "notification" && announced) askedSinceEntered = true;
+
+    if (finishedAt && announced && blocks[announced]?.state === "done") {
+      // After the ending: a turn ending again says nothing new, a real request
+      // for a person is still one, and new work is the session going on.
+      if (event.kind === "notification") {
+        blocks[announced] = {
+          ...blocks[announced],
+          state: "needsYou",
+          note: event.detail ?? event.title,
+          waitReason: "asked",
+        };
+        finishedAt = undefined;
+      } else if (resumesWork(event) && event.kind !== "session.start") {
+        blocks[announced] = { ...blocks[announced], state: "running", enteredAt: event.at };
+        finishedAt = undefined;
+      }
+      continue;
+    }
 
     if (yieldsToYou(event) && announced && blocks[announced]?.state === "running") {
       blocks[announced] = {
@@ -248,6 +317,7 @@ export function foldLiveSession(
           event.kind === "turn.end"
             ? "The agent ended its turn here and has not started anything since."
             : (event.detail ?? event.title),
+        waitReason: event.kind === "notification" ? "asked" : "yielded",
       };
       continue;
     }
@@ -256,30 +326,8 @@ export function foldLiveSession(
     // latching onto the first yield of the run.
     if (resumesWork(event) && announced && blocks[announced]?.state === "needsYou") {
       const waiting = blocks[announced];
-      const { note: _left, ...rest } = waiting;
+      const { note: _left, waitReason: _why, ...rest } = waiting;
       blocks[announced] = { ...rest, state: "running" };
-      continue;
-    }
-
-    // `anthill done` is an explicit statement from the harness that the bound
-    // workflow finished. It is stronger than a later generic turn-end record:
-    // that record only says Codex yielded, while this marker says the work is
-    // complete. Settle the active block here so a following `turn.end` cannot
-    // turn a completed final step back into "Waiting on you".
-    if (
-      event.kind === "session.end" &&
-      event.source === "anthill" &&
-      event.channel === "anthill:report" &&
-      announced &&
-      blocks[announced]
-    ) {
-      const current = blocks[announced];
-      const spent = spentBy(current, event.at);
-      blocks[announced] = {
-        ...current,
-        state: "done",
-        ...(spent !== undefined ? { spentMs: spent } : {}),
-      };
       continue;
     }
 
@@ -318,7 +366,7 @@ export function foldLiveSession(
       run.state === "completed" &&
       (blocks[announced].state !== "needsYou" || yieldedOnlyByTurnEnd)
     ) {
-      const { note: _yield, ...settled } = blocks[announced];
+      const { note: _yield, waitReason: _why, ...settled } = blocks[announced];
       blocks[announced] = settled;
       // Nothing announced a departure, so the last thing anything was recorded
       // at is as close as the record gets to when this step stopped.
@@ -341,6 +389,8 @@ export function foldLiveSession(
 
   const active =
     announced && blocks[announced]?.state === "running" ? announced : undefined;
+  // Only the CLI's opening record was seen: that is still when things began.
+  startedAt ??= sessionOpenedAt;
 
   return {
     blocks,
@@ -350,6 +400,7 @@ export function foldLiveSession(
     unmappedCount,
     ...(startedAt ? { startedAt } : {}),
     ...(lastSeenAt ? { lastSeenAt } : {}),
+    ...(finishedAt ? { endedAt: finishedAt } : {}),
     empty: events.length === 0,
   };
 }

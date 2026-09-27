@@ -26,6 +26,7 @@ import {
   TIMING,
   boundSessionId,
   messageExcerpt,
+  parseDoneMarker,
   parseStepMarkers,
   textCarriesMarker,
   type Evidence,
@@ -66,6 +67,18 @@ type FileState = {
    * seen in both places is one announcement, not a second pass (ANT-147).
    */
   lastStep?: { blockId: string; from: "reply" | "command" };
+  /**
+   * The session's opening record, held until the file turns out to be this
+   * run's. It is read in the first poll that sees the file, and the marker
+   * may only arrive in a later one — when the poll's events were dropped for
+   * not belonging to any matched session, the opening went with them, and a
+   * full re-read after a restart then appended it after `task_complete`
+   * (ANT-159). Held, it is reported once, whichever read the marker lands in.
+   */
+  opening?: ObservationEventDraft;
+  openingReported?: boolean;
+  /** The done line already reported, so a reply and a command echoing it are one ending. */
+  doneReported?: boolean;
 };
 
 export class CodexObserver implements LiveSessionObserver {
@@ -131,6 +144,15 @@ export class CodexObserver implements LiveSessionObserver {
       if (!chunk.grew) continue;
       grew.add(path);
       scan(chunk.lines, state, now, { runId: run.anthillRunId, nonce: run.correlationNonce }, events);
+    }
+
+    // Only the opening, never the history before the marker: a session reused
+    // for this run has earlier turns that were not this run's to report.
+    for (const state of states.values()) {
+      if (state.matched && state.opening && !state.openingReported) {
+        state.openingReported = true;
+        events.push(state.opening);
+      }
     }
 
     /*
@@ -386,6 +408,29 @@ function announceSteps(
 }
 
 /**
+ * The harness's own done line, printed in a reply or by a command. Reported
+ * once per file: an agent that prints it and then repeats it in its summary
+ * has finished once.
+ */
+function announceDone(
+  text: string,
+  state: FileState,
+  marker: { runId: string; nonce: string },
+  base: Omit<ObservationEventDraft, "kind" | "title">,
+  events: ObservationEventDraft[],
+): void {
+  if (state.doneReported || !parseDoneMarker(text, marker)) return;
+  state.doneReported = true;
+  events.push({
+    ...base,
+    kind: "session.end",
+    title: "The harness reported the work as finished",
+    author: { kind: "main" },
+    completion: "done",
+  });
+}
+
+/**
  * Read only what matters: the session id, the user's message, any step the
  * agent announced, tool calls, the turn-completion record, and errors.
  */
@@ -438,7 +483,7 @@ function scan(
       const id = session ?? thread;
       if (id) state.sessionId = id;
       if (stamped) state.lastActivityAt = stamped;
-      events.push({
+      state.opening = {
         at,
         cli: "codex",
         source: "rollout",
@@ -447,7 +492,7 @@ function scan(
         kind: "session.start",
         title: "Session started",
         ...(str(payload.cli_version) ? { detail: `Codex ${str(payload.cli_version)}` } : {}),
-      });
+      };
       continue;
     }
 
@@ -471,6 +516,7 @@ function scan(
       if (payload.role === "assistant") {
         const text = messageText(payload);
         announceSteps(text, "reply", state, marker, base, events);
+        announceDone(text, state, marker, base, events);
         // And one cut-down line of what it said. Codex writes its reasoning to
         // a different record type entirely, which this branch never sees.
         const said = messageExcerpt(text, marker);
@@ -514,6 +560,7 @@ function scan(
         // Only the output is read — the command itself merely names the line,
         // and a command that fails to print it has not announced anything.
         announceSteps(outputText(payload.output), "command", state, marker, base, events);
+        announceDone(outputText(payload.output), state, marker, base, events);
       }
       continue;
     }
@@ -540,7 +587,9 @@ function scan(
       if (payload.type === "task_complete") {
         state.completedAt = at;
         state.reportedComplete = false;
-        events.push({ ...base, kind: "turn.end", title: "Codex finished the turn" });
+        // Codex's own word that the task is over — typed, so the fold does not
+        // have to recognise it by where it came from (ANT-158).
+        events.push({ ...base, kind: "turn.end", title: "Codex finished the turn", completion: "task_complete" });
       }
       if (payload.type === "error" || payload.type === "stream_error") {
         const message = str(payload.message) ?? "Codex recorded an error.";

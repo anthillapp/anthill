@@ -145,6 +145,7 @@ describe("the cli report observer", () => {
         sessionId: "sess-1",
         kind: "session.end",
         title: "The harness reported the work as finished",
+        completion: "done",
       },
     ]);
   });

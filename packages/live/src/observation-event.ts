@@ -136,6 +136,21 @@ export type ObservationEvent = {
   blockId?: string;
 
   /**
+   * Why this record means the work is over, when it does.
+   *
+   * Set only by an adapter that read an explicit ending: Codex's own
+   * `task_complete` (`task_complete`), or the harness saying the workflow is
+   * finished — the `ANTHILL-DONE` line in a reply or a Stop hook's last
+   * message, or `anthill done` (`done`). A turn that merely ended carries
+   * nothing here: that is the CLI yielding, which can as well be a question
+   * (ANT-158, ANT-161).
+   *
+   * Journals written before this field existed lack it; `completionOf` reads
+   * the two records that already meant it.
+   */
+  completion?: "task_complete" | "done";
+
+  /**
    * Other channels that recorded this same action.
    *
    * Synthesized by `mergeChannels` and never written to the journal, which
@@ -156,4 +171,20 @@ export function eventFingerprint(event: Omit<ObservationEvent, "seq" | "recorded
     event.at,
     event.toolUseId ?? event.blockId ?? event.title,
   ].join("|");
+}
+
+/**
+ * The explicit ending a record carries, if any.
+ *
+ * Only the session's own records count: a subagent finishing is a delegate
+ * handing back, not the run ending. Older journals are read by the two shapes
+ * that already meant an ending — `anthill done`'s report, and the `turn.end`
+ * the Codex adapter wrote for `task_complete` and for nothing else.
+ */
+export function completionOf(event: ObservationEvent): ObservationEvent["completion"] {
+  if (event.author?.kind === "subagent") return undefined;
+  if (event.completion) return event.completion;
+  if (event.channel === "anthill:report" && event.kind === "session.end") return "done";
+  if (event.channel === "codex:rollout" && event.kind === "turn.end") return "task_complete";
+  return undefined;
 }

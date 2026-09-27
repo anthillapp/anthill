@@ -454,10 +454,14 @@ describe("a session that said it was finished", () => {
         last_assistant_message: `All four steps are done.\n\nANTHILL-DONE ${RUN_ID} ${NONCE}\n`,
       }),
     ]);
-    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    const { evidence, events } = await new HookLogObserver(path).poll(pending(), NOW);
     const done = evidence.find((item) => item.kind === "completed");
     expect(done).toBeTruthy();
     expect(done && "detail" in done && done.detail).toContain("reported the work as finished");
+    // And journalled, so the page is folded from the ending too (ANT-161).
+    expect(events).toContainEqual(
+      expect.objectContaining({ kind: "session.end", completion: "done", at: "2026-08-29T10:04:00.000Z" }),
+    );
   });
 
   it("does not settle on a done marker from another run or another copy", async () => {
@@ -465,8 +469,9 @@ describe("a session that said it was finished", () => {
       at("2026-08-29T10:04:00.000Z", { hook_event_name: "Stop", last_assistant_message: "ANTHILL-DONE ANT-OTHER 9f8e7d" }),
       at("2026-08-29T10:05:00.000Z", { hook_event_name: "Stop", last_assistant_message: `ANTHILL-DONE ${RUN_ID} 000000` }),
     ]);
-    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    const { evidence, events } = await new HookLogObserver(path).poll(pending(), NOW);
     expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+    expect(events.some((event) => event.completion)).toBe(false);
   });
 });
 

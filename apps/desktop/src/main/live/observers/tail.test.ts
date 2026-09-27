@@ -6,12 +6,12 @@
  * turn-completion record that landed mid-write was read past and lost.
  */
 
-import { appendFile, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, rename, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { newCursor, readNewLines, readRotatingLines } from "./tail.js";
+import { newCursor, readNewLines, readRotatingLines, readRotatingLinesUpTo, skipRotationOlderThan } from "./tail.js";
 
 async function scratch(): Promise<string> {
   return join(await mkdtemp(join(tmpdir(), "anthill-tail-")), "log.jsonl");
@@ -183,5 +183,47 @@ describe("a file larger than one read", () => {
     expect((await readNewLines(path, cursor)).lines).toEqual(['{"half":true}']);
 
     await rm(dir, { recursive: true, force: true });
+  });
+});
+
+/*
+  ANT-161. A new run's hook reader drained a 141 MB rotated log, four
+  megabytes a poll, before it reached the file its session was writing to.
+*/
+describe("a reader that starts behind", () => {
+  it("skips a rotated log last written before the run began", async () => {
+    const path = await scratch();
+    await writeFile(`${path}.1`, "old-1\nold-2\n", "utf8");
+    const longAgo = new Date(Date.now() - 86_400_000);
+    await utimes(`${path}.1`, longAgo, longAgo);
+    await writeFile(path, "new-1\n", "utf8");
+
+    const cursor = newCursor();
+    await skipRotationOlderThan(path, cursor, Date.now() - 60_000);
+    expect((await readRotatingLines(path, cursor)).lines).toEqual(["new-1"]);
+  });
+
+  it("still reads a rotated log written during the run", async () => {
+    const path = await scratch();
+    await writeFile(`${path}.1`, "during-1\n", "utf8");
+    await writeFile(path, "new-1\n", "utf8");
+
+    const cursor = newCursor();
+    await skipRotationOlderThan(path, cursor, Date.now() - 60_000);
+    expect((await readRotatingLinesUpTo(path, cursor, 4)).lines).toEqual(["during-1", "new-1"]);
+  });
+
+  it("leaves a reader that has already started where it is", async () => {
+    const path = await scratch();
+    await writeFile(`${path}.1`, "old-1\n", "utf8");
+    const longAgo = new Date(Date.now() - 86_400_000);
+    await utimes(`${path}.1`, longAgo, longAgo);
+    await writeFile(path, "new-1\n", "utf8");
+
+    const cursor = newCursor();
+    await readRotatingLines(path, cursor);
+    const before = { ...cursor };
+    await skipRotationOlderThan(path, cursor, Date.now());
+    expect(cursor).toEqual(before);
   });
 });

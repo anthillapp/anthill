@@ -558,13 +558,24 @@ describe("what a finished step cost", () => {
     expect(view.blocks.implement.spentMs).toBe(140_000);
   });
 
-  it("leaves the total alone when the clocks cannot support it", () => {
-    // Stamps can arrive out of order across channels; a departure that reads
-    // as earlier than the arrival is not a negative duration, it is no
-    // measurement at all.
+  it("folds records read out of order in the order they happened", () => {
+    // Stamps can arrive out of order across channels. Read in that order, the
+    // later announcement looked like the earlier one and the cost came out
+    // negative; the fold now reads the journal by when things were recorded
+    // (ANT-159).
     const view = foldLiveSession(workflow, run(), [
       marker("implement", 300_000),
       marker("test", 60_000),
+    ]);
+    expect(view.blocks.test.state).toBe("done");
+    expect(view.blocks.test.spentMs).toBe(240_000);
+    expect(view.blocks.implement.state).toBe("running");
+  });
+
+  it("leaves the total alone when a stamp cannot be read", () => {
+    const view = foldLiveSession(workflow, run(), [
+      marker("implement", 60_000),
+      { ...marker("test", 120_000), at: "not a time" },
     ]);
     expect(view.blocks.implement.state).toBe("done");
     expect(view.blocks.implement.spentMs).toBeUndefined();
@@ -614,5 +625,189 @@ describe("a diagram folded from a record that lost its beginning", () => {
     expect(view.blocks.implement.state).toBe("queued");
     expect(view.blocks.test.state).toBe("queued");
     expect(hasStepEvidence(view)).toBe(false);
+  });
+});
+
+/*
+  ANT-158, ANT-161. A session that says outright the work is over — Codex's
+  `task_complete`, or the harness's own done — settles the step it ends on
+  without the hooks having to vouch for the silence. A turn that merely
+  ended still does not, and nothing unannounced is painted done.
+*/
+describe("an explicit ending", () => {
+  const codex = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ cli: "codex", source: "rollout", channel: "codex:rollout", ...partial });
+  const taskComplete = () =>
+    codex({ kind: "turn.end", title: "Codex finished the turn", completion: "task_complete" });
+  const turnEnd = () => event({ kind: "turn.end", title: "The agent finished its turn" });
+  const codexStep = (blockId: string) =>
+    codex({ kind: "step.marker", title: `Step ${blockId}`, blockId });
+  const doneMarker = (channel = "claude-code:transcript") =>
+    event({
+      kind: "session.end",
+      title: "The harness reported the work as finished",
+      source: channel.endsWith(":hook") ? "hook" : "transcript",
+      channel,
+      completion: "done",
+    });
+
+  it("finishes Codex's last step on task_complete, with no hooks at all", () => {
+    const view = foldLiveSession(workflow, run({ selectedCli: "codex", state: "completed" }), [
+      codexStep("implement"),
+      codexStep("test"),
+      codex({ kind: "message", title: "Message", detail: "All tests pass.", author: { kind: "main" } }),
+      taskComplete(),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+    expect(view.blocks.test.state).toBe("done");
+    expect(view.blocks.test.note).toBeUndefined();
+    expect(view.blocks.fix.state).toBe("queued");
+    expect(view.endedAt).toBe(view.events[view.events.length - 1].at);
+  });
+
+  it("reads an older journal's task_complete, written before the field existed", () => {
+    const { completion: _field, ...legacy } = taskComplete();
+    const view = foldLiveSession(workflow, run({ selectedCli: "codex", state: "completed" }), [
+      codexStep("test"),
+      legacy,
+    ]);
+    expect(view.blocks.test.state).toBe("done");
+  });
+
+  it("finishes Claude Code's last step on ANTHILL-DONE before any hook has been read", () => {
+    // ANT-93806CC0: the transcript arrived first, the hook batch half a
+    // minute later. The done line is in the transcript.
+    const view = foldLiveSession(workflow, run({ state: "detected_live" }), [
+      step("test"),
+      { ...turnEnd(), source: "transcript", channel: "claude-code:transcript" },
+      doneMarker(),
+    ]);
+    expect(view.blocks.test.state).toBe("done");
+  });
+
+  it("is not reopened by the generic Stop and SessionEnd that follow it", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      step("test"),
+      doneMarker(),
+      event({ kind: "turn.end", title: "The agent finished its turn" }),
+      event({ kind: "session.end", title: "The session ended", detail: "The session ended (other)." }),
+    ]);
+    expect(view.blocks.test.state).toBe("done");
+  });
+
+  it("counts one ending however many channels carried it", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      step("test"),
+      doneMarker(),
+      doneMarker("claude-code:hook"),
+    ]);
+    expect(view.blocks.test).toMatchObject({ state: "done", passes: 1 });
+    expect(view.events.filter((e) => e.completion)).toHaveLength(1);
+  });
+
+  it("still says waiting on you for a real request made after it", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      step("test"),
+      doneMarker(),
+      event({ kind: "notification", title: "Claude needs your permission", detail: "to use Bash" }),
+    ]);
+    expect(view.blocks.test).toMatchObject({ state: "needsYou", note: "to use Bash" });
+    expect(view.endedAt).toBeUndefined();
+  });
+
+  it("goes back to running when the session carries on after it", () => {
+    const view = foldLiveSession(workflow, run({ selectedCli: "codex" }), [
+      codexStep("test"),
+      taskComplete(),
+      codex({ kind: "tool.start", title: "exec_command", toolUseId: "call-9" }),
+    ]);
+    expect(view.blocks.test.state).toBe("running");
+    expect(view.activeBlockId).toBe("test");
+  });
+
+  it("leaves a recorded failure a failure", () => {
+    const view = foldLiveSession(workflow, run({ selectedCli: "codex", state: "completed" }), [
+      codexStep("test"),
+      codex({ kind: "error", title: "Codex recorded an error", detail: "stream closed" }),
+      taskComplete(),
+    ]);
+    expect(view.blocks.test.state).toBe("failed");
+  });
+
+  it("does not take a subagent's done for the session's", () => {
+    const view = foldLiveSession(workflow, run(), [
+      step("test"),
+      { ...doneMarker(), author: { kind: "subagent", name: "Test Runner" } },
+    ]);
+    expect(view.blocks.test.state).toBe("running");
+  });
+
+  it("does not settle a step on a turn that merely ended, without hooks", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      step("test"),
+      { ...turnEnd(), source: "transcript", channel: "claude-code:transcript" },
+    ]);
+    expect(view.blocks.test.state).toBe("needsYou");
+    // Cautious, not a claim that anything was asked.
+    expect(view.blocks.test.waitReason).toBe("yielded");
+  });
+
+  it("says a step was asked about only on the CLI's own request record", () => {
+    const view = foldLiveSession(workflow, run(), [
+      step("test"),
+      event({ kind: "notification", title: "Claude needs your permission", detail: "to use Bash" }),
+    ]);
+    expect(view.blocks.test).toMatchObject({ state: "needsYou", waitReason: "asked" });
+  });
+});
+
+/*
+  ANT-159. The journal is in the order Anthill read things. After a restart
+  Codex's session_meta was re-read and appended after task_complete, and the
+  fold took it for the latest thing that happened: the session's last moment
+  became its first, and the opening record put the finished step back to
+  running.
+*/
+describe("a record read late", () => {
+  const codex = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ cli: "codex", source: "rollout", channel: "codex:rollout", ...partial });
+  const T = (s: number) => new Date(Date.parse("2026-09-27T00:37:00.000Z") + s * 1000).toISOString();
+
+  const journal = () => [
+    codex({ kind: "prompt.submit", title: "The workflow was pasted in", at: T(7) }),
+    codex({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(10) }),
+    codex({ kind: "step.marker", title: "Step test", blockId: "test", at: T(25) }),
+    codex({ kind: "turn.end", title: "Codex finished the turn", completion: "task_complete", at: T(37) }),
+  ];
+
+  it("gives the same blocks, clock and feed whether or not it was there all along", () => {
+    const live = foldLiveSession(workflow, run({ selectedCli: "codex", state: "completed" }), journal());
+    const late = codex({ kind: "session.start", title: "Session started", at: T(6) });
+    const replay = foldLiveSession(workflow, run({ selectedCli: "codex", state: "completed" }), [...journal(), late]);
+
+    for (const view of [live, replay]) {
+      expect(view.blocks.test.state).toBe("done");
+      expect(view.startedAt).toBe(T(7));
+      expect(view.lastSeenAt).toBe(T(37));
+      expect(view.endedAt).toBe(T(37));
+    }
+    expect(replay.blocks.test.spentMs).toBe(live.blocks.test.spentMs);
+    expect(replay.events.map((e) => e.kind)[0]).toBe("session.start");
+    expect(replay.events.slice(1).map((e) => e.at)).toEqual(live.events.map((e) => e.at));
+  });
+
+  it("does not let a late batch of earlier hook records reopen a finished step", () => {
+    const hook = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+      event({ channel: "claude-code:hook", source: "hook", ...partial });
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      event({ kind: "step.marker", title: "Step test", blockId: "test", channel: "claude-code:transcript", source: "transcript", at: T(10) }),
+      event({ kind: "session.end", title: "The harness reported the work as finished", channel: "claude-code:transcript", source: "transcript", completion: "done", at: T(30) }),
+      // Read afterwards, written before.
+      hook({ kind: "session.start", title: "Session started", at: T(1) }),
+      hook({ kind: "prompt.submit", title: "A prompt was submitted", at: T(20) }),
+      hook({ kind: "turn.end", title: "The agent finished its turn", at: T(31) }),
+    ]);
+    expect(view.blocks.test.state).toBe("done");
+    expect(view.lastSeenAt).toBe(T(31));
   });
 });

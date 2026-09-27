@@ -74,6 +74,45 @@ export function newCursor(): TailCursor {
   return { bytes: 0 };
 }
 
+/**
+ * Start a new reader past a rotated log that is too old to matter.
+ *
+ * The hook log is machine-wide and rotates by size, so the retained `.1` can
+ * be a hundred megabytes of other sessions from days ago. A run's reader
+ * started at byte zero drained all of it, four megabytes a poll, before it
+ * reached the current file — the hooks for a session Anthill had already
+ * matched arrived more than a minute late, and the page spent that minute
+ * reading the transcript alone (ANT-161). A file last written before `floorMs`
+ * cannot hold anything written after it, so it is skipped; a rotation that
+ * happened during the run is still read in full.
+ */
+export async function skipRotationOlderThan(path: string, cursor: TailCursor, floorMs: number): Promise<void> {
+  if (cursor.identity !== undefined) return;
+  const previous = await stat(`${path}.1`).catch(() => undefined);
+  const current = await stat(path).catch(() => undefined);
+  if (!previous || !current || previous.mtimeMs >= floorMs) return;
+  cursor.identity = `${current.dev}:${current.ino}`;
+  cursor.bytes = 0;
+}
+
+/**
+ * Read up to `chunks` capped reads in one go, so a reader that starts behind
+ * catches up within a poll or two instead of a read per poll.
+ */
+export async function readRotatingLinesUpTo(path: string, cursor: TailCursor, chunks: number): Promise<TailChunk> {
+  const lines: string[] = [];
+  let grew = false;
+  let skippedBytes = 0;
+  for (let read = 0; read < chunks; read += 1) {
+    const chunk = await readRotatingLines(path, cursor);
+    if (!chunk.grew && !chunk.skippedBytes) break;
+    lines.push(...chunk.lines);
+    grew ||= chunk.grew;
+    skippedBytes += chunk.skippedBytes ?? 0;
+  }
+  return { lines, grew, ...(skippedBytes ? { skippedBytes } : {}) };
+}
+
 /** Drain the retained old hook log before crossing a rotation boundary. */
 export async function readRotatingLines(path: string, cursor: TailCursor): Promise<TailChunk> {
   const previous = await stat(`${path}.1`).catch(() => undefined);

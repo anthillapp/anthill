@@ -40,7 +40,7 @@ import { join } from "node:path";
 import { TIMING, parseDoneMarker, parseStepMarkers, type Evidence, type MarkerCli, type PendingRun } from "@anthill/live";
 
 import type { ObservationEventDraft, PollResult } from "./types.js";
-import { newCursor, readRotatingLines, type TailCursor } from "./tail.js";
+import { newCursor, readRotatingLinesUpTo, skipRotationOlderThan, type TailCursor } from "./tail.js";
 import { minimalHookPayload } from "../hook-payload.js";
 
 export const HOOK_LOG = join(homedir(), ".anthill", "live-hooks", "events.jsonl");
@@ -214,7 +214,9 @@ export class HookLogObserver {
     }
 
     const stoppedAt = this.stoppedAt.get(run.anthillRunId);
-    const chunk = await readRotatingLines(this.path, cursor);
+    // Nothing in a log rotated away before this run began can be this run's.
+    await skipRotationOlderThan(this.path, cursor, Date.parse(run.createdAt) - 60_000);
+    const chunk = await readRotatingLinesUpTo(this.path, cursor, 8);
     // A log that has not grown can still be saying something: a tool that
     // opened before this poll and has not closed is work in flight now, and so
     // is a delegation the session last reported as still running.
@@ -368,6 +370,16 @@ export class HookLogObserver {
           nonce: run.correlationNonce,
         })) {
           ended = { at, cli, detail: "The harness reported the work as finished." };
+          events.push(base);
+          // The same ending the transcript journals, so whichever channel is
+          // read first settles the step and the other merges into it (ANT-161).
+          events.push({
+            ...base,
+            kind: "session.end",
+            title: "The harness reported the work as finished",
+            completion: "done",
+          });
+          continue;
         }
         events.push(base);
         continue;

@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import type { Workflow } from "@anthill/workflow-schema";
 import type { LiveSessionView, SessionMetrics } from "@anthill/live";
 
-import { compact, endStateOf, outcomeOf, sessionUsage, tokenLine } from "./report.js";
+import { compact, endStateOf, lastWords, outcomeOf, sessionUsage, tokenLine } from "./report.js";
 
 const workflow = {
   id: "w",
@@ -74,5 +74,41 @@ describe("words and figures", () => {
     expect(compact(61_400)).toBe("61k");
     expect(tokenLine({ in: 61_400, out: 900 }, true)).toBe("~61k in · ~900 out");
     expect(tokenLine(undefined, true)).toBe("no token data");
+  });
+});
+
+/*
+  ANT-158. The quote was headed "Codex asked" whenever any step was amber —
+  including a step left amber only because a turn ended with nothing after
+  it, where nothing was asked at all.
+*/
+describe("the last words' heading", () => {
+  const said = (waitReason?: "asked" | "yielded"): LiveSessionView => ({
+    ...view({ a: "done", b: waitReason ? "needsYou" : "done" }),
+    blocks: {
+      a: { state: "done", confidence: "exact", passes: 1 },
+      b: waitReason
+        ? { state: "needsYou", confidence: "exact", passes: 1, waitReason }
+        : { state: "done", confidence: "exact", passes: 1 },
+    },
+    events: [
+      {
+        runId: "r", seq: 1, at: "2026-08-29T10:02:00.000Z", recordedAt: "2026-08-29T10:02:00.000Z",
+        cli: "codex", source: "rollout", channel: "codex:rollout", kind: "message", title: "Message",
+        detail: "Implemented and tested.", author: { kind: "main" }, mapping: { confidence: "unmapped" },
+      },
+    ] as unknown as LiveSessionView["events"],
+  });
+
+  it("asks only when the CLI recorded a request", () => {
+    expect(lastWords(said("asked"), "completed")?.asksUser).toBe(true);
+  });
+
+  it("only says, when a step is amber because a turn ended", () => {
+    expect(lastWords(said("yielded"), "completed")?.asksUser).toBe(false);
+  });
+
+  it("only says, when the run finished", () => {
+    expect(lastWords(said(), "completed")?.asksUser).toBe(false);
   });
 });

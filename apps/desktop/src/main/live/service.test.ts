@@ -12,9 +12,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { TIMING, type PendingRun } from "@anthill/live";
+import { TIMING, createPendingRun, type PendingRun } from "@anthill/live";
 
-import { LiveSessionService, RECOVERY_POLL_MS, type LiveSessionSnapshot } from "./service.js";
+import { LiveSessionService, RECOVERY_POLL_MS, withSessionFrom, type LiveSessionSnapshot } from "./service.js";
 import { PendingRunStore } from "./store.js";
 
 const RUN_ID = "ANT-1A2B3C4D";
@@ -1777,5 +1777,43 @@ describe("endings worth writing down", () => {
     await h.service.poll();
 
     expect(h.settled).toHaveLength(1);
+  });
+});
+
+/*
+  ANT-161. The hooks only read for a session the run names, and the run named
+  none until after they had been read — so the poll that found the session
+  read no hooks for it.
+*/
+describe("the hooks on the poll that found the session", () => {
+  const run = (partial: Partial<PendingRun> = {}): PendingRun => ({
+    ...createPendingRun({
+      anthillRunId: "ANT-1A2B3C4D",
+      correlationNonce: "9f8e7d",
+      selectedCli: "claude-code",
+      promptVersion: "1",
+      bootstrapPromptHash: "abcd1234",
+      now: "2026-09-27T00:52:00.000Z",
+    }),
+    ...partial,
+  });
+  const match = (sessionId: string) =>
+    ({ kind: "match", sessionId, confidence: "strong", channel: "claude-code:transcript", at: "2026-09-27T00:52:44.000Z" }) as const;
+
+  it("are handed the session this poll matched", () => {
+    expect(withSessionFrom(run(), [match("sess-1")]).detectedSessionId).toBe("sess-1");
+  });
+
+  it("are not handed a session while two contend", () => {
+    expect(withSessionFrom(run(), [match("sess-1"), match("sess-2")]).detectedSessionId).toBeUndefined();
+    expect(
+      withSessionFrom(run(), [
+        { kind: "ambiguous", sessionIds: ["sess-1", "sess-2"], channel: "claude-code:transcript", at: "2026-09-27T00:52:44.000Z" },
+      ]).detectedSessionId,
+    ).toBeUndefined();
+  });
+
+  it("keep the session the run already had", () => {
+    expect(withSessionFrom(run({ detectedSessionId: "sess-1" }), [match("sess-2")]).detectedSessionId).toBe("sess-1");
   });
 });

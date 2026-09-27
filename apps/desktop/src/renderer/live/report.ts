@@ -125,8 +125,11 @@ export function verdictSource(end: EndState, events: readonly AttributedEvent[])
  * The last thing the agent said to the person, when one was recorded.
  *
  * Only the main session's words, and only as the excerpt the feed already
- * shows. `asksUser` when the run ended on a step waiting for a person; `stale`
- * when contact was lost, because a later message may simply not have arrived.
+ * shows. `asksUser` only when the CLI recorded a request for a person on the
+ * step still waiting — a step left amber because a turn ended with nothing
+ * after it is the cautious reading of a silence, not a question put, and the
+ * words are then only what the agent said (ANT-158). `stale` when contact was
+ * lost, because a later message may simply not have arrived.
  */
 export type LastWords = { text: string; at: string; asksUser: boolean; stale: boolean };
 
@@ -138,7 +141,9 @@ export function lastWords(view: LiveSessionView, end: EndState): LastWords | und
   return {
     text: message.detail,
     at: message.at,
-    asksUser: Object.values(view.blocks).some((block) => block.state === "needsYou"),
+    asksUser: Object.values(view.blocks).some(
+      (block) => block.state === "needsYou" && block.waitReason === "asked",
+    ),
     stale: end === "lost",
   };
 }

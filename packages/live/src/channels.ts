@@ -32,7 +32,15 @@ import type { ObservationEvent } from "./observation-event.js";
 const SAME_MOMENT_MS = 3_000;
 
 /** Kinds that carry no id and are still written by both channels. */
-const PAIRABLE_WITHOUT_ID = new Set(["prompt.submit", "step.marker", "turn.end", "session.start"]);
+const PAIRABLE_WITHOUT_ID = new Set([
+  "prompt.submit",
+  "step.marker",
+  "turn.end",
+  "session.start",
+  // The harness saying it is done, which a reply, a Stop hook and `anthill
+  // done` can each carry: one ending, not three (ANT-161).
+  "session.end",
+]);
 
 /**
  * What identifies the action a record is about.
@@ -89,6 +97,9 @@ function absorb(into: ObservationEvent, from: ObservationEvent): ObservationEven
     // A step id is the one thing that moves the graph, so a record that names
     // one is worth taking it from even when the first did not.
     ...(into.blockId === undefined && from.blockId !== undefined ? { blockId: from.blockId } : {}),
+    ...(into.completion === undefined && from.completion !== undefined
+      ? { completion: from.completion }
+      : {}),
     // A failure recorded by either channel is a failure.
     ...(from.ok === false ? { ok: false } : {}),
     // The earliest record is when the action happened; the later one is when
@@ -121,4 +132,38 @@ export function mergeChannels(events: readonly ObservationEvent[]): ObservationE
     merged.push(event);
   }
   return merged;
+}
+
+/**
+ * The journal in the order things happened, not the order they were read.
+ *
+ * The journal is append-only and `seq` is when Anthill got to a record, which
+ * is not when the CLI wrote it: a session's opening record can be read after
+ * its `task_complete` (a restart re-reads the file), and a batch of hook
+ * records can land half a minute after the transcript that overtook them.
+ * Folding in `seq` order let a late opening record put a finished step back
+ * to running and made the session's last moment the earliest one (ANT-159).
+ *
+ * Stable: records stamped the same moment keep the order they were read in,
+ * which within one channel is the order that channel wrote them.
+ */
+export function inRecordedOrder(events: readonly ObservationEvent[]): ObservationEvent[] {
+  const time = (event: ObservationEvent) => {
+    const parsed = Date.parse(event.at);
+    return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed;
+  };
+  return events
+    .map((event, index) => ({ event, index }))
+    .sort((a, b) => time(a.event) - time(b.event) || a.index - b.index)
+    .map(({ event }) => event);
+}
+
+/**
+ * What every fold reads: one record per action, in the order things happened.
+ *
+ * Ordered again after the merge, because a merged action takes the earlier of
+ * its two moments and can land before a record it was read after.
+ */
+export function projectJournal(events: readonly ObservationEvent[]): ObservationEvent[] {
+  return inRecordedOrder(mergeChannels(inRecordedOrder(events)));
 }

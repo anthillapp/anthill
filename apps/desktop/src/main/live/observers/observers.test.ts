@@ -2162,3 +2162,126 @@ describe("a session's delegates", () => {
     expect(events).toEqual([]);
   });
 });
+
+/*
+  ANT-159. What an observer reports must not depend on how much of the file
+  one poll happened to read. Codex's opening record used to be dropped when it
+  was read before the marker, and a full re-read after a restart then added it
+  to the journal after `task_complete`.
+*/
+describe("the same record whatever the read size", () => {
+  const base = Date.now();
+  const T = (s: number) => new Date(base + s * 1000).toISOString();
+  const rows = [
+    { timestamp: T(6), type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx", cli_version: "0.1" } },
+    {
+      timestamp: T(7),
+      type: "response_item",
+      payload: { type: "message", role: "user", content: [{ type: "input_text", text: MARKED_PROMPT }] },
+    },
+    {
+      timestamp: T(10),
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: `ANTHILL-STEP ${RUN_ID} ${NONCE} test` }],
+      },
+    },
+    {
+      timestamp: T(30),
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: `Tests pass.\nANTHILL-DONE ${RUN_ID} ${NONCE}` }],
+      },
+    },
+    { timestamp: T(37), type: "event_msg", payload: { type: "task_complete" } },
+  ].map((row) => JSON.stringify(row));
+
+  const shape = (events: { kind: string; at: string; completion?: string }[]) =>
+    events.map((event) => `${event.at} ${event.kind}${event.completion ? ` ${event.completion}` : ""}`);
+
+  async function readInSteps(dir: string, sizes: number[]) {
+    const day = join(dir, "2026", "08", "29");
+    await mkdir(day, { recursive: true });
+    const path = join(day, "rollout-2026-08-29T10-00-00-sess-cx.jsonl");
+    await writeFile(path, "", "utf8");
+    const observer = new CodexObserver(dir);
+    let run: PendingRun = pending("codex");
+    const seen: { kind: string; at: string; completion?: string }[] = [];
+    let offset = 0;
+    for (const size of sizes) {
+      await appendFile(path, rows.slice(offset, offset + size).map((row) => `${row}\n`).join(""), "utf8");
+      offset += size;
+      const result = await observer.poll(run, T(40));
+      run = result.evidence.reduce((next, evidence) => applyEvidence(next, evidence), run);
+      seen.push(...result.events);
+    }
+    return seen;
+  }
+
+  it("reports the opening once, in line or all at once", async () => {
+    const whole = await readInSteps(await root(), [rows.length]);
+    const lineByLine = await readInSteps(await root(), rows.map(() => 1));
+    const pairs = await readInSteps(await root(), [1, 2, 2]);
+
+    expect(shape(whole).sort()).toEqual([
+      `${T(6)} session.start`,
+      `${T(7)} prompt.submit`,
+      `${T(10)} step.marker`,
+      `${T(30)} message`,
+      `${T(30)} session.end done`,
+      `${T(37)} turn.end task_complete`,
+    ].sort());
+    expect(shape(lineByLine).sort()).toEqual(shape(whole).sort());
+    expect(shape(pairs).sort()).toEqual(shape(whole).sort());
+  });
+});
+
+describe("the harness's own done line, journalled", () => {
+  it("is a session end with the done completion in a Claude Code reply", async () => {
+    const dir = await root();
+    const at = new Date().toISOString();
+    const body = [
+      { type: "user", sessionId: "sess-cc", timestamp: at, cwd: "/tmp/scratch", message: { role: "user", content: MARKED_PROMPT } },
+      {
+        type: "assistant",
+        sessionId: "sess-cc",
+        timestamp: at,
+        message: {
+          role: "assistant",
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: `All green.\nANTHILL-DONE ${RUN_ID} ${NONCE}` }],
+        },
+      },
+    ].map((row) => JSON.stringify(row)).join("\n") + "\n";
+    await writeClaude(dir, "-tmp-scratch", "sess-cc", body);
+
+    const run = { ...pending("claude-code"), detectedSessionId: "sess-cc", state: "detected_live" as const };
+    const { events } = await new ClaudeCodeObserver(dir).poll(run, new Date().toISOString());
+    expect(events).toContainEqual(
+      expect.objectContaining({ kind: "session.end", completion: "done", author: { kind: "main" } }),
+    );
+  });
+
+  it("is not journalled for a done line that does not carry this run's nonce", async () => {
+    const dir = await root();
+    const at = new Date().toISOString();
+    const body = [
+      { type: "user", sessionId: "sess-cc", timestamp: at, cwd: "/tmp/scratch", message: { role: "user", content: MARKED_PROMPT } },
+      {
+        type: "assistant",
+        sessionId: "sess-cc",
+        timestamp: at,
+        message: { role: "assistant", content: [{ type: "text", text: `ANTHILL-DONE ${RUN_ID} 000000` }] },
+      },
+    ].map((row) => JSON.stringify(row)).join("\n") + "\n";
+    await writeClaude(dir, "-tmp-scratch", "sess-cc", body);
+
+    const run = { ...pending("claude-code"), detectedSessionId: "sess-cc", state: "detected_live" as const };
+    const { events } = await new ClaudeCodeObserver(dir).poll(run, new Date().toISOString());
+    expect(events.filter((event) => event.completion)).toEqual([]);
+  });
+});

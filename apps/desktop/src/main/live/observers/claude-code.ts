@@ -784,7 +784,21 @@ function scan(
               blockId,
             });
           }
-          if (parseDoneMarker(text, marker)) state.doneAt = at;
+          if (parseDoneMarker(text, marker)) {
+            state.doneAt = at;
+            // Journalled as well as reported, so the ending is in the record
+            // the page is folded from rather than only in the run's state; a
+            // delegate's done is its own business, not the session's (ANT-161).
+            if (!state.delegate && author.kind === "main") {
+              events.push({
+                ...base,
+                kind: "session.end",
+                title: "The harness reported the work as finished",
+                author,
+                completion: "done",
+              });
+            }
+          }
           // What the agent actually said. A message whose whole content was the
           // step marker leaves nothing behind and produces no card, which is
           // right: the announcement is already its own event.

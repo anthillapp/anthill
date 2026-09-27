@@ -19,6 +19,7 @@ import { createPortal } from "react-dom";
 import { CLI_LABEL, type PendingRun } from "@anthill/live";
 
 import { PresenceChip } from "./PresenceChip.js";
+import { presenceKey } from "./presence.js";
 
 const announced = new Set<string>();
 
@@ -50,6 +51,9 @@ export function SessionStartedDialog({
   onOpenSession,
   onDismiss,
 }: SessionStartedDialogProps) {
+  // A session can finish before the author comes back to see the
+  // announcement; the dialog then says what happened rather than what began.
+  const settled = run.state === "completed" || run.state === "failed" || run.state === "observation_lost";
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onDismiss();
@@ -72,7 +76,7 @@ export function SessionStartedDialog({
         onClick={(event) => event.stopPropagation()}
       >
         <header className="session-started-top">
-          <PresenceChip run={run} presence="receiving" size="small" />
+          <PresenceChip run={run} presence={settled ? presenceKey(run) : "receiving"} size="small" />
           <button
             type="button"
             className="session-started-close"
@@ -83,7 +87,9 @@ export function SessionStartedDialog({
           </button>
         </header>
 
-        <h2 id="session-started-title">A session started running this workflow</h2>
+        <h2 id="session-started-title">
+          {settled ? "A session ran this workflow" : "A session started running this workflow"}
+        </h2>
         <p className="session-started-how">
           {run.evidenceChannel === "anthill:report"
             ? `${CLI_LABEL[run.selectedCli]} reported progress through the Anthill CLI with this run's ID and nonce.`
@@ -108,7 +114,7 @@ export function SessionStartedDialog({
 
         <div className="session-started-actions">
           <button type="button" className="primary" onClick={onOpenSession}>
-            Open the live session
+            {settled ? "Open the session report" : "Open the live session"}
           </button>
           <button type="button" onClick={onDismiss}>
             Stay in the workflow

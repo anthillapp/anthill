@@ -716,11 +716,22 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
           }
         : { title: "Inspector" };
 
+  /*
+   * The run as the store has it now, not as it was when something pointed at
+   * it. The dialog and the chip hand over the copy they were shown, and the
+   * snapshot subscription only replaces `liveRun` when a *new* snapshot
+   * arrives — a session that had already finished sends none, so the page kept
+   * a `detected_live` copy for good and said Live over a finished run
+   * (ANT-157). Looking the run up by id on every render cannot go stale.
+   */
+  const current = (run: PendingRun): PendingRun =>
+    liveRuns.find((candidate) => candidate.anthillRunId === run.anthillRunId) ?? run;
+
   if (liveRun && workflow) {
     return (
       <LiveSessionPage
         workflow={workflow}
-        run={liveRun}
+        run={current(liveRun)}
         storageError={liveStorageError}
         {...(liveObservation ? { observation: liveObservation } : {})}
         onBack={() => setLiveRun(null)}
@@ -736,10 +747,10 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     <div className="app">
       {announcing && workflow ? (
         <SessionStartedDialog
-          run={announcing}
+          run={current(announcing)}
           workflowName={workflow.name}
           onOpenSession={() => {
-            setLiveRun(announcing);
+            setLiveRun(current(announcing));
             setAnnouncing(null);
           }}
           onDismiss={() => setAnnouncing(null)}

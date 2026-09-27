@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 /**
  * Passive Anthill observation hook.
  *
@@ -7,6 +5,10 @@
  * hooks. It records what passive observation needs from the hook payload and
  * exits successfully. It never starts, stops, approves, attaches to, or
  * otherwise controls the agent.
+ *
+ * No `#!` line: the hook command always runs this as `<execPath> <path>`, and
+ * in the release build Sentry's plugin prepends its snippet to the file, which
+ * leaves a `#!` mid-line and fails the build.
  *
  * It used to record the payload whole, which for Claude Code carries the full
  * shell command of a `Bash` call and the full contents of a `Write` — so a

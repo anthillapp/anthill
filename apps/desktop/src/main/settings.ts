@@ -25,7 +25,7 @@ export const SETTINGS_VERSION = 2;
  * choice anybody is known to have made, so it takes the new default. From
  * version 2 on, whatever is stored is the person's answer.
  */
-const DIAGNOSTICS_DEFAULTED_IN_V1 = ["analyticsEnabled", "errorReportingEnabled"] as const;
+const DIAGNOSTICS_DEFAULTED_IN_V1 = ["analyticsEnabled", "errorReportingEnabled", "nativeCrashReportingEnabled"] as const;
 
 /**
  * Which moments of an observed session raise a native notification.
@@ -47,9 +47,9 @@ export type Settings = {
   /** JavaScript error reports. On by default. Applied at the next launch. */
   errorReportingEnabled: boolean;
   /**
-   * Native memory dumps, separately consented to, and off by default: a dump
-   * can carry private text or credentials from memory. Applied at the next
-   * launch.
+   * Native memory dumps. On by default like the rest of diagnostics, and a
+   * switch of its own because a dump can carry private text from memory.
+   * Needs error reports; applied at the next launch.
    */
   nativeCrashReportingEnabled: boolean;
   /** A step the session announced it is starting. */
@@ -76,7 +76,7 @@ export type Settings = {
 export const DEFAULT_SETTINGS: Settings = {
   analyticsEnabled: true,
   errorReportingEnabled: true,
-  nativeCrashReportingEnabled: false,
+  nativeCrashReportingEnabled: true,
   stepNotifications: false,
   stepFinishedNotifications: false,
   loopNotifications: false,

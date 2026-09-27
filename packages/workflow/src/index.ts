@@ -8,6 +8,8 @@
 
 export const PACKAGE_NAME = "@anthill/workflow";
 
+export { parallelPlan, type ParallelPlan } from "./parallel.js";
+
 export {
   DEFAULT_TARGET,
   HARNESS_PROFILES,

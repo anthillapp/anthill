@@ -17,6 +17,7 @@
  */
 
 import type { Workflow } from "@anthill/workflow-schema";
+import { parallelPlan } from "@anthill/workflow";
 
 import { attribute, buildWorkflowIndex, type BlockMapping, type WorkflowIndex } from "./attribution.js";
 import { projectJournal } from "./channels.js";
@@ -254,6 +255,8 @@ export function foldLiveSession(
   const detours: Detour[] = [];
   /** Every connection the workflow has, as "source→target". */
   const planned = new Set(workflow.edges.map((edge) => `${edge.source}→${edge.target}`));
+  /** Which steps the workflow runs side by side: moving between them is no detour (ANT-166). */
+  const parallelSteps = parallelPlan(workflow);
 
   const isOpen = (id: string) => blocks[id]?.state === "running" || blocks[id]?.state === "needsYou";
   const settled = (d: { background: boolean; returned: boolean; delegateEnded: boolean }) =>
@@ -314,6 +317,20 @@ export function foldLiveSession(
   };
 
   const enter = (id: string, at: string, viaTag: boolean) => {
+    // Back to a step left with nothing done in it: it never ended, so this is
+    // the same pass going on, not another (ANT-166 — "A, B" in one command,
+    // then "A" again to start on it).
+    if (pendingClose.has(id) && announced !== id) {
+      pendingClose.delete(id);
+      const left = announced ? leave(announced, at) : "closed";
+      void left;
+      announced = id;
+      enteredByTag = viaTag;
+      workSinceEntered = false;
+      askedSinceEntered = false;
+      finishedAt = undefined;
+      return;
+    }
     const fanOut = announced !== undefined && announced !== id && outstanding(announced);
     const left = announced && announced !== id ? leave(announced, at) : "closed";
     // Coming back to a step still open ends the pass it was on — as of when
@@ -340,7 +357,8 @@ export function foldLiveSession(
       announced &&
       announced !== id &&
       !fanOut &&
-      !planned.has(`${announced}→${id}`)
+      !planned.has(`${announced}→${id}`) &&
+      !parallelSteps.parallel(announced, id)
     ) {
       const detour = { from: announced, to: id, at, pass };
       // A step left with nothing done may yet turn out to be a fan-out; the

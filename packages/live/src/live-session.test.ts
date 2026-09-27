@@ -248,8 +248,11 @@ describe("folding a session", () => {
   it("counts a second visit to a step as another pass", () => {
     const view = foldLiveSession(workflow, run(), [
       step("implement"),
+      worked(),
       step("test"),
+      worked(),
       step("fix"),
+      worked(),
       step("test"),
     ]);
     expect(view.blocks.test.passes).toBe(2);
@@ -290,7 +293,9 @@ describe("folding a session", () => {
   it("still counts a step the agent really announced twice as two passes", () => {
     const view = foldLiveSession(workflow, run(), [
       step("implement"),
+      worked(),
       step("test"),
+      worked(),
       step("implement"),
     ]);
     expect(view.blocks.implement.passes).toBe(2);
@@ -1181,6 +1186,39 @@ describe("a step left with nothing done in it", () => {
     ]);
     expect(view.blocks.implement.state).toBe("running");
     expect(view.detours).toEqual([]);
+  });
+
+  it("does not call moving between the branches of a parallel fork a detour (ANT-166)", () => {
+    const parallel: Workflow = {
+      ...workflow,
+      nodes: [
+        workflow.nodes[0],
+        { ...workflow.nodes[1], id: "svc-a", name: "Service A" },
+        { ...workflow.nodes[1], id: "svc-b", name: "Service B" },
+        workflow.nodes[4],
+      ],
+      edges: [
+        { id: "e1", source: "start", target: "svc-a" },
+        { id: "e2", source: "start", target: "svc-b" },
+        { id: "e3", source: "svc-a", target: "end" },
+        { id: "e4", source: "svc-b", target: "end" },
+      ],
+    };
+    // The session doing both branches itself, one after the other.
+    const view = foldLiveSession(parallel, run(), [...printed("svc-a", "p1", 1), own(2), ...printed("svc-b", "p2", 5), own(6)]);
+    expect(view.blocks["svc-a"].state).toBe("done");
+    expect(view.detours).toEqual([]);
+  });
+
+  it("goes on with the same pass when the session comes back to a step it announced in a batch", () => {
+    const view = foldLiveSession(workflow, run(), [
+      ...printed("implement", "p1", 1),
+      ...printed("fix", "p2", 1),
+      tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(2) }),
+      own(3),
+    ]);
+    expect(view.blocks.implement).toMatchObject({ state: "running", passes: 1 });
+    expect(view.spans.filter((s) => s.blockId === "implement")).toHaveLength(1);
   });
 
   it("closes a step that had work in it as soon as it is left, as before", () => {

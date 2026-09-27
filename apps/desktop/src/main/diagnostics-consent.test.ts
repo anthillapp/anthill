@@ -38,6 +38,8 @@ describe("a change on the Privacy page", () => {
 
   it("starts analytics on opt-in and drops it on opt-out", async () => {
     const { store, analytics, gate } = await setup();
+    // On by default now, so start from someone who turned it off.
+    await store.write({ analyticsEnabled: false });
     await writeSettingsWithConsent(store, analytics, gate, { analyticsEnabled: true }, { nativeCrashes: true });
     expect(analytics.enable).toHaveBeenCalledOnce();
     expect(analytics.capture).toHaveBeenCalledWith("analytics_enabled");

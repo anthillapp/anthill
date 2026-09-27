@@ -262,8 +262,10 @@ else into your repository.
 ## Where Anthill keeps things
 
 Workflows and session data stay local. Anthill has no account or sync. Both the
-macOS app and the Linux CLI offer independent controls under **Settings → Privacy**;
-all are off by default:
+macOS app and the Linux CLI offer independent controls under **Settings → Privacy**.
+Anonymous product analytics and JavaScript error reports are on by default and
+can be turned off there at any time; native crash reports are off until you turn
+them on:
 
 - **Anonymous product analytics** sends a random app identifier and the
   names of a few app actions (opening Anthill, enabling analytics, opening or

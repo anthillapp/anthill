@@ -91,7 +91,7 @@ describe("each step's own progress line", () => {
     const step = section(bootstrapPrompt, "### 1. Read the note");
     expect(step).toContain("delegate to the");
     expect(step).toContain(`ANTHILL-STEP ${marker.runId} ${marker.nonce} read`);
-    expect(step).toMatch(/Run it yourself before you hand the step to the subagent/);
+    expect(step).toMatch(/Run the command yourself before you hand the step to the subagent/);
   });
 
   it("names the command instead when the harness reports through the CLI", () => {

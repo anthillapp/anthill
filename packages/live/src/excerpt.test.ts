@@ -150,3 +150,11 @@ describe("what a message cannot carry out", () => {
     expect(said).toBeUndefined();
   });
 });
+
+describe("the step tag a message opens with (ANT-163)", () => {
+  it("never reaches the card", () => {
+    expect(messageExcerpt("[ANTHILL implement] Added negate to calc.py.", { runId: "ANT-1A2B3C4D", nonce: "9f8e7d" })).toBe(
+      "Added negate to calc.py.",
+    );
+  });
+});

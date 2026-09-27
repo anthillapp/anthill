@@ -97,6 +97,15 @@ function absorb(into: ObservationEvent, from: ObservationEvent): ObservationEven
     // A step id is the one thing that moves the graph, so a record that names
     // one is worth taking it from even when the first did not.
     ...(into.blockId === undefined && from.blockId !== undefined ? { blockId: from.blockId } : {}),
+    // The call a subagent's work came from, the step a message names, and a
+    // delegation's being in the background: facts only one channel may carry.
+    ...(into.parentToolUseId === undefined && from.parentToolUseId !== undefined
+      ? { parentToolUseId: from.parentToolUseId }
+      : {}),
+    ...(into.stepTag === undefined && from.stepTag !== undefined ? { stepTag: from.stepTag } : {}),
+    ...(into.background === undefined && from.background !== undefined
+      ? { background: from.background }
+      : {}),
     ...(into.completion === undefined && from.completion !== undefined
       ? { completion: from.completion }
       : {}),

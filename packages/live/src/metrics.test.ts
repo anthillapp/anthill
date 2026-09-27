@@ -172,3 +172,27 @@ describe("time per agent", () => {
     expect(timeByAgent(metrics, () => "Developer").size).toBe(0);
   });
 });
+
+describe("over the fold's own spans (ANT-163)", () => {
+  it("gives overlapping steps each their own time and tokens", () => {
+    const at = (s: number) => new Date(Date.parse("2026-09-27T05:00:00.000Z") + s * 1000).toISOString();
+    const usage = (blockId: string, s: number, out: number) =>
+      ({
+        runId: "r", seq: s, at: at(s), recordedAt: at(s), cli: "claude-code", source: "transcript",
+        channel: "claude-code:transcript", kind: "usage", title: "Token usage recorded",
+        tokens: { in: 0, out }, mapping: { blockId, confidence: "exact", how: "" },
+      }) as const;
+    const metrics = sessionMetrics(
+      [usage("implement", 5, 10), usage("test", 6, 20), usage("implement", 9, 5)],
+      at(20),
+      [
+        { blockId: "implement", pass: 1, startedAt: at(0), endedAt: at(10) },
+        { blockId: "test", pass: 1, startedAt: at(2) },
+      ],
+    );
+    expect(metrics.timeByBlock.get("implement")).toBe(10_000);
+    expect(metrics.timeByBlock.get("test")).toBe(18_000);
+    expect(metrics.spans.find((s) => s.blockId === "implement")?.tokens).toEqual({ in: 0, out: 15 });
+    expect(metrics.spans.find((s) => s.blockId === "test")?.tokens).toEqual({ in: 0, out: 20 });
+  });
+});

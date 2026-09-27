@@ -28,6 +28,7 @@ import {
   messageExcerpt,
   parseDoneMarker,
   parseStepMarkers,
+  parseStepTag,
   textCarriesMarker,
   type Evidence,
   type PendingRun,
@@ -524,12 +525,14 @@ function scan(
           // A rollout's assistant messages are the session's own. Codex has no
           // subagent concept in these records, so there is no other author
           // this could be — and nothing to be unsure about.
+          const tag = parseStepTag(text);
           events.push({
             ...base,
             kind: "message",
             title: "Message",
             detail: said,
             author: { kind: "main" },
+            ...(tag ? { stepTag: tag } : {}),
           });
         }
       }

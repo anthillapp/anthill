@@ -80,6 +80,11 @@ export function attribute(
   event: ObservationEvent,
   index: WorkflowIndex,
   announced: string | undefined,
+  /**
+   * The step each delegation was started from, by the id of the call that
+   * started it. A subagent's work carries that id (ANT-163).
+   */
+  delegations: ReadonlyMap<string, string> = new Map(),
 ): BlockMapping {
   // The agent said so. Nothing outranks that, and nothing else may produce it.
   if (event.kind === "step.marker" && event.blockId) {
@@ -87,6 +92,18 @@ export function attribute(
     return known
       ? { blockId: event.blockId, confidence: "exact", how: "the agent announced this step" }
       : { confidence: "unmapped", how: `the agent announced "${event.blockId}", which is not a step in this workflow` };
+  }
+
+  // The message says which step it is about, in the tag it opens with.
+  if (event.stepTag && index.blocks.some((block) => block.id === event.stepTag)) {
+    return { blockId: event.stepTag, confidence: "exact", how: "the message names this step" };
+  }
+
+  // Work a subagent did belongs to the step it was started from — known from
+  // the record of which call started it, not from what the subagent is called.
+  const from = event.parentToolUseId ? delegations.get(event.parentToolUseId) : undefined;
+  if (from) {
+    return { blockId: from, confidence: "exact", how: "a subagent started from this step" };
   }
 
   // A named agent, when exactly one block uses it. Two blocks sharing an agent

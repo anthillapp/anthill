@@ -69,6 +69,9 @@ export type BlockView = {
 
 export type AttributedEvent = ObservationEvent & { mapping: BlockMapping };
 
+/** One pass through a step: when it began and, once it has, when it ended. */
+export type BlockSpanView = { blockId: string; pass: number; startedAt: string; endedAt?: string };
+
 /**
  * A move the workflow never drew.
  *
@@ -92,6 +95,17 @@ export type LiveSessionView = {
   blocks: Record<string, BlockView>;
   /** The block the agent last announced, if it has not since left it. */
   activeBlockId?: string;
+  /**
+   * Every block running now: the one the session is on, and any a subagent
+   * it started is still working for (ANT-163).
+   */
+  activeBlockIds: string[];
+  /**
+   * Every pass through every step, in the order they began, with when each
+   * ended. Parallel steps have overlapping spans; a span still open has no
+   * end. What the per-step time and tokens are measured over.
+   */
+  spans: BlockSpanView[];
   /** Every move the workflow has no connection for, oldest first. */
   detours: Detour[];
   /** Every event, oldest first, each with how it was attributed. */
@@ -185,6 +199,27 @@ export function foldLiveSession(
 
   let announced: string | undefined;
   /**
+   * Whether the announced step was entered on a message's tag rather than a
+   * step line. The step line that usually follows confirms it; it is not a
+   * second pass (ANT-163).
+   */
+  let enteredByTag = false;
+  /**
+   * Every delegation, by the id of the call that started it: the step it was
+   * started from, and whether it has come back.
+   *
+   * A foreground call is over when its result returns. A background one
+   * returns a receipt at once, so it is over when the subagent itself ends
+   * its turn — which only its own transcript says (ANT-163).
+   */
+  const delegations = new Map<
+    string,
+    { blockId: string; background: boolean; returned: boolean; delegateEnded: boolean }
+  >();
+  /** The same, as attribution reads it: call id to step. */
+  const delegatedFrom = new Map<string, string>();
+  const spans: BlockSpanView[] = [];
+  /**
    * Whether the hook channel wrote anything for this run.
    *
    * The hooks are what can tell "waiting on you" from "done": they write a
@@ -210,13 +245,114 @@ export function foldLiveSession(
   /** Every connection the workflow has, as "source→target". */
   const planned = new Set(workflow.edges.map((edge) => `${edge.source}→${edge.target}`));
 
+  const isOpen = (id: string) => blocks[id]?.state === "running" || blocks[id]?.state === "needsYou";
+  const settled = (d: { background: boolean; returned: boolean; delegateEnded: boolean }) =>
+    d.background ? d.delegateEnded : d.returned;
+  /** Whether a step still has a subagent working for it. */
+  const outstanding = (id: string) =>
+    [...delegations.values()].some((d) => d.blockId === id && !settled(d));
+
+  /** A pass ends: the step's time is added up and its span closed. */
+  const finish = (id: string, at: string, state: "done" | "failed" | "unknown" = "done", note?: string) => {
+    const block = blocks[id];
+    if (!block || !isOpen(id)) return;
+    const { note: _note, waitReason: _why, ...rest } = block;
+    const spent = state === "done" ? spentBy(block, at) : block.spentMs;
+    blocks[id] = {
+      ...rest,
+      state,
+      ...(spent !== undefined ? { spentMs: spent } : {}),
+      ...(note ? { note } : {}),
+    };
+    for (let i = spans.length - 1; i >= 0; i -= 1) {
+      if (spans[i].blockId === id && spans[i].endedAt === undefined) {
+        spans[i] = { ...spans[i], endedAt: at };
+        break;
+      }
+    }
+  };
+
+  /**
+   * The session moves to another step. The one it leaves is done — unless a
+   * subagent it started is still working for it, in which case it goes on
+   * running until the last of them comes back (ANT-163).
+   */
+  const leave = (id: string, at: string) => {
+    if (!isOpen(id)) return;
+    if (outstanding(id)) {
+      const { note: _note, waitReason: _why, ...rest } = blocks[id];
+      blocks[id] = { ...rest, state: "running" };
+    } else {
+      finish(id, at);
+    }
+  };
+
+  const enter = (id: string, at: string, viaTag: boolean) => {
+    const fanOut = announced !== undefined && announced !== id && outstanding(announced);
+    if (announced && announced !== id) leave(announced, at);
+    // Coming back to a step still open ends the pass it was on.
+    if (isOpen(id)) finish(id, at);
+    const entering = blocks[id];
+    const pass = (entering?.passes ?? 0) + 1;
+    blocks[id] = {
+      state: "running",
+      confidence: "exact",
+      enteredAt: at,
+      // Carried, not reset: what earlier passes cost is still part of what
+      // this step has cost.
+      ...(entering?.spentMs !== undefined ? { spentMs: entering.spentMs } : {}),
+      passes: pass,
+    };
+    spans.push({ blockId: id, pass, startedAt: at });
+    // Only a move between two steps can be one the plan lacks: the first
+    // step came from nowhere the fold can see, a step announced again is not
+    // a move at all, and a step started while the last one's subagents are
+    // still at work is the session fanning out, not leaving it.
+    if (announced && announced !== id && !fanOut && !planned.has(`${announced}→${id}`)) {
+      detours.push({ from: announced, to: id, at, pass });
+    }
+    announced = id;
+    enteredByTag = viaTag;
+    askedSinceEntered = false;
+    finishedAt = undefined;
+  };
+
+  /** Take back the finish of a step's last pass: it had not ended after all. */
+  const reopen = (id: string) => {
+    const block = blocks[id];
+    const index = spans.map((span) => span.blockId).lastIndexOf(id);
+    const span = index >= 0 ? spans[index] : undefined;
+    if (!block || !span?.endedAt || !block.enteredAt) return;
+    const counted = Date.parse(span.endedAt) - Date.parse(block.enteredAt);
+    // The move that closed this pass was not a move away after all, so it is
+    // not a detour either.
+    for (let i = detours.length - 1; i >= 0; i -= 1) {
+      if (detours[i].from === id && detours[i].at === span.endedAt) detours.splice(i, 1);
+    }
+    const { endedAt: _ended, ...open } = span;
+    spans[index] = open;
+    const spentMs =
+      block.spentMs !== undefined && !Number.isNaN(counted) ? block.spentMs - counted : block.spentMs;
+    blocks[id] = {
+      ...block,
+      state: "running",
+      ...(spentMs !== undefined && spentMs > 0 ? { spentMs } : {}),
+    };
+    if (spentMs !== undefined && spentMs <= 0) delete blocks[id].spentMs;
+  };
+
+  /** A delegation came back: its step is done if nothing else holds it open. */
+  const release = (id: string, at: string) => {
+    if (id !== announced && isOpen(id) && !outstanding(id)) finish(id, at);
+  };
+
   // One action, however many channels wrote it down. A session with hooks
   // installed is described twice over, and everything below counts what it
   // iterates: the same step announced once arrived twice and was drawn as a
   // second pass through the block (ANT-48).
   // And in the order it happened rather than the order it was read (ANT-159).
   for (const event of projectJournal(events)) {
-    const mapping = attribute(event, index, announced);
+    const mapping = attribute(event, index, announced, delegatedFrom);
     attributed.push({ ...event, mapping });
     // Usage is bookkeeping, not activity; counting it against "events not
     // mapped to a step" would make every quiet turn look like a mystery.
@@ -226,48 +362,83 @@ export function foldLiveSession(
     else startedAt ??= event.at;
     if (!lastSeenAt || Date.parse(event.at) > Date.parse(lastSeenAt)) lastSeenAt = event.at;
 
-    // Only an exact marker moves the graph.
-    if (mapping.confidence === "exact" && mapping.blockId) {
-      if (announced && announced !== mapping.blockId) {
-        const leaving = blocks[announced];
-        // A step the agent left without failing is as done as Anthill can say.
-        if (leaving && (leaving.state === "running" || leaving.state === "needsYou")) {
-          const spent = spentBy(leaving, event.at);
-          blocks[announced] = {
-            ...leaving,
-            state: "done",
-            ...(spent !== undefined ? { spentMs: spent } : {}),
-          };
-        }
+    /*
+      Whose record this is. A subagent's work reaches the step it was started
+      from and settles that delegation, and nothing else: its turn ending is
+      not the session waiting for a person, and its tool calls are not the
+      session going on (ANT-161, ANT-163).
+    */
+    const via = event.parentToolUseId ? delegations.get(event.parentToolUseId) : undefined;
+    if (via || event.author?.kind === "subagent") {
+      if (via && event.kind === "turn.end") {
+        via.delegateEnded = true;
+        release(via.blockId, event.at);
       }
-      const entering = blocks[mapping.blockId];
-      const pass = (entering?.passes ?? 0) + 1;
-      blocks[mapping.blockId] = {
-        state: "running",
-        confidence: "exact",
-        enteredAt: event.at,
-        // Carried, not reset: what earlier passes cost is still part of what
-        // this step has cost.
-        ...(entering?.spentMs !== undefined ? { spentMs: entering.spentMs } : {}),
-        passes: pass,
-      };
-      // Only a move between two steps can be one the plan lacks: the first
-      // step came from nowhere the fold can see, and a step announced again
-      // is not a move at all.
-      if (
-        announced &&
-        announced !== mapping.blockId &&
-        !planned.has(`${announced}→${mapping.blockId}`)
-      ) {
-        detours.push({ from: announced, to: mapping.blockId, at: event.at, pass });
-      }
-      announced = mapping.blockId;
-      askedSinceEntered = false;
-      finishedAt = undefined;
       continue;
     }
 
-    // The session saying the work is over. It settles the step it lands on
+    // Only a step line moves the graph. A tag and a subagent's work say which
+    // step something belongs to; they are not the agent saying where it is.
+    if (event.kind === "step.marker" && mapping.confidence === "exact" && mapping.blockId) {
+      if (mapping.blockId === announced && enteredByTag) {
+        // The line confirming a step its messages had already named.
+        enteredByTag = false;
+      } else {
+        enter(mapping.blockId, event.at, false);
+      }
+      continue;
+    }
+
+    // A message naming a step nothing has announced: the fallback for a step
+    // line the agent forgot. A step already begun or finished is only named.
+    if (
+      event.kind === "message" &&
+      event.stepTag &&
+      mapping.blockId === event.stepTag &&
+      blocks[event.stepTag]?.state === "queued"
+    ) {
+      enter(event.stepTag, event.at, true);
+      continue;
+    }
+
+    /*
+      A subagent started for a step: the one its call names, when the session
+      put the step's tag in what it handed over, else the step the session is
+      on. The call's own word comes first because the session can announce
+      several steps and only then start their subagents together — measured,
+      that is exactly how Claude Code fans out, and by the moment of dispatch
+      every subagent looked like the last-announced step's (ANT-163).
+    */
+    if (event.kind === "subagent.start" && event.toolUseId) {
+      const target = event.stepTag && blocks[event.stepTag] ? event.stepTag : announced;
+      if (target && blocks[target]) {
+        delegations.set(event.toolUseId, {
+          blockId: target,
+          background: event.background === true,
+          returned: false,
+          delegateEnded: false,
+        });
+        delegatedFrom.set(event.toolUseId, target);
+        // A step left a moment before its subagent was started was not
+        // finished: the same pass goes on.
+        if (target !== announced && blocks[target].state === "done" && !finishedAt) reopen(target);
+        // A step nothing announced, begun by the subagent started for it. The
+        // session itself stays where it is.
+        if (blocks[target].state === "queued") {
+          blocks[target] = { state: "running", confidence: "exact", enteredAt: event.at, passes: 1 };
+          spans.push({ blockId: target, pass: 1, startedAt: event.at });
+        }
+      }
+    }
+
+    // And its result coming back to the session.
+    const returning = event.kind === "tool.end" && event.toolUseId ? delegations.get(event.toolUseId) : undefined;
+    if (returning) {
+      returning.returned = true;
+      release(returning.blockId, event.at);
+    }
+
+    // The session saying the work is over. It settles every step still open
     // outright: it is the record the hooks' silence was only ever standing in
     // for (ANT-78), so it needs no hooks to be believed. A failure already
     // recorded stays a failure, and steps nobody announced stay unreached —
@@ -275,16 +446,8 @@ export function foldLiveSession(
     const completion = completionOf(event);
     if (completion) {
       finishedAt = event.at;
-      const current = announced ? blocks[announced] : undefined;
-      if (announced && current && (current.state === "running" || current.state === "needsYou")) {
-        const { note: _yield, waitReason: _why, ...rest } = current;
-        const spent = spentBy(current, event.at);
-        blocks[announced] = {
-          ...rest,
-          state: "done",
-          ...(spent !== undefined ? { spentMs: spent } : {}),
-        };
-      }
+      for (const id of Object.keys(blocks)) finish(id, event.at);
+      delegations.clear();
       askedSinceEntered = false;
       continue;
     }
@@ -301,15 +464,27 @@ export function foldLiveSession(
           note: event.detail ?? event.title,
           waitReason: "asked",
         };
+        spans.push({ blockId: announced, pass: blocks[announced].passes, startedAt: event.at });
         finishedAt = undefined;
       } else if (resumesWork(event) && event.kind !== "session.start") {
         blocks[announced] = { ...blocks[announced], state: "running", enteredAt: event.at };
+        spans.push({ blockId: announced, pass: blocks[announced].passes, startedAt: event.at });
         finishedAt = undefined;
       }
       continue;
     }
 
-    if (yieldsToYou(event) && announced && blocks[announced]?.state === "running") {
+    // A turn ending while subagents it started are still out is the session
+    // waiting for them, not for a person: it will be prompted again when they
+    // report back (ANT-163). Its own request for a person still counts.
+    const waitingOnSubagents =
+      event.kind === "turn.end" && [...delegations.values()].some((d) => !settled(d));
+    if (
+      yieldsToYou(event) &&
+      !waitingOnSubagents &&
+      announced &&
+      blocks[announced]?.state === "running"
+    ) {
       blocks[announced] = {
         ...blocks[announced],
         state: "needsYou",
@@ -333,17 +508,14 @@ export function foldLiveSession(
 
     // A recorded failure settles the announced step, but never invents one.
     if (event.kind === "error" && announced && blocks[announced]) {
-      blocks[announced] = {
-        ...blocks[announced],
-        state: "failed",
-        note: event.detail ?? event.title,
-      };
+      if (isOpen(announced)) finish(announced, event.at, "failed", event.detail ?? event.title);
+      else blocks[announced] = { ...blocks[announced], state: "failed", note: event.detail ?? event.title };
     }
   }
 
   // The run's own state has the last word on anything still in flight.
   if (announced && blocks[announced]) {
-    const open = blocks[announced].state === "running" || blocks[announced].state === "needsYou";
+    const open = isOpen(announced);
     // A run reaches `completed` by reading a terminal stop reason followed by
     // a long silence — which is the exact shape of a turn that ended with a
     // question, because the silence is the person not having answered yet. The
@@ -366,35 +538,38 @@ export function foldLiveSession(
       run.state === "completed" &&
       (blocks[announced].state !== "needsYou" || yieldedOnlyByTurnEnd)
     ) {
-      const { note: _yield, waitReason: _why, ...settled } = blocks[announced];
-      blocks[announced] = settled;
       // Nothing announced a departure, so the last thing anything was recorded
       // at is as close as the record gets to when this step stopped.
-      const spent = lastSeenAt ? spentBy(blocks[announced], lastSeenAt) : blocks[announced].spentMs;
-      blocks[announced] = {
-        ...blocks[announced],
-        state: "done",
-        ...(spent !== undefined ? { spentMs: spent } : {}),
-      };
+      if (lastSeenAt) finish(announced, lastSeenAt);
     } else if (open && run.state === "failed") {
-      blocks[announced] = { ...blocks[announced], state: "failed", note: run.statusMessage };
+      finish(announced, lastSeenAt ?? run.lastObservedAt ?? run.createdAt, "failed", run.statusMessage);
     } else if (open && (run.state === "observation_lost" || run.state === "ambiguous_match")) {
-      blocks[announced] = {
-        ...blocks[announced],
-        state: "unknown",
-        note: "Anthill stopped being able to read this session.",
-      };
+      finish(announced, lastSeenAt ?? run.createdAt, "unknown", "Anthill stopped being able to read this session.");
+    }
+  }
+  // Steps a subagent was still holding open when the run settled: the run's
+  // word goes for them too, not only for the step the session was last on.
+  for (const id of Object.keys(blocks)) {
+    if (id === announced || blocks[id].state !== "running") continue;
+    const at = lastSeenAt ?? run.createdAt;
+    if (run.state === "completed") finish(id, at);
+    else if (run.state === "failed") finish(id, at, "failed", run.statusMessage);
+    else if (run.state === "observation_lost" || run.state === "ambiguous_match") {
+      finish(id, at, "unknown", "Anthill stopped being able to read this session.");
     }
   }
 
   const active =
     announced && blocks[announced]?.state === "running" ? announced : undefined;
+  const activeBlockIds = Object.keys(blocks).filter((id) => blocks[id].state === "running");
   // Only the CLI's opening record was seen: that is still when things began.
   startedAt ??= sessionOpenedAt;
 
   return {
     blocks,
     ...(active ? { activeBlockId: active } : {}),
+    activeBlockIds,
+    spans,
     detours,
     events: attributed,
     unmappedCount,

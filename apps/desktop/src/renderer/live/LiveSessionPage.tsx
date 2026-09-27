@@ -349,7 +349,12 @@ function LiveSessionContent({
   */
   const lastRecordedAt = view.endedAt ?? view.lastSeenAt ?? run.lastObservedAt;
   const endedAt = end ? (lastRecordedAt ?? run.closedAt) : undefined;
-  const metrics = useMemo(() => sessionMetrics(view.events, endedAt), [view.events, endedAt]);
+  // Over the fold's own spans, so steps that ran side by side each keep
+  // their own time and tokens (ANT-163).
+  const metrics = useMemo(
+    () => sessionMetrics(view.events, endedAt, view.spans),
+    [view.events, endedAt, view.spans],
+  );
   const usage = useMemo(
     () => sessionUsage(workflow, view, metrics, endedAt),
     [workflow, view, metrics, endedAt],

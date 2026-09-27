@@ -9646,3 +9646,67 @@ button.presence-chip {
 .win-chip-launch:empty,
 .win-chip-corner:empty,
 .win-chip-rail:empty { display: none; }
+
+/* The canvas's top edge (ANT-160). The origin chip and counts pill on the left
+   and the presence plaque and live chip on the right used to be positioned
+   independently and drew over each other on a narrow canvas. One column now:
+   a row that wraps, and the handover notice beneath it. */
+.canvas-top {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 16px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  pointer-events: none;
+}
+.canvas-top-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-width: 0;
+}
+.canvas-top .canvas-chips {
+  position: static;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+}
+.canvas-top .canvas-presence {
+  position: static;
+  flex: 1 0 auto;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  margin-left: auto;
+  max-width: 100%;
+}
+.canvas-top .presence-plaque {
+  max-width: 100%;
+  white-space: normal;
+}
+.canvas-top .wf-notice {
+  position: static;
+  pointer-events: auto;
+}
+.canvas-chips .canvas-origin {
+  min-width: min(100%, 12em);
+  max-width: 100%;
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+.canvas-chips .pill {
+  flex: none;
+  max-width: 100%;
+  white-space: normal;
+}
+.canvas-origin-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

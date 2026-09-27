@@ -97,8 +97,25 @@ export type ObservationEvent = {
   toolName?: string;
   /** Pairs a start with its end. Both vendors provide one. */
   toolUseId?: string;
-  /** Set when the work was delegated; the delegating call's id. */
+  /**
+   * Set when the work was delegated; the delegating call's id.
+   *
+   * For everything a Claude Code subagent wrote, the id of the Agent call that
+   * started it, read from the `.meta.json` beside its transcript. That is the
+   * link from a subagent's work back to the step it was started from (ANT-163).
+   */
   parentToolUseId?: string;
+  /**
+   * The step a message's own tag names: the `[ANTHILL <step-id>]` the agent
+   * is asked to open each message with.
+   *
+   * Not `blockId`. A tag says which step a message is about; it is not an
+   * announcement, and read as one every message would count as another pass
+   * through the step (ANT-163).
+   */
+  stepTag?: string;
+  /** For a delegation: it was dispatched to run in the background. */
+  background?: boolean;
   /** The agent or subagent the record named. Not inferred. */
   agentName?: string;
   /**

@@ -811,3 +811,225 @@ describe("a record read late", () => {
     expect(view.lastSeenAt).toBe(T(31));
   });
 });
+
+/*
+  ANT-163. Which block something belongs to, when more than one can be at
+  work: a subagent's work goes to the step it was started from, a step with a
+  subagent still out stays running after the session moves on, and a message
+  can name its step with a tag that is never another pass.
+*/
+describe("telling blocks apart", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-27T05:00:00.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const mark = (blockId: string, s: number) => tx({ kind: "step.marker", title: `Step ${blockId}`, blockId, at: T(s) });
+  const dispatch = (id: string, s: number, background = false) =>
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: id, at: T(s), ...(background ? { background } : {}) });
+  const result = (id: string, s: number) => tx({ kind: "tool.end", title: "Tool finished", toolUseId: id, at: T(s) });
+  const bySub = (id: string, partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    tx({ author: { kind: "subagent", name: "Developer" }, parentToolUseId: id, ...partial });
+
+  it("keeps a step running while its subagent works, after the session has moved on", () => {
+    const view = foldLiveSession(workflow, run(), [
+      mark("implement", 1),
+      dispatch("call-a", 2),
+      mark("test", 3),
+      dispatch("call-b", 4),
+    ]);
+    expect(view.blocks.implement.state).toBe("running");
+    expect(view.blocks.test.state).toBe("running");
+    expect(view.activeBlockIds.sort()).toEqual(["implement", "test"]);
+    expect(view.activeBlockId).toBe("test");
+  });
+
+  it("gives each subagent's work to the step it was started from", () => {
+    const view = foldLiveSession(workflow, run(), [
+      mark("implement", 1),
+      dispatch("call-a", 2),
+      mark("test", 3),
+      dispatch("call-b", 4),
+      bySub("call-a", { kind: "tool.start", title: "Edit", toolUseId: "t1", at: T(5) }),
+      bySub("call-b", { kind: "message", title: "Message", detail: "Running the suite.", at: T(6) }),
+      bySub("call-a", { kind: "usage", title: "Token usage recorded", tokens: { in: 100, out: 10 }, at: T(7) }),
+    ]);
+    const by = (at: string) => view.events.find((e) => e.at === at)?.mapping;
+    expect(by(T(5))).toMatchObject({ blockId: "implement", confidence: "exact" });
+    expect(by(T(6))).toMatchObject({ blockId: "test", confidence: "exact" });
+    expect(by(T(7))).toMatchObject({ blockId: "implement" });
+  });
+
+  it("finishes the earlier step when its subagent comes back, and not before", () => {
+    const view = foldLiveSession(workflow, run(), [
+      mark("implement", 1),
+      dispatch("call-a", 2),
+      mark("test", 3),
+      result("call-a", 10),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+    expect(view.blocks.implement.spentMs).toBe(9_000);
+    expect(view.blocks.test.state).toBe("running");
+  });
+
+  it("holds a step open for a background subagent until the subagent itself ends its turn", () => {
+    const events = [
+      mark("implement", 1),
+      dispatch("call-a", 2, true),
+      result("call-a", 2.1),
+      mark("test", 3),
+    ];
+    expect(foldLiveSession(workflow, run(), events).blocks.implement.state).toBe("running");
+    const later = foldLiveSession(workflow, run(), [
+      ...events,
+      bySub("call-a", { kind: "turn.end", title: "The agent finished its turn", at: T(20) }),
+    ]);
+    expect(later.blocks.implement.state).toBe("done");
+  });
+
+  it("does not read a subagent's turn ending as the session waiting for a person", () => {
+    const view = foldLiveSession(workflow, run(), [
+      mark("implement", 1),
+      dispatch("call-a", 2),
+      bySub("call-a", { kind: "turn.end", title: "The agent finished its turn", at: T(5) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("running");
+  });
+
+  it("does not call a fan-out a detour", () => {
+    const view = foldLiveSession(workflow, run(), [
+      mark("implement", 1),
+      dispatch("call-a", 2),
+      mark("fix", 3),
+    ]);
+    // implement → fix is not a connection, but implement never stopped.
+    expect(view.detours).toEqual([]);
+  });
+
+  it("settles every open step on an explicit ending", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      mark("implement", 1),
+      dispatch("call-a", 2),
+      mark("test", 3),
+      tx({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", at: T(9) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+    expect(view.blocks.test.state).toBe("done");
+    expect(view.activeBlockIds).toEqual([]);
+  });
+
+  it("measures overlapping steps over their own spans", () => {
+    const view = foldLiveSession(workflow, run(), [
+      mark("implement", 0),
+      dispatch("call-a", 1),
+      mark("test", 2),
+      result("call-a", 10),
+      mark("fix", 12),
+    ]);
+    expect(view.spans).toEqual([
+      { blockId: "implement", pass: 1, startedAt: T(0), endedAt: T(10) },
+      { blockId: "test", pass: 1, startedAt: T(2), endedAt: T(12) },
+      { blockId: "fix", pass: 1, startedAt: T(12) },
+    ]);
+  });
+
+  it("gives each subagent to the step its call names, when every step was announced first", () => {
+    // Measured (ANT-DFB8D21C): both step lines from one command, then both
+    // subagents from one message — at dispatch the session was on the last.
+    const tagged = (id: string, tag: string, s: number) =>
+      tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: id, stepTag: tag, background: true, at: T(s) });
+    const view = foldLiveSession(workflow, run(), [
+      mark("implement", 1),
+      mark("test", 1),
+      tagged("call-a", "implement", 2),
+      tagged("call-b", "test", 2),
+      result("call-a", 2.1),
+      result("call-b", 2.1),
+      bySub("call-a", { kind: "tool.start", title: "Edit", toolUseId: "t1", at: T(4) }),
+    ]);
+    expect(view.blocks.implement).toMatchObject({ state: "running", passes: 1 });
+    expect(view.blocks.test.state).toBe("running");
+    expect(view.events.find((e) => e.toolUseId === "t1")?.mapping.blockId).toBe("implement");
+    expect(view.spans.filter((s) => s.blockId === "implement")).toEqual([
+      { blockId: "implement", pass: 1, startedAt: T(1) },
+    ]);
+
+    const done = foldLiveSession(workflow, run(), [
+      ...[mark("implement", 1), mark("test", 1), tagged("call-a", "implement", 2), tagged("call-b", "test", 2)],
+      bySub("call-a", { kind: "turn.end", title: "The agent finished its turn", at: T(30) }),
+    ]);
+    expect(done.blocks.implement).toMatchObject({ state: "done", spentMs: 29_000 });
+    expect(done.blocks.test.state).toBe("running");
+  });
+
+  it("does not keep the detour a fan-out looked like before its subagents were started", () => {
+    const tagged = (id: string, tag: string, s: number) =>
+      tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: id, stepTag: tag, background: true, at: T(s) });
+    const view = foldLiveSession(workflow, run(), [
+      mark("implement", 1),
+      mark("fix", 2), // implement → fix is no connection
+      tagged("call-a", "implement", 3),
+    ]);
+    expect(view.detours).toEqual([]);
+    expect(view.blocks.implement.state).toBe("running");
+  });
+
+  it("does not read the session's turn ending as waiting on you while its subagents are out", () => {
+    const view = foldLiveSession(workflow, run(), [
+      mark("implement", 1),
+      dispatch("call-a", 2, true),
+      result("call-a", 2.1),
+      tx({ kind: "turn.end", title: "The agent finished its turn", at: T(3) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("running");
+    // Once they are back, a turn ending is a turn ending again.
+    const later = foldLiveSession(workflow, run(), [
+      mark("implement", 1),
+      dispatch("call-a", 2, true),
+      result("call-a", 2.1),
+      bySub("call-a", { kind: "turn.end", title: "The agent finished its turn", at: T(9) }),
+      tx({ kind: "turn.end", title: "The agent finished its turn", at: T(10) }),
+    ]);
+    expect(later.blocks.implement.state).toBe("needsYou");
+  });
+
+  it("begins a step nothing announced when a subagent is started for it", () => {
+    const view = foldLiveSession(workflow, run(), [
+      mark("implement", 1),
+      tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "call-f", stepTag: "fix", at: T(2) }),
+    ]);
+    expect(view.blocks.fix).toMatchObject({ state: "running", passes: 1 });
+    expect(view.activeBlockId).toBe("implement");
+  });
+
+  describe("a message's step tag", () => {
+    const said = (tag: string, s: number) =>
+      tx({ kind: "message", title: "Message", detail: "…", author: { kind: "main" }, stepTag: tag, at: T(s) });
+
+    it("starts a step nothing announced, as the fallback for a forgotten step line", () => {
+      const view = foldLiveSession(workflow, run(), [mark("implement", 1), said("test", 5)]);
+      expect(view.blocks.implement.state).toBe("done");
+      expect(view.blocks.test).toMatchObject({ state: "running", passes: 1 });
+    });
+
+    it("is confirmed, not repeated, by the step line that follows it", () => {
+      const view = foldLiveSession(workflow, run(), [said("implement", 1), mark("implement", 2), said("implement", 3)]);
+      expect(view.blocks.implement).toMatchObject({ state: "running", passes: 1 });
+    });
+
+    it("names a finished step without reopening it", () => {
+      const view = foldLiveSession(workflow, run(), [mark("implement", 1), mark("test", 5), said("implement", 6)]);
+      expect(view.blocks.implement.state).toBe("done");
+      expect(view.blocks.test.state).toBe("running");
+      expect(view.events.at(-1)?.mapping).toMatchObject({ blockId: "implement", confidence: "exact" });
+    });
+
+    it("is never another pass, however many messages carry it", () => {
+      const view = foldLiveSession(workflow, run(), [
+        mark("implement", 1),
+        said("implement", 2),
+        said("implement", 3),
+        said("implement", 4),
+      ]);
+      expect(view.blocks.implement.passes).toBe(1);
+    });
+  });
+});

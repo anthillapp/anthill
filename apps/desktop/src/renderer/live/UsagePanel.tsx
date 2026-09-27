@@ -142,8 +142,9 @@ export function UsagePanel({ usage, cli, onPickBlock, onPickAgent }: UsagePanelP
             )}
             <p className="usage-note">
               Tokens are recorded by {CLI_LABEL[cli]}; ~ marks a presumed split, read from the step
-              that was announced when they were recorded. Block time runs from one step&rsquo;s
-              announcement to the next, so it can include waiting.
+              they were recorded for – a subagent&rsquo;s count goes to the step it was started from.
+              Block time runs from a step&rsquo;s start until the session moves on and its subagents
+              are back, so it can include waiting, and steps run side by side overlap.
             </p>
           </div>
         </div>

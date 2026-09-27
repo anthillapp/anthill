@@ -14,6 +14,8 @@ import {
   STEP_TOKEN,
   echoInstruction,
   stepOpening,
+  parseStepTag,
+  withoutStepTags,
   textCarriesMarker,
   type RunMarker,
 } from "./marker.js";
@@ -219,12 +221,27 @@ describe("a step's opening line", () => {
 
   it("says who prints it when the step is delegated", () => {
     const lines = stepOpening(marker, { id: "review", delegated: true }).join("\n");
-    expect(lines).toMatch(/Run it yourself before you hand the step to the subagent/);
+    expect(lines).toMatch(/Run the command yourself before you hand the step to the subagent/);
   });
 
   it("is a command, which a harness that writes no text between tools still runs", () => {
     const lines = stepOpening(marker, { id: "review", delegated: false }).join("\n");
     expect(lines).toContain(`printf '${STEP_TOKEN} ${marker.runId} ${marker.nonce} review\\n'`);
     expect(lines).toMatch(/Your first action in this step/);
+  });
+});
+
+describe("a message's step tag (ANT-163)", () => {
+  it("is read from the message and taken out of what is shown", () => {
+    expect(parseStepTag("[ANTHILL implement] Adding negate to calc.py.")).toBe("implement");
+    expect(parseStepTag("No tag here.")).toBeUndefined();
+    expect(withoutStepTags("[ANTHILL implement] Adding negate.")).toBe("Adding negate.");
+  });
+
+  it("is asked for on every message, in the progress section and in each step", () => {
+    expect(echoInstruction(marker, [{ id: "review", name: "Review" }])).toMatch(/At the start of every message you write/);
+    const lines = stepOpening(marker, { id: "review", delegated: true }).join("\n");
+    expect(lines).toContain("[ANTHILL review]");
+    expect(lines).toMatch(/Do ask it to start its own messages with `\[ANTHILL review\]`/);
   });
 });

@@ -34,6 +34,7 @@ import {
   messageExcerpt,
   parseDoneMarker,
   parseStepMarkers,
+  parseStepTag,
   textCarriesMarker,
   type Evidence,
   type PendingRun,
@@ -114,7 +115,7 @@ function goesToBackground(name: string, input: Record<string, unknown>): boolean
 const CHANNEL = "claude-code:transcript";
 
 /** A transcript worth reading, and whose turns it holds. */
-type Candidate = { path: string; delegate: boolean; name?: string };
+type Candidate = { path: string; delegate: boolean; name?: string; via?: string };
 
 /**
  * What a delegate was for, in the tool's own words.
@@ -130,16 +131,20 @@ type Candidate = { path: string; delegate: boolean; name?: string };
  * A file that is missing or unreadable names nothing, and the delegate is
  * shown as what it is — a subagent — rather than as a guess.
  */
-async function delegateName(transcript: string): Promise<string | undefined> {
+async function delegateMeta(transcript: string): Promise<{ name?: string; via?: string }> {
   const meta = transcript.replace(/\.jsonl$/, ".meta.json");
   const text = await readFile(meta, "utf8").catch(() => undefined);
-  if (!text) return undefined;
+  if (!text) return {};
   try {
     const parsed: unknown = JSON.parse(text);
-    if (!isRecord(parsed)) return undefined;
-    return str(parsed.description) ?? str(parsed.agentType);
+    if (!isRecord(parsed)) return {};
+    const name = str(parsed.description) ?? str(parsed.agentType);
+    // The Agent call that started it — the link from its work back to the
+    // step the session was on when it did (ANT-163).
+    const via = str(parsed.toolUseId);
+    return { ...(name ? { name } : {}), ...(via ? { via } : {}) };
   } catch {
-    return undefined;
+    return {};
   }
 }
 
@@ -163,8 +168,10 @@ type FileState = {
    * nothing else.
    */
   delegate?: boolean;
-  /** What the delegate was for, from its own `.meta.json`. See `delegateName`. */
+  /** What the delegate was for, from its own `.meta.json`. See `delegateMeta`. */
   delegateName?: string;
+  /** The id of the call that started this delegate, from the same file. */
+  delegateVia?: string;
   /** Delegations whose result has not come back yet, by tool-use id. */
   awaiting: Set<string>;
   /**
@@ -265,7 +272,7 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
     const events: ObservationEventDraft[] = [];
     const grew = new Set<string>();
 
-    for (const { path, delegate, name: label } of files) {
+    for (const { path, delegate, name: label, via } of files) {
       const state =
         states.get(path) ??
         {
@@ -283,6 +290,7 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
           usageSeen: new Set<string>(),
           ...(delegate ? { delegate: true } : {}),
           ...(label ? { delegateName: label } : {}),
+          ...(via ? { delegateVia: via } : {}),
         };
       states.set(path, state);
 
@@ -579,8 +587,8 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
         const path = join(nest, name);
         const info = await stat(path).catch(() => undefined);
         if (!info || info.mtimeMs < floor) continue;
-        const label = await delegateName(path);
-        found.push({ path, delegate: true, ...(label ? { name: label } : {}) });
+        const { name: label, via } = await delegateMeta(path);
+        found.push({ path, delegate: true, ...(label ? { name: label } : {}), ...(via ? { via } : {}) });
       }
     }
     return found;
@@ -676,6 +684,8 @@ function scan(
       source: "transcript" as const,
       channel: CHANNEL,
       ...(state.sessionId ? { sessionId: state.sessionId } : {}),
+      // Everything a delegate writes carries the call that started it.
+      ...(state.delegateVia ? { parentToolUseId: state.delegateVia } : {}),
     };
 
     if (row.type === "user") {
@@ -821,7 +831,8 @@ function scan(
           // right: the announcement is already its own event.
           const said = messageExcerpt(text, marker);
           if (said) {
-            events.push({ ...base, kind: "message", title: "Message", detail: said, author });
+            const tag = parseStepTag(text);
+            events.push({ ...base, kind: "message", title: "Message", detail: said, author, ...(tag ? { stepTag: tag } : {}) });
           }
           continue;
         }
@@ -852,9 +863,13 @@ function scan(
               ? { agentName: str(input.subagent_type) as string }
               : {}),
             ...(toolTarget(name, input) ? { detail: toolTarget(name, input) as string } : {}),
-            ...(str(row.parent_tool_use_id)
+            ...(str(row.parent_tool_use_id) && !state.delegateVia
               ? { parentToolUseId: str(row.parent_tool_use_id) as string }
               : {}),
+            ...(isDelegation && background ? { background: true } : {}),
+            // The step the session named in what it handed the subagent — the
+            // tag it was asked to pass on (ANT-163).
+            ...(isDelegation && delegationTag(input) ? { stepTag: delegationTag(input) as string } : {}),
           });
         }
       }
@@ -920,4 +935,9 @@ function announceSteps(
     state.lastStep = { blockId, from };
     events.push({ ...base, kind: "step.marker", title: "Step announced", detail: blockId, blockId });
   }
+}
+
+/** The step tag in what a delegation handed over: its prompt, else its description. */
+function delegationTag(input: Record<string, unknown>): string | undefined {
+  return parseStepTag(str(input.prompt) ?? "") ?? parseStepTag(str(input.description) ?? "");
 }

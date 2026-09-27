@@ -156,6 +156,15 @@ export function echoInstruction(
     );
   }
 
+  // Which step each message is about, said on the message itself. Separate
+  // from the step line so that saying it again is not another pass (ANT-163).
+  lines.push(
+    "",
+    "**At the start of every message you write,** name the step it is about with a",
+    `short tag, for example \`[${STEP_TAG_TOKEN} <step-id>]\`. It does not replace the step`,
+    "line; it tells the Anthill window which step your words belong to.",
+  );
+
   // The counterpart of `anthill done`. A prompt that could say which step it
   // was on but never that it had stopped left Anthill only the silence rule to
   // end on — five minutes after the last word, and later than that whenever
@@ -206,9 +215,15 @@ export function stepOpening(
     "this command, which tells the Anthill window the step has begun.",
     "",
     `    ${command}`,
+    "",
+    `Start every message you write in this step with \`[${STEP_TAG_TOKEN} ${step.id}]\`.`,
   ];
   if (step.delegated) {
-    lines.push("", "Run it yourself before you hand the step to the subagent; do not ask the subagent to.");
+    lines.push(
+      "",
+      "Run the command yourself before you hand the step to the subagent; do not ask the",
+      `subagent to run it. Do ask it to start its own messages with \`[${STEP_TAG_TOKEN} ${step.id}]\` too.`,
+    );
   }
   return lines;
 }
@@ -271,6 +286,27 @@ export function cliInstruction(
 }
 
 export const RUN_TOKEN = "ANTHILL-RUN";
+
+/**
+ * The tag a message opens with to say which step it is about (ANT-163).
+ *
+ * Short on purpose — it is written on every message, and the run id and nonce
+ * would triple it. It needs neither: it is only read inside a session already
+ * matched on both, and it never moves the graph the way a step line does.
+ */
+export const STEP_TAG_TOKEN = "ANTHILL";
+const STEP_TAG = /\[ANTHILL\s+([A-Za-z0-9_.:-]+)\]/;
+const STEP_TAGS = /\[ANTHILL\s+[A-Za-z0-9_.:-]+\]\s*/g;
+
+/** The step a message's tag names: the first tag in it, if any. */
+export function parseStepTag(text: string): string | undefined {
+  return STEP_TAG.exec(text)?.[1];
+}
+
+/** The text with its step tags taken out, for showing. */
+export function withoutStepTags(text: string): string {
+  return text.replace(STEP_TAGS, "");
+}
 export const STEP_TOKEN = "ANTHILL-STEP";
 
 /**

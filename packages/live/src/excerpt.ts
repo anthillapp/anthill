@@ -39,7 +39,7 @@
  * that, rather than claiming more.
  */
 
-import type { RunMarker } from "./marker.js";
+import { withoutStepTags, type RunMarker } from "./marker.js";
 
 /** As much of a message as Anthill will keep. The card clamps further to show. */
 export const MESSAGE_EXCERPT_LIMIT = 600;
@@ -99,7 +99,8 @@ export function messageExcerpt(
   const kept: string[] = [];
   let inFence = false;
 
-  for (const raw of text.split("\n")) {
+  // The step tag each message opens with is plumbing too (ANT-163).
+  for (const raw of withoutStepTags(text).split("\n")) {
     if (FENCE.test(raw)) {
       inFence = !inFence;
       continue;

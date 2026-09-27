@@ -19,7 +19,7 @@
  *   total is never divided among steps to make the table look finished.
  */
 
-import type { AttributedEvent } from "./live-session.js";
+import type { AttributedEvent, BlockSpanView } from "./live-session.js";
 
 export type BlockSpan = {
   blockId: string;
@@ -69,7 +69,16 @@ function add(tally: TokenTally | undefined, tokens: TokenTally): TokenTally {
 export function sessionMetrics(
   events: readonly AttributedEvent[],
   settledAt?: string,
+  /**
+   * The passes the fold found, when there are any to hand. They are the only
+   * measure that holds once steps run side by side: a step a subagent is
+   * still working for does not end when the session announces the next one
+   * (ANT-163). Without them the spans are read off the step lines, one after
+   * another, as they always were.
+   */
+  foldSpans?: readonly BlockSpanView[],
 ): SessionMetrics {
+  if (foldSpans) return fromFoldSpans(events, foldSpans, settledAt);
   const spans: BlockSpan[] = [];
   const passesByBlock = new Map<string, number>();
 
@@ -156,4 +165,70 @@ export function timeByAgent(
     totals.set(agent, (totals.get(agent) ?? 0) + span.durationMs);
   }
   return totals;
+}
+
+/**
+ * The same figures over the fold's own spans.
+ *
+ * A recording for a step lands in the latest pass through that step that had
+ * begun by then — the same rule as above, except that "latest" is judged by
+ * time rather than by which step line came last, so two steps open at once
+ * each keep their own. One recorded before the step's first pass belongs to
+ * that first pass, so a step's passes still sum to its total.
+ */
+function fromFoldSpans(
+  events: readonly AttributedEvent[],
+  foldSpans: readonly BlockSpanView[],
+  settledAt: string | undefined,
+): SessionMetrics {
+  const spans: BlockSpan[] = foldSpans.map((span) => {
+    const end = span.endedAt ?? settledAt;
+    const duration = end ? Date.parse(end) - Date.parse(span.startedAt) : NaN;
+    return {
+      blockId: span.blockId,
+      pass: span.pass,
+      startedAt: span.startedAt,
+      ...(end ? { endedAt: end } : {}),
+      ...(Number.isNaN(duration) ? {} : { durationMs: Math.max(0, duration) }),
+    };
+  });
+
+  const passesByBlock = new Map<string, number>();
+  for (const span of spans) {
+    passesByBlock.set(span.blockId, Math.max(passesByBlock.get(span.blockId) ?? 0, span.pass));
+  }
+
+  let tokensRecorded: TokenTally | undefined;
+  let tokensUnattributed: TokenTally | undefined;
+  const tokensLikelyByBlock = new Map<string, TokenTally>();
+  for (const event of events) {
+    if (event.kind !== "usage" || !event.tokens) continue;
+    tokensRecorded = add(tokensRecorded, event.tokens);
+    const blockId = event.mapping.confidence !== "unmapped" ? event.mapping.blockId : undefined;
+    if (!blockId) {
+      tokensUnattributed = add(tokensUnattributed, event.tokens);
+      continue;
+    }
+    tokensLikelyByBlock.set(blockId, add(tokensLikelyByBlock.get(blockId), event.tokens));
+    const at = Date.parse(event.at);
+    const own = spans.filter((span) => span.blockId === blockId);
+    const begun = own.filter((span) => Date.parse(span.startedAt) <= at);
+    const span = begun[begun.length - 1] ?? own[0];
+    if (span) span.tokens = add(span.tokens, event.tokens);
+  }
+
+  const timeByBlock = new Map<string, number>();
+  for (const span of spans) {
+    if (span.durationMs === undefined) continue;
+    timeByBlock.set(span.blockId, (timeByBlock.get(span.blockId) ?? 0) + span.durationMs);
+  }
+
+  return {
+    spans,
+    passesByBlock,
+    timeByBlock,
+    ...(tokensRecorded ? { tokensRecorded } : {}),
+    tokensLikelyByBlock,
+    ...(tokensUnattributed ? { tokensUnattributed } : {}),
+  };
 }

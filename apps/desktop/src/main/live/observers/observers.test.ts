@@ -2087,6 +2087,22 @@ describe("a session's delegates", () => {
     requestShape: "background",
   };
 
+  it("carries the call that started the delegate on everything it wrote (ANT-163)", async () => {
+    const { events } = await followed(
+      [said("[ANTHILL implement] Editing calc.py.", 10_000), said("Done.", 12_000, "end_turn")],
+      META,
+    );
+    const fromDelegate = events.filter((event) => event.author?.kind === "subagent");
+    expect(fromDelegate.length).toBeGreaterThan(0);
+    for (const event of fromDelegate) expect(event.parentToolUseId).toBe("toolu_01DGF");
+    // Its turn ending is signed and linked too, which is how a background
+    // delegation is known to be over.
+    expect(events).toContainEqual(expect.objectContaining({ kind: "turn.end", parentToolUseId: "toolu_01DGF" }));
+    // And a message's tag is read, then left out of what is shown.
+    const message = events.find((event) => event.kind === "message");
+    expect(message).toMatchObject({ stepTag: "implement", detail: "Editing calc.py." });
+  });
+
   it("signs the delegate's words with what it was for", async () => {
     // The feed said "Subagent" and nothing else, on a run with two of them
     // (ANT-54). The description is the label that tells them apart.
@@ -2357,5 +2373,50 @@ describe("a marker printed by a command", () => {
     const run = { ...pending("codex"), detectedSessionId: "sess-cx", state: "detected_live" as const };
     const { events } = await new CodexObserver(dir).poll(run, new Date().toISOString());
     expect(events.filter((event) => event.kind === "step.marker")).toEqual([]);
+  });
+});
+
+describe("a delegation's shape (ANT-163)", () => {
+  it("says when a subagent was sent to the background", async () => {
+    const dir = await root();
+    const at = new Date().toISOString();
+    const body = [
+      { type: "user", sessionId: "sess-cc", timestamp: at, cwd: "/tmp/scratch", message: { role: "user", content: MARKED_PROMPT } },
+      {
+        type: "assistant",
+        sessionId: "sess-cc",
+        timestamp: at,
+        message: {
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: "toolu_bg", name: "Agent", input: { subagent_type: "developer", description: "Service A", prompt: "Start your messages with [ANTHILL svc-a]. Add shout().", run_in_background: true } },
+            { type: "tool_use", id: "toolu_fg", name: "Agent", input: { subagent_type: "developer", description: "Service B" } },
+          ],
+        },
+      },
+    ].map((row) => JSON.stringify(row)).join("\n") + "\n";
+    await writeClaude(dir, "-tmp-scratch", "sess-cc", body);
+    const run = { ...pending("claude-code"), detectedSessionId: "sess-cc", state: "detected_live" as const };
+    const { events } = await new ClaudeCodeObserver(dir).poll(run, new Date().toISOString());
+    const starts = events.filter((event) => event.kind === "subagent.start");
+    expect(starts.find((event) => event.toolUseId === "toolu_bg")?.background).toBe(true);
+    expect(starts.find((event) => event.toolUseId === "toolu_fg")?.background).toBeUndefined();
+    // The step the session named in what it handed over.
+    expect(starts.find((event) => event.toolUseId === "toolu_bg")?.stepTag).toBe("svc-a");
+    expect(starts.find((event) => event.toolUseId === "toolu_fg")?.stepTag).toBeUndefined();
+  });
+
+  it("reads a Codex reply's step tag", async () => {
+    const dir = await root();
+    const at = new Date().toISOString();
+    const body = [
+      { timestamp: at, type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx" } },
+      { timestamp: at, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: MARKED_PROMPT }] } },
+      { timestamp: at, type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "[ANTHILL test] Running the suite." }] } },
+    ].map((row) => JSON.stringify(row)).join("\n") + "\n";
+    await writeCodex(dir, "sess-cx", body);
+    const run = { ...pending("codex"), detectedSessionId: "sess-cx", state: "detected_live" as const };
+    const { events } = await new CodexObserver(dir).poll(run, new Date().toISOString());
+    expect(events.find((event) => event.kind === "message")).toMatchObject({ stepTag: "test", detail: "Running the suite." });
   });
 });

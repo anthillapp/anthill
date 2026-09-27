@@ -44,9 +44,9 @@ export function HowItRan({ block, events }: { block: BlockUsage; events: number 
             </ol>
           ) : null}
           <p className="how-it-ran-note">
-            {events} event{events === 1 ? "" : "s"} below. Time runs from this step&rsquo;s
-            announcement to the next, so it can include waiting; ~ marks tokens presumed from the
-            step that was announced when they were recorded.
+            {events} event{events === 1 ? "" : "s"} below. Time runs from this step&rsquo;s start
+            until the session moved on and its subagents were back, so it can include waiting; ~
+            marks tokens presumed from the step they were recorded for.
           </p>
         </>
       ) : (

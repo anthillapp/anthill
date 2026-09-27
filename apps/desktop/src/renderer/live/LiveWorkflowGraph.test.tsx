@@ -926,3 +926,49 @@ function withWork(events: ObservationEvent[]): ObservationEvent[] {
     return [event, work];
   });
 }
+
+/*
+  ANT-166. Where parallel branches meet, control arrives along every branch
+  and the step starts only once all have — so every branch's connection into
+  it pulses, not just the last one to arrive.
+*/
+describe("where parallel branches meet", () => {
+  const joining: Workflow = {
+    id: "workflow-join",
+    name: "Two services in parallel",
+    version: "1",
+    target: "claude-code",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {}, position: { x: 0, y: 180 } },
+      { id: "svc-a", type: "agent", name: "Change service A", config: { actionKind: "agent-step", task: "a" }, position: { x: 260, y: 60 } },
+      { id: "svc-b", type: "agent", name: "Change service B", config: { actionKind: "agent-step", task: "b" }, position: { x: 260, y: 300 } },
+      { id: "test", type: "agent", name: "Run tests", config: { actionKind: "agent-step", task: "t" }, position: { x: 540, y: 180 } },
+      { id: "end", type: "end", name: "Done", config: {}, position: { x: 820, y: 180 } },
+    ],
+    edges: [
+      { id: "to-a", source: "start", target: "svc-a" },
+      { id: "to-b", source: "start", target: "svc-b" },
+      { id: "a-test", source: "svc-a", target: "test" },
+      { id: "b-test", source: "svc-b", target: "test" },
+      { id: "test-end", source: "test", target: "end" },
+    ],
+    metadata: { workflow: { formatVersion: 4 } },
+  };
+  let seq = 0;
+  const announce = (blockId: string, at: string): ObservationEvent => {
+    seq += 1;
+    return { runId: "ANT-1", seq, at, recordedAt: at, cli: "claude-code", source: "transcript", channel: "claude-code:transcript", kind: "step.marker", title: blockId, blockId };
+  };
+
+  it("pulses both branches into the step they meet at", () => {
+    const view = foldLiveSession(joining, run, withWork([
+      announce("svc-a", "2026-08-29T10:00:05.000Z"),
+      announce("svc-b", "2026-08-29T10:00:10.000Z"),
+      announce("test", "2026-08-29T10:00:20.000Z"),
+    ]));
+    render(<LiveWorkflowGraph workflow={joining} view={view} sessionState={run.state} onSelect={vi.fn()} />);
+    const tone = (id: string) => document.querySelector(`[data-edge="${id}"]`)?.getAttribute("class") ?? "";
+    expect(tone("a-test")).toContain("tone-live");
+    expect(tone("b-test")).toContain("tone-live");
+  });
+});

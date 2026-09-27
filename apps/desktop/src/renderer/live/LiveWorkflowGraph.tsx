@@ -26,7 +26,7 @@ import {
   zoomAbout,
   type Workflow,
 } from "@anthill/builder";
-import { agentConfig } from "@anthill/workflow";
+import { agentConfig, parallelPlan } from "@anthill/workflow";
 import {
   hasStepEvidence,
   type BlockView,
@@ -253,6 +253,10 @@ function deliveringSources(
  *
  * And of the connections that did carry control, only the one that carried it
  * last may pulse. The rest are drawn as travelled, which they were — earlier.
+ *
+ * Except where parallel branches meet (ANT-166): control arrives there along
+ * every branch, and the step starts only once all have, so every branch's
+ * connection into it pulses. Picking the last would say the others never came.
  */
 function edgeTone(
   view: LiveSessionView,
@@ -260,6 +264,7 @@ function edgeTone(
   target: string,
   boundaryKind: (id: string) => "start" | "end" | undefined,
   delivering: Map<string, string>,
+  joins: ReadonlyMap<string, readonly string[]>,
 ): EdgeTone {
   if (!carriedControl(view, source, target, boundaryKind)) return "idle";
   if (boundaryKind(target) === "end") return "seen";
@@ -268,6 +273,7 @@ function edgeTone(
   const arriving = to?.state === "running" || to?.state === "needsYou";
   if (!arriving) return "seen";
 
+  if (joins.get(target)?.includes(source)) return "live";
   const last = delivering.get(target);
   return last === undefined || last === source ? "live" : "seen";
 }
@@ -331,6 +337,9 @@ export function LiveWorkflowGraph({
     }
     return (id: string) => kinds.get(id);
   }, [workflow]);
+
+  /** Where parallel branches meet — every branch into it pulses (ANT-166). */
+  const joins = useMemo(() => parallelPlan(workflow).joins, [workflow]);
 
   /** Recomputed with the view, since it is entirely a fact about the events. */
   const delivering = useMemo(
@@ -500,7 +509,7 @@ export function LiveWorkflowGraph({
       {model.connected.map((path) => {
         const edge = workflow.edges.find((item) => item.id === path.output.id);
         const target = edge?.target ?? "";
-        const tone = edgeTone(view, path.nodeId, target, boundaryKind, delivering);
+        const tone = edgeTone(view, path.nodeId, target, boundaryKind, delivering, joins);
         const style = EDGE_TONE[tone];
         return (
           <path

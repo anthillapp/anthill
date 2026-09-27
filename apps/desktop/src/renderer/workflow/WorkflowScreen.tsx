@@ -854,25 +854,6 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
             assembling={assembling}
           />
 
-          {/* Floating rather than in the layout: the exchange is re-read on a
-              timer, so this can appear while nobody is interacting, and the
-              canvas must not jump under the reader's cursor when it does. */}
-          {handover?.model.notice ? <HandoverNotice notice={handover.model.notice} /> : null}
-
-          {/* One cluster in the canvas's own coordinates: the plaque explains,
-              the chip claims. Both sit outside the layer that pans and zooms,
-              so neither drifts with the diagram. */}
-          <div className="canvas-presence">
-            {watched ? <PresencePlaque presence={presenceKey(watched)} {...(watched.exchange && watched.state === "pending_after_copy" ? { note: "revision bound; no progress evidence yet" } : {})} /> : null}
-            <LiveIndicator
-              {...(workflow.id ? { workflowId: workflow.id } : {})}
-              onOpenSession={(run, capability) => {
-                setLiveRun(run);
-                setLiveObservation(capability);
-              }}
-            />
-          </div>
-
           {/* Anchored to the canvas, not the topbar: this edits the diagram,
               so it belongs to the diagram's own chrome rather than beside
               New/Open/Save/Prompt, which act on the document. */}
@@ -891,17 +872,42 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
             {describing ? "Edit manually" : "Describe a change"}
           </button>
 
-          <div className="canvas-chips">
-            {handover ? (
-              <span className="canvas-origin from-session">
-                <i aria-hidden="true" />
-                Handed over · {workflow.name}
-              </span>
-            ) : null}
-            <span className="pill">
-              {workflow.nodes.length} blocks · {outputCount} connections ·{" "}
-              {cycles.length} {cycles.length === 1 ? "loop" : "loops"}
-            </span>
+          {/* The canvas's top edge, as one column: the origin and counts on
+              the left, the plaque and live chip on the right, wrapping onto a
+              second row rather than drawing over each other, and the handover
+              notice under whatever that takes (ANT-160). Floating rather than
+              in the layout: the exchange is re-read on a timer, so the notice
+              can appear while nobody is interacting, and the canvas must not
+              jump under the reader's cursor when it does. */}
+          <div className="canvas-top">
+            <div className="canvas-top-row">
+              <div className="canvas-chips">
+                {handover ? (
+                  <span className="canvas-origin from-session" title={`Handed over · ${workflow.name}`}>
+                    <i aria-hidden="true" />
+                    <span className="canvas-origin-name">Handed over · {workflow.name}</span>
+                  </span>
+                ) : null}
+                <span className="pill">
+                  {workflow.nodes.length} blocks · {outputCount} connections ·{" "}
+                  {cycles.length} {cycles.length === 1 ? "loop" : "loops"}
+                </span>
+              </div>
+              {/* One cluster in the canvas's own coordinates: the plaque explains,
+                  the chip claims. Both sit outside the layer that pans and zooms,
+                  so neither drifts with the diagram. */}
+              <div className="canvas-presence">
+                {watched ? <PresencePlaque presence={presenceKey(watched)} {...(watched.exchange && watched.state === "pending_after_copy" ? { note: "revision bound; no progress evidence yet" } : {})} /> : null}
+                <LiveIndicator
+                  {...(workflow.id ? { workflowId: workflow.id } : {})}
+                  onOpenSession={(run, capability) => {
+                    setLiveRun(run);
+                    setLiveObservation(capability);
+                  }}
+                />
+              </div>
+            </div>
+            {handover?.model.notice ? <HandoverNotice notice={handover.model.notice} /> : null}
           </div>
 
           <div className="canvas-legend">

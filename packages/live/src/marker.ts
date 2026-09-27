@@ -158,11 +158,16 @@ export function echoInstruction(
 
   // Which step each message is about, said on the message itself. Separate
   // from the step line so that saying it again is not another pass (ANT-163).
+  // Written as a Markdown link definition, which chat windows render as
+  // nothing: the tag is for the Anthill window, not for the person reading
+  // the chat (ANT-168).
   lines.push(
     "",
-    "**At the start of every message you write,** name the step it is about with a",
-    `short tag, for example \`[${STEP_TAG_TOKEN} <step-id>]\`. It does not replace the step`,
-    "line; it tells the Anthill window which step your words belong to.",
+    "**Begin every message you write** with a line naming the step it is about,",
+    "followed by a blank line. It does not replace the step line; it tells the",
+    "Anthill window which step your words belong to, and chat windows hide it:",
+    "",
+    `    ${stepTagLine("<step-id>")}`,
   );
 
   // The counterpart of `anthill done`. A prompt that could say which step it
@@ -216,13 +221,15 @@ export function stepOpening(
     "",
     `    ${command}`,
     "",
-    `Start every message you write in this step with \`[${STEP_TAG_TOKEN} ${step.id}]\`.`,
+    "Begin every message you write in this step with this line, then a blank line:",
+    "",
+    `    ${stepTagLine(step.id)}`,
   ];
   if (step.delegated) {
     lines.push(
       "",
       "Run the command yourself before you hand the step to the subagent; do not ask the",
-      `subagent to run it. Do ask it to start its own messages with \`[${STEP_TAG_TOKEN} ${step.id}]\` too.`,
+      "subagent to run it. Do ask it to begin its own messages with that same line too.",
     );
   }
   return lines;
@@ -295,17 +302,42 @@ export const RUN_TOKEN = "ANTHILL-RUN";
  * matched on both, and it never moves the graph the way a step line does.
  */
 export const STEP_TAG_TOKEN = "ANTHILL";
-const STEP_TAG = /\[ANTHILL\s+([A-Za-z0-9_.:-]+)\]/;
-const STEP_TAGS = /\[ANTHILL\s+[A-Za-z0-9_.:-]+\]\s*/g;
+
+/**
+ * The tag as the prompt asks for it: a Markdown link definition, which every
+ * renderer that follows CommonMark shows as nothing. An HTML comment was the
+ * obvious choice and the wrong one — ChatGPT's Codex tab prints it (ANT-168).
+ */
+export function stepTagLine(stepId: string): string {
+  return `[//]: # (anthill:${stepId})`;
+}
+
+const ID = "([A-Za-z0-9_.:-]+)";
+/**
+ * Either form, the link definition or the `[ANTHILL x]` prompts copied before
+ * it asked for, and in either case perhaps wrapped in backticks — the prompt
+ * showed the old form as code, and agents copied it as shown (ANT-167).
+ */
+const STEP_TAG = new RegExp(`\\[//\\]: # \\(anthill:${ID}\\)|\\[ANTHILL\\s+${ID}\\]`);
+const STEP_TAGS = new RegExp(
+  [
+    // A link-definition line, taken whole with its line break.
+    `^[ \\t]*\`?\\[//\\]: # \\(anthill:[A-Za-z0-9_.:-]+\\)\`?[ \\t]*(?:\\r?\\n|$)`,
+    // The old tag, with any backticks around it and the space after.
+    `\`?\\[ANTHILL\\s+[A-Za-z0-9_.:-]+\\]\`?[ \\t]*`,
+  ].join("|"),
+  "gm",
+);
 
 /** The step a message's tag names: the first tag in it, if any. */
 export function parseStepTag(text: string): string | undefined {
-  return STEP_TAG.exec(text)?.[1];
+  const match = STEP_TAG.exec(text);
+  return match?.[1] ?? match?.[2];
 }
 
 /** The text with its step tags taken out, for showing. */
 export function withoutStepTags(text: string): string {
-  return text.replace(STEP_TAGS, "");
+  return text.replace(STEP_TAGS, "").replace(/^\s*\n/, "");
 }
 export const STEP_TOKEN = "ANTHILL-STEP";
 

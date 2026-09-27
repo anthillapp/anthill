@@ -11,7 +11,9 @@ import {
   parseStepMarkers,
   renderMarker,
   DONE_TOKEN,
+  STEP_TOKEN,
   echoInstruction,
+  stepOpening,
   textCarriesMarker,
   type RunMarker,
 } from "./marker.js";
@@ -162,9 +164,15 @@ describe("the done marker", () => {
   it("is asked for by the printed-line instruction, with both halves", () => {
     const text = echoInstruction(marker, [{ id: "review", name: "Review" }]);
     expect(text).toContain(`${DONE_TOKEN} ${marker.runId} ${marker.nonce}`);
-    // After the step ids, before the opt-out: an ending is the last thing asked for.
+    // After the step ids: an ending is the last thing asked for.
     expect(text.indexOf(DONE_TOKEN)).toBeGreaterThan(text.indexOf("`review`"));
-    expect(text.indexOf(DONE_TOKEN)).toBeLessThan(text.indexOf("Ignore this section"));
+  });
+
+  it("offers no way out, only a second way in (ANT-162)", () => {
+    const text = echoInstruction(marker, [{ id: "review", name: "Review" }]);
+    expect(text).not.toMatch(/ignore this section/i);
+    expect(text).toMatch(/from a command's output as well as from your reply/);
+    expect(text).toMatch(/never leave one to a subagent/);
   });
 });
 
@@ -199,5 +207,24 @@ describe("the CLI instruction", () => {
 
   it("says a command that cannot be run is skipped, not fatal", () => {
     expect(cliInstruction(marker)).toContain("if a command cannot\nbe run, continue without it");
+  });
+});
+
+describe("a step's opening line", () => {
+  it("is the step's own marker, with no word about subagents when nothing is delegated", () => {
+    const lines = stepOpening(marker, { id: "review", delegated: false }).join("\n");
+    expect(parseStepMarkers(lines, marker)).toEqual(["review"]);
+    expect(lines).not.toMatch(/subagent/);
+  });
+
+  it("says who prints it when the step is delegated", () => {
+    const lines = stepOpening(marker, { id: "review", delegated: true }).join("\n");
+    expect(lines).toMatch(/Run it yourself before you hand the step to the subagent/);
+  });
+
+  it("is a command, which a harness that writes no text between tools still runs", () => {
+    const lines = stepOpening(marker, { id: "review", delegated: false }).join("\n");
+    expect(lines).toContain(`printf '${STEP_TOKEN} ${marker.runId} ${marker.nonce} review\\n'`);
+    expect(lines).toMatch(/Your first action in this step/);
   });
 });

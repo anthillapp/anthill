@@ -10,7 +10,8 @@
  *    optional — the copy-paste path must work on its own, and a prompt that
  *    silently depended on a separate export would fail in a way the user could
  *    not see.
- * 3. **The workflow.** Exactly what `compile()` produces, unchanged.
+ * 3. **The workflow.** What `compile()` produces, with each step opening on
+ *    its own progress line (ANT-162).
  *
  * Anthill does not run any of this. The user pastes it into their own Codex or
  * Claude Code and starts it there.
@@ -19,7 +20,7 @@
 import type { Workflow } from "@anthill/workflow-schema";
 import { compile, executableBlocks, type CompileResult } from "@anthill/workflow";
 
-import { cliInstruction, echoInstruction, renderMarker, type RunMarker } from "./marker.js";
+import { cliInstruction, echoInstruction, renderMarker, stepOpening, type RunMarker } from "./marker.js";
 
 export type BootstrapResult = CompileResult & {
   /** The prompt to copy: marker, set-up, then the workflow. */
@@ -67,7 +68,8 @@ export function buildBootstrapPrompt(
   marker: RunMarker,
   options: BootstrapOptions = {},
 ): BootstrapResult {
-  const compiled = compile(workflow);
+  const via = options.reportViaCli ? "cli" : "echo";
+  const compiled = compile(workflow, { stepOpening: (step) => stepOpening(marker, step, via) });
   const sections: string[] = [renderMarker(marker)];
 
   if (compiled.files.length > 0) {

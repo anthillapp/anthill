@@ -559,8 +559,13 @@ function scan(
         // …'`, and the line exists only in the command's output (ANT-147).
         // Only the output is read — the command itself merely names the line,
         // and a command that fails to print it has not announced anything.
-        announceSteps(outputText(payload.output), "command", state, marker, base, events);
-        announceDone(outputText(payload.output), state, marker, base, events);
+        // Not a command that printed the prompt itself, though: that carries
+        // every step's line at once, and would announce them all (ANT-162).
+        const output = outputText(payload.output);
+        if (!textCarriesMarker(output, marker)) {
+          announceSteps(output, "command", state, marker, base, events);
+          announceDone(output, state, marker, base, events);
+        }
       }
       continue;
     }

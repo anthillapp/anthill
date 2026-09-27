@@ -2285,3 +2285,77 @@ describe("the harness's own done line, journalled", () => {
     expect(events.filter((event) => event.completion)).toEqual([]);
   });
 });
+
+/*
+  ANT-162. The prompt now tells an agent that cannot put a marker in its reply
+  to print it with a command. Codex's command output was already read
+  (ANT-147); Claude Code's tool results now are too. And since each step now
+  carries its own concrete line, a command that prints the prompt itself must
+  not announce every step at once.
+*/
+describe("a marker printed by a command", () => {
+  const PROMPT_WITH_STEPS = `${MARKED_PROMPT}\n\n    ANTHILL-STEP ${RUN_ID} ${NONCE} implement\n\n    ANTHILL-STEP ${RUN_ID} ${NONCE} test`;
+
+  function claudeWithResult(result: string, reply?: string) {
+    const at = new Date().toISOString();
+    const rows: unknown[] = [
+      { type: "user", sessionId: "sess-cc", timestamp: at, cwd: "/tmp/scratch", message: { role: "user", content: MARKED_PROMPT } },
+      {
+        type: "assistant",
+        sessionId: "sess-cc",
+        timestamp: at,
+        message: {
+          role: "assistant",
+          content: [
+            ...(reply ? [{ type: "text", text: reply }] : []),
+            { type: "tool_use", id: "toolu_9", name: "Bash", input: { command: "printf …" } },
+          ],
+        },
+      },
+      {
+        type: "user",
+        sessionId: "sess-cc",
+        timestamp: at,
+        message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_9", content: result }] },
+      },
+    ];
+    return rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+  }
+  const live = () => ({ ...pending("claude-code"), detectedSessionId: "sess-cc", state: "detected_live" as const });
+
+  it("announces the step from a Claude Code tool result", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-scratch", "sess-cc", claudeWithResult(`ANTHILL-STEP ${RUN_ID} ${NONCE} implement\n`));
+    const { events } = await new ClaudeCodeObserver(dir).poll(live(), new Date().toISOString());
+    expect(events.filter((event) => event.kind === "step.marker").map((event) => event.blockId)).toEqual(["implement"]);
+  });
+
+  it("counts a line in the reply and the same line printed by a command once", async () => {
+    const dir = await root();
+    const line = `ANTHILL-STEP ${RUN_ID} ${NONCE} implement`;
+    await writeClaude(dir, "-tmp-scratch", "sess-cc", claudeWithResult(`${line}\n`, line));
+    const { events } = await new ClaudeCodeObserver(dir).poll(live(), new Date().toISOString());
+    expect(events.filter((event) => event.kind === "step.marker")).toHaveLength(1);
+  });
+
+  it("does not announce every step when a Claude Code tool printed the prompt", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-scratch", "sess-cc", claudeWithResult(PROMPT_WITH_STEPS));
+    const { events } = await new ClaudeCodeObserver(dir).poll(live(), new Date().toISOString());
+    expect(events.filter((event) => event.kind === "step.marker")).toEqual([]);
+  });
+
+  it("does not announce every step when a Codex command printed the prompt", async () => {
+    const dir = await root();
+    const at = new Date().toISOString();
+    const body = [
+      { timestamp: at, type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx" } },
+      { timestamp: at, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: MARKED_PROMPT }] } },
+      { timestamp: at, type: "response_item", payload: { type: "function_call_output", call_id: "c1", output: PROMPT_WITH_STEPS } },
+    ].map((row) => JSON.stringify(row)).join("\n") + "\n";
+    await writeCodex(dir, "sess-cx", body);
+    const run = { ...pending("codex"), detectedSessionId: "sess-cx", state: "detected_live" as const };
+    const { events } = await new CodexObserver(dir).poll(run, new Date().toISOString());
+    expect(events.filter((event) => event.kind === "step.marker")).toEqual([]);
+  });
+});

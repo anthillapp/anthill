@@ -186,6 +186,11 @@ type FileState = {
    */
   doneAt?: string;
   /**
+   * The last step announced in this file, and where: the reply, or the output
+   * of a tool. The same announcement seen in both is one, not a second pass.
+   */
+  lastStep?: { blockId: string; from: "reply" | "command" };
+  /**
    * When the person interrupted the session, if they did.
    *
    * Claude Code writes `[Request interrupted by user]` into the transcript as
@@ -710,6 +715,26 @@ function scan(
               ok: block.is_error !== true,
               ...(id ? { toolUseId: id } : {}),
             });
+            // The prompt tells an agent that cannot put a line in its reply to
+            // print it with a command, so a result is read for the markers too
+            // — and for nothing else; the body stays where Claude Code wrote
+            // it (ANT-162, as ANT-147 did for Codex).
+            const output = resultText(block.content);
+            if (!textCarriesMarker(output, marker)) {
+              announceSteps(output, "command", state, marker, base, events);
+              if (parseDoneMarker(output, marker)) {
+                state.doneAt = at;
+                if (!state.delegate) {
+                  events.push({
+                    ...base,
+                    kind: "session.end",
+                    title: "The harness reported the work as finished",
+                    author: { kind: "main" },
+                    completion: "done",
+                  });
+                }
+              }
+            }
           }
         }
       }
@@ -775,15 +800,7 @@ function scan(
 
         if (block.type === "text") {
           const text = str(block.text) ?? "";
-          for (const blockId of parseStepMarkers(text, marker)) {
-            events.push({
-              ...base,
-              kind: "step.marker",
-              title: "Step announced",
-              detail: blockId,
-              blockId,
-            });
-          }
+          announceSteps(text, "reply", state, marker, base, events);
           if (parseDoneMarker(text, marker)) {
             state.doneAt = at;
             // Journalled as well as reported, so the ending is in the record
@@ -871,5 +888,36 @@ function scan(
         });
       }
     }
+  }
+}
+
+/** The text of a tool result: a string, or an array of `{ type, text }` parts. */
+function resultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => (isRecord(part) ? str(part.text) : undefined))
+    .filter((text): text is string => text !== undefined)
+    .join("\n");
+}
+
+/**
+ * Every step the text announces, as events. The same announcement read from
+ * the other place — printed by a command and repeated in the reply, or the
+ * reverse — is one announcement: each counts as a pass of the step, and a
+ * loop must not appear where none happened.
+ */
+function announceSteps(
+  text: string,
+  from: "reply" | "command",
+  state: FileState,
+  marker: { runId: string; nonce: string },
+  base: Omit<ObservationEventDraft, "kind" | "title">,
+  events: ObservationEventDraft[],
+): void {
+  for (const blockId of parseStepMarkers(text, marker)) {
+    if (state.lastStep?.blockId === blockId && state.lastStep.from !== from) continue;
+    state.lastStep = { blockId, from };
+    events.push({ ...base, kind: "step.marker", title: "Step announced", detail: blockId, blockId });
   }
 }

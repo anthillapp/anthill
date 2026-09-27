@@ -44,6 +44,19 @@ export type GeneratedFile = {
   content: string;
 };
 
+export type CompileOptions = {
+  /**
+   * Lines to open each step with, right under its heading.
+   *
+   * The workflow itself knows nothing about observation; the caller that does
+   * (the Live Session bootstrap) uses this to put the step's own
+   * announcement where the agent is when it starts the step. `delegated` says
+   * the step hands its work to a subagent, where the instruction has to say
+   * who announces it. Returning nothing leaves the step as it was.
+   */
+  stepOpening?: (step: { id: string; delegated: boolean }) => string[];
+};
+
 export type CompileResult = {
   /** The text to paste into the agent. */
   prompt: string;
@@ -478,6 +491,7 @@ function buildPrompt(
   workflow: Workflow,
   harness: HarnessProfile,
   ordered: WorkflowNode[],
+  options: CompileOptions,
 ): string {
   // Start and end are structural; everything else is a numbered step.
   const stepNumbers = new Map<string, number>();
@@ -563,6 +577,8 @@ function buildPrompt(
       const prompt = approvalConfig(node).prompt;
       steps.push("");
       steps.push(`### ${step}. ${node.name} – stop and ask a human`);
+      const opening = options.stepOpening?.({ id: node.id, delegated: false }) ?? [];
+      if (opening.length > 0) steps.push("", ...opening);
       steps.push("");
       steps.push(
         prompt
@@ -591,6 +607,12 @@ function buildPrompt(
         : `### ${step}. ${node.name} – act as ${assignment.profile.name}`
       : `### ${step}. ${node.name}`;
     steps.push(heading);
+
+    // Whatever the caller needs said first, inside the step rather than in a
+    // section the agent read long before it got here (ANT-162).
+    const opening =
+      options.stepOpening?.({ id: node.id, delegated: Boolean(assignment && usesSubagents) }) ?? [];
+    if (opening.length > 0) steps.push("", ...opening);
 
     if (action) {
       steps.push("");
@@ -676,7 +698,7 @@ function buildPrompt(
  * Throws `WorkflowCompileError` when the diagram is not valid — callers should run
  * `validateWorkflow` first and keep the generate action disabled until it passes.
  */
-export function compile(workflow: Workflow): CompileResult {
+export function compile(workflow: Workflow, options: CompileOptions = {}): CompileResult {
   const validation = validateWorkflow(workflow);
   if (!validation.valid) {
     throw new WorkflowCompileError(validation.errors.map((error) => error.message));
@@ -707,7 +729,7 @@ export function compile(workflow: Workflow): CompileResult {
     );
   }
 
-  return { prompt: buildPrompt(workflow, harness, ordered), files, warnings };
+  return { prompt: buildPrompt(workflow, harness, ordered, options), files, warnings };
 }
 
 /**

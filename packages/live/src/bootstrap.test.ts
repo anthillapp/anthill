@@ -63,6 +63,45 @@ function workflow(target: "claude-code" | "codex"): Workflow {
   };
 }
 
+/*
+  ANT-162. Measured on "Implement, test, fix", Claude Code announced `test` in
+  five runs of five and the delegated `implement` in none: the ids were listed
+  once, sections before the steps, and the delegated step said only who to
+  hand it to.
+*/
+describe("each step's own progress line", () => {
+  const section = (prompt: string, heading: string) => {
+    const from = prompt.indexOf(heading);
+    const next = prompt.indexOf("\n### ", from + 1);
+    return prompt.slice(from, next === -1 ? undefined : next);
+  };
+
+  it("opens the step it announces, before the step's own work", () => {
+    const { bootstrapPrompt } = buildBootstrapPrompt(workflow("codex"), marker);
+    const step = section(bootstrapPrompt, "### 1. Read the note");
+    const line = `ANTHILL-STEP ${marker.runId} ${marker.nonce} read`;
+    expect(step).toContain(line);
+    expect(step.indexOf(line)).toBeLessThan(step.indexOf("Task:"));
+    expect(step).toContain(`printf '${line}\\n'`);
+    expect(step).toMatch(/each time you come back to it/);
+  });
+
+  it("tells a delegated step who prints it", () => {
+    const { bootstrapPrompt } = buildBootstrapPrompt(workflow("claude-code"), marker);
+    const step = section(bootstrapPrompt, "### 1. Read the note");
+    expect(step).toContain("delegate to the");
+    expect(step).toContain(`ANTHILL-STEP ${marker.runId} ${marker.nonce} read`);
+    expect(step).toMatch(/Run it yourself before you hand the step to the subagent/);
+  });
+
+  it("names the command instead when the harness reports through the CLI", () => {
+    const { bootstrapPrompt } = buildBootstrapPrompt(workflow("claude-code"), marker, { reportViaCli: true });
+    const step = section(bootstrapPrompt, "### 1. Read the note");
+    expect(step).toContain(`anthill step ${marker.runId} ${marker.nonce} read`);
+    expect(step).not.toContain("ANTHILL-STEP");
+  });
+});
+
 describe("the copied bootstrap prompt", () => {
   it("opens with the marker, so it lands in the session's first record", () => {
     const { bootstrapPrompt } = buildBootstrapPrompt(workflow("claude-code"), marker);
@@ -103,7 +142,7 @@ describe("the copied bootstrap prompt", () => {
   it("asks the agent to echo the run marker without depending on it", () => {
     const { bootstrapPrompt } = buildBootstrapPrompt(workflow("claude-code"), marker);
     expect(bootstrapPrompt).toContain(`ANTHILL-RUN ${marker.runId} ${marker.nonce}`);
-    expect(bootstrapPrompt).toContain("Ignore this section entirely");
+    expect(bootstrapPrompt).not.toMatch(/ignore this section/i);
   });
 
   it("asks for a step marker, and lists the ids it expects back", () => {

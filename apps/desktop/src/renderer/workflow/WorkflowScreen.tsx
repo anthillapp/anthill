@@ -203,6 +203,10 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
 
   useEffect(() => {
     let live = true;
+    // Any push is newer than the answer to the first ask, which may still be
+    // in flight; letting that answer land afterwards would put a finished run
+    // back to Live (ANT-157).
+    let pushed = false;
     // Ask once as well as subscribing. A push only arrives when something
     // changes, so without this the canvas knows nothing about a session that
     // was already being observed when this screen opened — and the
@@ -210,7 +214,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     void window.anthill
       .liveSnapshot()
       .then((snapshot) => {
-        if (live) {
+        if (live && !pushed) {
           setLiveRuns(snapshot.runs);
           setLiveStorageError(snapshot.storageError);
         }
@@ -223,6 +227,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     let off: (() => void) | undefined;
     try {
       off = window.anthill.onLiveSnapshot((snapshot) => {
+        pushed = true;
         setLiveRuns(snapshot.runs);
         setLiveStorageError(snapshot.storageError);
         setLiveRun((current) => {

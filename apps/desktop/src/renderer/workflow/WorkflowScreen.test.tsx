@@ -306,6 +306,33 @@ describe("the live session page and what main knows", () => {
     expect(screen.queryByRole("button", { name: /Stop observing/ })).toBeNull();
   });
 
+  it("does not let a late first snapshot undo a newer push", async () => {
+    const api = stubApi();
+    let answer: (snapshot: Snapshot) => void = () => undefined;
+    api.liveSnapshot.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    const listeners: SnapshotListener[] = [];
+    api.onLiveSnapshot.mockImplementation((listener: SnapshotListener) => {
+      listeners.push(listener);
+      return () => undefined;
+    });
+
+    render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />);
+    await openTemplateAndLearnId();
+    const live = { ...observed, anthillRunId: "ANT-157157BB", workflowId: observedWorkflowId };
+    for (const listener of listeners) {
+      listener({ runs: [{ ...live, state: "completed" }], capabilities: [] });
+    }
+    await waitFor(() => {
+      expect((document.querySelector(".presence-label") as HTMLElement).textContent).toContain("Session finished");
+    });
+
+    // The answer to the first ask, made before the push, lands only now.
+    await act(async () => answer({ runs: [live], capabilities: [] }));
+
+    expect((document.querySelector(".presence-label") as HTMLElement).textContent).toContain("Session finished");
+    expect(screen.queryByRole("button", { name: "Open the live session" })).toBeNull();
+  });
+
   /**
    * A template instance has its own id now, so a test cannot name it up front.
    * It is learned the way the product learns it: from the call the Prompt modal

@@ -84,11 +84,14 @@ export function LiveIndicator({ workflowId, onOpenSession }: LiveIndicatorProps 
 
   useEffect(() => {
     let live = true;
+    // A push is newer than the answer to the first ask; that answer must not
+    // land on top of it and put a finished run back to Live (ANT-157).
+    let pushed = false;
 
     window.anthill
       .liveSnapshot()
       .then((next) => {
-        if (live) setSnapshot(next);
+        if (live && !pushed) setSnapshot(next);
       })
       .catch(() => {
         // A rejection here means the running process does not serve this
@@ -99,7 +102,10 @@ export function LiveIndicator({ workflowId, onOpenSession }: LiveIndicatorProps 
 
     let off: (() => void) | undefined;
     try {
-      off = window.anthill.onLiveSnapshot(setSnapshot);
+      off = window.anthill.onLiveSnapshot((next) => {
+        pushed = true;
+        setSnapshot(next);
+      });
     } catch {
       if (live) setBroken(true);
     }

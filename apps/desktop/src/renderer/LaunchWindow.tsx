@@ -191,13 +191,18 @@ export function LaunchWindow({
 
     // Which of these workflows has a session Anthill is following. A failure here
     // costs the chips, not the list — the workflows are still openable.
+    // A push is newer than the answer to the first ask (ANT-157).
+    let pushed = false;
     window.anthill
       .liveSnapshot()
       .then((next) => {
-        if (live) setSnapshot(next);
+        if (live && !pushed) setSnapshot(next);
       })
       .catch(() => undefined);
-    const off = window.anthill.onLiveSnapshot((next) => setSnapshot(next));
+    const off = window.anthill.onLiveSnapshot((next) => {
+      pushed = true;
+      setSnapshot(next);
+    });
 
     return () => {
       live = false;

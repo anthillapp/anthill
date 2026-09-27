@@ -158,3 +158,12 @@ describe("the step tag a message opens with (ANT-163)", () => {
     );
   });
 });
+
+describe("the invisible step tag (ANT-167, ANT-168)", () => {
+  const marker = { runId: "ANT-1A2B3C4D", nonce: "9f8e7d" };
+
+  it("never reaches the card, and leaves the Markdown whole", () => {
+    expect(messageExcerpt("[//]: # (anthill:test)\n\nAdded `negate` to calc_py.", marker)).toBe("Added `negate` to calc_py.");
+    expect(messageExcerpt("`[ANTHILL test]` I've added `shout` to svc_a.", marker)).toBe("I've added `shout` to svc_a.");
+  });
+});

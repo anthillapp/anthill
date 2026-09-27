@@ -239,9 +239,52 @@ describe("a message's step tag (ANT-163)", () => {
   });
 
   it("is asked for on every message, in the progress section and in each step", () => {
-    expect(echoInstruction(marker, [{ id: "review", name: "Review" }])).toMatch(/At the start of every message you write/);
+    expect(echoInstruction(marker, [{ id: "review", name: "Review" }])).toMatch(/Begin every message you write/);
     const lines = stepOpening(marker, { id: "review", delegated: true }).join("\n");
-    expect(lines).toContain("[ANTHILL review]");
-    expect(lines).toMatch(/Do ask it to start its own messages with `\[ANTHILL review\]`/);
+    expect(lines).toContain("[//]: # (anthill:review)");
+    expect(lines).toMatch(/Do ask it to begin its own messages with that same line too/);
+  });
+});
+
+/*
+  ANT-168. The tag is written as a Markdown link definition, which a chat
+  window renders as nothing — an HTML comment was printed by ChatGPT's Codex
+  tab. The old form is still read, for prompts copied before.
+*/
+describe("the invisible step tag (ANT-168)", () => {
+  it("is asked for as a link definition, never in code", () => {
+    const prompt = echoInstruction(marker, [{ id: "review", name: "Review" }]) +
+      stepOpening(marker, { id: "review", delegated: false }).join("\n");
+    expect(prompt).toContain("    [//]: # (anthill:review)");
+    expect(prompt).not.toMatch(/`\[\/\/\]/);
+    expect(prompt).not.toContain("[ANTHILL review]");
+  });
+
+  it("is read and taken out whole, line and all", () => {
+    const text = "[//]: # (anthill:implement)\n\nAdded `negate` to calc.py.";
+    expect(parseStepTag(text)).toBe("implement");
+    expect(withoutStepTags(text)).toBe("Added `negate` to calc.py.");
+  });
+
+  it("is read in the old form too", () => {
+    expect(parseStepTag("[ANTHILL test] Running.")).toBe("test");
+  });
+});
+
+/*
+  ANT-167. The prompt showed the old tag as code and the agent copied it that
+  way; cutting the tag out of the backticks left an empty pair that broke the
+  message's Markdown in the report and the feed. The real text, from ANT-68573EE6.
+*/
+describe("a tag wrapped in backticks (ANT-167)", () => {
+  const real = "`[ANTHILL test]` I've added `shout` to svc_a and `average` to svc_b, each with a unittest file.";
+
+  it("goes with its backticks", () => {
+    expect(withoutStepTags(real)).toBe("I've added `shout` to svc_a and `average` to svc_b, each with a unittest file.");
+    expect(parseStepTag(real)).toBe("test");
+  });
+
+  it("goes with its backticks in the new form as well", () => {
+    expect(withoutStepTags("`[//]: # (anthill:test)`\nAll green.")).toBe("All green.");
   });
 });

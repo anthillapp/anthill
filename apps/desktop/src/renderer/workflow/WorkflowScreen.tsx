@@ -203,6 +203,10 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
 
   useEffect(() => {
     let live = true;
+    // Any push is newer than the answer to the first ask, which may still be
+    // in flight; letting that answer land afterwards would put a finished run
+    // back to Live (ANT-157).
+    let pushed = false;
     // Ask once as well as subscribing. A push only arrives when something
     // changes, so without this the canvas knows nothing about a session that
     // was already being observed when this screen opened — and the
@@ -210,7 +214,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     void window.anthill
       .liveSnapshot()
       .then((snapshot) => {
-        if (live) {
+        if (live && !pushed) {
           setLiveRuns(snapshot.runs);
           setLiveStorageError(snapshot.storageError);
         }
@@ -223,6 +227,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     let off: (() => void) | undefined;
     try {
       off = window.anthill.onLiveSnapshot((snapshot) => {
+        pushed = true;
         setLiveRuns(snapshot.runs);
         setLiveStorageError(snapshot.storageError);
         setLiveRun((current) => {
@@ -716,11 +721,22 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
           }
         : { title: "Inspector" };
 
+  /*
+   * The run as the store has it now, not as it was when something pointed at
+   * it. The dialog and the chip hand over the copy they were shown, and the
+   * snapshot subscription only replaces `liveRun` when a *new* snapshot
+   * arrives — a session that had already finished sends none, so the page kept
+   * a `detected_live` copy for good and said Live over a finished run
+   * (ANT-157). Looking the run up by id on every render cannot go stale.
+   */
+  const current = (run: PendingRun): PendingRun =>
+    liveRuns.find((candidate) => candidate.anthillRunId === run.anthillRunId) ?? run;
+
   if (liveRun && workflow) {
     return (
       <LiveSessionPage
         workflow={workflow}
-        run={liveRun}
+        run={current(liveRun)}
         storageError={liveStorageError}
         {...(liveObservation ? { observation: liveObservation } : {})}
         onBack={() => setLiveRun(null)}
@@ -736,10 +752,10 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     <div className="app">
       {announcing && workflow ? (
         <SessionStartedDialog
-          run={announcing}
+          run={current(announcing)}
           workflowName={workflow.name}
           onOpenSession={() => {
-            setLiveRun(announcing);
+            setLiveRun(current(announcing));
             setAnnouncing(null);
           }}
           onDismiss={() => setAnnouncing(null)}

@@ -275,6 +275,64 @@ describe("the live session page and what main knows", () => {
     });
   });
 
+  /*
+   * ANT-157. The session was announced while live and finished before the
+   * author clicked. The dialog handed the page its announced copy, no further
+   * snapshot came, and the page said Live over a finished run for good.
+   */
+  it("opens the announced session as it is now, not as it was announced", async () => {
+    const api = stubApi();
+    const listeners: SnapshotListener[] = [];
+    api.onLiveSnapshot.mockImplementation((listener: SnapshotListener) => {
+      listeners.push(listener);
+      return () => undefined;
+    });
+
+    render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />);
+    await openTemplateAndLearnId();
+    const live = { ...observed, anthillRunId: "ANT-157157AA", workflowId: observedWorkflowId };
+    for (const listener of listeners) listener({ runs: [live], capabilities: [] });
+    await screen.findByRole("button", { name: "Open the live session" });
+
+    // It finishes while the dialog is still up; nothing arrives afterwards.
+    for (const listener of listeners) {
+      listener({ runs: [{ ...live, state: "completed" }], capabilities: [] });
+    }
+    fireEvent.click(await screen.findByRole("button", { name: "Open the session report" }));
+
+    await waitFor(() => {
+      expect((document.querySelector(".presence-label") as HTMLElement).textContent).toContain("Session finished");
+    });
+    expect(screen.queryByRole("button", { name: /Stop observing/ })).toBeNull();
+  });
+
+  it("does not let a late first snapshot undo a newer push", async () => {
+    const api = stubApi();
+    let answer: (snapshot: Snapshot) => void = () => undefined;
+    api.liveSnapshot.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    const listeners: SnapshotListener[] = [];
+    api.onLiveSnapshot.mockImplementation((listener: SnapshotListener) => {
+      listeners.push(listener);
+      return () => undefined;
+    });
+
+    render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />);
+    await openTemplateAndLearnId();
+    const live = { ...observed, anthillRunId: "ANT-157157BB", workflowId: observedWorkflowId };
+    for (const listener of listeners) {
+      listener({ runs: [{ ...live, state: "completed" }], capabilities: [] });
+    }
+    await waitFor(() => {
+      expect((document.querySelector(".presence-label") as HTMLElement).textContent).toContain("Session finished");
+    });
+
+    // The answer to the first ask, made before the push, lands only now.
+    await act(async () => answer({ runs: [live], capabilities: [] }));
+
+    expect((document.querySelector(".presence-label") as HTMLElement).textContent).toContain("Session finished");
+    expect(screen.queryByRole("button", { name: "Open the live session" })).toBeNull();
+  });
+
   /**
    * A template instance has its own id now, so a test cannot name it up front.
    * It is learned the way the product learns it: from the call the Prompt modal

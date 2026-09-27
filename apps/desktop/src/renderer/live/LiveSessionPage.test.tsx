@@ -889,6 +889,9 @@ describe("an ended session's report", () => {
     marker("test", at(4)),
     usage({ in: 10_000, out: 500 }, at(5)),
     marker("implement", at(6)),
+    // Some work in the second pass, as a session does between two steps: a
+    // step left with nothing done in it is a different case (ANT-164).
+    event({ kind: "tool.start", title: "Edit", toolUseId: "fix-1", source: "transcript", channel: "claude-code:transcript", at: at(6, 30) }),
     marker("test", at(7)),
     usage({ in: 20_000, out: 1_000 }, at(8)),
     said("All tests pass now.", at(9)),

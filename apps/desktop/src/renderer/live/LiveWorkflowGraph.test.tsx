@@ -638,7 +638,10 @@ describe("edges only carry control where control demonstrably went", () => {
     ],
     edges: [
       { id: "to-select", source: "start", target: "select" },
-      { id: "to-scenario", source: "select", target: "scenario" },
+      // A choice, not a fork: one untested scenario is run, or there is none
+      // and the loop ends. Without a condition the two would run side by side
+      // (ANT-166).
+      { id: "to-scenario", source: "select", target: "scenario", condition: "an untested scenario is left" },
       { id: "to-checkpoint", source: "select", target: "checkpoint" },
       { id: "to-record", source: "scenario", target: "record" },
       { id: "back-to-select", source: "record", target: "select" },

@@ -18,6 +18,7 @@ import {
   type WorkflowNode,
 } from "@anthill/workflow-schema";
 
+import { parallelPlan, type ParallelPlan } from "./parallel.js";
 import { DEFAULT_TARGET, harnessProfile, type HarnessProfile } from "./harness.js";
 import {
   explicitModelFor,
@@ -298,20 +299,54 @@ function buildAgentFile(
 /* Prompt                                                              */
 /* ------------------------------------------------------------------ */
 
+/** "and"-joined, the way the step list is read aloud. */
+function joinList(items: readonly string[]): string {
+  return items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/** The instruction to start every branch of a fork at once. */
+function startTogether(
+  targets: readonly string[],
+  byId: ReadonlyMap<string, WorkflowNode>,
+  stepNumbers: ReadonlyMap<string, number>,
+  usesSubagents: boolean,
+): string {
+  const names = targets.map((id) => {
+    const block = byId.get(id);
+    const step = stepNumbers.get(id);
+    return step === undefined ? (block?.name ?? id) : `${step} (${block?.name ?? id})`;
+  });
+  const all = targets.every((id) => stepNumbers.has(id)) ? `steps ${joinList(names)}` : joinList(names);
+  return usesSubagents
+    ? `continue to ${all} at the same time – they are independent. Hand each to its own subagent in one go, and do not wait for one before starting the next.`
+    : `continue to ${all} – they are independent, so do all of them, in whichever order suits.`;
+}
+
 function renderTransitions(
   workflow: Workflow,
   node: WorkflowNode,
   stepNumbers: Map<string, number>,
+  plan: ParallelPlan,
+  usesSubagents: boolean,
 ): string[] {
   const edges = outgoingEdges(workflow, node.id);
   if (edges.length === 0) return [];
 
   const byId = new Map(workflow.nodes.map((item) => [item.id, item]));
 
+  // Every branch at once, not a choice between them (ANT-166).
+  const fork = plan.forks.get(node.id);
+  if (fork) return [`Then ${startTogether(fork, byId, stepNumbers, usesSubagents)}`];
+
   const describeTarget = (edge: WorkflowEdge): string => {
     const target = byId.get(edge.target);
     if (!target) return "an unknown block";
-    if (target.type === "end") return `stop – the workflow is complete (${target.name})`;
+    if (target.type === "end") {
+      // One branch of several reaching the end is not the workflow ending.
+      return plan.joins.has(target.id)
+        ? `stop – this branch is finished; the workflow is complete (${target.name}) once every parallel branch is`
+        : `stop – the workflow is complete (${target.name})`;
+    }
 
     // The outcome kind carries meaning the target alone does not: sending work
     // back is a different instruction from moving on to the next step, even
@@ -568,7 +603,28 @@ function buildPrompt(
     for (const stepId of assignment.stepIds) agentOf.set(stepId, assignment);
   }
 
+  const plan = parallelPlan(workflow);
+  const byId = new Map(workflow.nodes.map((item) => [item.id, item]));
   const steps: string[] = ["## Steps"];
+  // Branches that begin the workflow: out of Start there is no step to say it.
+  for (const node of ordered) {
+    const fork = node.type === "start" ? plan.forks.get(node.id) : undefined;
+    if (fork) steps.push("", `To begin, ${startTogether(fork, byId, stepNumbers, usesSubagents)}`);
+  }
+  /** Where parallel branches meet: this step waits for all of them. */
+  const waitsFor = (id: string): string[] => {
+    const sources = plan.joins.get(id);
+    if (!sources) return [];
+    const names = sources.map((source) => {
+      const block = byId.get(source);
+      const step = stepNumbers.get(source);
+      return step === undefined ? (block?.name ?? source) : `step ${step} (${block?.name ?? source})`;
+    });
+    return [
+      "",
+      `Start this step only once ${joinList(names)} are ${names.length === 2 ? "both" : "all"} finished – they run in parallel and meet here.`,
+    ];
+  };
   ordered.forEach((node) => {
     if (node.type !== "agent" && node.type !== "approval") return;
     const step = stepNumbers.get(node.id) as number;
@@ -577,6 +633,7 @@ function buildPrompt(
       const prompt = approvalConfig(node).prompt;
       steps.push("");
       steps.push(`### ${step}. ${node.name} – stop and ask a human`);
+      steps.push(...waitsFor(node.id));
       const opening = options.stepOpening?.({ id: node.id, delegated: false }) ?? [];
       if (opening.length > 0) steps.push("", ...opening);
       steps.push("");
@@ -588,7 +645,7 @@ function buildPrompt(
       steps.push("");
       steps.push("Do not decide this yourself and do not continue until they answer.");
 
-      const transitions = renderTransitions(workflow, node, stepNumbers);
+      const transitions = renderTransitions(workflow, node, stepNumbers, plan, usesSubagents);
       if (transitions.length > 0) {
         steps.push("");
         steps.push(...transitions);
@@ -607,6 +664,7 @@ function buildPrompt(
         : `### ${step}. ${node.name} – act as ${assignment.profile.name}`
       : `### ${step}. ${node.name}`;
     steps.push(heading);
+    steps.push(...waitsFor(node.id));
 
     // Whatever the caller needs said first, inside the step rather than in a
     // section the agent read long before it got here (ANT-162).
@@ -655,7 +713,7 @@ function buildPrompt(
       steps.push("", `Hand off: ${config.handoff}`);
     }
 
-    const transitions = renderTransitions(workflow, node, stepNumbers);
+    const transitions = renderTransitions(workflow, node, stepNumbers, plan, usesSubagents);
     if (transitions.length > 0) {
       steps.push("");
       steps.push(...transitions);
@@ -672,7 +730,9 @@ function buildPrompt(
     [
       "## Rules",
       "",
-      "- Follow the steps in the order given; do not skip ahead.",
+      plan.forks.size > 0
+        ? "- Follow the steps in the order given – steps marked to run at the same time start together; do not skip ahead."
+        : "- Follow the steps in the order given; do not skip ahead.",
       "- After each step, state which branch you are taking and why.",
       "- If a step's result is ambiguous, ask rather than guessing which branch to take.",
       "- The constraints in the shared context apply throughout, not only to the step being worked on.",

@@ -2344,6 +2344,8 @@ describe("a marker printed by a command", () => {
     await writeClaude(dir, "-tmp-scratch", "sess-cc", claudeWithResult(`ANTHILL-STEP ${RUN_ID} ${NONCE} implement\n`));
     const { events } = await new ClaudeCodeObserver(dir).poll(live(), new Date().toISOString());
     expect(events.filter((event) => event.kind === "step.marker").map((event) => event.blockId)).toEqual(["implement"]);
+    // Linked to the command that printed it, which is not work in any step (ANT-164).
+    expect(events.find((event) => event.kind === "step.marker")?.printedBy).toBe("toolu_9");
   });
 
   it("counts a line in the reply and the same line printed by a command once", async () => {
@@ -2406,6 +2408,23 @@ describe("a delegation's shape (ANT-163)", () => {
     expect(starts.find((event) => event.toolUseId === "toolu_fg")?.stepTag).toBeUndefined();
   });
 
+  it("reads a subagent launched on its own from the receipt, when the call did not ask (ANT-164)", async () => {
+    const dir = await root();
+    const at = new Date().toISOString();
+    const body = [
+      { type: "user", sessionId: "sess-cc", timestamp: at, cwd: "/tmp/scratch", message: { role: "user", content: MARKED_PROMPT } },
+      { type: "assistant", sessionId: "sess-cc", timestamp: at, message: { role: "assistant", content: [
+        { type: "tool_use", id: "toolu_as", name: "Agent", input: { subagent_type: "general-purpose", description: "Service A" } },
+      ] } },
+      { type: "user", sessionId: "sess-cc", timestamp: at, toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+        message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_as", content: [{ type: "text", text: "Async agent launched successfully." }] }] } },
+    ].map((row) => JSON.stringify(row)).join("\n") + "\n";
+    await writeClaude(dir, "-tmp-scratch", "sess-cc", body);
+    const run = { ...pending("claude-code"), detectedSessionId: "sess-cc", state: "detected_live" as const };
+    const { events } = await new ClaudeCodeObserver(dir).poll(run, new Date().toISOString());
+    expect(events.find((event) => event.kind === "tool.end" && event.toolUseId === "toolu_as")?.background).toBe(true);
+  });
+
   it("reads a Codex reply's step tag", async () => {
     const dir = await root();
     const at = new Date().toISOString();
@@ -2418,5 +2437,21 @@ describe("a delegation's shape (ANT-163)", () => {
     const run = { ...pending("codex"), detectedSessionId: "sess-cx", state: "detected_live" as const };
     const { events } = await new CodexObserver(dir).poll(run, new Date().toISOString());
     expect(events.find((event) => event.kind === "message")).toMatchObject({ stepTag: "test", detail: "Running the suite." });
+  });
+});
+
+describe("a Codex step line printed by a command (ANT-164)", () => {
+  it("is linked to the call that printed it", async () => {
+    const dir = await root();
+    const at = new Date().toISOString();
+    const body = [
+      { timestamp: at, type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx" } },
+      { timestamp: at, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: MARKED_PROMPT }] } },
+      { timestamp: at, type: "response_item", payload: { type: "function_call_output", call_id: "call_p1", output: `ANTHILL-STEP ${RUN_ID} ${NONCE} implement\n` } },
+    ].map((row) => JSON.stringify(row)).join("\n") + "\n";
+    await writeCodex(dir, "sess-cx", body);
+    const run = { ...pending("codex"), detectedSessionId: "sess-cx", state: "detected_live" as const };
+    const { events } = await new CodexObserver(dir).poll(run, new Date().toISOString());
+    expect(events.find((event) => event.kind === "step.marker")?.printedBy).toBe("call_p1");
   });
 });

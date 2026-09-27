@@ -566,7 +566,8 @@ function scan(
         // every step's line at once, and would announce them all (ANT-162).
         const output = outputText(payload.output);
         if (!textCarriesMarker(output, marker)) {
-          announceSteps(output, "command", state, marker, base, events);
+          const call = str(payload.call_id);
+          announceSteps(output, "command", state, marker, call ? { ...base, printedBy: call } : base, events);
           announceDone(output, state, marker, base, events);
         }
       }

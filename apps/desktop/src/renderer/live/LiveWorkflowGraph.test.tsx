@@ -665,7 +665,7 @@ describe("edges only carry control where control demonstrably went", () => {
   }
 
   function draw(events: ObservationEvent[]) {
-    const view = foldLiveSession(branching, run, events);
+    const view = foldLiveSession(branching, run, withWork(events));
     const { unmount } = render(
       <LiveWorkflowGraph
         workflow={branching}
@@ -853,7 +853,7 @@ describe("only the connection that carried control last pulses", () => {
   }
 
   function draw(events: ObservationEvent[]) {
-    const view = foldLiveSession(converging, run, events);
+    const view = foldLiveSession(converging, run, withWork(events));
     const { unmount } = render(
       <LiveWorkflowGraph
         workflow={converging}
@@ -903,3 +903,23 @@ describe("only the connection that carried control last pulses", () => {
     unmount();
   });
 });
+
+/**
+ * Some work after each step line, as a real session does. A step left with
+ * nothing done in it waits to see whether it was a fan-out (ANT-164); these
+ * tests are about steps the agent worked through one after another.
+ */
+function withWork(events: ObservationEvent[]): ObservationEvent[] {
+  return events.flatMap((event) => {
+    if (event.kind !== "step.marker") return [event];
+    const { blockId: _step, ...rest } = event;
+    const work: ObservationEvent = {
+      ...rest,
+      kind: "tool.start",
+      title: "Bash",
+      toolUseId: `work-${event.seq}-${event.at}`,
+      at: new Date(Date.parse(event.at) + 1).toISOString(),
+    };
+    return [event, work];
+  });
+}

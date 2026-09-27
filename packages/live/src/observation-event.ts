@@ -116,6 +116,11 @@ export type ObservationEvent = {
   stepTag?: string;
   /** For a delegation: it was dispatched to run in the background. */
   background?: boolean;
+  /**
+   * For a step line printed by a command, that command's call id. The call is
+   * the announcement itself, not work done in any step (ANT-164).
+   */
+  printedBy?: string;
   /** The agent or subagent the record named. Not inferred. */
   agentName?: string;
   /**

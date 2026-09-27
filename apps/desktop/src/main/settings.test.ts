@@ -37,7 +37,12 @@ describe("the preferences", () => {
     const store = new SettingsStore(join(dir, "never-written.json"));
     expect(await store.read()).toEqual(DEFAULT_SETTINGS);
     expect(DEFAULT_SETTINGS.stepNotifications).toBe(false);
-    expect(reportingConsentOnDisk(path)).toEqual({ errorReportingEnabled: false, nativeCrashReportingEnabled: false });
+    // Analytics and error reports are on unless turned off; memory dumps stay
+    // off unless asked for, since a dump can hold private text.
+    expect(DEFAULT_SETTINGS.analyticsEnabled).toBe(true);
+    expect(DEFAULT_SETTINGS.errorReportingEnabled).toBe(true);
+    expect(DEFAULT_SETTINGS.nativeCrashReportingEnabled).toBe(false);
+    expect(reportingConsentOnDisk(path)).toEqual({ errorReportingEnabled: true, nativeCrashReportingEnabled: false });
   });
 
   it("keep the workflow folder, which defaults to ~/Documents/Anthill and must be absolute", async () => {
@@ -60,10 +65,22 @@ describe("the preferences", () => {
     expect(settings.stepNotifications).toBe(false);
   });
 
-  it("keeps diagnostics off for old files and reads explicit launch consent", async () => {
-    await writeFile(path, JSON.stringify({ version: 1, settings: { stepNotifications: true } }));
+  it("gives a version-1 file the new defaults, since its false was only the old default", async () => {
+    await writeFile(path, JSON.stringify({
+      version: 1,
+      settings: { stepNotifications: true, analyticsEnabled: false, errorReportingEnabled: false, nativeCrashReportingEnabled: false },
+    }));
+    expect(reportingConsentOnDisk(path)).toEqual({ errorReportingEnabled: true, nativeCrashReportingEnabled: false });
+    const read = await new SettingsStore(path).read();
+    expect(read).toMatchObject({ stepNotifications: true, analyticsEnabled: true, errorReportingEnabled: true, nativeCrashReportingEnabled: false });
+  });
+
+  it("keeps a choice made from version 2 on, including turning diagnostics off", async () => {
+    const store = new SettingsStore(path);
+    await store.write({ analyticsEnabled: false, errorReportingEnabled: false });
     expect(reportingConsentOnDisk(path)).toEqual({ errorReportingEnabled: false, nativeCrashReportingEnabled: false });
-    await new SettingsStore(path).write({ errorReportingEnabled: true, nativeCrashReportingEnabled: true });
+    expect(await new SettingsStore(path).read()).toMatchObject({ analyticsEnabled: false, errorReportingEnabled: false });
+    await store.write({ errorReportingEnabled: true, nativeCrashReportingEnabled: true });
     expect(reportingConsentOnDisk(path)).toEqual({ errorReportingEnabled: true, nativeCrashReportingEnabled: true });
   });
 

@@ -17,7 +17,15 @@ import { dirname, isAbsolute, join } from "node:path";
 import { readFileSync } from "node:fs";
 
 /** Bumped when the file's shape changes. A version this one cannot read is defaulted. */
-export const SETTINGS_VERSION = 1;
+export const SETTINGS_VERSION = 2;
+
+/**
+ * Version 1 wrote every setting at its default, and the diagnostics defaults
+ * were off. A `false` in a version-1 file is therefore the old default, not a
+ * choice anybody is known to have made, so it takes the new default. From
+ * version 2 on, whatever is stored is the person's answer.
+ */
+const DIAGNOSTICS_DEFAULTED_IN_V1 = ["analyticsEnabled", "errorReportingEnabled"] as const;
 
 /**
  * Which moments of an observed session raise a native notification.
@@ -34,11 +42,15 @@ export const SETTINGS_VERSION = 1;
  * a new step.
  */
 export type Settings = {
-  /** Anonymous, content-free product analytics. Off until the author opts in. */
+  /** Anonymous, content-free product analytics. On by default; one switch turns it off. */
   analyticsEnabled: boolean;
-  /** JavaScript error reports. Applied at the next launch. */
+  /** JavaScript error reports. On by default. Applied at the next launch. */
   errorReportingEnabled: boolean;
-  /** Native memory dumps, separately consented to. Applied at the next launch. */
+  /**
+   * Native memory dumps, separately consented to, and off by default: a dump
+   * can carry private text or credentials from memory. Applied at the next
+   * launch.
+   */
   nativeCrashReportingEnabled: boolean;
   /** A step the session announced it is starting. */
   stepNotifications: boolean;
@@ -62,8 +74,8 @@ export type Settings = {
 };
 
 export const DEFAULT_SETTINGS: Settings = {
-  analyticsEnabled: false,
-  errorReportingEnabled: false,
+  analyticsEnabled: true,
+  errorReportingEnabled: true,
   nativeCrashReportingEnabled: false,
   stepNotifications: false,
   stepFinishedNotifications: false,
@@ -103,8 +115,9 @@ function parse(text: string): Settings {
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
-  if (!isRecord(value) || value.version !== SETTINGS_VERSION) return { ...DEFAULT_SETTINGS };
-  const stored = isRecord(value.settings) ? value.settings : {};
+  if (!isRecord(value) || (value.version !== SETTINGS_VERSION && value.version !== 1)) return { ...DEFAULT_SETTINGS };
+  const stored: Record<string, unknown> = isRecord(value.settings) ? { ...value.settings } : {};
+  if (value.version === 1) for (const key of DIAGNOSTICS_DEFAULTED_IN_V1) delete stored[key];
   const settings = { ...DEFAULT_SETTINGS };
   for (const key of SETTING_KEYS) {
     // Each value only in the type its default has: a string where a switch
@@ -126,9 +139,10 @@ export function reportingConsentOnDisk(path: string): Pick<Settings, "errorRepor
       nativeCrashReportingEnabled: settings.nativeCrashReportingEnabled,
     };
   } catch {
+    // No file yet is a first launch, which gets the defaults like everything else.
     return {
-      errorReportingEnabled: false,
-      nativeCrashReportingEnabled: false,
+      errorReportingEnabled: DEFAULT_SETTINGS.errorReportingEnabled,
+      nativeCrashReportingEnabled: DEFAULT_SETTINGS.nativeCrashReportingEnabled,
     };
   }
 }

@@ -328,10 +328,10 @@ export function PrivacyPage({ available = __ANTHILL_DIAGNOSTICS__ }: { available
     <SettingGroup
       title="Optional diagnostics"
       footer={!available
-        ? "This build never sends diagnostics. Only the released macOS app and the Anthill CLI can, and only after you turn them on."
+        ? "This build never sends diagnostics. Only the released macOS app and the Anthill CLI can."
         : cli
-          ? "All sharing is off until you turn it on. Reports leave from the Anthill CLI process, never from this page."
-          : "All sharing is off until you turn it on. Development builds do not send diagnostics."}
+          ? "Analytics and error reports are on by default and turn off here at any time; native crash reports stay off until you turn them on. Reports leave from the Anthill CLI process, never from this page."
+          : "Analytics and error reports are on by default and turn off here at any time; native crash reports stay off until you turn them on. Development builds do not send diagnostics."}
     >
       <SettingRow
         label="Anonymous product analytics"

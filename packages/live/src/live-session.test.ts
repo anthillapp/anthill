@@ -1351,3 +1351,62 @@ describe("a parallel branch announced again to report its result", () => {
     expect(view.blocks["chk-a"].passes).toBe(2);
   });
 });
+
+/*
+  ANT-176. The agent reached the Decide gate, asked its question and ended its
+  turn; `claude -p` exited, the hooks wrote Stop and SessionEnd and no
+  Notification. The gate was drawn Done, and the report read as approved,
+  though nobody had answered.
+*/
+describe("a session that stopped at an Approval Gate", () => {
+  const gated: Workflow = {
+    ...workflow,
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "implement", type: "agent", name: "Research", config: { actionKind: "agent-step", task: "Look", agentId: "agent-dev" } },
+      { id: "decide", type: "approval", name: "Decide", config: { prompt: "Which way?" } },
+      { id: "test", type: "agent", name: "Present", config: { actionKind: "agent-step", task: "Present", agentId: "agent-dev" } },
+      { id: "end", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "implement" },
+      { id: "e2", source: "implement", target: "decide" },
+      { id: "e3", source: "decide", target: "test", label: "Approved" },
+      { id: "e4", source: "decide", target: "end", label: "Rejected", kind: "stop" },
+      { id: "e5", source: "test", target: "end" },
+    ],
+  };
+  const hookTurnEnd = () => event({ kind: "turn.end", title: "The agent finished its turn" });
+
+  it("stays waiting on you when the turn and the session end there", () => {
+    const view = foldLiveSession(gated, run({ state: "completed" }), [
+      step("implement"), worked(),
+      step("decide"),
+      hookTurnEnd(),
+      event({ kind: "session.end", title: "Session ended" }),
+    ]);
+    expect(view.blocks.decide.state).toBe("needsYou");
+    expect(view.blocks.decide.note).toContain("nobody answered");
+    expect(view.blocks.implement.state).toBe("done");
+  });
+
+  it("is passed once the next step is announced", () => {
+    const view = foldLiveSession(gated, run({ state: "completed" }), [
+      step("implement"), worked(),
+      step("decide"),
+      hookTurnEnd(),
+      step("test"), worked(),
+      hookTurnEnd(),
+    ]);
+    expect(view.blocks.decide.state).toBe("done");
+  });
+
+  it("is settled by the session's own word that the work is done", () => {
+    const view = foldLiveSession(gated, run({ state: "completed" }), [
+      step("implement"), worked(),
+      step("decide"),
+      event({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", source: "transcript", channel: "claude-code:transcript" }),
+    ]);
+    expect(view.blocks.decide.state).toBe("done");
+  });
+});

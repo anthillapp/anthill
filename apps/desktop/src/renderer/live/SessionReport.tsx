@@ -65,6 +65,14 @@ export function SessionReport({ workflow, run, view, end, usage, endedAt, onPick
   const loops = usage.blocks.filter((block) => block.passes.length > 1);
   const name = (blockId: string) => workflow.nodes.find((node) => node.id === blockId)?.name ?? blockId;
 
+  // A session that ended at an Approval Gate nobody answered did not finish
+  // the workflow; it stopped where a person has to decide (ANT-176).
+  const gate =
+    end === "completed"
+      ? workflow.nodes.find((node) => node.type === "approval" && view.blocks[node.id]?.state === "needsYou")
+      : undefined;
+  const title = gate ? `Stopped at ${gate.name}` : END_TITLE[end];
+
   const chips = OUTCOME_ORDER.filter((outcome) => (counts.get(outcome)?.length ?? 0) > 0);
   // The collapsed line names only what ended somewhere, not every empty bucket.
   const summary = chips.map((outcome) => outcomeWord(outcome, counts.get(outcome)!.length)).join(" · ");
@@ -85,7 +93,7 @@ export function SessionReport({ workflow, run, view, end, usage, endedAt, onPick
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <strong>{END_TITLE[end]}</strong>
+        <strong>{title}</strong>
         {endedAt ? <span className="quiet">{end === "lost" ? "Last read" : "Ended"} {clock(endedAt)}</span> : null}
         {summary ? <span className="session-report-counts">{summary}</span> : null}
         <span className="spacer" />

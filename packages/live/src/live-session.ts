@@ -268,6 +268,8 @@ export function foldLiveSession(
    * own is drawn as one (ANT-82).
    */
   const repeatable = nodesOnCycles(workflow);
+  /** The Approval Gates: a person decides there, and nothing else settles one. */
+  const gates = new Set(workflow.nodes.filter((node) => node.type === "approval").map((node) => node.id));
 
   const isOpen = (id: string) => blocks[id]?.state === "running" || blocks[id]?.state === "needsYou";
   const settled = (d: { background: boolean; returned: boolean; delegateEnded: boolean }) =>
@@ -689,9 +691,23 @@ export function foldLiveSession(
     // finished workflow ends with a turn ending and has no later marker to
     // move it on, so without this no finished run could ever go green. With
     // no hooks the two cases are indistinguishable, and the amber stays.
+    // Never at an Approval Gate. A turn that ends at the gate is the gate's
+    // question put to a person, with or without the CLI's own "waiting for
+    // your input" — which a headless run, or a person who closes the session
+    // there, never produces. Only the next step, or the session's own word that
+    // the work is done, gets past a gate (ANT-176).
+    const atGate = gates.has(announced);
     const yieldedOnlyByTurnEnd =
-      blocks[announced].state === "needsYou" && hooksCarried && !askedSinceEntered;
-    if (
+      blocks[announced].state === "needsYou" && hooksCarried && !askedSinceEntered && !atGate;
+    if (open && atGate && run.state === "completed") {
+      const { note: _note, waitReason: _why, ...rest } = blocks[announced];
+      blocks[announced] = {
+        ...rest,
+        state: "needsYou",
+        note: "The session stopped at this approval, and nobody answered it.",
+        waitReason: "asked",
+      };
+    } else if (
       open &&
       run.state === "completed" &&
       (blocks[announced].state !== "needsYou" || yieldedOnlyByTurnEnd)

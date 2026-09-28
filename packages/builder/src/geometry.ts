@@ -717,6 +717,16 @@ export function route(
   return clearOf(a, b, options.routing ?? "curved", base, blocks);
 }
 
+/**
+ * Whether a drawn line passes under a block other than the two it connects.
+ *
+ * The same question the router asks before detouring, for a caller choosing
+ * between two landings.
+ */
+export function passesUnder(a: LooseFrom, b: EntryPoint, geometry: CurveGeometry, blocks: readonly Rect[]): boolean {
+  return crossed(samplesAlong(geometry), blocks, departure(a), b).length > 0;
+}
+
 export const BEND_LIMIT = 1.5;
 
 /**
@@ -821,27 +831,30 @@ export function labelSpot(
       ),
     );
 
+  // The connection's own side first, at every distance, and only then the
+  // other. Trying both at each distance let a clear spot a few pixels onto the
+  // far side beat one a little further out on the near side — and in a tight
+  // fork the far side is the neighbouring connection's, so each label read as
+  // the other's (ANT-178, still seen on a three-way fork in 0.8.3 QA).
+  const candidates: Point[] = [
+    { x: mid.x, y: mid.y },
+    ...LABEL_OFFSETS.filter((offset) => offset > 0).map((offset) => ({ x: mid.x + nx * offset, y: mid.y + ny * offset })),
+    ...LABEL_OFFSETS.filter((offset) => offset > 0).map((offset) => ({ x: mid.x - nx * offset, y: mid.y - ny * offset })),
+  ];
+
   let best = { x: mid.x, y: mid.y };
   let bestRoom = -Infinity;
-  for (const offset of LABEL_OFFSETS) {
-    const sides = offset === 0
-      ? [{ x: mid.x, y: mid.y }]
-      : [
-          { x: mid.x + nx * offset, y: mid.y + ny * offset },
-          { x: mid.x - nx * offset, y: mid.y - ny * offset },
-        ];
-    for (const spot of sides) {
-      if (isClear(spot.x, spot.y)) return spot;
-      // The fallback used to be a fixed 110 above the line, returned without
-      // ever being checked — and 110 sits between two offsets this search has
-      // already rejected, so the one case where placement is hardest was the
-      // one case that skipped the test (ANT-44). Keeping the roomiest
-      // candidate instead means the answer is always one this loop looked at.
-      const room = roominess(spot.x, spot.y);
-      if (room > bestRoom) {
-        best = spot;
-        bestRoom = room;
-      }
+  for (const spot of candidates) {
+    if (isClear(spot.x, spot.y)) return spot;
+    // The fallback used to be a fixed 110 above the line, returned without
+    // ever being checked — and 110 sits between two offsets this search has
+    // already rejected, so the one case where placement is hardest was the
+    // one case that skipped the test (ANT-44). Keeping the roomiest
+    // candidate instead means the answer is always one this loop looked at.
+    const room = roominess(spot.x, spot.y);
+    if (room > bestRoom) {
+      best = spot;
+      bestRoom = room;
     }
   }
   return best;

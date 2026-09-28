@@ -19,6 +19,7 @@ import {
   entryPoint,
   labelHalfSize,
   labelSpot,
+  passesUnder,
   portFromAnchor,
   portPoint,
   portSideToward,
@@ -226,15 +227,37 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
       const targetRect = rects.get(output.target);
       if (!targetRect) return;
 
-      const landing = entryPoint(targetRect, port, output.anchor);
-      const geometry = route(port, landing, {
+      const options = {
         routing: output.routing,
         bend: output.bend,
         // What the line has to get past. Without this the router has no idea
         // anything is in the way, and a connection reaching past several
         // blocks is drawn straight through them.
         blocks,
-      });
+      };
+      let landing = entryPoint(targetRect, port, output.anchor);
+      let geometry = route(port, landing, options);
+      /*
+        A step stacked under a sibling is entered from above by default, and
+        the line down to it then runs behind the sibling in between: a fork's
+        third branch was drawn through its second (ANT-178). Its left side,
+        facing the step the line comes from, is the way in when the top is
+        blocked. Only when nobody placed the landing or shaped the line.
+      */
+      if (
+        !output.anchor &&
+        !output.bend &&
+        (landing.side === "top" || landing.side === "bottom") &&
+        port.x < targetRect.left &&
+        passesUnder(port, landing, geometry, blocks)
+      ) {
+        const side = entryPoint(targetRect, port, { u: 0, v: (port.y - targetRect.top) / targetRect.h });
+        const beside = route(port, side, options);
+        if (!passesUnder(port, side, beside, blocks)) {
+          landing = side;
+          geometry = beside;
+        }
+      }
       const { halfW, halfH } = labelHalfSize(output.label || " ", {
         quiet: output.kind === "next" && !output.condition,
         hasCondition: Boolean(output.condition),

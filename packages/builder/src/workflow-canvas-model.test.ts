@@ -458,3 +458,50 @@ describe("a template's loop back along its row", () => {
     });
   }
 });
+
+/*
+  ANT-178, as the 0.8.3 QA saw it: the canvas assistant added a third branch
+  under the other two. The fork's labels read against the wrong lines —
+  "package B" beside the line to A — and the line to the third branch ran
+  behind the second.
+*/
+describe("a three-way fork stacked in one column", () => {
+  const step = (id: string, name: string, x: number, y: number): WorkflowNode => ({
+    id,
+    type: "agent",
+    name,
+    config: { actionKind: "agent-step" },
+    position: { x, y },
+  });
+  const fork: Workflow = {
+    id: "fork",
+    name: "Fork",
+    version: "1",
+    nodes: [
+      step("split", "Split the work", 200, 240),
+      step("a", "Build area A", 440, 120),
+      step("b", "Build area B", 440, 360),
+      step("c", "Build area C", 440, 480),
+    ],
+    edges: [
+      { id: "to-a", source: "split", target: "a", label: "package A" },
+      { id: "to-b", source: "split", target: "b", label: "package B" },
+      { id: "to-c", source: "split", target: "c", label: "package C" },
+    ],
+  };
+
+  it("keeps its labels in the order of the branches they name", () => {
+    const model = buildCanvasModel(fork);
+    const y = (id: string) => model.connected.find((path) => path.output.id === id)!.label.y;
+    expect(y("to-a")).toBeLessThan(y("to-b"));
+    expect(y("to-b")).toBeLessThan(y("to-c"));
+  });
+
+  it("goes into the lowest branch from the side, not behind the one above it", () => {
+    const model = buildCanvasModel(fork);
+    const toC = model.connected.find((path) => path.output.id === "to-c")!;
+    expect(toC.geometry.to.side).toBe("left");
+    const b = model.rects.get("b")!;
+    expect(toC.geometry.to.x).toBeLessThanOrEqual(b.left);
+  });
+});

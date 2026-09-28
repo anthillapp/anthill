@@ -1290,3 +1290,64 @@ describe("a step line recorded after its subagent was started", () => {
     expect(view.activeBlockId).toBe("test");
   });
 });
+
+/*
+  ANT-179. Codex announced three parallel checks, spawned a checker for
+  each, and when the results came back announced each check again to report
+  it — as the prompt asks, "each time you come back to it". Two of the three
+  were drawn as pass 2, though no connection can lead back into them.
+*/
+describe("a parallel branch announced again to report its result", () => {
+  const fork: Workflow = {
+    id: "workflow-fork",
+    name: "Checks in parallel",
+    version: "1",
+    target: "codex",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "prep", type: "agent", name: "Prepare checks", config: { actionKind: "agent-step", task: "Prepare", agentId: "agent-dev" } },
+      { id: "chk-a", type: "agent", name: "Check: import", config: { actionKind: "verify", task: "a", agentId: "agent-qa" } },
+      { id: "chk-b", type: "agent", name: "Check: values", config: { actionKind: "verify", task: "b", agentId: "agent-qa" } },
+      { id: "chk-c", type: "agent", name: "Check: files", config: { actionKind: "verify", task: "c", agentId: "agent-qa" } },
+      { id: "sum", type: "agent", name: "Summarize", config: { actionKind: "agent-step", task: "Sum up", agentId: "agent-dev" } },
+      { id: "end", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "prep" },
+      { id: "e2", source: "prep", target: "chk-a" },
+      { id: "e3", source: "prep", target: "chk-b" },
+      { id: "e4", source: "prep", target: "chk-c" },
+      { id: "e5", source: "chk-a", target: "sum" },
+      { id: "e6", source: "chk-b", target: "sum" },
+      { id: "e7", source: "chk-c", target: "sum" },
+      { id: "e8", source: "sum", target: "end" },
+    ],
+    metadata: {
+      workflow: { formatVersion: 4, agents: [{ id: "agent-dev", name: "Developer" }, { id: "agent-qa", name: "Checker" }] },
+    },
+  };
+
+  it("is the same pass, not a second", () => {
+    const view = foldLiveSession(fork, run(), [
+      step("prep"), worked(),
+      step("chk-a"), worked(),
+      step("chk-b"), worked(),
+      step("chk-c"), worked(),
+      step("chk-b"), worked(),
+      step("chk-c"), worked(),
+      step("sum"), worked(),
+    ]);
+    for (const id of ["chk-a", "chk-b", "chk-c"]) expect(view.blocks[id].passes).toBe(1);
+    expect(view.detours).toEqual([]);
+  });
+
+  it("still counts a return from a later step as a second pass", () => {
+    const view = foldLiveSession(fork, run(), [
+      step("prep"), worked(),
+      step("chk-a"), worked(),
+      step("sum"), worked(),
+      step("chk-a"), worked(),
+    ]);
+    expect(view.blocks["chk-a"].passes).toBe(2);
+  });
+});

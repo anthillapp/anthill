@@ -17,7 +17,7 @@
  */
 
 import type { Workflow } from "@anthill/workflow-schema";
-import { parallelPlan } from "@anthill/workflow";
+import { nodesOnCycles, parallelPlan } from "@anthill/workflow";
 
 import { attribute, buildWorkflowIndex, type BlockMapping, type WorkflowIndex } from "./attribution.js";
 import { projectJournal } from "./channels.js";
@@ -259,6 +259,15 @@ export function foldLiveSession(
   const planned = new Set(workflow.edges.map((edge) => `${edge.source}→${edge.target}`));
   /** Which steps the workflow runs side by side: moving between them is no detour (ANT-166). */
   const parallelSteps = parallelPlan(workflow);
+  /**
+   * Steps a connection can lead back into (ANT-179). A parallel branch that is
+   * not one of them, announced again from a sibling branch, is the session
+   * coming back to report its result — the prompt asks for the line "each time
+   * you come back to it" — and that is more of the same pass, not another. A
+   * return from anywhere else stays a second pass: the agent going back on its
+   * own is drawn as one (ANT-82).
+   */
+  const repeatable = nodesOnCycles(workflow);
 
   const isOpen = (id: string) => blocks[id]?.state === "running" || blocks[id]?.state === "needsYou";
   const settled = (d: { background: boolean; returned: boolean; delegateEnded: boolean }) =>
@@ -351,7 +360,13 @@ export function foldLiveSession(
       if (pendingClose.has(id)) closePending(id);
       if (isOpen(id)) finish(id, at);
       const entering = blocks[id];
-      pass = (entering?.passes ?? 0) + 1;
+      const again =
+        (entering?.passes ?? 0) >= 1 &&
+        !repeatable.has(id) &&
+        announced !== undefined &&
+        announced !== id &&
+        parallelSteps.parallel(announced, id);
+      pass = (entering?.passes ?? 0) + (again ? 0 : 1);
       blocks[id] = {
         state: "running",
         confidence: "exact",

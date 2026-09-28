@@ -126,7 +126,20 @@ export type Evidence =
    * record, and saying otherwise would tell the author something that did
    * not happen.
    */
-  | { kind: "activity"; sessionId: string; at: string; channel?: string }
+  | {
+      kind: "activity";
+      sessionId: string;
+      at: string;
+      channel?: string;
+      /**
+       * Whether the new records include work: a prompt submitted or a tool
+       * called. `false` is the observer saying they do not — the closing
+       * reply after the done line, the turn ending, the Stop hook — and that
+       * cannot take back a finish (ANT-188). Absent: the observer does not
+       * say, and any later record counts, as before.
+       */
+      resumes?: boolean;
+    }
   /**
    * A tool this session started has not reported back yet.
    *
@@ -412,6 +425,15 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
       ) {
         return run;
       }
+      // Later, but not work: the rest of the turn that said it was done — its
+      // closing reply, the turn ending, the Stop hook. Claude Code prints the
+      // done line and then goes on writing for seconds, and each of those
+      // records used to turn a finished run back into a live one that nothing
+      // would ever finish again (ANT-188). The session is still there, so the
+      // record is fresher; the run is still finished.
+      if (run.state === "completed" && evidence.resumes === false) {
+        return { ...run, expiresAt: windowFrom(run, evidence.at), lastObservedAt: evidence.at };
+      }
       // Work arriving from the session being followed says the session is
       // alive. It does not say it is the right session, so it keeps an
       // ambiguous run fresh without resolving it — only the field narrowing
@@ -439,16 +461,24 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
       };
     }
 
-    case "completed":
+    case "completed": {
       if (run.detectedSessionId && run.detectedSessionId !== evidence.sessionId) return run;
+      // The ending is dated when the session said it, which can be before
+      // records already read from the same poll; the run's freshness does not
+      // go backwards for it (ANT-188).
+      const latest =
+        run.lastObservedAt && Date.parse(run.lastObservedAt) > Date.parse(evidence.at)
+          ? run.lastObservedAt
+          : evidence.at;
       return {
         ...run,
         state: "completed",
-        expiresAt: windowFrom(run, evidence.at),
-        lastObservedAt: evidence.at,
+        expiresAt: windowFrom(run, latest),
+        lastObservedAt: latest,
         evidenceChannel: evidence.channel,
         statusMessage: evidence.detail ?? "The session recorded that it finished.",
       };
+    }
 
     /*
       A stop the person made, read out of the record rather than waited out.

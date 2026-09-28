@@ -2282,6 +2282,60 @@ describe("the harness's own done line, journalled", () => {
     );
   });
 
+  /*
+    ANT-188. Claude Code prints the done line and goes on writing: the
+    closing reply, the turn ending. Read as activity, those turned the
+    finished run back into a live one that nothing ever finished again.
+  */
+  it("keeps the run finished through the rest of the turn, and a new prompt starts it again", async () => {
+    const dir = await root();
+    const t = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString();
+    const rows: Record<string, unknown>[] = [
+      { type: "user", sessionId: "sess-cc", timestamp: t(0), cwd: "/tmp/scratch", message: { role: "user", content: MARKED_PROMPT } },
+      {
+        type: "assistant", sessionId: "sess-cc", timestamp: t(5),
+        message: { role: "assistant", content: [{ type: "text", text: `All green.\nANTHILL-DONE ${RUN_ID} ${NONCE}` }] },
+      },
+    ];
+    const write = () => writeClaude(dir, "-tmp-scratch", "sess-cc", rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const observer = new ClaudeCodeObserver(dir);
+    let run: PendingRun = { ...pending("claude-code"), detectedSessionId: "sess-cc", state: "detected_live" as const };
+    const poll = async () => {
+      const { evidence } = await observer.poll(run, new Date().toISOString());
+      for (const item of evidence) run = applyEvidence(run, item);
+      return evidence;
+    };
+
+    await write();
+    await poll();
+    expect(run.state).toBe("completed");
+
+    // The closing reply, seconds later, with the turn ending.
+    rows.push({
+      type: "assistant", sessionId: "sess-cc", timestamp: t(12),
+      message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "Here is what I did." }] },
+    });
+    await write();
+    const tail = await poll();
+    expect(tail).toContainEqual(expect.objectContaining({ kind: "activity", resumes: false }));
+    expect(run.state).toBe("completed");
+
+    // Somebody asks for more: the session goes on, and the old done no longer holds.
+    rows.push({ type: "user", sessionId: "sess-cc", timestamp: t(30), message: { role: "user", content: "One more thing." } });
+    await write();
+    await poll();
+    expect(run.state).toBe("detected_live");
+
+    // And a new done ends it again.
+    rows.push({
+      type: "assistant", sessionId: "sess-cc", timestamp: t(40),
+      message: { role: "assistant", content: [{ type: "text", text: `Done.\nANTHILL-DONE ${RUN_ID} ${NONCE}` }] },
+    });
+    await write();
+    await poll();
+    expect(run.state).toBe("completed");
+  });
+
   it("is not journalled for a done line that does not carry this run's nonce", async () => {
     const dir = await root();
     const at = new Date().toISOString();

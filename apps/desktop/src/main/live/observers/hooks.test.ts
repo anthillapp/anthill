@@ -157,7 +157,7 @@ describe("hook lines as evidence the session is alive", () => {
     ]);
     const { evidence } = await new HookLogObserver(path).poll(pending(), new Date().toISOString());
     // One piece of evidence for the poll, at the moment of the latest line.
-    expect(evidence).toEqual([{ kind: "activity", sessionId: "sess-1", at: "2026-08-29T10:00:04.000Z" }]);
+    expect(evidence).toEqual([{ kind: "activity", resumes: true, sessionId: "sess-1", at: "2026-08-29T10:00:04.000Z" }]);
   });
 
   it("says nothing about a line that belongs to another session", async () => {
@@ -462,6 +462,24 @@ describe("a session that said it was finished", () => {
     expect(events).toContainEqual(
       expect.objectContaining({ kind: "session.end", completion: "done", at: "2026-08-29T10:04:00.000Z" }),
     );
+  });
+
+  // ANT-188: a Stop after the done line is the same turn finishing.
+  it("says the lines after it are not work, unless one of them is", async () => {
+    const path = await log([
+      at("2026-08-29T10:04:00.000Z", { hook_event_name: "Stop", background_tasks: [] }),
+      at("2026-08-29T10:04:02.000Z", { hook_event_name: "SessionEnd" }),
+    ]);
+    const observer = new HookLogObserver(path);
+    const first = await observer.poll(pending(), NOW);
+    expect(first.evidence).toContainEqual(expect.objectContaining({ kind: "activity", resumes: false }));
+
+    const later = await log([
+      at("2026-08-29T10:04:00.000Z", { hook_event_name: "Stop", background_tasks: [] }),
+      at("2026-08-29T10:06:00.000Z", { hook_event_name: "UserPromptSubmit" }),
+    ]);
+    const second = await new HookLogObserver(later).poll(pending(), NOW);
+    expect(second.evidence).toContainEqual(expect.objectContaining({ kind: "activity", resumes: true }));
   });
 
   it("does not settle on a done marker from another run or another copy", async () => {

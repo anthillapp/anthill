@@ -207,6 +207,15 @@ type FileState = {
   interruptedAt?: string;
   lastActivityAt?: string;
   /**
+   * When the session last did work: a prompt submitted or a tool called.
+   *
+   * What separates a session going on from the rest of a turn that said it
+   * was done — the closing reply and the turn ending carry later timestamps
+   * too, and read as activity they turned a finished run back into a live
+   * one (ANT-188).
+   */
+  lastWorkAt?: string;
+  /**
    * Assistant message ids whose usage has been taken.
    *
    * A message streams as several transcript records and each repeats the same
@@ -410,8 +419,11 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
         // observer deliberately skips — the model's own reasoning, for one —
         // and reporting that as activity would keep a finished run looking
         // alive.
+        const resumes =
+          state.lastWorkAt !== undefined &&
+          (state.reportedActivityAt === undefined || state.lastWorkAt > state.reportedActivityAt);
         state.reportedActivityAt = state.lastActivityAt;
-        evidence.push({ kind: "activity", sessionId, at: state.lastActivityAt });
+        evidence.push({ kind: "activity", sessionId, at: state.lastActivityAt, resumes });
       }
 
       /*
@@ -704,6 +716,19 @@ function scan(
         continue;
       }
 
+      // Somebody typed something: the session goes on, and a done said before
+      // it no longer describes the session — the next one will (ANT-188).
+      const prompted =
+        row.isMeta !== true &&
+        !state.delegate &&
+        (typeof message?.content === "string" ||
+          (blocks.some((block) => isRecord(block) && block.type === "text") &&
+            !blocks.some((block) => isRecord(block) && block.type === "tool_result")));
+      if (prompted && stamped) {
+        state.lastWorkAt = stamped;
+        if (state.doneAt && stamped > state.doneAt) state.doneAt = undefined;
+      }
+
       if (carries(message?.content)) {
         state.matched = true;
         events.push({ ...base, kind: "prompt.submit", title: "The workflow was pasted in" });
@@ -848,6 +873,7 @@ function scan(
         }
 
         if (block.type === "tool_use") {
+          if (stamped) state.lastWorkAt = stamped;
           const name = str(block.name) ?? "a tool";
           const input = isRecord(block.input) ? block.input : {};
           const id = str(block.id);

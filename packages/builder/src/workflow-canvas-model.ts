@@ -359,7 +359,17 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
         h: HANDLE_HALF * 2,
       };
 
-      const label = labelSpot(geometry, halfW, halfH, [...blocks, handleSpot, ...placed]);
+      // Where connections meet at one step and do not part from one, the
+      // label goes on the side its own source lies: the one from above over
+      // the one from below. By the direction of travel alone the two labels
+      // swapped places between the lines (ANT-178, seen on a drafted join).
+      const meets =
+        workflow.edges.filter((edge) => edge.target === output.target).length > 1 &&
+        outputs.filter((item) => item.target !== null).length === 1;
+      const prefer = meets && Math.abs(geometry.from.y - geometry.to.y) > 4
+        ? geometry.from.y < geometry.to.y ? "up" : "down"
+        : undefined;
+      const label = labelSpot(geometry, halfW, halfH, [...blocks, handleSpot, ...placed], prefer);
       placed.push({ left: label.x - halfW, top: label.y - halfH, w: halfW * 2, h: halfH * 2 });
 
       connected.push({

@@ -594,3 +594,35 @@ describe("a loop back along its row, with nothing placed by hand", () => {
     expect(path(buildCanvasModel(placed), "tests-failed").geometry.from.side).toBe("left");
   });
 });
+
+/*
+  ANT-178 again, where connections meet rather than part: Claude Code's draft
+  of W9 brings "mod1–mod2 done" down and "mod3–mod5 done" up into one step.
+  By their direction of travel each label went to the side facing the other
+  line, so the two read crossed.
+*/
+describe("labels where two connections meet at one step", () => {
+  const step = (id: string, x: number, y: number): WorkflowNode => ({
+    id,
+    type: "agent",
+    name: id,
+    config: { actionKind: "agent-step" },
+    position: { x, y },
+  });
+  const join: Workflow = {
+    id: "join",
+    name: "Join",
+    version: "1",
+    nodes: [step("upper", 286, 44), step("lower", 286, 198), step("tests", 616, 132)],
+    edges: [
+      { id: "from-upper", source: "upper", target: "tests", label: "mod1–mod2 done" },
+      { id: "from-lower", source: "lower", target: "tests", label: "mod3–mod5 done" },
+    ],
+  };
+
+  it("keeps the upper line's label above the lower line's", () => {
+    const model = buildCanvasModel(join);
+    const y = (id: string) => model.connected.find((path) => path.output.id === id)!.label.y;
+    expect(y("from-upper")).toBeLessThan(y("from-lower"));
+  });
+});

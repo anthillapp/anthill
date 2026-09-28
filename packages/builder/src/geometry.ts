@@ -819,6 +819,12 @@ export function labelSpot(
   halfW: number,
   halfH: number,
   blocks: readonly Rect[],
+  /**
+   * Which side the label belongs on, when the caller knows better than the
+   * line's own direction: where connections *meet*, the one coming down
+   * belongs above the one coming up, which is the opposite of how it falls.
+   */
+  prefer?: "up" | "down",
 ): Point {
   const { from, to, mid } = geometry;
   const dx = to.x - from.x;
@@ -832,7 +838,7 @@ export function labelSpot(
   // label read as the other connection's (ANT-178). A level one keeps up.
   let nx = -dy / length;
   let ny = dx / length;
-  const falling = dy > length * 0.2;
+  const falling = prefer ? prefer === "down" : dy > length * 0.2;
   if (falling ? ny < 0 : ny > 0) {
     nx = -nx;
     ny = -ny;

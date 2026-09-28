@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Workflow } from "@anthill/workflow-schema";
-import { addOutput } from "@anthill/workflow";
+import { WORKFLOW_TEMPLATES, addOutput } from "@anthill/workflow";
 
 import { PORT_OFFSET } from "./geometry";
 import type { WorkflowNode } from "@anthill/workflow-schema";
@@ -428,4 +428,33 @@ describe("how large a control pill is", () => {
     const step = { id: "s", name: "A very long step name indeed", type: "agent", config: {} } as WorkflowNode;
     expect(blockSize(step)).toEqual(STEP_SIZE);
   });
+});
+
+/*
+  ANT-194. A template's loop back along its row names the sides it leaves and
+  arrives at — the bottom of each — and the canvas never read them, so the
+  loop ran straight through the step it returns to and was hidden behind it.
+*/
+describe("a template's loop back along its row", () => {
+  for (const id of ["multi-agent-coordination", "brainstorm-to-workflow", "consult-adversarial-decide"]) {
+    it(`runs under the row, clear of every step, in ${id}`, () => {
+      const template = WORKFLOW_TEMPLATES.find((item) => item.id === id);
+      expect(template).toBeDefined();
+      const workflow = template!.build();
+      const model = buildCanvasModel(workflow);
+      const loop = model.connected.find((path) => path.output.kind === "rework");
+      expect(loop).toBeDefined();
+      const source = model.rects.get(loop!.nodeId)!;
+      const target = model.rects.get(loop!.output.target!)!;
+      expect(loop!.geometry.from.y).toBeGreaterThan(source.top + source.h);
+      expect(loop!.geometry.to.y).toBe(target.top + target.h);
+      // And its label is not under a step.
+      for (const rect of model.rects.values()) {
+        const inside =
+          loop!.label.x > rect.left && loop!.label.x < rect.left + rect.w &&
+          loop!.label.y > rect.top && loop!.label.y < rect.top + rect.h;
+        expect(inside).toBe(false);
+      }
+    });
+  }
 });

@@ -71,7 +71,12 @@ export function SessionReport({ workflow, run, view, end, usage, endedAt, onPick
     end === "completed"
       ? workflow.nodes.find((node) => node.type === "approval" && view.blocks[node.id]?.state === "needsYou")
       : undefined;
-  const title = gate ? `Stopped at ${gate.name}` : END_TITLE[end];
+  // Not lost: the author asked Anthill to stop reading it (ANT-191).
+  const title = run.observationStoppedAt && end === "lost"
+    ? "You stopped observing"
+    : gate
+      ? `Stopped at ${gate.name}`
+      : END_TITLE[end];
 
   const chips = OUTCOME_ORDER.filter((outcome) => (counts.get(outcome)?.length ?? 0) > 0);
   // The collapsed line names only what ended somewhere, not every empty bucket.

@@ -33,6 +33,7 @@ import {
   isRecoverable,
   isVisible,
   reopenForAnotherLook,
+  stopObserving,
   resumeFromEvidence,
   type Evidence,
   type MarkerCli,
@@ -251,10 +252,26 @@ export class LiveSessionService {
    * it and no business ending it. The record is dropped and the indicator goes.
    */
   async cancelObservation(runId: string): Promise<LiveSessionSnapshot> {
+    const run = this.store.find(runId);
+    /*
+      A run that found its session keeps what was read: the button says only
+      Anthill stops observing, and deleting the record made the run the author
+      had just been watching unreachable — the workflow's chip then opened an
+      older run in its place (ANT-191). It is closed and never picked back up.
+    */
+    if (run && run.detectedSessionId) {
+      const stopped = stopObserving(run, this.now());
+      await this.store.put(stopped, true);
+      this.storageErrors.delete(runId);
+      this.forget(runId);
+      // Its row on the launch window says so, as any other ending would.
+      this.onSettled(stopped);
+      return this.announce();
+    }
+    // A copy no session ever carried has nothing to keep.
     await this.store.remove(runId, true);
     this.storageErrors.delete(runId);
     this.forget(runId);
-    // The log goes with the run: the user asked Anthill to stop keeping this.
     await this.journal.forget(runId);
     return this.announce();
   }

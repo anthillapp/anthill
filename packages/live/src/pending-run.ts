@@ -99,6 +99,15 @@ export type PendingRun = {
   closedAt?: string;
   /** Set when the user dismissed it, so cleanup can drop it. */
   dismissedAt?: string;
+  /**
+   * When the author pressed "Stop observing in Anthill" (ANT-191).
+   *
+   * The run and its record stay: the button promises that only Anthill stops
+   * reading, and deleting what it had read made the run the author was just
+   * watching unreachable — the workflow's chip fell back to an older run.
+   * A stopped run is never picked back up by itself.
+   */
+  observationStoppedAt?: string;
 };
 
 /* ------------------------------------------------------------------ */
@@ -610,7 +619,7 @@ export function expireIfStale(run: PendingRun, now: string): PendingRun {
  * `ambiguous_match`, not a reconnection to one of them.
  */
 export function reopenForAnotherLook(run: PendingRun, now: string): PendingRun | undefined {
-  if (!run.closedAt || run.dismissedAt) return undefined;
+  if (!run.closedAt || run.dismissedAt || run.observationStoppedAt) return undefined;
   if (run.state !== "observation_lost") return undefined;
   if (!run.detectedSessionId) return undefined;
 
@@ -640,7 +649,7 @@ export function reopenForAnotherLook(run: PendingRun, now: string): PendingRun |
  * the button the only way back (ANT-65).
  */
 export function isRecoverable(run: PendingRun, now: string): boolean {
-  if (!run.closedAt || run.dismissedAt) return false;
+  if (!run.closedAt || run.dismissedAt || run.observationStoppedAt) return false;
   if (run.state !== "observation_lost" || !run.detectedSessionId) return false;
   return !isExpired(run, now);
 }
@@ -751,7 +760,29 @@ export const CLI_LABEL: Record<MarkerCli, string> = {
  * Every one of these is about what Anthill knows, never about what Anthill is
  * doing — it is not doing anything.
  */
+/**
+ * Stop reading a session the author asked Anthill to stop observing.
+ *
+ * Closed, and kept: what was read stays readable, and nothing picks the run
+ * back up. A session that had already settled keeps its ending; one still
+ * being followed is marked as no longer observed — which is what happened,
+ * rather than a claim that it finished or was lost (ANT-191).
+ */
+export function stopObserving(run: PendingRun, now: string): PendingRun {
+  const settled = run.state === "completed" || run.state === "failed";
+  return {
+    ...run,
+    state: settled ? run.state : "observation_lost",
+    closedAt: run.closedAt ?? now,
+    observationStoppedAt: now,
+    statusMessage: settled
+      ? run.statusMessage
+      : "You stopped observing this session in Anthill. The session itself was not touched.",
+  };
+}
+
 export function statusLabel(run: PendingRun): string {
+  if (run.observationStoppedAt && run.state === "observation_lost") return "Not observing";
   switch (run.state) {
     case "pending_after_copy":
       return run.exchange ? "Waiting for external progress" : "Waiting for a session";

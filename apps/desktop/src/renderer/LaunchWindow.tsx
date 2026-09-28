@@ -81,6 +81,9 @@ const CHIP: Record<LiveSessionState, { label: string; tone: string; pulse: boole
   completed: { label: "Finished", tone: "done" , pulse: false },
 };
 
+/** A run the author stopped observing: not lost, and not finished either (ANT-191). */
+const STOPPED_CHIP = { label: "Not observing", tone: "waiting", pulse: false };
+
 /** A workflow, plus the observation Anthill has for it, if any. */
 type Row = RecentWorkflow & { run?: PendingRun };
 
@@ -98,7 +101,7 @@ type Row = RecentWorkflow & { run?: PendingRun };
  */
 function past(row: Row): { tone: string; label: string; when: string } | undefined {
   if (row.run || !row.lastRun) return undefined;
-  const chip = CHIP[row.lastRun.state];
+  const chip = row.lastRun.stopped ? STOPPED_CHIP : CHIP[row.lastRun.state];
   if (!chip.label) return undefined;
   return { tone: chip.tone, label: chip.label, when: when(row.lastRun.at) };
 }
@@ -808,7 +811,11 @@ function RecentRow({
   /** The step this session last announced, when it has announced one. */
   step?: string;
 }) {
-  const chip = row.run ? CHIP[row.run.state] : undefined;
+  const chip = row.run
+    ? row.run.observationStoppedAt && row.run.state === "observation_lost"
+      ? STOPPED_CHIP
+      : CHIP[row.run.state]
+    : undefined;
   // Only when nothing is live: one row never shows both.
   const before = past(row);
 

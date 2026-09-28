@@ -478,7 +478,7 @@ export type RecentWorkflow = {
    * a day later, which turned every row grey a day after it was last used
    * (ANT-84).
    */
-  lastRun?: { state: LiveSessionState; at: string };
+  lastRun?: { state: LiveSessionState; at: string; stopped?: boolean };
   /**
    * Step id → step name, for the workflows in this list.
    *

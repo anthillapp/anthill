@@ -149,3 +149,28 @@ describe("which runs a canvas may speak for", () => {
     expect(mostRelevant(runsFor([theirs, orphan], "w-new"))).toBeUndefined();
   });
 });
+
+/*
+  ANT-191. After Stop observing, the workflow's chip opened an older run —
+  the one just watched had been deleted. It is now kept, closed, and it is
+  the run the header speaks for.
+*/
+describe("a run the author stopped observing", () => {
+  const stopped = (): PendingRun => ({
+    ...run("observation_lost"),
+    anthillRunId: "ANT-NEW",
+    createdAt: "2026-09-27T16:24:36.000Z",
+    closedAt: "2026-09-27T16:27:00.000Z",
+    observationStoppedAt: "2026-09-27T16:27:00.000Z",
+  });
+  const older = (): PendingRun => ({ ...run("completed"), anthillRunId: "ANT-OLD", createdAt: "2026-09-27T11:47:44.000Z" });
+
+  it("is the run the header speaks for, over an older finished one", () => {
+    expect(mostRelevant([older(), stopped()])?.anthillRunId).toBe("ANT-NEW");
+  });
+
+  it("says it is not being observed, not that it was lost", () => {
+    expect(presenceKey(stopped())).toBe("stopped");
+    expect(presenceLabel(stopped(), presenceKey(stopped()))).toBe("Not observing");
+  });
+});

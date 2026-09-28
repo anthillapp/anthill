@@ -1171,7 +1171,9 @@ function registerIpcHandlers(): void {
     const [rows, endings] = await Promise.all([listRecents(), workflowStatus().all()]);
     return rows.map((row) => {
       const ending = row.workflowId ? endings[row.workflowId] : undefined;
-      return ending ? { ...row, lastRun: { state: ending.state, at: ending.at } } : row;
+      return ending
+        ? { ...row, lastRun: { state: ending.state, at: ending.at, ...(ending.stopped ? { stopped: true } : {}) } }
+        : row;
     });
   });
 

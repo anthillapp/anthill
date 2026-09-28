@@ -185,3 +185,46 @@ describe("the compiled prompt", () => {
     expect(compile(sequential).prompt).toContain("- Follow the steps in the order given; do not skip ahead.");
   });
 });
+
+/*
+  ANT-187. A gate's paths are a person's answers. Drawn as two plain
+  connections — "approved" and "declined" — the gate read as a fork: both
+  branches ran at once, writing the same file, and the step after them waited
+  for both.
+*/
+describe("an Approval Gate's paths", () => {
+  const gated = () =>
+    flow(
+      [
+        step("read", "Read the request"),
+        { id: "gate", type: "approval", name: "Approve the codename", config: { prompt: "May it appear?" } },
+        step("with", "Write note including it"),
+        step("without", "Write note omitting it"),
+        step("verify", "Verify"),
+      ],
+      [
+        edge("start", "read"),
+        edge("read", "gate"),
+        edge("gate", "with", { label: "approved" }),
+        edge("gate", "without", { label: "declined" }),
+        edge("with", "verify"),
+        edge("without", "verify"),
+        edge("verify", "end"),
+      ],
+    );
+
+  it("are alternatives, never a fork, so nothing after them is a join", () => {
+    const plan = parallelPlan(gated());
+    expect(plan.forks.has("gate")).toBe(false);
+    expect(plan.joins.has("verify")).toBe(false);
+    expect(plan.parallel("with", "without")).toBe(false);
+  });
+
+  it("compile to one answer each, and nothing at the same time", () => {
+    const steps = compile(gated()).prompt;
+    expect(steps).toContain('- if they answer "approved", continue to step 3 (Write note including it).');
+    expect(steps).toContain('- if they answer "declined", continue to step 4 (Write note omitting it).');
+    expect(steps).not.toContain("at the same time");
+    expect(steps).not.toContain("are both finished");
+  });
+});

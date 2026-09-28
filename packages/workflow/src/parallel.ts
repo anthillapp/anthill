@@ -73,7 +73,11 @@ export function parallelPlan(workflow: Workflow): ParallelPlan {
 
   const forks = new Map<string, string[]>();
   for (const node of workflow.nodes) {
-    if (node.type === "condition" || node.type === "end") continue;
+    // A person's answer picks one way out of an Approval Gate: its paths are
+    // alternatives however they are drawn, never branches to run at once.
+    // Read as a fork, a gate with "approved" and "declined" compiled into both
+    // branches at the same time, writing the same file (ANT-187).
+    if (node.type === "condition" || node.type === "end" || node.type === "approval") continue;
     const edges = out.get(node.id) ?? [];
     if (edges.length >= 2 && edges.every(isPlain)) forks.set(node.id, edges.map((edge) => edge.target));
   }

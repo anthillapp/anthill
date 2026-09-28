@@ -67,8 +67,10 @@ refusal carrying the questions rather than as a diagram.
     "workflow": {
       "formatVersion": 5,
       "agents": [
-        { "id": "agent-1", "name": "Developer", "role": "Reads the code and makes the change" },
-        { "id": "agent-2", "name": "Reviewer", "role": "Checks the change against the criteria" }
+        { "id": "agent-1", "name": "Developer", "role": "Reads the code and makes the change",
+          "models": { "codex": { "id": "__default__" } } },
+        { "id": "agent-2", "name": "Reviewer", "role": "Checks the change against the criteria",
+          "models": { "codex": { "id": "__default__" } } }
       ]
     }
   }

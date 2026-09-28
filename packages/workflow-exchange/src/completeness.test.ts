@@ -79,6 +79,26 @@ describe("checkCompleteness", () => {
     expect(checkCompleteness(completeWorkflow(), SOURCE)).toEqual([]);
   });
 
+  // ANT-124: the answer most callers want has a spelling, and the refusal
+  // now says it rather than leaving the session to grep for it.
+  it("says how to write \"whatever the session is on\" when an agent has no model", () => {
+    const workflow = completeWorkflow();
+    const agents = (workflow.metadata?.workflow as { agents: { models?: unknown }[] }).agents;
+    delete agents[0].models;
+    const problem = checkCompleteness(workflow, SOURCE).find(
+      (item) => item.code === WORKFLOWNER_ADVISORY_CODES.AGENT_NO_MODEL_FOR_TARGET,
+    );
+    expect(problem?.message).toContain('"models": { "claude-code": { "id": "__default__" } }');
+    expect(problem?.ask).toContain("whatever the session is on");
+  });
+
+  it("takes the session's model, written that way, as an answer", () => {
+    const workflow = completeWorkflow();
+    const agents = (workflow.metadata?.workflow as { agents: { models?: unknown }[] }).agents;
+    agents[0].models = { "claude-code": { id: "__default__" } };
+    expect(checkCompleteness(workflow, SOURCE)).toEqual([]);
+  });
+
   it("gives every problem a question to put to the user", () => {
     // A deliberately empty workflow, so most of the vocabulary fires at once.
     const bare: Workflow = { id: "w", name: "", version: "0.1.0", nodes: [], edges: [] };

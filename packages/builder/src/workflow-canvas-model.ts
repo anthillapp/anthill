@@ -181,6 +181,13 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
 
   const blocks = [...rects.values()];
   const connected: ConnectedPath[] = [];
+  /*
+    Labels already placed, which the next one keeps clear of as it does of a
+    block. Placed one by one with no idea of each other, two connections
+    leaving and entering the same side of a step put "re-run" under "tests
+    failed" (ANT-194).
+  */
+  const placed: Rect[] = [];
   const pending: PendingPath[] = [];
 
   for (const node of workflow.nodes) {
@@ -273,12 +280,15 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
         h: HANDLE_HALF * 2,
       };
 
+      const label = labelSpot(geometry, halfW, halfH, [...blocks, handleSpot, ...placed]);
+      placed.push({ left: label.x - halfW, top: label.y - halfH, w: halfW * 2, h: halfH * 2 });
+
       connected.push({
         nodeId: node.id,
         output,
         index,
         geometry,
-        label: labelSpot(geometry, halfW, halfH, [...blocks, handleSpot]),
+        label,
         style,
         port,
       });

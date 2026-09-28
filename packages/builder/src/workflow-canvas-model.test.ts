@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Workflow } from "@anthill/workflow-schema";
 import { WORKFLOW_TEMPLATES, addOutput } from "@anthill/workflow";
 
-import { PORT_OFFSET } from "./geometry";
+import { PORT_OFFSET, labelHalfSize } from "./geometry";
 import type { WorkflowNode } from "@anthill/workflow-schema";
 
 import {
@@ -504,4 +504,33 @@ describe("a three-way fork stacked in one column", () => {
     const b = model.rects.get("b")!;
     expect(toC.geometry.to.x).toBeLessThanOrEqual(b.left);
   });
+});
+
+/*
+  ANT-194, found once the templates' loops left from their named sides:
+  Implement, test, fix's "re-run" label was drawn under "tests failed". Each
+  label was placed with no idea where the others had gone.
+*/
+describe("labels on a template's connections", () => {
+  for (const template of WORKFLOW_TEMPLATES) {
+    it(`never cover one another in ${template.id}`, () => {
+      const model = buildCanvasModel(template.build());
+      const boxes = model.connected
+        .filter((path) => path.output.label)
+        .map((path) => {
+          const { halfW, halfH } = labelHalfSize(path.output.label, {
+            quiet: path.output.kind === "next" && !path.output.condition,
+            hasCondition: Boolean(path.output.condition),
+          });
+          return { id: path.output.id, x: path.label.x, y: path.label.y, halfW, halfH };
+        });
+      for (const a of boxes) {
+        for (const b of boxes) {
+          if (a.id >= b.id) continue;
+          const overlap = Math.abs(a.x - b.x) < a.halfW + b.halfW && Math.abs(a.y - b.y) < a.halfH + b.halfH;
+          expect(overlap, `${a.id} and ${b.id}`).toBe(false);
+        }
+      }
+    });
+  }
 });

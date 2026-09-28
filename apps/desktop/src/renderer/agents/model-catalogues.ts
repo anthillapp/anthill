@@ -22,7 +22,23 @@ export type ModelCatalogues = {
   codex: CodexModelCatalog | undefined;
   /** What pi listed for this machine, or undefined when the CLI could not be reached. */
   pi: PiModelCatalog | undefined;
+  /**
+   * Which lists are still being asked for. Not given and not yet answered are
+   * different, and only the first is worth a warning (ANT-169).
+   */
+  loading?: { codex?: boolean; pi?: boolean };
 };
+
+/**
+ * The last lists this window was given, for the next editor that asks.
+ *
+ * The workflow's agent editor is remounted for every agent opened, and each
+ * mount asked again — so the warning that no list had been given flashed on
+ * every switch, and stayed for as long as Codex took to answer (ANT-169).
+ * A new mount starts from what the window already knows and asks again
+ * behind it.
+ */
+const known: { codex?: CodexModelCatalog; pi?: PiModelCatalog } = {};
 
 /**
  * The discovered catalogues, read once for the window.
@@ -34,8 +50,9 @@ export type ModelCatalogues = {
  * as an empty list, and the editors say the difference.
  */
 export function useModelCatalogues(): ModelCatalogues & { reload: () => void } {
-  const [codex, setCodex] = useState<CodexModelCatalog | undefined>();
-  const [pi, setPi] = useState<PiModelCatalog | undefined>();
+  const [codex, setCodex] = useState<CodexModelCatalog | undefined>(known.codex);
+  const [pi, setPi] = useState<PiModelCatalog | undefined>(known.pi);
+  const [loading, setLoading] = useState({ codex: true, pi: true });
   // Bumped to read again. Settings offers a Refresh (ANT-135): a model
   // released since the window opened is otherwise invisible until a relaunch.
   const [generation, setGeneration] = useState(0);
@@ -47,24 +64,35 @@ export function useModelCatalogues(): ModelCatalogues & { reload: () => void } {
     // altogether — an older preload, a test's partial stub — rejects like a
     // failed read instead of throwing out of the effect and taking the
     // editor with it.
+    setLoading({ codex: true, pi: true });
     Promise.resolve()
       .then(() => window.anthill.codexModels())
       .then((found) => {
+        // The latest answer stands, whatever it is; the remembered list only
+        // fills the moment before it arrives.
+        known.codex = found;
         if (live) setCodex(found);
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (live) setLoading((current) => ({ ...current, codex: false }));
+      });
     Promise.resolve()
       .then(() => window.anthill.piModels())
       .then((found) => {
+        known.pi = found;
         if (live) setPi(found);
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (live) setLoading((current) => ({ ...current, pi: false }));
+      });
     return () => {
       live = false;
     };
   }, [generation]);
 
-  return { codex, pi, reload };
+  return { codex, pi, loading, reload };
 }
 
 /**
@@ -95,6 +123,10 @@ export function modelOptionsFor(
 /** Whether a tool whose models are discovered has had none discovered yet. */
 export function catalogueMissing(target: HarnessTarget, catalogues: ModelCatalogues): boolean {
   if (harnessProfile(target).modelsAreDeclared) return false;
+  // Still being asked: not missing yet (ANT-169).
+  if ((target === "codex" || target === "pi") && catalogues.loading?.[target] && modelOptionsFor(target, catalogues).length === 0) {
+    return false;
+  }
   return modelOptionsFor(target, catalogues).length === 0;
 }
 

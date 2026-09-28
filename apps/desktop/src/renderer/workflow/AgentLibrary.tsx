@@ -359,6 +359,16 @@ export function AgentEditor({
           that is empty. Codex's catalogue is a cache the CLI refreshes when it
           runs, so opening it once is the retry; pi's is read live when the
           window loads, so the retry is a reload. */}
+      {/* Asked for and not answered yet: said quietly, not as a warning
+          that the list was never given (ANT-169). */}
+      {!missing &&
+      harness.supportsPerAgentModel &&
+      options.length === 0 &&
+      (harness.target === "codex" || harness.target === "pi") &&
+      catalogues.loading?.[harness.target] ? (
+        <p className="hint">Reading {harness.displayName}&rsquo;s model list…</p>
+      ) : null}
+
       {missing && harness.supportsPerAgentModel ? (
         <p className="hint warn">
           Anthill has not been given {harness.displayName}&rsquo;s model list, so only Default

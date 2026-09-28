@@ -1226,3 +1226,67 @@ describe("a step left with nothing done in it", () => {
     expect(view.blocks.implement.state).toBe("done");
   });
 });
+
+/*
+  ANT-184. Claude Code starts a step's subagent in the same message as the
+  command that prints the step's line, and the line is recorded only when that
+  command returns — after the subagent has already opened the step. The line
+  then read as the step being entered a second time: "pass 2" on the first
+  visit, and a step still working counted among the finished.
+*/
+describe("a step line recorded after its subagent was started", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-27T19:39:00.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  /** One step as the recorded W3 run did it: command, dispatch, then the line, then the subagent's work. */
+  const visit = (blockId: string, n: number, s: number) => [
+    tx({ kind: "tool.start", title: "Bash", toolUseId: `p${n}`, at: T(s) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: `a${n}`, stepTag: blockId, at: T(s + 1.7) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: `p${n}`, at: T(s + 3.1) }),
+    tx({ kind: "step.marker", title: `Step ${blockId}`, blockId, printedBy: `p${n}`, at: T(s + 3.1) }),
+    tx({ kind: "tool.start", title: "Read", toolUseId: `r${n}`, parentToolUseId: `a${n}`, at: T(s + 4) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: `a${n}`, at: T(s + 5) }),
+  ];
+
+  it("is the first pass, not the second", () => {
+    const view = foldLiveSession(workflow, run(), [...visit("implement", 1, 1), ...visit("test", 2, 7)]);
+    expect(view.blocks.implement).toMatchObject({ state: "done", passes: 1 });
+    expect(view.blocks.test).toMatchObject({ state: "running", passes: 1 });
+    expect(view.spans.map((span) => [span.blockId, span.pass])).toEqual([
+      ["implement", 1],
+      ["test", 1],
+    ]);
+  });
+
+  it("does not count the step still working as finished", () => {
+    const journal = [...visit("implement", 1, 1), ...visit("test", 2, 7)];
+    // Right after the second step's line: only the first is finished.
+    const view = foldLiveSession(workflow, run(), journal.slice(0, 6 + 4));
+    expect(view.blocks.test.state).toBe("running");
+    expect(finishedSteps(view)).toBe(1);
+  });
+
+  it("still counts a real return to a step, done the same way, as its second pass", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      ...visit("implement", 1, 1),
+      ...visit("test", 2, 7),
+      ...visit("fix", 3, 13),
+      ...visit("test", 4, 19),
+    ]);
+    expect(view.blocks.implement.passes).toBe(1);
+    expect(view.blocks.fix.passes).toBe(1);
+    expect(view.blocks.test.passes).toBe(2);
+    // The second pass began when its subagent was started, and the first
+    // was not stretched over the fix in between.
+    const tests = view.spans.filter((span) => span.blockId === "test");
+    expect(tests.map((span) => span.pass)).toEqual([1, 2]);
+    expect(tests[0].endedAt).toBe(T(16.1));
+    expect(tests[1].startedAt).toBe(T(20.7));
+  });
+
+  it("is no detour and moves the session onto the step", () => {
+    const view = foldLiveSession(workflow, run(), [...visit("implement", 1, 1), ...visit("test", 2, 7)]);
+    expect(view.detours).toEqual([]);
+    expect(view.activeBlockId).toBe("test");
+  });
+});

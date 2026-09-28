@@ -196,11 +196,26 @@ export function sessionUsage(
     const block = view.blocks[node.id];
     if (!block) continue;
     const spans = metrics.spans.filter((span) => span.blockId === node.id);
-    const passes = spans.map<PassUsage>((span) => ({
-      pass: span.pass,
-      ...(span.durationMs !== undefined ? { durationMs: span.durationMs } : {}),
-      ...(span.tokens ? { tokens: span.tokens } : {}),
-    }));
+    // One entry per pass, not per span: a pass the session carried on with
+    // after saying it was done — or came back to after waiting on you — is
+    // the same pass in two stretches, and counting stretches reported
+    // "2 passes" for a step that ran once (ANT-184).
+    const passes: PassUsage[] = [];
+    for (const span of spans) {
+      const same = passes.find((pass) => pass.pass === span.pass);
+      if (!same) {
+        passes.push({
+          pass: span.pass,
+          ...(span.durationMs !== undefined ? { durationMs: span.durationMs } : {}),
+          ...(span.tokens ? { tokens: { ...span.tokens } } : {}),
+        });
+        continue;
+      }
+      if (span.durationMs !== undefined) same.durationMs = (same.durationMs ?? 0) + span.durationMs;
+      if (span.tokens) {
+        same.tokens = { in: (same.tokens?.in ?? 0) + span.tokens.in, out: (same.tokens?.out ?? 0) + span.tokens.out };
+      }
+    }
     const ended = passes.filter((pass) => pass.durationMs !== undefined);
     const tokens = metrics.tokensLikelyByBlock.get(node.id);
     const agentId = agentConfig(node).agentId;

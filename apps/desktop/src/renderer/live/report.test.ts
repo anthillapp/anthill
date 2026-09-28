@@ -53,6 +53,25 @@ describe("usage by block and agent", () => {
     expect(usage.durationMs).toBe(180_000);
   });
 
+  // ANT-184: a step that went on after the session said it was done is one
+  // pass in two stretches, not two passes.
+  it("counts a pass carried on in two stretches once, with both stretches' figures", () => {
+    const usage = sessionUsage(
+      workflow,
+      view({ a: "done", b: "queued" }),
+      metrics({
+        spans: [
+          { blockId: "a", pass: 1, startedAt: "2026-08-29T10:00:00.000Z", endedAt: "2026-08-29T10:01:00.000Z", durationMs: 60_000, tokens: { in: 10, out: 2 } },
+          { blockId: "a", pass: 1, startedAt: "2026-08-29T10:02:00.000Z", endedAt: "2026-08-29T10:02:30.000Z", durationMs: 30_000, tokens: { in: 5, out: 1 } },
+        ],
+      }),
+      undefined,
+    );
+    const block = usage.blocks.find((item) => item.blockId === "a");
+    expect(block?.passes).toEqual([{ pass: 1, durationMs: 90_000, tokens: { in: 15, out: 3 } }]);
+    expect(block?.durationMs).toBe(90_000);
+  });
+
   it("has no token figure where nothing was recorded", () => {
     const usage = sessionUsage(workflow, view({ a: "done", b: "queued" }), metrics(), undefined);
     expect(usage.blocks[0].tokens).toBeUndefined();

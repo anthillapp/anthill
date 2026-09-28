@@ -230,6 +230,8 @@ export function foldLiveSession(
   let workSinceEntered = false;
   /** Steps left with no work done, by when they were left and the move that left them. */
   const pendingClose = new Map<string, { leftAt: string; detour?: Detour }>();
+  /** Steps a subagent opened that no step line has named yet (ANT-184). */
+  const openedByDispatch = new Set<string>();
   /**
    * Whether the hook channel wrote anything for this run.
    *
@@ -333,22 +335,34 @@ export function foldLiveSession(
     }
     const fanOut = announced !== undefined && announced !== id && outstanding(announced);
     const left = announced && announced !== id ? leave(announced, at) : "closed";
-    // Coming back to a step still open ends the pass it was on — as of when
-    // it was left, if it was left with nothing done.
-    if (pendingClose.has(id)) closePending(id);
-    if (isOpen(id)) finish(id, at);
-    const entering = blocks[id];
-    const pass = (entering?.passes ?? 0) + 1;
-    blocks[id] = {
-      state: "running",
-      confidence: "exact",
-      enteredAt: at,
-      // Carried, not reset: what earlier passes cost is still part of what
-      // this step has cost.
-      ...(entering?.spentMs !== undefined ? { spentMs: entering.spentMs } : {}),
-      passes: pass,
-    };
-    spans.push({ blockId: id, pass, startedAt: at });
+    /*
+      A step its subagent opened before its line was read: this is the line
+      for that same pass. Claude Code starts the subagent in the same message
+      as the command that prints the line, and the line is recorded only when
+      the command returns — seconds after the subagent began (ANT-184).
+    */
+    const continuing = openedByDispatch.delete(id) && isOpen(id);
+    let pass: number;
+    if (continuing) {
+      pass = blocks[id].passes;
+    } else {
+      // Coming back to a step still open ends the pass it was on — as of when
+      // it was left, if it was left with nothing done.
+      if (pendingClose.has(id)) closePending(id);
+      if (isOpen(id)) finish(id, at);
+      const entering = blocks[id];
+      pass = (entering?.passes ?? 0) + 1;
+      blocks[id] = {
+        state: "running",
+        confidence: "exact",
+        enteredAt: at,
+        // Carried, not reset: what earlier passes cost is still part of what
+        // this step has cost.
+        ...(entering?.spentMs !== undefined ? { spentMs: entering.spentMs } : {}),
+        passes: pass,
+      };
+      spans.push({ blockId: id, pass, startedAt: at });
+    }
     // Only a move between two steps can be one the plan lacks: the first
     // step came from nowhere the fold can see, a step announced again is not
     // a move at all, and a step started while the last one's subagents are
@@ -369,7 +383,8 @@ export function foldLiveSession(
     }
     announced = id;
     enteredByTag = viaTag;
-    workSinceEntered = false;
+    // A subagent already at work for the step is work in it.
+    workSinceEntered = continuing;
     askedSinceEntered = false;
     finishedAt = undefined;
   };
@@ -529,13 +544,25 @@ export function foldLiveSession(
         // A step announced in a batch, now started: a fan-out, not a move away.
         pendingClose.delete(target);
         // A step left a moment before its subagent was started was not
-        // finished: the same pass goes on.
-        if (target !== announced && blocks[target].state === "done" && !finishedAt) reopen(target);
+        // finished: the same pass goes on. But once the session has worked in
+        // the step it moved to, a subagent for a finished step is the session
+        // coming back to it — a new pass, which its line will then confirm
+        // (ANT-184).
+        if (target !== announced && blocks[target].state === "done" && !finishedAt) {
+          if (!workSinceEntered) reopen(target);
+          else {
+            const pass = blocks[target].passes + 1;
+            blocks[target] = { ...blocks[target], state: "running", enteredAt: event.at, passes: pass };
+            spans.push({ blockId: target, pass, startedAt: event.at });
+            openedByDispatch.add(target);
+          }
+        }
         // A step nothing announced, begun by the subagent started for it. The
         // session itself stays where it is.
         if (blocks[target].state === "queued") {
           blocks[target] = { state: "running", confidence: "exact", enteredAt: event.at, passes: 1 };
           spans.push({ blockId: target, pass: 1, startedAt: event.at });
+          openedByDispatch.add(target);
         }
       }
     }

@@ -437,6 +437,17 @@ export function foldLiveSession(
   const stoppedFor = new Set<string>();
   const STOPPED_NOTE = "A subagent working on this step was stopped by hand before it handed back.";
 
+  /*
+    A session that ended with a subagent still out on a step: killed, or
+    closed while the delegate worked. The subagent never handed back, so the
+    step is not done — it was drawn green and counted as finished (W9 in the
+    0.8.3 QA, interrupted right after it delegated). Nor is it a failure
+    anything recorded. What the delegate got through is not in the record,
+    and the step says so.
+  */
+  const CUT_OFF_NOTE =
+    "The session ended while a subagent was still working on this step, and the subagent never handed back.";
+
   /** A delegation came back: its step is done if nothing else holds it open. */
   const release = (id: string, at: string) => {
     if (id !== announced && isOpen(id) && !outstanding(id)) {
@@ -733,6 +744,7 @@ export function foldLiveSession(
       // at is as close as the record gets to when this step stopped.
       if (lastSeenAt) {
         if (stoppedFor.has(announced)) finish(announced, lastSeenAt, "failed", STOPPED_NOTE);
+        else if (outstanding(announced)) finish(announced, lastSeenAt, "unknown", CUT_OFF_NOTE);
         else finish(announced, lastSeenAt);
       }
     } else if (open && run.state === "failed") {
@@ -751,6 +763,7 @@ export function foldLiveSession(
     const at = lastSeenAt ?? run.createdAt;
     if (run.state === "completed") {
       if (stoppedFor.has(id)) finish(id, at, "failed", STOPPED_NOTE);
+      else if (outstanding(id)) finish(id, at, "unknown", CUT_OFF_NOTE);
       else finish(id, at);
     }
     else if (run.state === "failed") finish(id, at, "failed", run.statusMessage);

@@ -1450,3 +1450,41 @@ describe("a subagent stopped by hand", () => {
     expect(view.blocks.implement.state).toBe("done");
   });
 });
+
+/*
+  W9 in the 0.8.3 QA: the session sent two subagents off on their own, ended
+  its turn waiting for them, and was killed. Neither handed back, and both
+  steps were drawn green and counted as finished.
+*/
+describe("a session that ends with its subagents still out", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-28T03:33:40.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const hook = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "hook", channel: "claude-code:hook", ...partial });
+
+  const killed = [
+    tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "call-a", stepTag: "implement", background: true, at: T(7) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "call-a", background: true, at: T(8) }),
+    tx({ kind: "message", title: "Message", detail: "The Developer is running.", author: { kind: "main" }, at: T(14) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", at: T(14) }),
+    hook({ kind: "session.end", title: "Session ended", at: T(16) }),
+  ];
+
+  it("does not call the step done: nothing came back from it", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), killed);
+    expect(view.blocks.implement.state).toBe("unknown");
+    expect(view.blocks.implement.note).toContain("never handed back");
+    expect(finishedSteps(view)).toBe(0);
+  });
+
+  it("still calls it done once the subagent has finished its turn", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      ...killed.slice(0, 3),
+      tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "call-a", author: { kind: "subagent" }, at: T(12) }),
+      ...killed.slice(3),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+  });
+});

@@ -387,13 +387,29 @@ function renderTransitions(
     return [`Then ${describeTarget(edges[0])}.`];
   }
 
+  /*
+    Paths with no condition are told apart by their labels. "otherwise" means
+    "when none of the conditions above holds", so it can be said of one path
+    at most; two paths both called otherwise left the agent to guess which
+    answer led where (ANT-175). An Approval Gate's paths are a person's
+    answers, and are said as such.
+  */
+  const gate = node.type === "approval";
+  const open = edges.filter((edge) => edge.condition === undefined);
+  const byLabel = gate || open.length > 1;
   const lines = ["Then:"];
+  let otherwiseSaid = false;
   for (const edge of edges) {
-    const label = edge.label ? ` (${edge.label})` : "";
-    if (edge.condition === undefined) {
-      lines.push(`- otherwise${label}, ${describeTarget(edge)}.`);
+    const label = edge.label?.trim();
+    if (edge.condition !== undefined) {
+      lines.push(`- if ${describeCondition(edge.condition)}${label ? ` (${label})` : ""}, ${describeTarget(edge)}.`);
+    } else if (byLabel && label) {
+      lines.push(`- if ${gate ? "they answer" : "the outcome is"} "${label}", ${describeTarget(edge)}.`);
+    } else if (!otherwiseSaid) {
+      otherwiseSaid = true;
+      lines.push(`- otherwise${label ? ` (${label})` : ""}, ${describeTarget(edge)}.`);
     } else {
-      lines.push(`- if ${describeCondition(edge.condition)}${label}, ${describeTarget(edge)}.`);
+      lines.push(`- or, if that is what happened instead, ${describeTarget(edge)}.`);
     }
   }
   return lines;

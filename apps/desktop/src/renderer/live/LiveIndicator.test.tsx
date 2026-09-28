@@ -102,6 +102,16 @@ describe("what the indicator shows", () => {
     fireEvent.click(screen.getByRole("button"));
     expect(await screen.findByRole("button", { name: action })).toBeTruthy();
   });
+  // ANT-201: after Stop observing, the popover still offered to stop again.
+  it("offers to dismiss a run Anthill already stopped observing, not to stop it again", async () => {
+    await show([
+      run({ state: "observation_lost", detectedSessionId: "sess-1", observationStoppedAt: "2026-09-28T05:03:00.000Z" }),
+    ]);
+    fireEvent.click(screen.getByRole("button"));
+    expect(await screen.findByRole("button", { name: "Dismiss" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop observing in Anthill" })).toBeNull();
+  });
+
   it("shows nothing at all when no prompt has been copied", async () => {
     await show([]);
     expect(screen.queryByRole("button")).toBeNull();

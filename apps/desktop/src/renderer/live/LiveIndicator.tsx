@@ -261,7 +261,10 @@ export function LiveIndicator({ workflowId, onOpenSession }: LiveIndicatorProps 
           </p>
 
               <div className="live-pop-actions">
-                {run.state === "completed" || run.state === "failed" ? (
+                {/* A run Anthill already stopped observing has nothing left to
+                    stop: offering the button again read as though it had not
+                    taken (ANT-201). */}
+                {run.state === "completed" || run.state === "failed" || run.observationStoppedAt ? (
                   <button
                     onClick={() => void window.anthill.liveDismiss(run.anthillRunId).then(setSnapshot)}
                   >

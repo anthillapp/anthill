@@ -359,6 +359,35 @@ describe("a finished step's elapsed time", () => {
   });
 });
 
+/*
+  ANT-193. A session that finished on another branch left the step it skipped
+  reading "Waiting its turn" under a "Session finished" header.
+*/
+describe("a step the session never reached", () => {
+  function line(sessionState: PendingRun["state"]) {
+    const view = foldLiveSession(workflow, { ...run, state: sessionState }, []);
+    const { container, unmount } = render(
+      <LiveWorkflowGraph workflow={workflow} view={view} sessionState={sessionState} onSelect={vi.fn()} />,
+    );
+    const text = container.querySelector(".live-node-state")?.textContent;
+    unmount();
+    return text;
+  }
+
+  it("waits its turn while the session is live", () => {
+    expect(line("detected_live")).toBe("Waiting its turn");
+  });
+
+  it("was not reached once the session is over", () => {
+    expect(line("completed")).toBe("Not reached");
+    expect(line("failed")).toBe("Not reached");
+  });
+
+  it("may still get its turn when contact was only lost", () => {
+    expect(line("observation_lost")).toBe("Waiting its turn");
+  });
+});
+
 /**
  * A step's name cannot leave the card it is in.
  *

@@ -379,6 +379,15 @@ export function LiveWorkflowGraph({
   /** Whether the run reached its end, branches not taken included (ANT-170). */
   const finished = runFinished(view, sessionState);
 
+  /*
+    Whether the session is over, however it ended. A step it never entered
+    then will not get a turn, and "Waiting its turn" under a "Session
+    finished" header said otherwise (ANT-193): it reads "Not reached", as the
+    report does. A session that only went quiet may still come back, so a
+    lost one keeps the waiting words.
+  */
+  const over = view.endedAt !== undefined || sessionState === "completed" || sessionState === "failed";
+
   /** Recomputed with the view, since it is entirely a fact about the events. */
   const delivering = useMemo(
     () => deliveringSources(workflow, view, boundaryKind, finished),
@@ -572,6 +581,7 @@ export function LiveWorkflowGraph({
           ? boundaryState(view, node, sessionState)
           : (block?.state ?? "queued");
         const style = RUN_STATE[state];
+        const label = state === "queued" && over && !structural ? "Not reached" : style.label;
         const selected = selectedBlockId === node.id;
         const passes = block?.passes ?? 0;
 
@@ -587,7 +597,7 @@ export function LiveWorkflowGraph({
               if (event.key === "Enter" || event.key === " ") onSelect(selected ? undefined : node.id);
             }}
           >
-            <title>{`${node.name} – ${style.label}${block?.note ? `. ${block.note}` : ""}`}</title>
+            <title>{`${node.name} – ${label}${block?.note ? `. ${block.note}` : ""}`}</title>
 
             {/*
               One border, and it is the block's own.
@@ -640,7 +650,7 @@ export function LiveWorkflowGraph({
                   <span className="live-node-kicker">{kicker(node)}</span>
                   <span className="live-node-name">{node.name}</span>
                   <span className="live-node-state">
-                    {style.label}
+                    {label}
                     {passes > 1 ? ` · pass ${passes}` : ""}
                     {/* How long the agent has been on this step — elapsed since
                         its own announcement, ticking, and plainly not a promise

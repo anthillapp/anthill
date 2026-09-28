@@ -1456,6 +1456,57 @@ describe("a subagent stopped by hand", () => {
   its turn waiting for them, and was killed. Neither handed back, and both
   steps were drawn green and counted as finished.
 */
+/*
+  W15 in the 0.8.3 QA: two checkers sent off on their own. Claude Code wrote
+  the Quantity Checker's last message with no stop reason, so its transcript
+  never recorded the end of its turn — only the SubagentStop hook said it was
+  over, naming no subagent. Its step stayed "Working" for a minute after the
+  session had both verdicts and moved on.
+*/
+describe("a subagent whose end only the SubagentStop hook records", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-28T03:59:45.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const hook = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "hook", channel: "claude-code:hook", ...partial });
+  const sub = { kind: "subagent" as const };
+
+  const dispatch = [
+    tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+    tx({ kind: "step.marker", title: "Step test", blockId: "test", at: T(0.1) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "qty", stepTag: "implement", background: true, at: T(4) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "qty", background: true, at: T(4.1) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "name", stepTag: "test", background: true, at: T(6) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "name", background: true, at: T(6.1) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", at: T(8) }),
+  ];
+
+  it("is over when the hook says a subagent stopped, right after it last spoke", () => {
+    const view = foldLiveSession(workflow, run({ state: "detected_live" }), [
+      ...dispatch,
+      tx({ kind: "tool.start", title: "Read", toolUseId: "n1", parentToolUseId: "name", author: sub, at: T(9) }),
+      tx({ kind: "message", title: "Message", detail: "Qty column verdict: PASS", parentToolUseId: "qty", author: sub, at: T(11) }),
+      hook({ kind: "subagent.end", title: "A subagent finished", at: T(11.4) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+    // The other one is still at work.
+    expect(view.blocks.test.state).toBe("running");
+  });
+
+  it("leaves a running subagent alone when the stop was owed to one whose end was recorded", () => {
+    const view = foldLiveSession(workflow, run({ state: "detected_live" }), [
+      ...dispatch,
+      tx({ kind: "tool.start", title: "Read", toolUseId: "q1", parentToolUseId: "qty", author: sub, at: T(12) }),
+      tx({ kind: "message", title: "Message", detail: "Name check complete", parentToolUseId: "name", author: sub, at: T(13) }),
+      tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "name", author: sub, at: T(13) }),
+      hook({ kind: "subagent.end", title: "A subagent finished", at: T(13.8) }),
+    ]);
+    // Its stop was the Name Checker's, whose end was already recorded; the
+    // Quantity Checker, heard from a second earlier, is still at work.
+    expect(view.blocks.implement.state).toBe("running");
+  });
+});
+
 describe("a session that ends with its subagents still out", () => {
   const T = (s: number) => new Date(Date.parse("2026-09-28T03:33:40.000Z") + s * 1000).toISOString();
   const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>

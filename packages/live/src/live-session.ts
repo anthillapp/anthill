@@ -219,6 +219,22 @@ export function foldLiveSession(
   >();
   /** The same, as attribution reads it: call id to step. */
   const delegatedFrom = new Map<string, string>();
+  /*
+    Pairing Claude Code's SubagentStop hook with the subagent it was for.
+
+    A subagent sent off on its own is over when its transcript records the
+    end of its turn — but Claude Code sometimes writes that last message
+    without a stop reason, and then only the hook says it stopped, naming no
+    subagent. W15's Quantity Checker was drawn "Working" for a minute after
+    the session had its verdict and moved on. So the hook is paired with the
+    subagent heard from last, unless a subagent whose end the transcript did
+    record is still owed its hook.
+  */
+  const lastHeard = new Map<string, number>();
+  const endedByHook = new Set<string>();
+  let hooksOwed = 0;
+  /** How recently a subagent must have been heard from for a stop to be its. */
+  const STOP_PAIRING_MS = 10_000;
   const spans: BlockSpanView[] = [];
   /**
    * Whether the session did any work in the announced step before it moved
@@ -494,9 +510,34 @@ export function foldLiveSession(
     // that call has been read: Claude Code writes the message holding the
     // Agent calls only once the last is made, and the subagents are already
     // at work by then (ANT-164).
+    if (event.kind === "subagent.end" && !event.parentToolUseId && event.channel.endsWith(":hook")) {
+      if (hooksOwed > 0) {
+        hooksOwed -= 1;
+      } else {
+        const at = Date.parse(event.at);
+        let best: string | undefined;
+        for (const [call, heard] of lastHeard) {
+          const d = delegations.get(call);
+          if (!d || d.delegateEnded || Number.isNaN(at) || heard > at || at - heard > STOP_PAIRING_MS) continue;
+          if (best === undefined || heard > (lastHeard.get(best) ?? 0)) best = call;
+        }
+        const d = best ? delegations.get(best) : undefined;
+        if (best && d) {
+          endedByHook.add(best);
+          d.delegateEnded = true;
+          release(d.blockId, event.at);
+        }
+      }
+    }
+
     const via = event.parentToolUseId ? delegations.get(event.parentToolUseId) : undefined;
+    if (via && event.parentToolUseId) {
+      const at = Date.parse(event.at);
+      if (!Number.isNaN(at)) lastHeard.set(event.parentToolUseId, at);
+    }
     if (via || event.parentToolUseId || event.author?.kind === "subagent") {
       if (via && event.kind === "turn.end") {
+        if (!via.delegateEnded && !endedByHook.has(event.parentToolUseId ?? "")) hooksOwed += 1;
         via.delegateEnded = true;
         release(via.blockId, event.at);
       }

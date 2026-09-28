@@ -1410,3 +1410,43 @@ describe("a session that stopped at an Approval Gate", () => {
     expect(view.blocks.decide.state).toBe("done");
   });
 });
+
+/*
+  ANT-190. Two parallel Developer subagents were sent off on their own and
+  stopped by hand from Claude Code's Background tasks panel before either
+  handed back. Their transcripts end "[Request interrupted by user]"; the
+  steps must not end as done.
+*/
+describe("a subagent stopped by hand", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-27T23:25:00.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+
+  it("ends its step failed, not done, even once the run completes", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+      tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "call-a", stepTag: "implement", background: true, at: T(1) }),
+      tx({ kind: "tool.end", title: "Tool finished", toolUseId: "call-a", background: true, at: T(1.2) }),
+      tx({ kind: "step.marker", title: "Step test", blockId: "test", at: T(2) }),
+      tx({ kind: "tool.start", title: "Edit", toolUseId: "own", at: T(3) }),
+      tx({ kind: "notification", title: "Stopped by hand", parentToolUseId: "call-a", at: T(40) }),
+      tx({ kind: "turn.end", title: "The agent finished its turn", at: T(45) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("failed");
+    expect(view.blocks.implement.note).toContain("stopped by hand");
+    // A stopped step is not a finished one.
+    expect(finishedSteps(view)).toBe(0);
+  });
+
+  it("leaves a subagent that finished its turn done", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+      tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "call-a", stepTag: "implement", background: true, at: T(1) }),
+      tx({ kind: "tool.end", title: "Tool finished", toolUseId: "call-a", background: true, at: T(1.2) }),
+      tx({ kind: "step.marker", title: "Step test", blockId: "test", at: T(2) }),
+      tx({ kind: "tool.start", title: "Edit", toolUseId: "own", at: T(3) }),
+      tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "call-a", author: { kind: "subagent" }, at: T(40) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+  });
+});

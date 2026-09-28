@@ -441,3 +441,25 @@ describe("a subagent's dispatch card", () => {
   });
 });
 
+/* ANT-190: a subagent stopped by hand is not drawn as completed. */
+describe("a subagent stopped by hand, in the feed", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-27T23:25:00.000Z") + s * 1000).toISOString();
+  const tx = { channel: "claude-code:transcript", source: "transcript" as const };
+  const hook = { channel: "claude-code:hook", source: "hook" as const };
+
+  it("fails its dispatch card, and the SubagentStop after it is not a completion", () => {
+    const cards = buildFeed(
+      [
+        event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "developer-mod3-mod5", toolUseId: "call-b", at: T(0), ...tx }),
+        event({ kind: "tool.end", title: "Tool finished", toolUseId: "call-b", background: true, at: T(0.2), ...tx }),
+        event({ kind: "notification", title: "Stopped by hand", parentToolUseId: "call-b", author: { kind: "subagent" }, at: T(48.7), ...tx }),
+        event({ kind: "subagent.end", title: "A subagent finished", at: T(48.9), ...hook }),
+      ],
+      false,
+    );
+    const agents = cards.filter((card) => card.kind === "agent");
+    expect(agents).toHaveLength(1);
+    expect(agents[0]).toMatchObject({ state: "failed", detail: "Stopped by hand before it handed back" });
+    expect(cards.some((card) => card.state === "done" && card.kind === "agent")).toBe(false);
+  });
+});

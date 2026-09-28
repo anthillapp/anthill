@@ -77,6 +77,9 @@ export type FeedCard = {
 };
 
 const AGENT_KINDS = new Set(["subagent.start", "subagent.end"]);
+
+/** The title the Claude Code observer gives a stop the person made. */
+const STOPPED_BY_HAND = "Stopped by hand";
 const TOOL_KINDS = new Set(["tool.start", "tool.end"]);
 
 function kindOf(event: AttributedEvent): CardKind {
@@ -197,6 +200,25 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
           card.durationMs = Date.parse(event.at) - Date.parse(card.at);
           open.delete(event.parentToolUseId);
         }
+      }
+    }
+
+    /*
+      A subagent somebody stopped: its transcript ends "[Request interrupted
+      by user]", which the observer records as a stop on the call that
+      started it. Stopped is not finished — the card is failed, and the hooks'
+      SubagentStop right after it is the same stop, not a completion (ANT-190).
+    */
+    if (event.kind === "notification" && event.parentToolUseId && event.title === STOPPED_BY_HAND) {
+      const card = dispatched.get(event.parentToolUseId);
+      if (card) {
+        card.state = "failed";
+        card.detail = "Stopped by hand before it handed back";
+        card.durationMs = Date.parse(event.at) - Date.parse(card.at);
+        open.delete(event.parentToolUseId);
+        lastDelegateEnd = { card, at: Date.parse(event.at) };
+        fold(card, event);
+        continue;
       }
     }
 

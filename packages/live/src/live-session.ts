@@ -430,9 +430,19 @@ export function foldLiveSession(
     if (spentMs !== undefined && spentMs <= 0) delete blocks[id].spentMs;
   };
 
+  /**
+   * Steps a subagent working for them was stopped by hand, before it handed
+   * back: they end failed, not done (ANT-190).
+   */
+  const stoppedFor = new Set<string>();
+  const STOPPED_NOTE = "A subagent working on this step was stopped by hand before it handed back.";
+
   /** A delegation came back: its step is done if nothing else holds it open. */
   const release = (id: string, at: string) => {
-    if (id !== announced && isOpen(id) && !outstanding(id)) finish(id, at);
+    if (id !== announced && isOpen(id) && !outstanding(id)) {
+      if (stoppedFor.has(id)) finish(id, at, "failed", STOPPED_NOTE);
+      else finish(id, at);
+    }
   };
 
   // One action, however many channels wrote it down. A session with hooks
@@ -477,6 +487,13 @@ export function foldLiveSession(
     if (via || event.parentToolUseId || event.author?.kind === "subagent") {
       if (via && event.kind === "turn.end") {
         via.delegateEnded = true;
+        release(via.blockId, event.at);
+      }
+      // Stopped by the person: over, and not finished (ANT-190).
+      if (via && event.kind === "notification" && event.title === "Stopped by hand") {
+        via.delegateEnded = true;
+        via.returned = true;
+        stoppedFor.add(via.blockId);
         release(via.blockId, event.at);
       }
       continue;
@@ -714,7 +731,10 @@ export function foldLiveSession(
     ) {
       // Nothing announced a departure, so the last thing anything was recorded
       // at is as close as the record gets to when this step stopped.
-      if (lastSeenAt) finish(announced, lastSeenAt);
+      if (lastSeenAt) {
+        if (stoppedFor.has(announced)) finish(announced, lastSeenAt, "failed", STOPPED_NOTE);
+        else finish(announced, lastSeenAt);
+      }
     } else if (open && run.state === "failed") {
       finish(announced, lastSeenAt ?? run.lastObservedAt ?? run.createdAt, "failed", run.statusMessage);
     } else if (open && (run.state === "observation_lost" || run.state === "ambiguous_match")) {
@@ -729,7 +749,10 @@ export function foldLiveSession(
   for (const id of Object.keys(blocks)) {
     if (id === announced || blocks[id].state !== "running") continue;
     const at = lastSeenAt ?? run.createdAt;
-    if (run.state === "completed") finish(id, at);
+    if (run.state === "completed") {
+      if (stoppedFor.has(id)) finish(id, at, "failed", STOPPED_NOTE);
+      else finish(id, at);
+    }
     else if (run.state === "failed") finish(id, at, "failed", run.statusMessage);
     else if (run.state === "observation_lost" || run.state === "ambiguous_match") {
       finish(id, at, "unknown", "Anthill stopped being able to read this session.");

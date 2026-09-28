@@ -131,7 +131,13 @@ export-package        release-publish  handoff-to-human
 ## Connections
 
 `{ id, source, target }` at minimum. `kind` is `next` (the default), `rework`,
-`question` or `stop`. `label` is what the user reads on the line.
+`question`, `stop` or `switch`. `label` is what the user reads on the line.
+
+`switch` marks one of several paths of which exactly one is taken, once — approved
+one way, declined another. Two or more `switch` connections from one block are
+drawn as a single switcher. Give each a `label`, give all but the last a
+`condition`, and leave the last one without: it is the otherwise path. Work sent
+back to be redone is `rework`, never `switch`.
 
 * Every block except `end` needs a way out. A block with no outgoing connection
   is a dead end and is refused.

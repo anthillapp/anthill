@@ -556,3 +556,53 @@ describe("validateWorkflow", () => {
     expect(validateWorkflow(workflow).errors.length).toBeGreaterThan(2);
   });
 });
+
+/* ANT-165. A switcher's exits must decide exactly one path. */
+describe("validateWorkflow – switcher", () => {
+  function switcher(exits: Partial<WorkflowEdge>[]): Workflow {
+    return makeWorkflow(
+      [
+        node("s", "start", "Start"),
+        step("dev", "Implement", { agentId: "agent-dev" }),
+        step("a", "Path A", { agentId: "agent-dev" }),
+        step("b", "Path B", { agentId: "agent-dev" }),
+        node("e", "end", "Done"),
+      ],
+      [
+        edge("e1", "s", "dev"),
+        edge("x1", "dev", "a", { kind: "switch", label: "a", ...exits[0] }),
+        edge("x2", "dev", "b", { kind: "switch", label: "b", ...exits[1] }),
+        edge("e2", "a", "e"),
+        edge("e3", "b", "e"),
+      ],
+    );
+  }
+  const advisories = (workflow: Workflow) =>
+    (validateWorkflow(workflow).warnings ?? []).filter((item) => item.code === "SWITCHER_NOT_EXACTLY_ONE");
+
+  it("accepts a condition in plain words on a switch exit", () => {
+    const workflow = switcher([{ condition: "the tests pass" }, {}]);
+    expect(codesIn(workflow)).not.toContain(WORKFLOWNER_VALIDATION_CODES.INVALID_CONDITION);
+    expect(advisories(workflow)).toEqual([]);
+  });
+
+  it("still rejects plain words on any other kind of connection", () => {
+    const workflow = switcher([{ condition: "the tests pass", kind: "next" }, { kind: "next" }]);
+    expect(codesIn(workflow)).toContain(WORKFLOWNER_VALIDATION_CODES.INVALID_CONDITION);
+  });
+
+  it("warns when two exits have no condition", () => {
+    expect(advisories(switcher([{}, {}]))).toEqual([
+      expect.objectContaining({
+        nodeId: "dev",
+        message: "Implement: Two exits have no condition — only one can be the otherwise path.",
+      }),
+    ]);
+  });
+
+  it("warns when the otherwise exit is not the last one", () => {
+    expect(advisories(switcher([{}, { condition: "the tests fail" }]))[0]?.message).toBe(
+      "Implement: The otherwise exit must be the last one.",
+    );
+  });
+});

@@ -5443,6 +5443,39 @@ button.state-chip {
   font-size: 11.5px;
 }
 
+/* ANT-165 · the switcher in the inspector's Outputs */
+.add-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.add-switch i {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  background: #444141;
+  transform: rotate(45deg);
+}
+
+.switch-warn {
+  margin: 9px 0 0;
+  padding: 8px 10px;
+  border-left: 3px solid #d8a21a;
+  border-radius: 7px;
+  background: #fdf8ec;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #8a6a08;
+}
+
+.switch-note {
+  margin: 9px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #8a8584;
+}
+
 .connection-ends {
   display: flex;
   align-items: center;

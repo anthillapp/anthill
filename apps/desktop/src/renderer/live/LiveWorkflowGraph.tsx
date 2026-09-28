@@ -19,8 +19,12 @@ import {
   ZOOM_MAX,
   ZOOM_MIN,
   ZOOM_STEP,
+  SWITCH_GLYPH_PATHS,
+  SWITCH_HUB_RADIUS,
   blockRect,
   buildCanvasModel,
+  switchGlyphTransform,
+  switchStemPath,
   useDisplayLayout,
   useWheelZoom,
   zoomAbout,
@@ -428,6 +432,34 @@ export function LiveWorkflowGraph({
     [workflow, view, boundaryKind, endsReached],
   );
 
+  /** How each connection is drawn, keyed by its id. */
+  const toneOf = useMemo(() => {
+    const tones = new Map<string, EdgeTone>();
+    for (const edge of workflow.edges) {
+      tones.set(edge.id, edgeTone(view, edge.source, edge.target, boundaryKind, delivering, joins, endsReached));
+    }
+    return tones;
+  }, [workflow, view, boundaryKind, delivering, joins, endsReached]);
+
+  /*
+    Steps a switcher chose against (ANT-165). It takes exactly one path, once,
+    so once one of its fingers is taken the targets of the others will not be
+    reached from it — "Not reached" before the session ends, not "Waiting its
+    turn". Only a step every way into which was such a finger: one that
+    something else still leads to may yet be reached.
+  */
+  const passedBy = useMemo(() => {
+    const untaken = new Set<string>();
+    for (const shape of model.switchers) {
+      if (!shape.outputIds.some((id) => (toneOf.get(id) ?? "idle") !== "idle")) continue;
+      for (const id of shape.outputIds) if ((toneOf.get(id) ?? "idle") === "idle") untaken.add(id);
+    }
+    const targets = new Set<string>();
+    for (const edge of workflow.edges) if (untaken.has(edge.id)) targets.add(edge.target);
+    for (const edge of workflow.edges) if (!untaken.has(edge.id)) targets.delete(edge.target);
+    return targets;
+  }, [model.switchers, toneOf, workflow.edges]);
+
   const bounds = useMemo(() => {
     const rects = workflow.nodes.map((node) => blockRect(node));
     if (rects.length === 0) return { x: 0, y: 0, w: 800, h: 400 };
@@ -589,21 +621,45 @@ export function LiveWorkflowGraph({
       <g transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.scale})`}>
       {model.connected.map((path) => {
         const edge = workflow.edges.find((item) => item.id === path.output.id);
-        const target = edge?.target ?? "";
-        const tone = edgeTone(view, path.nodeId, target, boundaryKind, delivering, joins, endsReached);
+        const tone = toneOf.get(path.output.id) ?? "idle";
         const style = EDGE_TONE[tone];
+        // A switcher's finger is one alternative of one path: thin, and a
+        // little heavier once it is the one taken (ANT-165).
+        const width = path.switcher ? (tone === "idle" ? 1.25 : 1.75) : style.width;
         return (
           <path
             key={`${path.nodeId}-${path.output.id}`}
             {...(edge ? { "data-edge": edge.id } : {})}
-            className={`live-edge tone-${tone}`}
+            className={`live-edge tone-${tone}${path.switcher ? " live-finger" : ""}`}
             d={path.geometry.path}
             fill="none"
             stroke={style.stroke}
-            strokeWidth={style.width}
+            strokeWidth={width}
             {...(style.dash ? { strokeDasharray: style.dash } : {})}
             markerEnd={`url(#live-arrow${tone === "idle" ? "" : `-${tone}`})`}
           />
+        );
+      })}
+
+      {/* Over the fingers, as on the Workflow canvas: grey until the agent
+          chose, then green — the choice was made, whichever way it went. */}
+      {model.switchers.map((shape) => {
+        const chosen = shape.outputIds.some((id) => (toneOf.get(id) ?? "idle") !== "idle");
+        const stroke = chosen ? "#2f8f5f" : "#bab6b6";
+        return (
+          <g
+            key={`switcher-${shape.nodeId}`}
+            className={`live-switcher${chosen ? " is-taken" : ""}`}
+            data-switcher={shape.nodeId}
+          >
+            <path d={switchStemPath(shape)} stroke={stroke} strokeWidth={chosen ? 3.75 : 3} strokeLinecap="round" fill="none" />
+            <circle cx={shape.hub.x} cy={shape.hub.y} r={SWITCH_HUB_RADIUS} fill="#ffffff" stroke={stroke} strokeWidth={2.5} />
+            <g transform={switchGlyphTransform(shape.hub)}>
+              {SWITCH_GLYPH_PATHS.map((d) => (
+                <path key={d} d={d} stroke={stroke} strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+              ))}
+            </g>
+          </g>
         );
       })}
 
@@ -615,7 +671,8 @@ export function LiveWorkflowGraph({
           ? boundaryState(view, node, sessionState, endsReached)
           : (block?.state ?? "queued");
         const style = RUN_STATE[state];
-        const label = state === "queued" && over && !structural ? "Not reached" : style.label;
+        const label =
+          state === "queued" && (over || passedBy.has(node.id)) && !structural ? "Not reached" : style.label;
         const selected = selectedBlockId === node.id;
         const passes = block?.passes ?? 0;
 

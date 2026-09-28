@@ -72,7 +72,7 @@ export type EditOp =
       /** Existing id, or the ref of a block this proposal added. */
       source: string;
       target: string;
-      kind?: "next" | "rework" | "question";
+      kind?: "next" | "rework" | "question" | "switch";
       label?: string;
       condition?: string;
     }
@@ -82,7 +82,7 @@ export type EditOp =
       edgeId: string;
       label?: string;
       condition?: string;
-      kind?: "next" | "rework" | "question";
+      kind?: "next" | "rework" | "question" | "switch";
     };
 
 export type EditProposal = {
@@ -132,7 +132,7 @@ const OP_NAMES = new Set([
   "update-connection",
 ]);
 
-const EDGE_KINDS = new Set(["next", "rework", "question"]);
+const EDGE_KINDS = new Set(["next", "rework", "question", "switch"]);
 const BLOCK_TYPES = new Set(["agent", "approval", "condition"]);
 
 /** The first JSON object in a reply, tolerating prose and fences around it. */
@@ -239,7 +239,7 @@ function validateOp(value: unknown, index: number): { ok: true; op: EditOp } | {
           op: "connect",
           source,
           target,
-          ...(kind ? { kind: kind as "next" | "rework" | "question" } : {}),
+          ...(kind ? { kind: kind as "next" | "rework" | "question" | "switch" } : {}),
           ...(str(value.label) ? { label: str(value.label) as string } : {}),
           ...(str(value.condition) ? { condition: str(value.condition) as string } : {}),
         },
@@ -262,7 +262,7 @@ function validateOp(value: unknown, index: number): { ok: true; op: EditOp } | {
         op: {
           op: "update-connection",
           edgeId,
-          ...(kind ? { kind: kind as "next" | "rework" | "question" } : {}),
+          ...(kind ? { kind: kind as "next" | "rework" | "question" | "switch" } : {}),
           ...(str(value.label) !== undefined ? { label: str(value.label) as string } : {}),
           ...(str(value.condition) !== undefined ? { condition: str(value.condition) as string } : {}),
         },

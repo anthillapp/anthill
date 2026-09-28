@@ -10,7 +10,9 @@ import type { Workflow, WorkflowNode } from "@anthill/workflow-schema";
 import {
   agentConfig,
   actionDefinition,
+  isSwitcher,
   outputsOf,
+  switcherProblem,
   type ActionCategory,
   type BlockOutput,
 } from "@anthill/workflow";
@@ -27,6 +29,7 @@ import {
   route,
   unconnectedStub,
   type CurveGeometry,
+  type EntryPoint,
   type Point,
   type PortPoint,
   type Rect,
@@ -112,6 +115,53 @@ export const OUTCOME_STYLES: Record<BlockOutput["kind"], OutcomeStyle> = {
   rework: { color: "#d8a21a", dash: "7 5", width: 1.75 },
   question: { color: "#56aee0", dash: "2 5", width: 2 },
   stop: { color: "#ec3013", dash: "7 5", width: 1.75 },
+  // A switcher's fingers: thin and solid. Thin because each is one alternative
+  // of one path; the stem carries the weight (ANT-165).
+  switch: { color: "#444141", width: 1.25 },
+};
+
+/*
+  The switcher (ANT-165): a block's two or more connected `switch` exits drawn
+  as one heavy stem into a hub, and a thin finger from the hub to each target.
+  Heavy to light is deliberate — one path that parts into alternatives — and
+  the hub is drawn over the fingers' starts, or it reads as several arrows
+  that happen to begin at the same spot, which is what this replaces.
+*/
+
+/** How far the hub sits from where the stem leaves the block. */
+export const SWITCH_STEM = 40;
+export const SWITCH_HUB_RADIUS = 12;
+export const SWITCH_INK = "#444141";
+/** Stem and hub when the exits do not decide exactly one path. */
+export const SWITCH_WARN = { stroke: "#d8a21a", fill: "#fdf8ec" };
+
+/** Lucide `split`, on its 24-unit grid. Turned to open rightward when drawn. */
+export const SWITCH_GLYPH_PATHS = [
+  "M16 3h5v5",
+  "M8 3H3v5",
+  "M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3",
+  "m15 9 6-6",
+] as const;
+
+/** Places the 24-unit glyph as 14 units inside the hub, opening rightward. */
+export function switchGlyphTransform(hub: Point): string {
+  return `translate(${hub.x - 7} ${hub.y - 7}) rotate(90 7 7) scale(0.5833)`;
+}
+
+/** The stem, from its port to the hub's rim. */
+export function switchStemPath(shape: { port: Point; hub: Point }): string {
+  return `M ${shape.port.x} ${shape.port.y} L ${shape.hub.x - SWITCH_HUB_RADIUS} ${shape.hub.y}`;
+}
+
+export type SwitcherShape = {
+  nodeId: string;
+  /** Where the stem leaves the block — the switcher's one port dot. */
+  port: PortPoint;
+  hub: Point;
+  /** The exits it chooses between, in port order. */
+  outputIds: string[];
+  /** Why "exactly one" does not hold, when it does not. */
+  problem?: string;
 };
 
 export function blockSize(node: WorkflowNode): { w: number; h: number } {
@@ -151,6 +201,8 @@ export type ConnectedPath = {
   label: Point;
   style: OutcomeStyle;
   port: PortPoint;
+  /** Set on a switcher's finger: the block whose switcher it leaves from its hub. */
+  switcher?: string;
 };
 
 export type PendingPath = {
@@ -168,6 +220,7 @@ export type CanvasModel = {
   rects: Map<string, Rect>;
   connected: ConnectedPath[];
   pending: PendingPath[];
+  switchers: SwitcherShape[];
 };
 
 /**
@@ -194,6 +247,13 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
   */
   const placed: Rect[] = [];
   const pending: PendingPath[] = [];
+  const switchers: SwitcherShape[] = [];
+
+  /** A block's exits that leave from a switcher's hub rather than a port of their own. */
+  const fingersOf = (outputs: readonly BlockOutput[]): Set<string> =>
+    isSwitcher(outputs)
+      ? new Set(outputs.filter((output) => output.kind === "switch" && output.target !== null).map((output) => output.id))
+      : new Set();
 
   /*
     A loop back to a step earlier in the same row, with nothing placed by
@@ -212,8 +272,10 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
     for (const node of workflow.nodes) {
       const rect = rects.get(node.id);
       if (!rect) continue;
-      for (const output of outputsOf(workflow, node.id)) {
-        if (output.target === null || output.port || output.anchor) continue;
+      const outputs = outputsOf(workflow, node.id);
+      const fingers = fingersOf(outputs);
+      for (const output of outputs) {
+        if (output.target === null || output.port || output.anchor || fingers.has(output.id)) continue;
         const targetRect = rects.get(output.target);
         if (!targetRect || !sameRow(rect, targetRect)) continue;
         if (portSideToward(rect, targetRect) !== "left") continue;
@@ -269,7 +331,8 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
     // outputs and one rework output shows two ports on the right and one on
     // the left rather than three on the right.
     const under = (output: (typeof outputs)[number]) => loopsUnder.get(`${node.id}:${output.id}`);
-    const automatic = outputs.filter((output) => !output.port && !under(output));
+    const fingers = fingersOf(outputs);
+    const automatic = outputs.filter((output) => !output.port && !under(output) && !fingers.has(output.id));
     const sideOf = new Map<(typeof outputs)[number], "left" | "right">();
     for (const output of automatic) {
       const targetRect = output.target === null ? undefined : rects.get(output.target);
@@ -278,15 +341,55 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
       sideOf.set(output, targetRect ? (portSideToward(rect, targetRect) as "left" | "right") : "right");
     }
 
+    /*
+      A switcher takes one slot on the right edge, the middle one, and the
+      block's other forward ports spread either side of it — so a plain
+      arrow never leaves from under the stem. Alone, that is the right edge's
+      centre.
+    */
+    const rightSharing = automatic.filter((item) => sideOf.get(item) === "right");
+    const stemSlot = Math.floor(rightSharing.length / 2);
+    const rightSlots = rightSharing.length + (fingers.size > 0 ? 1 : 0);
+    const slotOf = (output: BlockOutput, side: "left" | "right", sharing: readonly BlockOutput[]) => {
+      const at = sharing.indexOf(output);
+      if (side !== "right" || fingers.size === 0) return { index: at, count: sharing.length };
+      return { index: at >= stemSlot ? at + 1 : at, count: rightSlots };
+    };
+
+    let switcher: SwitcherShape | undefined;
+    if (fingers.size > 0) {
+      const port = portPoint(rect, stemSlot, rightSlots, "right");
+      const problem = switcherProblem(outputs);
+      switcher = {
+        nodeId: node.id,
+        port,
+        hub: { x: port.x + SWITCH_STEM, y: port.y },
+        outputIds: [...fingers],
+        ...(problem ? { problem } : {}),
+      };
+      switchers.push(switcher);
+      // Nothing else's label may sit on the stem or the hub.
+      placed.push({
+        left: port.x,
+        top: port.y - SWITCH_HUB_RADIUS,
+        w: SWITCH_STEM + SWITCH_HUB_RADIUS,
+        h: SWITCH_HUB_RADIUS * 2,
+      });
+    }
+
     outputs.forEach((output, index) => {
       const side = sideOf.get(output) ?? "right";
       const sharing = automatic.filter((item) => sideOf.get(item) === side);
       const loop = under(output);
-      const port = output.port
-        ? portFromAnchor(rect, output.port)
-        : loop
-          ? portFromAnchor(rect, { u: loop.leave, v: 1 })
-          : portPoint(rect, sharing.indexOf(output), sharing.length, side);
+      const slot = slotOf(output, side, sharing);
+      const finger = switcher && fingers.has(output.id) ? switcher : undefined;
+      const port: PortPoint = finger
+        ? { ...finger.hub, side: "right" }
+        : output.port
+          ? portFromAnchor(rect, output.port)
+          : loop
+            ? portFromAnchor(rect, { u: loop.leave, v: 1 })
+            : portPoint(rect, slot.index, slot.count, side);
       const style = OUTCOME_STYLES[output.kind];
 
       if (output.target === null) {
@@ -315,7 +418,10 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
         blocks,
       };
       let landing = entryPoint(targetRect, port, output.anchor ?? (loop ? { u: loop.arrive, v: 1 } : undefined));
-      let geometry = route(port, landing, options);
+      // A finger to the block in line with the hub is a straight line: in the
+      // short gap after the hub a curve kinks backwards.
+      const inLine = Boolean(finger) && !output.bend && landing.side === "left" && Math.abs(landing.y - port.y) < 4;
+      let geometry = inLine ? straight(port, landing) : route(port, landing, options);
       if (loop && !output.bend) {
         const below = loopBelow(port, landing, loop.depth, output.routing ?? "curved");
         // Unless something sits under the row in the way; then the router's
@@ -343,11 +449,15 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
           geometry = beside;
         }
       }
-      const { halfW, halfH } = labelHalfSize(output.label || " ", {
-        quiet: output.kind === "next" && !output.condition,
-        hasCondition: Boolean(output.condition),
-        ...(output.condition ? { condition: output.condition } : {}),
-      });
+      // A finger's label is the exit's name alone; its condition is read in
+      // the inspector, not on the canvas.
+      const { halfW, halfH } = finger
+        ? labelHalfSize(output.label || " ")
+        : labelHalfSize(output.label || " ", {
+            quiet: output.kind === "next" && !output.condition,
+            hasCondition: Boolean(output.condition),
+            ...(output.condition ? { condition: output.condition } : {}),
+          });
 
       // The bend handle sits at the middle of the line, which is also where a
       // label would like to be. Treat it as something to keep clear of, so the
@@ -380,11 +490,22 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
         label,
         style,
         port,
+        ...(finger ? { switcher: node.id } : {}),
       });
     });
   }
 
-  return { rects, connected, pending };
+  return { rects, connected, pending, switchers };
+}
+
+/** A straight line between two points, in the shape the router returns. */
+function straight(from: PortPoint, to: EntryPoint): CurveGeometry {
+  return {
+    path: `M ${from.x} ${from.y} L ${to.x} ${to.y}`,
+    mid: { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 },
+    from,
+    to,
+  };
 }
 
 /**

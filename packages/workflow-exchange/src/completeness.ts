@@ -123,6 +123,8 @@ const ASKS: Record<string, string> = {
     "What should this step hand back when it is done?",
   [WORKFLOWNER_ADVISORY_CODES.STEP_NO_SUCCESS_CRITERIA]:
     "How would you tell this step went well rather than badly?",
+  [WORKFLOWNER_ADVISORY_CODES.SWITCHER_NOT_EXACTLY_ONE]:
+    "Of the paths this step chooses between, which one is taken when none of the others applies?",
 
   // The handover's own
   [EXCHANGE_PROBLEM_CODES.HANDOVER_NO_DONE_CRITERIA]:

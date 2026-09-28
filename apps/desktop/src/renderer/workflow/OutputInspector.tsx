@@ -224,85 +224,114 @@ export function OutputInspector({
         </p>
       ) : null}
 
-      <span className="field-label">Follow this connection when</span>
-      <div className="two-up" style={{ marginTop: 4, marginBottom: 8 }}>
-        <select
-          value={parts.source}
-          onChange={(event) => setParts({ source: event.target.value })}
-        >
-          <option value="">always</option>
-          {agents.map((agent) => (
-            <option key={agent.id} value={agentSlug(agent)}>
-              {agentSlug(agent)}
-            </option>
-          ))}
-        </select>
-
-        <input
-          value={parts.field}
-          placeholder="field"
-          list="condition-fields"
-          disabled={!parts.source}
-          onChange={(event) => setParts({ field: event.target.value })}
-        />
-        <datalist id="condition-fields">
-          <option value="decision" />
-          <option value="status" />
-          <option value="summary" />
-        </datalist>
-
-        <select
-          value={parts.operator}
-          disabled={!parts.source}
-          onChange={(event) => setParts({ operator: event.target.value as "==" | "!=" })}
-        >
-          <option value="==">is</option>
-          <option value="!=">is not</option>
-        </select>
-
-        <input
-          value={parts.value}
-          placeholder="value"
-          list="condition-values"
-          disabled={!parts.source}
-          onChange={(event) => setParts({ value: event.target.value })}
-        />
-        <datalist id="condition-values">
-          {(sourceAction?.decisionValues ?? []).map((value) => (
-            <option key={value} value={value} />
-          ))}
-        </datalist>
-      </div>
-
-      <div
-        className="prompt"
-        style={{ maxHeight: "none", marginBottom: 12, padding: "9px 11px" }}
-      >
-        {output.condition ?? "always – this connection is followed whenever the step finishes"}
-      </div>
-
-      {sourceAction?.decisionValues?.length ? (
-        <p className="hint">
-          Quick pick:{" "}
-          {sourceAction.decisionValues.map((value) => (
-            <button
-              key={value}
-              className="link"
-              style={{ marginRight: 8 }}
-              onClick={() =>
-                setParts({
-                  source: sourceAgent ? agentSlug(sourceAgent) : parts.source,
-                  field: "decision",
-                  operator: "==",
-                  value,
-                })
+      {output.kind === "switch" ? (
+        /*
+          A switcher's exits are tried in order, and a condition may be an
+          expression or plain words: the generated workflow says either as
+          written (ANT-165). The one left empty is the otherwise path.
+        */
+        <>
+          <label className="field">
+            <span>Take this path when</span>
+            <input
+              value={output.condition ?? ""}
+              placeholder={'reviewer.decision == "approved", or in plain words'}
+              onChange={(event) =>
+                onChange(
+                  patchOutput(workflow, nodeId, outputId, {
+                    condition: event.target.value.trim() ? event.target.value : undefined,
+                  }),
+                )
               }
+            />
+          </label>
+          <p className="hint">
+            Leave it empty on the last exit – that one is the otherwise path.
+          </p>
+        </>
+      ) : (
+        <>
+          <span className="field-label">Follow this connection when</span>
+          <div className="two-up" style={{ marginTop: 4, marginBottom: 8 }}>
+            <select
+              value={parts.source}
+              onChange={(event) => setParts({ source: event.target.value })}
             >
-              {value}
-            </button>
-          ))}
-        </p>
-      ) : null}
+              <option value="">always</option>
+              {agents.map((agent) => (
+                <option key={agent.id} value={agentSlug(agent)}>
+                  {agentSlug(agent)}
+                </option>
+              ))}
+            </select>
+
+            <input
+              value={parts.field}
+              placeholder="field"
+              list="condition-fields"
+              disabled={!parts.source}
+              onChange={(event) => setParts({ field: event.target.value })}
+            />
+            <datalist id="condition-fields">
+              <option value="decision" />
+              <option value="status" />
+              <option value="summary" />
+            </datalist>
+
+            <select
+              value={parts.operator}
+              disabled={!parts.source}
+              onChange={(event) => setParts({ operator: event.target.value as "==" | "!=" })}
+            >
+              <option value="==">is</option>
+              <option value="!=">is not</option>
+            </select>
+
+            <input
+              value={parts.value}
+              placeholder="value"
+              list="condition-values"
+              disabled={!parts.source}
+              onChange={(event) => setParts({ value: event.target.value })}
+            />
+            <datalist id="condition-values">
+              {(sourceAction?.decisionValues ?? []).map((value) => (
+                <option key={value} value={value} />
+              ))}
+            </datalist>
+          </div>
+
+          <div
+            className="prompt"
+            style={{ maxHeight: "none", marginBottom: 12, padding: "9px 11px" }}
+          >
+            {output.condition ?? "always – this connection is followed whenever the step finishes"}
+          </div>
+
+          {sourceAction?.decisionValues?.length ? (
+            <p className="hint">
+              Quick pick:{" "}
+              {sourceAction.decisionValues.map((value) => (
+                <button
+                  key={value}
+                  className="link"
+                  style={{ marginRight: 8 }}
+                  onClick={() =>
+                    setParts({
+                      source: sourceAgent ? agentSlug(sourceAgent) : parts.source,
+                      field: "decision",
+                      operator: "==",
+                      value,
+                    })
+                  }
+                >
+                  {value}
+                </button>
+              ))}
+            </p>
+          ) : null}
+        </>
+      )}
 
       <span className="field-label">Line</span>
       <div className="segmented">

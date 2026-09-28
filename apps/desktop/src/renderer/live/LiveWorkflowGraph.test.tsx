@@ -1096,3 +1096,93 @@ describe("where parallel branches meet", () => {
     expect(tone("b-test")).toContain("tone-live");
   });
 });
+
+/*
+  ANT-165. A switcher takes exactly one path, once: its stem and hub light
+  once the agent chose, the taken finger lights, the others stay grey, and
+  the step down an untaken finger reads "Not reached".
+*/
+describe("a switcher in a live session", () => {
+  const gate: Workflow = {
+    id: "workflow-3",
+    name: "Gate paths",
+    version: "1",
+    target: "claude-code",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {}, position: { x: 0, y: 30 } },
+      { id: "read", type: "agent", name: "Read the request", config: { actionKind: "agent-step", task: "Read" }, position: { x: 200, y: 0 } },
+      { id: "with", type: "agent", name: "Note with codename", config: { actionKind: "agent-step", task: "With" }, position: { x: 520, y: 0 } },
+      { id: "without", type: "agent", name: "Note without codename", config: { actionKind: "agent-step", task: "Without" }, position: { x: 520, y: 240 } },
+      { id: "end", type: "end", name: "Done", config: {}, position: { x: 840, y: 30 } },
+    ],
+    edges: [
+      { id: "to-read", source: "start", target: "read" },
+      { id: "approved", source: "read", target: "with", kind: "switch", label: "approved", condition: "the codename is approved" },
+      { id: "declined", source: "read", target: "without", kind: "switch", label: "declined" },
+      { id: "with-end", source: "with", target: "end" },
+      { id: "without-end", source: "without", target: "end" },
+    ],
+    metadata: { workflow: { formatVersion: 4 } },
+  };
+
+  const marker = (blockId: string, seq: number, at: string): ObservationEvent => ({
+    runId: "ANT-1",
+    seq,
+    at,
+    recordedAt: at,
+    cli: "claude-code",
+    source: "transcript",
+    channel: "claude-code:transcript",
+    kind: "step.marker",
+    title: blockId,
+    blockId,
+  });
+
+  function draw(events: ObservationEvent[]) {
+    const view = foldLiveSession(gate, run, withWork(events));
+    const { container, unmount } = render(
+      <LiveWorkflowGraph workflow={gate} view={view} sessionState={run.state} onSelect={vi.fn()} />,
+    );
+    const edge = (id: string) => container.querySelector(`[data-edge="${id}"]`)!;
+    const switcher = container.querySelector('[data-switcher="read"]')!;
+    const state = (name: string) =>
+      [...container.querySelectorAll(".live-node")]
+        .find((node) => node.querySelector(".live-node-name")?.textContent === name)
+        ?.querySelector(".live-node-state")?.textContent;
+    return { view, edge, switcher, state, unmount };
+  }
+
+  it("stays grey until the agent chose", () => {
+    const { switcher, edge, state, unmount } = draw([marker("read", 1, "2026-08-29T10:00:05.000Z")]);
+    expect(switcher.getAttribute("class")).toBe("live-switcher");
+    expect(switcher.querySelector("circle")!.getAttribute("stroke")).toBe("#bab6b6");
+    expect(edge("approved").getAttribute("stroke-width")).toBe("1.25");
+    expect(state("Note without codename")).toBe("Waiting its turn");
+    unmount();
+  });
+
+  it("lights the stem, the hub and the taken finger, and leaves the others grey", () => {
+    const { view, switcher, edge, state, unmount } = draw([
+      marker("read", 1, "2026-08-29T10:00:05.000Z"),
+      marker("without", 2, "2026-08-29T10:00:10.000Z"),
+    ]);
+    expect(switcher.getAttribute("class")).toContain("is-taken");
+    const stem = switcher.querySelector("path")!;
+    expect(stem.getAttribute("stroke")).toBe("#2f8f5f");
+    expect(stem.getAttribute("stroke-width")).toBe("3.75");
+    expect(edge("declined").getAttribute("class")).not.toContain("tone-idle");
+    expect(edge("declined").getAttribute("stroke-width")).toBe("1.75");
+    expect(edge("approved").getAttribute("class")).toContain("tone-idle");
+    expect(edge("approved").getAttribute("stroke-width")).toBe("1.25");
+    expect(state("Note with codename")).toBe("Not reached");
+    // The path it chose is the plan, not a detour.
+    expect(view.detours).toEqual([]);
+    unmount();
+  });
+
+  it("draws the hub over the fingers' starts", () => {
+    const { switcher, edge, unmount } = draw([]);
+    expect(edge("approved").compareDocumentPosition(switcher) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    unmount();
+  });
+});

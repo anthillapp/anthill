@@ -27,7 +27,7 @@ import {
   approvalConfig,
   slugify,
 } from "./node-config.js";
-import { OUTCOME_LABELS, unconnectedOutputs } from "./outputs.js";
+import { OUTCOME_LABELS, outputsOf, switcherProblem, unconnectedOutputs } from "./outputs.js";
 
 export {
   WORKFLOWNER_NODE_TYPES,
@@ -102,6 +102,8 @@ export const WORKFLOWNER_ADVISORY_CODES = {
   AGENT_NO_DESCRIPTION: "AGENT_NO_DESCRIPTION",
   STEP_NO_EXPECTED_OUTPUT: "STEP_NO_EXPECTED_OUTPUT",
   STEP_NO_SUCCESS_CRITERIA: "STEP_NO_SUCCESS_CRITERIA",
+  /** A switcher whose exits do not decide exactly one path (ANT-165). */
+  SWITCHER_NOT_EXACTLY_ONE: "SWITCHER_NOT_EXACTLY_ONE",
 } as const;
 
 export type WorkflowAdvisoryCode =
@@ -302,11 +304,15 @@ export function validateWorkflow(workflow: Workflow): ValidationResult {
     if (edge.condition !== undefined) {
       const parsed = parseEdgeCondition(edge.condition);
       if (!parsed.ok) {
-        push(
-          WORKFLOWNER_VALIDATION_CODES.INVALID_CONDITION,
-          `Condition is not valid: ${parsed.error}`,
-          { edgeId: edge.id },
-        );
+        // A switcher's exit may say when it is taken in plain words
+        // (ANT-165); only an expression has a grammar to break.
+        if (edge.kind !== "switch") {
+          push(
+            WORKFLOWNER_VALIDATION_CODES.INVALID_CONDITION,
+            `Condition is not valid: ${parsed.error}`,
+            { edgeId: edge.id },
+          );
+        }
       } else {
         // The first segment names the role whose result the branch reads.
         // Renaming a role silently orphans conditions written against the old
@@ -596,6 +602,15 @@ export function validateWorkflow(workflow: Workflow): ValidationResult {
       WORKFLOWNER_ADVISORY_CODES.WORKFLOW_NO_GOAL,
       "The brief has no goal, so the generated prompt never states what success looks like.",
     );
+  }
+
+  // An advisory, not an error: the compiler still writes the branch, but an
+  // agent reading two otherwise paths, or one ahead of the rest, has to guess.
+  for (const node of workflow.nodes) {
+    const problem = switcherProblem(outputsOf(workflow, node.id));
+    if (problem) {
+      advise(WORKFLOWNER_ADVISORY_CODES.SWITCHER_NOT_EXACTLY_ONE, `${node.name}: ${problem}`, { nodeId: node.id });
+    }
   }
 
   return { valid: errors.length === 0, errors, warnings };

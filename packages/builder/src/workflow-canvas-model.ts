@@ -268,6 +268,7 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
       const { halfW, halfH } = labelHalfSize(output.label || " ", {
         quiet: output.kind === "next" && !output.condition,
         hasCondition: Boolean(output.condition),
+        ...(output.condition ? { condition: output.condition } : {}),
       });
 
       // The bend handle sits at the middle of the line, which is also where a

@@ -223,6 +223,16 @@ describe("labelHalfSize", () => {
       labelHalfSize("x").halfH,
     );
   });
+
+  // ANT-195: "Tests passed" over `tester.result == "passed"` was sized by the
+  // name, and the condition ran under the steps beside it.
+  it("is as wide as its condition when that is the longer line", () => {
+    const named = labelHalfSize("Tests passed", { hasCondition: true });
+    const full = labelHalfSize("Tests passed", { condition: 'tester.result == "passed"' });
+    expect(full.halfW).toBeGreaterThan(named.halfW);
+    expect(full.halfW * 2).toBeGreaterThanOrEqual('tester.result == "passed"'.length * 6.3);
+    expect(full.halfH).toBe(named.halfH);
+  });
 });
 
 describe("anchorFromPoint", () => {

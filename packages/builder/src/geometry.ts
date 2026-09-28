@@ -769,12 +769,19 @@ export function bendFromPoint(
  */
 export function labelHalfSize(
   text: string,
-  options: { quiet?: boolean; hasCondition?: boolean } = {},
+  options: { quiet?: boolean; hasCondition?: boolean; condition?: string } = {},
 ): { halfW: number; halfH: number } {
   const quiet = options.quiet ?? false;
+  const name = (quiet ? 8 : 14) + text.length * (quiet ? 3.1 : 3.5);
+  // The condition is a second line under the name, in a smaller monospace
+  // face, and often the longer of the two: `tester.result == "passed"` under
+  // "Tests passed". Sized by the name alone, the label was placed where only
+  // its middle fitted and the rest of the condition ran under the steps on
+  // either side (ANT-195).
+  const condition = options.condition ? 10 + options.condition.length * 3.3 : 0;
   return {
-    halfW: (quiet ? 8 : 14) + text.length * (quiet ? 3.1 : 3.5),
-    halfH: quiet ? 11 : options.hasCondition ? 22 : 15,
+    halfW: Math.max(name, condition),
+    halfH: quiet ? 11 : options.hasCondition || options.condition ? 22 : 15,
   };
 }
 

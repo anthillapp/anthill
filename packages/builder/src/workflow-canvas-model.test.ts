@@ -521,6 +521,7 @@ describe("labels on a template's connections", () => {
           const { halfW, halfH } = labelHalfSize(path.output.label, {
             quiet: path.output.kind === "next" && !path.output.condition,
             hasCondition: Boolean(path.output.condition),
+            ...(path.output.condition ? { condition: path.output.condition } : {}),
           });
           return { id: path.output.id, x: path.label.x, y: path.label.y, halfW, halfH };
         });

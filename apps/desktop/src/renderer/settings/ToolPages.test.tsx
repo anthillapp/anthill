@@ -79,6 +79,15 @@ describe("the Coding tools page", () => {
     expect(screen.getByText(/Per-agent models: no, one per session/)).toBeTruthy();
   });
 
+  // ANT-181: Pi is observed passively, with nothing to set up.
+  it("says Pi's live observation is passive, not unavailable", async () => {
+    stub();
+    open("Coding tools");
+    const note = await screen.findByText(/Live observation: passive – reads its session file/);
+    expect(note.textContent).toContain("Per-agent models: no, one per session");
+    expect(note.textContent).not.toContain("not available");
+  });
+
   it("connects through the same sheet, worded for a page with no agent behind it", async () => {
     stub();
     open("Coding tools");

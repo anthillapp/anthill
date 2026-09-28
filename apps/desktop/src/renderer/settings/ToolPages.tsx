@@ -105,7 +105,16 @@ export function CodingToolsPage() {
           const connection = connections.of(target);
           const badge = BADGE[connection.status];
           const setup = hooks?.harnesses.find((item) => item.id === target);
-          const hook = setup && setup.cliAvailable ? CHIP[hookState(setup)].label : undefined;
+          // Pi has no hooks: Anthill follows the session file it writes, which
+          // is on with nothing to set up — the Prompt flow's own words. The
+          // hook status never names it, and "not available" was the opposite
+          // of true (ANT-181).
+          const hook =
+            target === "pi"
+              ? "passive – reads its session file"
+              : setup && setup.cliAvailable
+                ? CHIP[hookState(setup)].label
+                : undefined;
           const version = connection.info?.version;
 
           return (

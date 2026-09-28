@@ -248,6 +248,18 @@ describe("privacy controls", () => {
     expect(screen.queryByRole("switch", { name: "Native crash reports" })).toBeNull();
   });
 
+  // ANT-156: the public description of what is collected, and how to get a
+  // new identifier.
+  it("links the privacy notes by name, and says how to get a new identifier", async () => {
+    const api = stub();
+    const openLink = vi.fn(async () => undefined);
+    (api as unknown as { openLink: typeof openLink }).openLink = openLink;
+    render(<PrivacyPage available />);
+    fireEvent.click(await screen.findByRole("button", { name: "Read the privacy notes" }));
+    expect(openLink).toHaveBeenCalledWith("privacy");
+    expect(screen.getByText(/turning it back on starts a new one/)).toBeTruthy();
+  });
+
   it("starts with sharing off and writes analytics consent only after a click", async () => {
     const api = stub();
     render(<PrivacyPage available />);

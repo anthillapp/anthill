@@ -335,7 +335,7 @@ export function PrivacyPage({ available = __ANTHILL_DIAGNOSTICS__ }: { available
     >
       <SettingRow
         label="Anonymous product analytics"
-        note="Sends a random app identifier and the names of these actions: opening Anthill, enabling analytics, opening or saving a workflow, and starting live observation. PostHog also receives the SDK name and version, and discards your IP address. No workflow content, prompts, paths, clicks, pageviews, or recordings. Turning this off removes the local identifier."
+        note="Sends a random app identifier and the names of these actions: opening Anthill, enabling analytics, opening or saving a workflow, and starting live observation. PostHog also receives the SDK name and version, and discards your IP address. No workflow content, prompts, paths, clicks, pageviews, or recordings. Turning this off removes the local identifier; turning it back on starts a new one."
       >
         <SettingSwitch
           on={settings?.analyticsEnabled === true}
@@ -372,6 +372,17 @@ export function PrivacyPage({ available = __ANTHILL_DIAGNOSTICS__ }: { available
           </SettingRow>
         </>
       )}
+      <SettingDivider />
+      {/* The public account of all this, which the switches above summarise
+          (ANT-156). Opened by name; main holds the address. */}
+      <SettingRow
+        label="What is collected"
+        note="Everything each switch sends, where it goes, and what is never collected."
+      >
+        <button type="button" className="set-link" onClick={() => void window.anthill.openLink?.("privacy")}>
+          Read the privacy notes
+        </button>
+      </SettingRow>
       {unsaved ? <p className="set-result" role="alert">This preference was not saved.</p> : null}
     </SettingGroup>
   );

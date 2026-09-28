@@ -550,6 +550,43 @@ describe("a finished run and a claim of work", () => {
     });
     expect(next.state).toBe("detected_live");
   });
+
+  /*
+    ANT-188. Claude Code prints the done line and goes on writing — the
+    closing reply, the turn ending, the Stop hook — all later than the line.
+    Each of them used to turn the finished run back into a live one, and no
+    second ending ever came, so it sat at Live until it was called lost.
+  */
+  it("stays finished through the rest of the turn that said so", () => {
+    let next = finished();
+    for (const s of [7, 9, 12]) {
+      next = applyEvidence(next, {
+        kind: "activity", sessionId: "sess-1", at: later(10 * 60_000 + s * 1000), resumes: false,
+      });
+    }
+    expect(next.state).toBe("completed");
+    expect(next.statusMessage).toContain("reported the work as finished");
+    // Still the freshest thing known about the session.
+    expect(next.lastObservedAt).toBe(later(10 * 60_000 + 12_000));
+  });
+
+  it("goes live again when the session is given more to do", () => {
+    const next = applyEvidence(finished(), {
+      kind: "activity", sessionId: "sess-1", at: later(15 * 60_000), resumes: true,
+    });
+    expect(next.state).toBe("detected_live");
+  });
+
+  it("does not move its freshness backwards for an ending read after later records", () => {
+    const live = applyEvidence(applyEvidence(run(), strongMatch), {
+      kind: "activity", sessionId: "sess-1", at: later(10 * 60_000 + 9_000),
+    });
+    const next = applyEvidence(live, {
+      kind: "completed", sessionId: "sess-1", channel: "claude-code:transcript", at: later(10 * 60_000),
+    });
+    expect(next.state).toBe("completed");
+    expect(next.lastObservedAt).toBe(later(10 * 60_000 + 9_000));
+  });
 });
 
 describe("reopening a run for another look", () => {

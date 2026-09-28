@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Workflow } from "@anthill/workflow-schema";
-import { addOutput } from "@anthill/workflow";
+import { WORKFLOW_TEMPLATES, addOutput } from "@anthill/workflow";
 
-import { PORT_OFFSET } from "./geometry";
+import { PORT_OFFSET, labelHalfSize } from "./geometry";
 import type { WorkflowNode } from "@anthill/workflow-schema";
 
 import {
@@ -308,11 +308,16 @@ describe("snapTarget", () => {
  * crossed the whole diagram.
  */
 describe("ports and the direction of their work", () => {
-  /** Review sends work back to Implement, which sits well behind it. */
+  /**
+   * Review sends work back to Implement, which sits well behind it and a row
+   * higher. (Behind it in the same row, the loop runs under the row instead —
+   * ANT-196, below.)
+   */
   function withRework(): Workflow {
     const base = makeWorkflow();
     return {
       ...base,
+      nodes: base.nodes.map((node) => (node.id === "a" ? { ...node, position: { x: 200, y: 0 } } : node)),
       edges: [...base.edges, { id: "e4", source: "b", target: "a", kind: "rework", label: "again" }],
     };
   }
@@ -427,5 +432,197 @@ describe("how large a control pill is", () => {
   it("still gives a step card its own fixed size", () => {
     const step = { id: "s", name: "A very long step name indeed", type: "agent", config: {} } as WorkflowNode;
     expect(blockSize(step)).toEqual(STEP_SIZE);
+  });
+});
+
+/*
+  ANT-194. A template's loop back along its row names the sides it leaves and
+  arrives at — the bottom of each — and the canvas never read them, so the
+  loop ran straight through the step it returns to and was hidden behind it.
+*/
+describe("a template's loop back along its row", () => {
+  for (const id of ["multi-agent-coordination", "brainstorm-to-workflow", "consult-adversarial-decide"]) {
+    it(`runs under the row, clear of every step, in ${id}`, () => {
+      const template = WORKFLOW_TEMPLATES.find((item) => item.id === id);
+      expect(template).toBeDefined();
+      const workflow = template!.build();
+      const model = buildCanvasModel(workflow);
+      const loop = model.connected.find((path) => path.output.kind === "rework");
+      expect(loop).toBeDefined();
+      const source = model.rects.get(loop!.nodeId)!;
+      const target = model.rects.get(loop!.output.target!)!;
+      expect(loop!.geometry.from.y).toBeGreaterThan(source.top + source.h);
+      expect(loop!.geometry.to.y).toBe(target.top + target.h);
+      // And its label is not under a step.
+      for (const rect of model.rects.values()) {
+        const inside =
+          loop!.label.x > rect.left && loop!.label.x < rect.left + rect.w &&
+          loop!.label.y > rect.top && loop!.label.y < rect.top + rect.h;
+        expect(inside).toBe(false);
+      }
+    });
+  }
+});
+
+/*
+  ANT-178, as the 0.8.3 QA saw it: the canvas assistant added a third branch
+  under the other two. The fork's labels read against the wrong lines —
+  "package B" beside the line to A — and the line to the third branch ran
+  behind the second.
+*/
+describe("a three-way fork stacked in one column", () => {
+  const step = (id: string, name: string, x: number, y: number): WorkflowNode => ({
+    id,
+    type: "agent",
+    name,
+    config: { actionKind: "agent-step" },
+    position: { x, y },
+  });
+  const fork: Workflow = {
+    id: "fork",
+    name: "Fork",
+    version: "1",
+    nodes: [
+      step("split", "Split the work", 200, 240),
+      step("a", "Build area A", 440, 120),
+      step("b", "Build area B", 440, 360),
+      step("c", "Build area C", 440, 480),
+    ],
+    edges: [
+      { id: "to-a", source: "split", target: "a", label: "package A" },
+      { id: "to-b", source: "split", target: "b", label: "package B" },
+      { id: "to-c", source: "split", target: "c", label: "package C" },
+    ],
+  };
+
+  it("keeps its labels in the order of the branches they name", () => {
+    const model = buildCanvasModel(fork);
+    const y = (id: string) => model.connected.find((path) => path.output.id === id)!.label.y;
+    expect(y("to-a")).toBeLessThan(y("to-b"));
+    expect(y("to-b")).toBeLessThan(y("to-c"));
+  });
+
+  it("goes into the lowest branch from the side, not behind the one above it", () => {
+    const model = buildCanvasModel(fork);
+    const toC = model.connected.find((path) => path.output.id === "to-c")!;
+    expect(toC.geometry.to.side).toBe("left");
+    const b = model.rects.get("b")!;
+    expect(toC.geometry.to.x).toBeLessThanOrEqual(b.left);
+  });
+});
+
+/*
+  ANT-194, found once the templates' loops left from their named sides:
+  Implement, test, fix's "re-run" label was drawn under "tests failed". Each
+  label was placed with no idea where the others had gone.
+*/
+describe("labels on a template's connections", () => {
+  for (const template of WORKFLOW_TEMPLATES) {
+    it(`never cover one another in ${template.id}`, () => {
+      const model = buildCanvasModel(template.build());
+      const boxes = model.connected
+        .filter((path) => path.output.label)
+        .map((path) => {
+          const { halfW, halfH } = labelHalfSize(path.output.label, {
+            quiet: path.output.kind === "next" && !path.output.condition,
+            hasCondition: Boolean(path.output.condition),
+            ...(path.output.condition ? { condition: path.output.condition } : {}),
+          });
+          return { id: path.output.id, x: path.label.x, y: path.label.y, halfW, halfH };
+        });
+      for (const a of boxes) {
+        for (const b of boxes) {
+          if (a.id >= b.id) continue;
+          const overlap = Math.abs(a.x - b.x) < a.halfW + b.halfW && Math.abs(a.y - b.y) < a.halfH + b.halfH;
+          expect(overlap, `${a.id} and ${b.id}`).toBe(false);
+        }
+      }
+    });
+  }
+});
+
+/*
+  ANT-196. A workflow drafted by Codex names no sides. Its loop from Run tests
+  back to Implement, the step just before it in the row, was drawn straight
+  along the row, on the forward line and behind the Implement card.
+*/
+describe("a loop back along its row, with nothing placed by hand", () => {
+  const step = (id: string, x: number): WorkflowNode => ({
+    id,
+    type: "agent",
+    name: id,
+    config: { actionKind: "agent-step" },
+    position: { x, y: 44 },
+  });
+  const row: Workflow = {
+    id: "row",
+    name: "Row",
+    version: "1",
+    nodes: [step("implement", 286), step("test", 616), step("review", 946)],
+    edges: [
+      { id: "forward-1", source: "implement", target: "test" },
+      { id: "forward-2", source: "test", target: "review" },
+      { id: "tests-failed", source: "test", target: "implement", kind: "rework", label: "Tests failed" },
+      { id: "changes", source: "review", target: "implement", kind: "rework", label: "Changes requested" },
+    ],
+  };
+  const path = (model: ReturnType<typeof buildCanvasModel>, id: string) =>
+    model.connected.find((item) => item.output.id === id)!;
+
+  it("leaves the bottom of its step and arrives at the bottom of the one it returns to", () => {
+    const model = buildCanvasModel(row);
+    const loop = path(model, "tests-failed");
+    expect(loop.geometry.from.side).toBe("bottom");
+    expect(loop.geometry.to.side).toBe("bottom");
+    expect(loop.geometry.to.y).toBe(model.rects.get("implement")!.top + model.rects.get("implement")!.h);
+  });
+
+  it("nests the longer loop under the shorter one, landing apart", () => {
+    const model = buildCanvasModel(row);
+    const inner = path(model, "tests-failed");
+    const outer = path(model, "changes");
+    expect(outer.geometry.mid.y).toBeGreaterThan(inner.geometry.mid.y);
+    // The outer one lands further out, so it never crosses the inner one's run.
+    expect(outer.geometry.to.x).toBeLessThan(inner.geometry.to.x);
+  });
+
+  it("keeps a port or landing that was placed by hand", () => {
+    const placed: Workflow = {
+      ...row,
+      edges: row.edges.map((edge) => (edge.id === "tests-failed" ? { ...edge, port: { u: 0, v: 0.5 } } : edge)),
+    };
+    expect(path(buildCanvasModel(placed), "tests-failed").geometry.from.side).toBe("left");
+  });
+});
+
+/*
+  ANT-178 again, where connections meet rather than part: Claude Code's draft
+  of W9 brings "mod1–mod2 done" down and "mod3–mod5 done" up into one step.
+  By their direction of travel each label went to the side facing the other
+  line, so the two read crossed.
+*/
+describe("labels where two connections meet at one step", () => {
+  const step = (id: string, x: number, y: number): WorkflowNode => ({
+    id,
+    type: "agent",
+    name: id,
+    config: { actionKind: "agent-step" },
+    position: { x, y },
+  });
+  const join: Workflow = {
+    id: "join",
+    name: "Join",
+    version: "1",
+    nodes: [step("upper", 286, 44), step("lower", 286, 198), step("tests", 616, 132)],
+    edges: [
+      { id: "from-upper", source: "upper", target: "tests", label: "mod1–mod2 done" },
+      { id: "from-lower", source: "lower", target: "tests", label: "mod3–mod5 done" },
+    ],
+  };
+
+  it("keeps the upper line's label above the lower line's", () => {
+    const model = buildCanvasModel(join);
+    const y = (id: string) => model.connected.find((path) => path.output.id === id)!.label.y;
+    expect(y("from-upper")).toBeLessThan(y("from-lower"));
   });
 });

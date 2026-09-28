@@ -99,6 +99,15 @@ export type PendingRun = {
   closedAt?: string;
   /** Set when the user dismissed it, so cleanup can drop it. */
   dismissedAt?: string;
+  /**
+   * When the author pressed "Stop observing in Anthill" (ANT-191).
+   *
+   * The run and its record stay: the button promises that only Anthill stops
+   * reading, and deleting what it had read made the run the author was just
+   * watching unreachable — the workflow's chip fell back to an older run.
+   * A stopped run is never picked back up by itself.
+   */
+  observationStoppedAt?: string;
 };
 
 /* ------------------------------------------------------------------ */
@@ -126,7 +135,20 @@ export type Evidence =
    * record, and saying otherwise would tell the author something that did
    * not happen.
    */
-  | { kind: "activity"; sessionId: string; at: string; channel?: string }
+  | {
+      kind: "activity";
+      sessionId: string;
+      at: string;
+      channel?: string;
+      /**
+       * Whether the new records include work: a prompt submitted or a tool
+       * called. `false` is the observer saying they do not — the closing
+       * reply after the done line, the turn ending, the Stop hook — and that
+       * cannot take back a finish (ANT-188). Absent: the observer does not
+       * say, and any later record counts, as before.
+       */
+      resumes?: boolean;
+    }
   /**
    * A tool this session started has not reported back yet.
    *
@@ -412,6 +434,15 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
       ) {
         return run;
       }
+      // Later, but not work: the rest of the turn that said it was done — its
+      // closing reply, the turn ending, the Stop hook. Claude Code prints the
+      // done line and then goes on writing for seconds, and each of those
+      // records used to turn a finished run back into a live one that nothing
+      // would ever finish again (ANT-188). The session is still there, so the
+      // record is fresher; the run is still finished.
+      if (run.state === "completed" && evidence.resumes === false) {
+        return { ...run, expiresAt: windowFrom(run, evidence.at), lastObservedAt: evidence.at };
+      }
       // Work arriving from the session being followed says the session is
       // alive. It does not say it is the right session, so it keeps an
       // ambiguous run fresh without resolving it — only the field narrowing
@@ -439,16 +470,24 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
       };
     }
 
-    case "completed":
+    case "completed": {
       if (run.detectedSessionId && run.detectedSessionId !== evidence.sessionId) return run;
+      // The ending is dated when the session said it, which can be before
+      // records already read from the same poll; the run's freshness does not
+      // go backwards for it (ANT-188).
+      const latest =
+        run.lastObservedAt && Date.parse(run.lastObservedAt) > Date.parse(evidence.at)
+          ? run.lastObservedAt
+          : evidence.at;
       return {
         ...run,
         state: "completed",
-        expiresAt: windowFrom(run, evidence.at),
-        lastObservedAt: evidence.at,
+        expiresAt: windowFrom(run, latest),
+        lastObservedAt: latest,
         evidenceChannel: evidence.channel,
         statusMessage: evidence.detail ?? "The session recorded that it finished.",
       };
+    }
 
     /*
       A stop the person made, read out of the record rather than waited out.
@@ -580,7 +619,7 @@ export function expireIfStale(run: PendingRun, now: string): PendingRun {
  * `ambiguous_match`, not a reconnection to one of them.
  */
 export function reopenForAnotherLook(run: PendingRun, now: string): PendingRun | undefined {
-  if (!run.closedAt || run.dismissedAt) return undefined;
+  if (!run.closedAt || run.dismissedAt || run.observationStoppedAt) return undefined;
   if (run.state !== "observation_lost") return undefined;
   if (!run.detectedSessionId) return undefined;
 
@@ -610,7 +649,7 @@ export function reopenForAnotherLook(run: PendingRun, now: string): PendingRun |
  * the button the only way back (ANT-65).
  */
 export function isRecoverable(run: PendingRun, now: string): boolean {
-  if (!run.closedAt || run.dismissedAt) return false;
+  if (!run.closedAt || run.dismissedAt || run.observationStoppedAt) return false;
   if (run.state !== "observation_lost" || !run.detectedSessionId) return false;
   return !isExpired(run, now);
 }
@@ -721,7 +760,29 @@ export const CLI_LABEL: Record<MarkerCli, string> = {
  * Every one of these is about what Anthill knows, never about what Anthill is
  * doing — it is not doing anything.
  */
+/**
+ * Stop reading a session the author asked Anthill to stop observing.
+ *
+ * Closed, and kept: what was read stays readable, and nothing picks the run
+ * back up. A session that had already settled keeps its ending; one still
+ * being followed is marked as no longer observed — which is what happened,
+ * rather than a claim that it finished or was lost (ANT-191).
+ */
+export function stopObserving(run: PendingRun, now: string): PendingRun {
+  const settled = run.state === "completed" || run.state === "failed";
+  return {
+    ...run,
+    state: settled ? run.state : "observation_lost",
+    closedAt: run.closedAt ?? now,
+    observationStoppedAt: now,
+    statusMessage: settled
+      ? run.statusMessage
+      : "You stopped observing this session in Anthill. The session itself was not touched.",
+  };
+}
+
 export function statusLabel(run: PendingRun): string {
+  if (run.observationStoppedAt && run.state === "observation_lost") return "Not observing";
   switch (run.state) {
     case "pending_after_copy":
       return run.exchange ? "Waiting for external progress" : "Waiting for a session";

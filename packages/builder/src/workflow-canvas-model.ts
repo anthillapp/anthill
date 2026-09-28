@@ -19,6 +19,8 @@ import {
   entryPoint,
   labelHalfSize,
   labelSpot,
+  loopBelow,
+  passesUnder,
   portFromAnchor,
   portPoint,
   portSideToward,
@@ -174,13 +176,87 @@ export type CanvasModel = {
  * Labels are placed last and against every block, so a label pushed off one
  * curve does not land on a card belonging to another.
  */
+/** How far under its row a loop back along the row runs, and how much deeper for each loop it spans. */
+const LOOP_DEPTH = 30;
+const LOOP_STEP = 22;
+
 export function buildCanvasModel(workflow: Workflow): CanvasModel {
   const rects = new Map<string, Rect>();
   for (const node of workflow.nodes) rects.set(node.id, blockRect(node));
 
   const blocks = [...rects.values()];
   const connected: ConnectedPath[] = [];
+  /*
+    Labels already placed, which the next one keeps clear of as it does of a
+    block. Placed one by one with no idea of each other, two connections
+    leaving and entering the same side of a step put "re-run" under "tests
+    failed" (ANT-194).
+  */
+  const placed: Rect[] = [];
   const pending: PendingPath[] = [];
+
+  /*
+    A loop back to a step earlier in the same row, with nothing placed by
+    hand, leaves the bottom of its step and arrives at the bottom of the step
+    it returns to. Landed on that step's left side, as any connection from the
+    same row is, it could only get there straight through the step — along
+    the forward line and behind the card, where it read as nothing (ANT-196).
+    Under the row is where the templates' own loops say they go (ANT-194).
+    Several loops leaving or arriving at one step are spread along its
+    bottom, nearest source innermost, so they nest rather than cross.
+  */
+  const sameRow = (a: Rect, b: Rect) => a.top < b.top + b.h && b.top < a.top + a.h;
+  const loopsUnder = new Map<string, { leave: number; arrive: number; depth: number }>();
+  {
+    const loops: { key: string; source: string; target: string; reach: number; left: number; right: number; row: Rect }[] = [];
+    for (const node of workflow.nodes) {
+      const rect = rects.get(node.id);
+      if (!rect) continue;
+      for (const output of outputsOf(workflow, node.id)) {
+        if (output.target === null || output.port || output.anchor) continue;
+        const targetRect = rects.get(output.target);
+        if (!targetRect || !sameRow(rect, targetRect)) continue;
+        if (portSideToward(rect, targetRect) !== "left") continue;
+        loops.push({
+          key: `${node.id}:${output.id}`,
+          source: node.id,
+          target: output.target,
+          reach: rect.left - targetRect.left,
+          left: targetRect.left,
+          right: rect.left + rect.w,
+          row: rect,
+        });
+      }
+    }
+    const spread = (group: typeof loops, from: number, sign: 1 | -1, field: "leave" | "arrive") => {
+      const ordered = [...group].sort((a, b) => a.reach - b.reach);
+      ordered.forEach((loop, index) => {
+        const at = from + sign * 0.3 * ((index + 1) / (ordered.length + 1) - 0.5);
+        const current = loopsUnder.get(loop.key) ?? { leave: 0.65, arrive: 0.35, depth: LOOP_DEPTH };
+        loopsUnder.set(loop.key, { ...current, [field]: at });
+      });
+    };
+    for (const id of new Set(loops.map((loop) => loop.source))) {
+      spread(loops.filter((loop) => loop.source === id), 0.65, -1, "leave");
+    }
+    for (const id of new Set(loops.map((loop) => loop.target))) {
+      spread(loops.filter((loop) => loop.target === id), 0.35, -1, "arrive");
+    }
+    // Deeper for every loop in the same row it spans, so the outer one runs
+    // under the inner one instead of across it.
+    for (const loop of loops) {
+      const inside = loops.filter(
+        (other) =>
+          other !== loop &&
+          sameRow(other.row, loop.row) &&
+          other.left >= loop.left &&
+          other.right <= loop.right &&
+          other.reach < loop.reach,
+      ).length;
+      const current = loopsUnder.get(loop.key) ?? { leave: 0.65, arrive: 0.35, depth: LOOP_DEPTH };
+      loopsUnder.set(loop.key, { ...current, depth: LOOP_DEPTH + inside * LOOP_STEP });
+    }
+  }
 
   for (const node of workflow.nodes) {
     const outputs = outputsOf(workflow, node.id);
@@ -192,7 +268,8 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
     // moving one does not shuffle the others, and a block with two forward
     // outputs and one rework output shows two ports on the right and one on
     // the left rather than three on the right.
-    const automatic = outputs.filter((output) => !output.port);
+    const under = (output: (typeof outputs)[number]) => loopsUnder.get(`${node.id}:${output.id}`);
+    const automatic = outputs.filter((output) => !output.port && !under(output));
     const sideOf = new Map<(typeof outputs)[number], "left" | "right">();
     for (const output of automatic) {
       const targetRect = output.target === null ? undefined : rects.get(output.target);
@@ -204,9 +281,12 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
     outputs.forEach((output, index) => {
       const side = sideOf.get(output) ?? "right";
       const sharing = automatic.filter((item) => sideOf.get(item) === side);
+      const loop = under(output);
       const port = output.port
         ? portFromAnchor(rect, output.port)
-        : portPoint(rect, sharing.indexOf(output), sharing.length, side);
+        : loop
+          ? portFromAnchor(rect, { u: loop.leave, v: 1 })
+          : portPoint(rect, sharing.indexOf(output), sharing.length, side);
       const style = OUTCOME_STYLES[output.kind];
 
       if (output.target === null) {
@@ -226,18 +306,47 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
       const targetRect = rects.get(output.target);
       if (!targetRect) return;
 
-      const landing = entryPoint(targetRect, port, output.anchor);
-      const geometry = route(port, landing, {
+      const options = {
         routing: output.routing,
         bend: output.bend,
         // What the line has to get past. Without this the router has no idea
         // anything is in the way, and a connection reaching past several
         // blocks is drawn straight through them.
         blocks,
-      });
+      };
+      let landing = entryPoint(targetRect, port, output.anchor ?? (loop ? { u: loop.arrive, v: 1 } : undefined));
+      let geometry = route(port, landing, options);
+      if (loop && !output.bend) {
+        const below = loopBelow(port, landing, loop.depth, output.routing ?? "curved");
+        // Unless something sits under the row in the way; then the router's
+        // own way round stands.
+        if (!passesUnder(port, landing, below, blocks)) geometry = below;
+      }
+      /*
+        A step stacked under a sibling is entered from above by default, and
+        the line down to it then runs behind the sibling in between: a fork's
+        third branch was drawn through its second (ANT-178). Its left side,
+        facing the step the line comes from, is the way in when the top is
+        blocked. Only when nobody placed the landing or shaped the line.
+      */
+      if (
+        !output.anchor &&
+        !output.bend &&
+        (landing.side === "top" || landing.side === "bottom") &&
+        port.x < targetRect.left &&
+        passesUnder(port, landing, geometry, blocks)
+      ) {
+        const side = entryPoint(targetRect, port, { u: 0, v: (port.y - targetRect.top) / targetRect.h });
+        const beside = route(port, side, options);
+        if (!passesUnder(port, side, beside, blocks)) {
+          landing = side;
+          geometry = beside;
+        }
+      }
       const { halfW, halfH } = labelHalfSize(output.label || " ", {
         quiet: output.kind === "next" && !output.condition,
         hasCondition: Boolean(output.condition),
+        ...(output.condition ? { condition: output.condition } : {}),
       });
 
       // The bend handle sits at the middle of the line, which is also where a
@@ -250,12 +359,25 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
         h: HANDLE_HALF * 2,
       };
 
+      // Where connections meet at one step and do not part from one, the
+      // label goes on the side its own source lies: the one from above over
+      // the one from below. By the direction of travel alone the two labels
+      // swapped places between the lines (ANT-178, seen on a drafted join).
+      const meets =
+        workflow.edges.filter((edge) => edge.target === output.target).length > 1 &&
+        outputs.filter((item) => item.target !== null).length === 1;
+      const prefer = meets && Math.abs(geometry.from.y - geometry.to.y) > 4
+        ? geometry.from.y < geometry.to.y ? "up" : "down"
+        : undefined;
+      const label = labelSpot(geometry, halfW, halfH, [...blocks, handleSpot, ...placed], prefer);
+      placed.push({ left: label.x - halfW, top: label.y - halfH, w: halfW * 2, h: halfH * 2 });
+
       connected.push({
         nodeId: node.id,
         output,
         index,
         geometry,
-        label: labelSpot(geometry, halfW, halfH, [...blocks, handleSpot]),
+        label,
         style,
         port,
       });

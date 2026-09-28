@@ -166,7 +166,11 @@ plausible guess does more damage than an admitted gap.
      document under the same key after they answer. Under `watch`, they are
      usually questions you can answer from the task and the repository — answer
      those and resubmit; ask the user only about what you genuinely cannot know.
-     Never fill a requirement with an invention to pass validation.
+     Never fill a requirement with an invention to pass validation. The model
+     question is the common one: unless the user named a model, answer it with
+     the session's own — `"models": { "claude-code": { "id": "__default__" } }`
+     on every agent — and better still, write that in the first submission (see
+     `reference/workflow-format.md`, Agents).
    * `invalid` — nothing was stored, and the problems say what to change.
 
    The result carries an `anthill://workflow/<id>` link. Give it to the user —

@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { TIMING, createPendingRun, type PendingRun } from "@anthill/live";
+import { TIMING, createPendingRun, isWatching, type PendingRun } from "@anthill/live";
 
 import { LiveSessionService, RECOVERY_POLL_MS, withSessionFrom, type LiveSessionSnapshot } from "./service.js";
 import { PendingRunStore } from "./store.js";
@@ -779,7 +779,13 @@ describe("the harness's own report", () => {
 });
 
 describe("cancelling observation", () => {
-  it("forgets the run and sends nothing to the session", async () => {
+  /*
+    ANT-191. Stopping observation used to delete the run and its record, so
+    the run the author had just been watching became unreachable and the
+    workflow's chip opened an older run instead. The button says only Anthill
+    stops observing; the record stays, closed, and is never picked back up.
+  */
+  it("stops reading, keeps what was read, and sends nothing to the session", async () => {
     const h = await harness();
     await h.service.start();
     await h.service.startObservation(observeRequest);
@@ -790,10 +796,29 @@ describe("cancelling observation", () => {
     const before = await readFile(join(h.claudeRoot, "-tmp-scratch", "sess-1.jsonl"), "utf8");
     const after = await h.service.cancelObservation(RUN_ID);
 
-    expect(after.runs).toHaveLength(0);
-    expect(h.published.at(-1)?.runs).toHaveLength(0);
+    const run = only(after);
+    expect(run.observationStoppedAt).toBeTruthy();
+    expect(run.closedAt).toBeTruthy();
+    expect(run.statusMessage).toContain("You stopped observing");
+    expect(isWatching(run)).toBe(false);
+    // Its events are still there to read.
+    expect((await h.service.events(RUN_ID)).length).toBeGreaterThan(0);
     // The user's own session file is untouched: Anthill only ever read it.
     expect(await readFile(join(h.claudeRoot, "-tmp-scratch", "sess-1.jsonl"), "utf8")).toBe(before);
+
+    // And the session writing again does not bring it back.
+    h.setNow("2026-08-29T10:05:00.000Z");
+    await writeTranscript(h.claudeRoot, "sess-1");
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("observation_lost");
+  });
+
+  it("forgets a copy no session ever carried", async () => {
+    const h = await harness();
+    await h.service.start();
+    await h.service.startObservation(observeRequest);
+    const after = await h.service.cancelObservation(RUN_ID);
+    expect(after.runs).toHaveLength(0);
   });
 
   it("keeps a settled run until it is dismissed", async () => {

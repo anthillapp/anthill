@@ -17,7 +17,7 @@
  */
 
 import type { Workflow } from "@anthill/workflow-schema";
-import { parallelPlan } from "@anthill/workflow";
+import { nodesOnCycles, parallelPlan } from "@anthill/workflow";
 
 import { attribute, buildWorkflowIndex, type BlockMapping, type WorkflowIndex } from "./attribution.js";
 import { projectJournal } from "./channels.js";
@@ -219,6 +219,22 @@ export function foldLiveSession(
   >();
   /** The same, as attribution reads it: call id to step. */
   const delegatedFrom = new Map<string, string>();
+  /*
+    Pairing Claude Code's SubagentStop hook with the subagent it was for.
+
+    A subagent sent off on its own is over when its transcript records the
+    end of its turn — but Claude Code sometimes writes that last message
+    without a stop reason, and then only the hook says it stopped, naming no
+    subagent. W15's Quantity Checker was drawn "Working" for a minute after
+    the session had its verdict and moved on. So the hook is paired with the
+    subagent heard from last, unless a subagent whose end the transcript did
+    record is still owed its hook.
+  */
+  const lastHeard = new Map<string, number>();
+  const endedByHook = new Set<string>();
+  let hooksOwed = 0;
+  /** How recently a subagent must have been heard from for a stop to be its. */
+  const STOP_PAIRING_MS = 10_000;
   const spans: BlockSpanView[] = [];
   /**
    * Whether the session did any work in the announced step before it moved
@@ -230,6 +246,8 @@ export function foldLiveSession(
   let workSinceEntered = false;
   /** Steps left with no work done, by when they were left and the move that left them. */
   const pendingClose = new Map<string, { leftAt: string; detour?: Detour }>();
+  /** Steps a subagent opened that no step line has named yet (ANT-184). */
+  const openedByDispatch = new Set<string>();
   /**
    * Whether the hook channel wrote anything for this run.
    *
@@ -257,6 +275,17 @@ export function foldLiveSession(
   const planned = new Set(workflow.edges.map((edge) => `${edge.source}→${edge.target}`));
   /** Which steps the workflow runs side by side: moving between them is no detour (ANT-166). */
   const parallelSteps = parallelPlan(workflow);
+  /**
+   * Steps a connection can lead back into (ANT-179). A parallel branch that is
+   * not one of them, announced again from a sibling branch, is the session
+   * coming back to report its result — the prompt asks for the line "each time
+   * you come back to it" — and that is more of the same pass, not another. A
+   * return from anywhere else stays a second pass: the agent going back on its
+   * own is drawn as one (ANT-82).
+   */
+  const repeatable = nodesOnCycles(workflow);
+  /** The Approval Gates: a person decides there, and nothing else settles one. */
+  const gates = new Set(workflow.nodes.filter((node) => node.type === "approval").map((node) => node.id));
 
   const isOpen = (id: string) => blocks[id]?.state === "running" || blocks[id]?.state === "needsYou";
   const settled = (d: { background: boolean; returned: boolean; delegateEnded: boolean }) =>
@@ -333,22 +362,40 @@ export function foldLiveSession(
     }
     const fanOut = announced !== undefined && announced !== id && outstanding(announced);
     const left = announced && announced !== id ? leave(announced, at) : "closed";
-    // Coming back to a step still open ends the pass it was on — as of when
-    // it was left, if it was left with nothing done.
-    if (pendingClose.has(id)) closePending(id);
-    if (isOpen(id)) finish(id, at);
-    const entering = blocks[id];
-    const pass = (entering?.passes ?? 0) + 1;
-    blocks[id] = {
-      state: "running",
-      confidence: "exact",
-      enteredAt: at,
-      // Carried, not reset: what earlier passes cost is still part of what
-      // this step has cost.
-      ...(entering?.spentMs !== undefined ? { spentMs: entering.spentMs } : {}),
-      passes: pass,
-    };
-    spans.push({ blockId: id, pass, startedAt: at });
+    /*
+      A step its subagent opened before its line was read: this is the line
+      for that same pass. Claude Code starts the subagent in the same message
+      as the command that prints the line, and the line is recorded only when
+      the command returns — seconds after the subagent began (ANT-184).
+    */
+    const continuing = openedByDispatch.delete(id) && isOpen(id);
+    let pass: number;
+    if (continuing) {
+      pass = blocks[id].passes;
+    } else {
+      // Coming back to a step still open ends the pass it was on — as of when
+      // it was left, if it was left with nothing done.
+      if (pendingClose.has(id)) closePending(id);
+      if (isOpen(id)) finish(id, at);
+      const entering = blocks[id];
+      const again =
+        (entering?.passes ?? 0) >= 1 &&
+        !repeatable.has(id) &&
+        announced !== undefined &&
+        announced !== id &&
+        parallelSteps.parallel(announced, id);
+      pass = (entering?.passes ?? 0) + (again ? 0 : 1);
+      blocks[id] = {
+        state: "running",
+        confidence: "exact",
+        enteredAt: at,
+        // Carried, not reset: what earlier passes cost is still part of what
+        // this step has cost.
+        ...(entering?.spentMs !== undefined ? { spentMs: entering.spentMs } : {}),
+        passes: pass,
+      };
+      spans.push({ blockId: id, pass, startedAt: at });
+    }
     // Only a move between two steps can be one the plan lacks: the first
     // step came from nowhere the fold can see, a step announced again is not
     // a move at all, and a step started while the last one's subagents are
@@ -369,7 +416,8 @@ export function foldLiveSession(
     }
     announced = id;
     enteredByTag = viaTag;
-    workSinceEntered = false;
+    // A subagent already at work for the step is work in it.
+    workSinceEntered = continuing;
     askedSinceEntered = false;
     finishedAt = undefined;
   };
@@ -398,9 +446,30 @@ export function foldLiveSession(
     if (spentMs !== undefined && spentMs <= 0) delete blocks[id].spentMs;
   };
 
+  /**
+   * Steps a subagent working for them was stopped by hand, before it handed
+   * back: they end failed, not done (ANT-190).
+   */
+  const stoppedFor = new Set<string>();
+  const STOPPED_NOTE = "A subagent working on this step was stopped by hand before it handed back.";
+
+  /*
+    A session that ended with a subagent still out on a step: killed, or
+    closed while the delegate worked. The subagent never handed back, so the
+    step is not done — it was drawn green and counted as finished (W9 in the
+    0.8.3 QA, interrupted right after it delegated). Nor is it a failure
+    anything recorded. What the delegate got through is not in the record,
+    and the step says so.
+  */
+  const CUT_OFF_NOTE =
+    "The session ended while a subagent was still working on this step, and the subagent never handed back.";
+
   /** A delegation came back: its step is done if nothing else holds it open. */
   const release = (id: string, at: string) => {
-    if (id !== announced && isOpen(id) && !outstanding(id)) finish(id, at);
+    if (id !== announced && isOpen(id) && !outstanding(id)) {
+      if (stoppedFor.has(id)) finish(id, at, "failed", STOPPED_NOTE);
+      else finish(id, at);
+    }
   };
 
   // One action, however many channels wrote it down. A session with hooks
@@ -441,10 +510,42 @@ export function foldLiveSession(
     // that call has been read: Claude Code writes the message holding the
     // Agent calls only once the last is made, and the subagents are already
     // at work by then (ANT-164).
+    if (event.kind === "subagent.end" && !event.parentToolUseId && event.channel.endsWith(":hook")) {
+      if (hooksOwed > 0) {
+        hooksOwed -= 1;
+      } else {
+        const at = Date.parse(event.at);
+        let best: string | undefined;
+        for (const [call, heard] of lastHeard) {
+          const d = delegations.get(call);
+          if (!d || d.delegateEnded || Number.isNaN(at) || heard > at || at - heard > STOP_PAIRING_MS) continue;
+          if (best === undefined || heard > (lastHeard.get(best) ?? 0)) best = call;
+        }
+        const d = best ? delegations.get(best) : undefined;
+        if (best && d) {
+          endedByHook.add(best);
+          d.delegateEnded = true;
+          release(d.blockId, event.at);
+        }
+      }
+    }
+
     const via = event.parentToolUseId ? delegations.get(event.parentToolUseId) : undefined;
+    if (via && event.parentToolUseId) {
+      const at = Date.parse(event.at);
+      if (!Number.isNaN(at)) lastHeard.set(event.parentToolUseId, at);
+    }
     if (via || event.parentToolUseId || event.author?.kind === "subagent") {
       if (via && event.kind === "turn.end") {
+        if (!via.delegateEnded && !endedByHook.has(event.parentToolUseId ?? "")) hooksOwed += 1;
         via.delegateEnded = true;
+        release(via.blockId, event.at);
+      }
+      // Stopped by the person: over, and not finished (ANT-190).
+      if (via && event.kind === "notification" && event.title === "Stopped by hand") {
+        via.delegateEnded = true;
+        via.returned = true;
+        stoppedFor.add(via.blockId);
         release(via.blockId, event.at);
       }
       continue;
@@ -529,13 +630,25 @@ export function foldLiveSession(
         // A step announced in a batch, now started: a fan-out, not a move away.
         pendingClose.delete(target);
         // A step left a moment before its subagent was started was not
-        // finished: the same pass goes on.
-        if (target !== announced && blocks[target].state === "done" && !finishedAt) reopen(target);
+        // finished: the same pass goes on. But once the session has worked in
+        // the step it moved to, a subagent for a finished step is the session
+        // coming back to it — a new pass, which its line will then confirm
+        // (ANT-184).
+        if (target !== announced && blocks[target].state === "done" && !finishedAt) {
+          if (!workSinceEntered) reopen(target);
+          else {
+            const pass = blocks[target].passes + 1;
+            blocks[target] = { ...blocks[target], state: "running", enteredAt: event.at, passes: pass };
+            spans.push({ blockId: target, pass, startedAt: event.at });
+            openedByDispatch.add(target);
+          }
+        }
         // A step nothing announced, begun by the subagent started for it. The
         // session itself stays where it is.
         if (blocks[target].state === "queued") {
           blocks[target] = { state: "running", confidence: "exact", enteredAt: event.at, passes: 1 };
           spans.push({ blockId: target, pass: 1, startedAt: event.at });
+          openedByDispatch.add(target);
         }
       }
     }
@@ -647,16 +760,34 @@ export function foldLiveSession(
     // finished workflow ends with a turn ending and has no later marker to
     // move it on, so without this no finished run could ever go green. With
     // no hooks the two cases are indistinguishable, and the amber stays.
+    // Never at an Approval Gate. A turn that ends at the gate is the gate's
+    // question put to a person, with or without the CLI's own "waiting for
+    // your input" — which a headless run, or a person who closes the session
+    // there, never produces. Only the next step, or the session's own word that
+    // the work is done, gets past a gate (ANT-176).
+    const atGate = gates.has(announced);
     const yieldedOnlyByTurnEnd =
-      blocks[announced].state === "needsYou" && hooksCarried && !askedSinceEntered;
-    if (
+      blocks[announced].state === "needsYou" && hooksCarried && !askedSinceEntered && !atGate;
+    if (open && atGate && run.state === "completed") {
+      const { note: _note, waitReason: _why, ...rest } = blocks[announced];
+      blocks[announced] = {
+        ...rest,
+        state: "needsYou",
+        note: "The session stopped at this approval, and nobody answered it.",
+        waitReason: "asked",
+      };
+    } else if (
       open &&
       run.state === "completed" &&
       (blocks[announced].state !== "needsYou" || yieldedOnlyByTurnEnd)
     ) {
       // Nothing announced a departure, so the last thing anything was recorded
       // at is as close as the record gets to when this step stopped.
-      if (lastSeenAt) finish(announced, lastSeenAt);
+      if (lastSeenAt) {
+        if (stoppedFor.has(announced)) finish(announced, lastSeenAt, "failed", STOPPED_NOTE);
+        else if (outstanding(announced)) finish(announced, lastSeenAt, "unknown", CUT_OFF_NOTE);
+        else finish(announced, lastSeenAt);
+      }
     } else if (open && run.state === "failed") {
       finish(announced, lastSeenAt ?? run.lastObservedAt ?? run.createdAt, "failed", run.statusMessage);
     } else if (open && (run.state === "observation_lost" || run.state === "ambiguous_match")) {
@@ -671,7 +802,11 @@ export function foldLiveSession(
   for (const id of Object.keys(blocks)) {
     if (id === announced || blocks[id].state !== "running") continue;
     const at = lastSeenAt ?? run.createdAt;
-    if (run.state === "completed") finish(id, at);
+    if (run.state === "completed") {
+      if (stoppedFor.has(id)) finish(id, at, "failed", STOPPED_NOTE);
+      else if (outstanding(id)) finish(id, at, "unknown", CUT_OFF_NOTE);
+      else finish(id, at);
+    }
     else if (run.state === "failed") finish(id, at, "failed", run.statusMessage);
     else if (run.state === "observation_lost" || run.state === "ambiguous_match") {
       finish(id, at, "unknown", "Anthill stopped being able to read this session.");

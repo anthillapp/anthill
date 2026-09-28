@@ -101,6 +101,29 @@ describe("a selected block", () => {
     expect(onSelectOutput).toHaveBeenCalledWith("build", "e2");
   });
 
+  // ANT-187: the gate's inspector said "In – 0" whatever led into it.
+  it("lists what leads into an Approval Gate", () => {
+    const gated: Workflow = {
+      ...workflow,
+      nodes: [...workflow.nodes, { id: "gate", type: "approval", name: "Approve it", config: { prompt: "Go?" } }],
+      edges: [...workflow.edges, { id: "e4", source: "check", target: "gate" }],
+    };
+    render(
+      <BlockInspector
+        workflow={gated}
+        node={gated.nodes.find((node) => node.id === "gate") as Workflow["nodes"][number]}
+        onChange={() => undefined}
+        onStartLinking={() => undefined}
+        onSelectOutput={() => undefined}
+        onEditAgent={() => undefined}
+        onSelectStep={() => undefined}
+        validation={validateWorkflow(gated)}
+      />,
+    );
+    expect(screen.getByText("In – 1")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Check it/ })).toBeTruthy();
+  });
+
   it("says plainly when nothing reaches a step", () => {
     render(
       <BlockInspector

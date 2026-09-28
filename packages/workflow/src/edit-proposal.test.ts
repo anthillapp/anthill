@@ -719,3 +719,28 @@ describe("a step the assistant adds without an action", () => {
     expect(applied.ok && applied.workflow.nodes.find((node) => node.id === "end")?.position).toEqual({ x: 900, y: 0 });
   });
 });
+
+/*
+  ANT-172. A third parallel build step, "near" the join, landed beside the
+  join — and its connection from the fork ran straight across the join block.
+*/
+describe("a block added as another branch of an existing fork", () => {
+  it("goes into its siblings' column, below the last of them", async () => {
+    const { WORKFLOW_TEMPLATES } = await import("./templates.js");
+    const workflow = WORKFLOW_TEMPLATES.find((template) => template.id === "multi-agent-coordination")!.build();
+    const result = applyEditProposal(
+      workflow,
+      proposal([
+        { op: "add-block", ref: "c", blockType: "agent", name: "Build area C", near: "integrate", config: { actionKind: "agent-step", task: "dates/" } },
+        { op: "connect", source: "coordinate", target: "c", label: "package C" },
+        { op: "connect", source: "c", target: "integrate" },
+      ]),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const byId = (id: string) => result.workflow.nodes.find((node) => node.id === id)!;
+    const added = result.workflow.nodes.find((node) => node.name === "Build area C")!;
+    expect(added.position?.x).toBe(byId("area-a").position!.x);
+    expect(added.position!.y).toBeGreaterThan(byId("area-b").position!.y);
+  });
+});

@@ -396,7 +396,14 @@ export class HookLogObserver {
     const evidence: Evidence[] = [];
     if (newest && (!already || newest > already)) {
       this.reportedAt.set(run.anthillRunId, newest);
-      evidence.push({ kind: "activity", sessionId, at: newest });
+      // Whether any of it is work: a prompt, or a tool called. A Stop or a
+      // turn ending after the done line is the same turn finishing, and must
+      // not read as the session going on (ANT-188).
+      const resumes = events.some(
+        (event) =>
+          (!already || event.at > already) && (event.kind === "prompt.submit" || event.kind === "tool.start"),
+      );
+      evidence.push({ kind: "activity", sessionId, at: newest, resumes });
     }
     if (ended) {
       evidence.push({

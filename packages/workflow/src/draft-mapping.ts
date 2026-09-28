@@ -433,6 +433,29 @@ export function mapDraftToWorkflow(
     }
   }
 
+  /*
+    A step nothing leads into starts with the workflow, beside the first one.
+
+    The draft has no Start of its own: its first step is where the work begins,
+    so work that begins with two checks side by side could only put one of
+    them first and leave the other with no way in — unreachable, and Prompt
+    blocked until the author found the missing connection (ANT-185). The
+    instruction now says an unreferenced step starts with the first; this is
+    that rule, and the warning says it was applied so a step that was simply
+    forgotten is noticed.
+  */
+  const entered = new Set(edges.map((edge) => edge.target));
+  for (const step of draft.steps.slice(1)) {
+    const nodeId = nodeIdOf.get(step.id) as string;
+    if (entered.has(nodeId)) continue;
+    edges.push({ id: `out-start-${nodeId}`, source: startId, target: nodeId });
+    warn({
+      where: `step "${step.id}"`,
+      message:
+        "Nothing led into it, so it starts with the workflow, at the same time as the first step. If it belongs after another step, connect it there instead.",
+    });
+  }
+
   const withPending = nodes.map((node) => {
     const pending = pendingByNode.get(node.id);
     return pending ? { ...node, config: { ...node.config, pendingOutputs: pending } } : node;

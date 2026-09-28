@@ -601,11 +601,9 @@ export function applyEditProposal(workflow: Workflow, proposal: EditProposal): E
     }
   }
 
-  keepEndLast(
-    nodes,
-    edges,
-    new Set(changes.flatMap((change) => (change.kind === "block-added" ? [change.id] : []))),
-  );
+  const added = new Set(changes.flatMap((change) => (change.kind === "block-added" ? [change.id] : [])));
+  besideSiblings(nodes, edges, added);
+  keepEndLast(nodes, edges, added);
 
   // Every id this application issued is remembered, so a block the author
   // deletes afterwards does not hand its number back out.
@@ -667,6 +665,41 @@ function keepEndLast(nodes: WorkflowNode[], edges: readonly WorkflowEdge[], adde
     const right = furthestRight(others);
     if (!right || right.x < end.position.x) continue;
     end.position = { x: right.x + BLOCK_W + GAP, y: end.position.y };
+  }
+}
+
+/**
+ * A block added as another branch of an existing fork goes into its siblings'
+ * column, below the lowest of them (ANT-172).
+ *
+ * Where a block is first placed is decided before its connections exist, so a
+ * third parallel build step "near" the join landed beside the join — and its
+ * connection from the fork ran straight across the join block. Once the
+ * proposal's connections are in, a new block whose source already had other
+ * successors belongs with them: in their column, under the last of them.
+ */
+function besideSiblings(nodes: WorkflowNode[], edges: readonly WorkflowEdge[], added: ReadonlySet<string>): void {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  for (const id of added) {
+    const node = byId.get(id);
+    if (!node?.position) continue;
+    for (const into of edges.filter((edge) => edge.target === id)) {
+      const siblings = edges
+        .filter((edge) => edge.source === into.source && edge.target !== id && !added.has(edge.target))
+        .map((edge) => byId.get(edge.target))
+        .filter((sibling): sibling is WorkflowNode => Boolean(sibling?.position) && sibling?.type !== "end");
+      if (siblings.length === 0) continue;
+      const column = siblings[0].position!.x;
+      if (!siblings.every((sibling) => sibling.position!.x === column)) continue;
+      const lowest = Math.max(...siblings.map((sibling) => sibling.position!.y));
+      const spot = { x: column, y: lowest + ROW };
+      const others = nodes.filter((other) => other.id !== id);
+      const clash = () =>
+        others.some((other) => other.position && Math.abs(other.position.x - spot.x) < BLOCK_W && Math.abs(other.position.y - spot.y) < ROW);
+      for (let row = 0; row < 40 && clash(); row += 1) spot.y += ROW;
+      node.position = spot;
+      break;
+    }
   }
 }
 

@@ -28,6 +28,7 @@ import {
   stepsUsingAgent,
   stampWorkflowFormat,
   validateWorkflow,
+  openSpot,
   withRunRoot,
   type WorkflowTemplate,
 } from "@anthill/workflow";
@@ -85,6 +86,18 @@ export type WorkflowScreenProps = {
     | { kind: "prompt" }
     | { kind: "open"; path?: string; live?: PendingRun; deliveryId?: number };
 };
+
+/** Whether a text field has focus, where ⌘Z belongs to the text. */
+function typingInAField(): boolean {
+  const active = document.activeElement;
+  const tag = active?.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    Boolean((active as HTMLElement | null)?.isContentEditable)
+  );
+}
 
 export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProps) {
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
@@ -350,25 +363,35 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    * of what was typed, and stealing it would make correcting a typo throw away
    * the whole edit instead.
    */
+  /** When the keys last stepped the history, so the menu's echo of them is not a second step. */
+  const keyStepAt = useRef(0);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") return;
-      const active = document.activeElement;
-      const tag = active?.tagName;
-      if (
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        tag === "SELECT" ||
-        (active as HTMLElement | null)?.isContentEditable
-      ) {
-        return;
-      }
+      if (typingInAField()) return;
       event.preventDefault();
+      keyStepAt.current = Date.now();
       step(event.shiftKey ? "forward" : "back");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [step]);
+
+  /*
+    The same two, from the app's Edit menu. In the app the menu takes ⌘Z and
+    ⇧⌘Z before this page sees them, so the handler above never ran there and
+    the canvas could only be stepped from its buttons (ANT-192). The menu undoes
+    typing in a field itself; here, outside one, the workflow steps.
+  */
+  useEffect(
+    () =>
+      window.anthill.onEditHistory?.((action) => {
+        if (typingInAField()) return;
+        if (Date.now() - keyStepAt.current < 400) return;
+        step(action === "redo" ? "forward" : "back");
+      }),
+    [step],
+  );
 
   const replaceWorkflow = useCallback(
     (next: Workflow, nextPath?: string) => {
@@ -424,7 +447,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     void open(start.path);
   }, [start, open]);
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (options: { quiet?: boolean } = {}) => {
     if (!workflow) return;
     // One press, one write. A second click while the first is in flight would
     // race it to the same file and could report the older answer last, so it
@@ -437,6 +460,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
       const result = await window.anthill.saveWorkflow({
         workflow: stampWorkflowFormat(workflow),
         path,
+        ...(options.quiet ? { quiet: true } : {}),
       });
       if (result.kind === "saved") {
         setPath(result.path);
@@ -481,6 +505,18 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   saveNow.current = save;
   useEffect(() => window.anthill.onSaveWorkflow(() => void saveNow.current()), []);
 
+  /**
+   * A save the run folder asked for, made once the edit is in the workflow
+   * (ANT-180): `save` reads the workflow it closes over, so it has to wait
+   * for the render that carries the change.
+   */
+  const quietSave = useRef(false);
+  useEffect(() => {
+    if (!quietSave.current) return;
+    quietSave.current = false;
+    void save();
+  }, [workflow, save]);
+
   // "Saved" is about the click, so it goes when the click stops being recent.
   // A failure stays until something else happens: it is the author's to read.
   useEffect(() => {
@@ -507,7 +543,9 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         const position =
           at && canvasSize
             ? dropPosition(at, canvasSize)
-            : { x: 120 + current.nodes.length * 30, y: 160 + (current.nodes.length % 4) * 40 };
+            : // A free spot, never on top of a block or across the top row's
+              // connections (ANT-183).
+              openSpot(current.nodes);
 
         const node = createNode(current, block.nodeType ?? "agent", {
           name: block.label,
@@ -766,7 +804,22 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         <PromptModal
           workflow={workflow}
           validation={validation}
-          onRunRoot={(root) => editWorkflow((current) => withRunRoot(current, root))}
+          onRunRoot={(root) => {
+            // Where the agent files go is not an edit the author made. A
+            // workflow that was saved and unchanged stays saved: the folder is
+            // written into its file on the spot, rather than leaving it
+            // "Unsaved" and every run ending on a discard-changes dialog
+            // (ANT-180).
+            if (!dirty && path) quietSave.current = true;
+            editWorkflow((current) => withRunRoot(current, root));
+          }}
+          onObserving={() => {
+            // A run from a workflow that was never saved had nowhere to be
+            // found once the editor closed: no file, so no row on the launch
+            // window (ANT-177). The workflow is saved into the workflow folder
+            // as the prompt leaves, so the run it starts can be reached again.
+            if (!path) void save({ quiet: true });
+          }}
           onClose={() => setShowPrompt(false)}
         />
       ) : null}
@@ -785,7 +838,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         canStepBack={canStepBack(history)}
         canStepForward={canStepForward(history)}
         onStep={step}
-        onSave={save}
+        onSave={() => void save()}
         onPrompt={() => setShowPrompt(true)}
         {...(handover ? { handover } : {})}
       />
@@ -943,6 +996,14 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
                 style={{ borderColor: "#56aee0", borderTopStyle: "dotted" }}
               />{" "}
               question
+            </span>
+            {/* Drawn on the canvas, so it has its entry here (W2, ANT-178). */}
+            <span>
+              <i
+                className="legend-line"
+                style={{ borderColor: "#ec3013", borderTopStyle: "dashed" }}
+              />{" "}
+              stop
             </span>
           </div>
         </div>

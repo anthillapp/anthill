@@ -131,13 +131,34 @@ export function verdictSource(end: EndState, events: readonly AttributedEvent[])
  * words are then only what the agent said (ANT-158). `stale` when contact was
  * lost, because a later message may simply not have arrived.
  */
-export type LastWords = { text: string; at: string; asksUser: boolean; stale: boolean };
+export type LastWords = {
+  text: string;
+  at: string;
+  asksUser: boolean;
+  stale: boolean;
+  /**
+   * The session said the work was done and has not finished that turn yet.
+   * Its closing reply comes seconds after the done line, so the last message
+   * so far is an earlier progress note — "Both tests fail" — and quoting it as
+   * what the agent said misreported a run that passed (ANT-186).
+   */
+  closing: boolean;
+};
 
-export function lastWords(view: LiveSessionView, end: EndState): LastWords | undefined {
+/** How long after the done line a closing reply is still worth waiting for. */
+const CLOSING_REPLY_MS = 2 * 60_000;
+
+export function lastWords(view: LiveSessionView, end: EndState, now: number = Date.now()): LastWords | undefined {
   const message = [...view.events]
     .reverse()
     .find((event) => event.kind === "message" && event.author?.kind !== "subagent" && event.detail);
   if (!message?.detail) return undefined;
+  const endedAt = view.endedAt ? Date.parse(view.endedAt) : undefined;
+  const turnEnded =
+    endedAt !== undefined &&
+    view.events.some(
+      (event) => event.kind === "turn.end" && event.author?.kind !== "subagent" && Date.parse(event.at) >= endedAt,
+    );
   return {
     text: message.detail,
     at: message.at,
@@ -145,6 +166,14 @@ export function lastWords(view: LiveSessionView, end: EndState): LastWords | und
       (block) => block.state === "needsYou" && block.waitReason === "asked",
     ),
     stale: end === "lost",
+    // Not for ever: a turn whose end is never recorded does not hold the
+    // quote back past a couple of minutes.
+    closing:
+      end === "completed" &&
+      endedAt !== undefined &&
+      !turnEnded &&
+      Date.parse(message.at) < endedAt &&
+      now - endedAt < CLOSING_REPLY_MS,
   };
 }
 
@@ -196,11 +225,26 @@ export function sessionUsage(
     const block = view.blocks[node.id];
     if (!block) continue;
     const spans = metrics.spans.filter((span) => span.blockId === node.id);
-    const passes = spans.map<PassUsage>((span) => ({
-      pass: span.pass,
-      ...(span.durationMs !== undefined ? { durationMs: span.durationMs } : {}),
-      ...(span.tokens ? { tokens: span.tokens } : {}),
-    }));
+    // One entry per pass, not per span: a pass the session carried on with
+    // after saying it was done — or came back to after waiting on you — is
+    // the same pass in two stretches, and counting stretches reported
+    // "2 passes" for a step that ran once (ANT-184).
+    const passes: PassUsage[] = [];
+    for (const span of spans) {
+      const same = passes.find((pass) => pass.pass === span.pass);
+      if (!same) {
+        passes.push({
+          pass: span.pass,
+          ...(span.durationMs !== undefined ? { durationMs: span.durationMs } : {}),
+          ...(span.tokens ? { tokens: { ...span.tokens } } : {}),
+        });
+        continue;
+      }
+      if (span.durationMs !== undefined) same.durationMs = (same.durationMs ?? 0) + span.durationMs;
+      if (span.tokens) {
+        same.tokens = { in: (same.tokens?.in ?? 0) + span.tokens.in, out: (same.tokens?.out ?? 0) + span.tokens.out };
+      }
+    }
     const ended = passes.filter((pass) => pass.durationMs !== undefined);
     const tokens = metrics.tokensLikelyByBlock.get(node.id);
     const agentId = agentConfig(node).agentId;

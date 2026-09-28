@@ -717,6 +717,38 @@ export function route(
   return clearOf(a, b, options.routing ?? "curved", base, blocks);
 }
 
+/**
+ * Whether a drawn line passes under a block other than the two it connects.
+ *
+ * The same question the router asks before detouring, for a caller choosing
+ * between two landings.
+ */
+export function passesUnder(a: LooseFrom, b: EntryPoint, geometry: CurveGeometry, blocks: readonly Rect[]): boolean {
+  return crossed(samplesAlong(geometry), blocks, departure(a), b).length > 0;
+}
+
+/**
+ * A loop back along a row, drawn under it: down from the step it leaves, along
+ * at `depth` below the lower of its two ends, and up into the step it returns
+ * to — the shape a detour takes, so a loop reads the same wherever it runs.
+ * `depth` grows for a loop that spans another, so loops nest rather than
+ * cross (ANT-196).
+ */
+export function loopBelow(a: LooseFrom, b: EntryPoint, depth: number, routing: Routing = "curved"): CurveGeometry {
+  const from = departure(a);
+  const points = detour(from, b, Math.max(from.y, b.y) + depth);
+  return {
+    path:
+      routing === "orthogonal"
+        ? points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ")
+        : roundedPath(points, DETOUR_RADIUS),
+    mid: polylineMid(points),
+    from,
+    to: b,
+    ...(routing === "orthogonal" ? { turn: "y" as const } : {}),
+  };
+}
+
 export const BEND_LIMIT = 1.5;
 
 /**
@@ -759,12 +791,19 @@ export function bendFromPoint(
  */
 export function labelHalfSize(
   text: string,
-  options: { quiet?: boolean; hasCondition?: boolean } = {},
+  options: { quiet?: boolean; hasCondition?: boolean; condition?: string } = {},
 ): { halfW: number; halfH: number } {
   const quiet = options.quiet ?? false;
+  const name = (quiet ? 8 : 14) + text.length * (quiet ? 3.1 : 3.5);
+  // The condition is a second line under the name, in a smaller monospace
+  // face, and often the longer of the two: `tester.result == "passed"` under
+  // "Tests passed". Sized by the name alone, the label was placed where only
+  // its middle fitted and the rest of the condition ran under the steps on
+  // either side (ANT-195).
+  const condition = options.condition ? 10 + options.condition.length * 3.3 : 0;
   return {
-    halfW: (quiet ? 8 : 14) + text.length * (quiet ? 3.1 : 3.5),
-    halfH: quiet ? 11 : options.hasCondition ? 22 : 15,
+    halfW: Math.max(name, condition),
+    halfH: quiet ? 11 : options.hasCondition || options.condition ? 22 : 15,
   };
 }
 
@@ -780,16 +819,27 @@ export function labelSpot(
   halfW: number,
   halfH: number,
   blocks: readonly Rect[],
+  /**
+   * Which side the label belongs on, when the caller knows better than the
+   * line's own direction: where connections *meet*, the one coming down
+   * belongs above the one coming up, which is the opposite of how it falls.
+   */
+  prefer?: "up" | "down",
 ): Point {
   const { from, to, mid } = geometry;
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const length = Math.hypot(dx, dy) || 1;
 
-  // Normal to the chord, flipped so it points upwards on screen.
+  // Normal to the chord, pointing the way the connection itself goes: up for
+  // one that climbs, down for one that falls. Two connections out of a fork
+  // leave from ports a few pixels apart and part at once; a normal that always
+  // pointed up sent the falling one's label up onto the climbing one, so each
+  // label read as the other connection's (ANT-178). A level one keeps up.
   let nx = -dy / length;
   let ny = dx / length;
-  if (ny > 0) {
+  const falling = prefer ? prefer === "down" : dy > length * 0.2;
+  if (falling ? ny < 0 : ny > 0) {
     nx = -nx;
     ny = -ny;
   }
@@ -816,27 +866,30 @@ export function labelSpot(
       ),
     );
 
+  // The connection's own side first, at every distance, and only then the
+  // other. Trying both at each distance let a clear spot a few pixels onto the
+  // far side beat one a little further out on the near side — and in a tight
+  // fork the far side is the neighbouring connection's, so each label read as
+  // the other's (ANT-178, still seen on a three-way fork in 0.8.3 QA).
+  const candidates: Point[] = [
+    { x: mid.x, y: mid.y },
+    ...LABEL_OFFSETS.filter((offset) => offset > 0).map((offset) => ({ x: mid.x + nx * offset, y: mid.y + ny * offset })),
+    ...LABEL_OFFSETS.filter((offset) => offset > 0).map((offset) => ({ x: mid.x - nx * offset, y: mid.y - ny * offset })),
+  ];
+
   let best = { x: mid.x, y: mid.y };
   let bestRoom = -Infinity;
-  for (const offset of LABEL_OFFSETS) {
-    const sides = offset === 0
-      ? [{ x: mid.x, y: mid.y }]
-      : [
-          { x: mid.x + nx * offset, y: mid.y + ny * offset },
-          { x: mid.x - nx * offset, y: mid.y - ny * offset },
-        ];
-    for (const spot of sides) {
-      if (isClear(spot.x, spot.y)) return spot;
-      // The fallback used to be a fixed 110 above the line, returned without
-      // ever being checked — and 110 sits between two offsets this search has
-      // already rejected, so the one case where placement is hardest was the
-      // one case that skipped the test (ANT-44). Keeping the roomiest
-      // candidate instead means the answer is always one this loop looked at.
-      const room = roominess(spot.x, spot.y);
-      if (room > bestRoom) {
-        best = spot;
-        bestRoom = room;
-      }
+  for (const spot of candidates) {
+    if (isClear(spot.x, spot.y)) return spot;
+    // The fallback used to be a fixed 110 above the line, returned without
+    // ever being checked — and 110 sits between two offsets this search has
+    // already rejected, so the one case where placement is hardest was the
+    // one case that skipped the test (ANT-44). Keeping the roomiest
+    // candidate instead means the answer is always one this loop looked at.
+    const room = roominess(spot.x, spot.y);
+    if (room > bestRoom) {
+      best = spot;
+      bestRoom = room;
     }
   }
   return best;

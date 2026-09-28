@@ -69,9 +69,17 @@ export type FeedCard = {
   sessionId?: string;
   /** The raw event kinds folded into this card, in order. */
   events: string[];
+  /**
+   * A subagent sent off on its own: its launch receipt comes back at once and
+   * is not the subagent finishing — its own turn ending is (ANT-173).
+   */
+  background?: boolean;
 };
 
 const AGENT_KINDS = new Set(["subagent.start", "subagent.end"]);
+
+/** The title the Claude Code observer gives a stop the person made. */
+const STOPPED_BY_HAND = "Stopped by hand";
 const TOOL_KINDS = new Set(["tool.start", "tool.end"]);
 
 function kindOf(event: AttributedEvent): CardKind {
@@ -130,6 +138,18 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
   const cards: FeedCard[] = [];
   /** Open cards by the id that pairs a start with its end. */
   const open = new Map<string, FeedCard>();
+  /** Agent cards by the call that started them, open or closed. */
+  const dispatched = new Map<string, FeedCard>();
+  /** The subagent whose own turn ended last, and when: what a SubagentStop names. */
+  let lastDelegateEnd: { card: FeedCard; at: number } | undefined;
+
+  /** Another channel's record of this card's action, folded in rather than drawn twice. */
+  const fold = (card: FeedCard, event: AttributedEvent) => {
+    card.events.push(event.kind);
+    for (const channel of [event.channel, ...(event.alsoFrom ?? [])]) {
+      if (!card.channels.includes(channel)) card.channels.push(channel);
+    }
+  };
 
   for (const event of events) {
     // Usage is metadata about things that happened, not a thing that happened.
@@ -165,8 +185,88 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
       }
     }
 
+    /*
+      A delegate's own turn ending, named by the call that started it. It is
+      what finishes a subagent that was sent off on its own, whose launch
+      receipt came back at once (ANT-173); and it is the subagent the hooks'
+      SubagentStop that follows is about.
+    */
+    if (event.kind === "turn.end" && event.parentToolUseId) {
+      const card = dispatched.get(event.parentToolUseId);
+      if (card) {
+        lastDelegateEnd = { card, at: Date.parse(event.at) };
+        if (card.background && open.get(event.parentToolUseId) === card) {
+          card.state = "done";
+          card.durationMs = Date.parse(event.at) - Date.parse(card.at);
+          open.delete(event.parentToolUseId);
+        }
+      }
+    }
+
+    /*
+      A subagent somebody stopped: its transcript ends "[Request interrupted
+      by user]", which the observer records as a stop on the call that
+      started it. Stopped is not finished — the card is failed, and the hooks'
+      SubagentStop right after it is the same stop, not a completion (ANT-190).
+    */
+    if (event.kind === "notification" && event.parentToolUseId && event.title === STOPPED_BY_HAND) {
+      const card = dispatched.get(event.parentToolUseId);
+      if (card) {
+        card.state = "failed";
+        card.detail = "Stopped by hand before it handed back";
+        card.durationMs = Date.parse(event.at) - Date.parse(card.at);
+        open.delete(event.parentToolUseId);
+        lastDelegateEnd = { card, at: Date.parse(event.at) };
+        fold(card, event);
+        continue;
+      }
+    }
+
+    // The hooks' "a subagent finished", which names no call: the subagent
+    // whose turn ended a moment ago. Folded into its card rather than drawn
+    // as a second, finished one beside it (ANT-173).
+    if (event.kind === "subagent.end" && !pairKey && lastDelegateEnd && Date.parse(event.at) - lastDelegateEnd.at <= 5_000) {
+      fold(lastDelegateEnd.card, event);
+      continue;
+    }
+
+    // The same call opened twice — the transcript's dispatch and the hooks'
+    // PreToolUse for it. One card, not two; and the second used to take the
+    // pairing key from the first, which then never closed (ANT-173).
+    if (isOpening(event) && pairKey && open.has(pairKey)) {
+      const card = open.get(pairKey) as FeedCard;
+      if (event.kind === "subagent.start" && card.kind !== "agent") {
+        card.kind = "agent";
+        card.title = event.title;
+        if (event.agentName) card.agentName = event.agentName;
+        if (event.detail) card.detail = event.detail;
+        dispatched.set(pairKey, card);
+      }
+      if (event.background) card.background = true;
+      fold(card, event);
+      continue;
+    }
+
     if (isClosing(event) && pairKey) {
       const card = open.get(pairKey);
+      // A background subagent's launch receipt: it is still at work.
+      if (card && card.kind === "agent" && (card.background || event.background)) {
+        card.background = true;
+        fold(card, event);
+        continue;
+      }
+      // The same receipt read from the transcript after the hooks' end had
+      // already closed the card: only the transcript says the subagent was
+      // sent off on its own, and it is not finished (ANT-173).
+      const closed = dispatched.get(pairKey);
+      if (!card && event.background && closed && closed.state === "done" && open.get(pairKey) === undefined) {
+        closed.state = "working";
+        closed.background = true;
+        delete closed.durationMs;
+        open.set(pairKey, closed);
+        fold(closed, event);
+        continue;
+      }
       if (card) {
         card.state = event.ok === false ? "failed" : "done";
         card.durationMs = event.durationMs ?? Date.parse(event.at) - Date.parse(card.at);
@@ -216,8 +316,10 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
       events: [event.kind],
     };
 
+    if (event.background) card.background = true;
     // A session-level record is a moment, not a span, so it never sits open.
     if (isOpening(event) && pairKey) open.set(pairKey, card);
+    if (event.kind === "subagent.start" && pairKey) dispatched.set(pairKey, card);
     cards.push(card);
   }
 

@@ -167,14 +167,14 @@ it("never substitutes an edited graph when the immutable revision cannot be read
 async function show(
   events: ObservationEvent[],
   pending: PendingRun = run(),
-  options: { api?: Record<string, unknown>; observation?: { available: boolean; note: string } } = {},
+  options: { api?: Record<string, unknown>; observation?: { available: boolean; note: string }; workflow?: Workflow } = {},
 ) {
   const api = stub(events, options.api ?? {});
   const onBack = vi.fn();
   const onStop = vi.fn();
   render(
     <LiveSessionPage
-      workflow={workflow}
+      workflow={options.workflow ?? workflow}
       run={pending}
       {...(options.observation ? { observation: options.observation } : {})}
       onBack={onBack}
@@ -913,6 +913,38 @@ describe("an ended session's report", () => {
     openReport();
     expect(report().textContent).toContain("Finished is not the same as succeeded");
     expect(report().textContent).not.toMatch(/succeeded\b(?! –)|success/i);
+  });
+
+  // ANT-176: a session that stopped at an unanswered gate did not finish the workflow.
+  it("says the session stopped at the approval, not that it finished", async () => {
+    const gated: Workflow = {
+      ...workflow,
+      nodes: [
+        ...workflow.nodes.filter((node) => node.id !== "end"),
+        { id: "decide", type: "approval", name: "Decide", config: { prompt: "Which way?" } },
+        { id: "end", type: "end", name: "Done", config: {} },
+      ],
+      edges: [
+        { id: "e1", source: "start", target: "implement" },
+        { id: "e2", source: "implement", target: "decide" },
+        { id: "e3", source: "decide", target: "test", label: "Approved" },
+        { id: "e4", source: "decide", target: "end", label: "Rejected", kind: "stop" },
+        { id: "e5", source: "test", target: "end" },
+      ],
+    };
+    await show(
+      [
+        marker("implement", at(1)),
+        event({ kind: "tool.start", title: "Edit", toolUseId: "w-1", source: "transcript", channel: "claude-code:transcript", at: at(2) }),
+        marker("decide", at(3)),
+        event({ kind: "turn.end", title: "The agent finished its turn", at: at(4) }),
+      ],
+      run({ state: "completed", lastObservedAt: at(5) }),
+      { workflow: gated },
+    );
+    const line = within(report()).getByRole("button", { name: /What happened/ });
+    expect(line.textContent).toContain("Stopped at Decide");
+    expect(line.textContent).not.toContain("Session finished");
   });
 
   it("gives the agent's last words as the agent's, and says so", async () => {

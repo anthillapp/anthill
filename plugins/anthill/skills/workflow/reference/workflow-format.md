@@ -66,8 +66,10 @@ refusal carrying the questions rather than as a diagram.
     "workflow": {
       "formatVersion": 5,
       "agents": [
-        { "id": "agent-1", "name": "Developer", "role": "Reads the code and makes the change" },
-        { "id": "agent-2", "name": "Reviewer", "role": "Checks the change against the criteria" }
+        { "id": "agent-1", "name": "Developer", "role": "Reads the code and makes the change",
+          "models": { "claude-code": { "id": "__default__" } } },
+        { "id": "agent-2", "name": "Reviewer", "role": "Checks the change against the criteria",
+          "models": { "claude-code": { "id": "__default__" } } }
       ]
     }
   }
@@ -160,10 +162,26 @@ are worth filling when the user has said something about them.
 
 ## Agents
 
-`metadata.workflow.agents` is a list of `{ id, name, role, description }`. A
-block points at one by `config.agentId` and carries no name or model of its
-own, so renaming an agent cannot split it and two steps cannot disagree about
-what it is.
+`metadata.workflow.agents` is a list of `{ id, name, role, description }`,
+with `models`. A block points at one by `config.agentId` and carries no name or
+model of its own, so renaming an agent cannot split it and two steps cannot
+disagree about what it is.
+
+Every agent answers which model it runs on, for the tool the workflow targets.
+A handover without that answer comes back `incomplete` with the question
+"Which model should this agent use, or should it simply use whatever the
+session is on?". Most of the time the answer is the session's own model, and it
+is written like this:
+
+```json
+"models": { "claude-code": { "id": "__default__" } }
+```
+
+`__default__` is a complete answer, not a missing one: the agent file is written
+with no model, so the agent runs on whatever the session is on. To pin a model
+instead, put its exact id there — `fable`, `opus`, `sonnet` or `haiku` for
+Claude Code. Do not invent an id to get past the question, and do not ask the
+user again once they have said to use the session's model.
 
 `role` is one line: what the agent is. `description` is the job, and Anthill
 will not show a workflow whose agents lack one — it becomes the opening of the

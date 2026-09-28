@@ -50,6 +50,46 @@ describe("outputsOf", () => {
   });
 });
 
+/*
+  ANT-194. The templates' loops name the sides they leave and arrive at, and
+  those sides were never read: a loop meant to run under the row was drawn
+  through the step it returns to.
+*/
+describe("the sides a connection names", () => {
+  const named = (): Workflow => {
+    const workflow = makeWorkflow();
+    workflow.edges[0] = { ...workflow.edges[0], sourceHandle: "bottom", targetHandle: "bottom" };
+    return workflow;
+  };
+
+  it("place its port and landing on those sides, apart from each other", () => {
+    const [output] = outputsOf(named(), "a");
+    expect(output.port).toEqual({ u: 0.65, v: 1 });
+    expect(output.anchor).toEqual({ u: 0.35, v: 1 });
+  });
+
+  it("give way to a port and landing placed by hand", () => {
+    const workflow = named();
+    workflow.edges[0] = { ...workflow.edges[0], port: { u: 1, v: 0.2 }, anchor: { u: 0, v: 0.8 } };
+    const [output] = outputsOf(workflow, "a");
+    expect(output.port).toEqual({ u: 1, v: 0.2 });
+    expect(output.anchor).toEqual({ u: 0, v: 0.8 });
+  });
+
+  it("are forgotten when the port or landing is put back", () => {
+    const reset = patchOutput(named(), "a", "out-1", { port: null, anchor: null });
+    const [output] = outputsOf(reset, "a");
+    expect(output.port).toBeUndefined();
+    expect(output.anchor).toBeUndefined();
+  });
+
+  it("forget the arrival side when the connection moves to another step", () => {
+    const moved = setOutputTarget(named(), "a", "out-1", "c");
+    expect(moved.edges[0].targetHandle).toBeUndefined();
+    expect(moved.edges[0].sourceHandle).toBe("bottom");
+  });
+});
+
 describe("addOutput", () => {
   it("adds an unrouted output and returns its id", () => {
     const { workflow, outputId } = addOutput(makeWorkflow(), "b", "question", "ask");

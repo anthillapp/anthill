@@ -744,7 +744,10 @@ function LiveSessionContent({
             {(["queued", "running", "needsYou", "done", "failed", "unknown"] as const).map((state) => (
               <span key={state} className="live-legend-item">
                 <i className={`live-swatch state-${state}`} style={{ background: RUN_STATE[state].line }} />
-                {RUN_STATE[state].label}
+                {/* The graph's own words for a step the ended session skipped (ANT-193). */}
+                {state === "queued" && (view.endedAt !== undefined || end === "completed" || end === "failed")
+                  ? "Not reached"
+                  : RUN_STATE[state].label}
               </span>
             ))}
             <span className="live-legend-item" title="The agent announced a step the workflow has no connection to from where it was.">

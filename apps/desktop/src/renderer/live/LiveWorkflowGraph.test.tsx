@@ -359,6 +359,35 @@ describe("a finished step's elapsed time", () => {
   });
 });
 
+/*
+  ANT-193. A session that finished on another branch left the step it skipped
+  reading "Waiting its turn" under a "Session finished" header.
+*/
+describe("a step the session never reached", () => {
+  function line(sessionState: PendingRun["state"]) {
+    const view = foldLiveSession(workflow, { ...run, state: sessionState }, []);
+    const { container, unmount } = render(
+      <LiveWorkflowGraph workflow={workflow} view={view} sessionState={sessionState} onSelect={vi.fn()} />,
+    );
+    const text = container.querySelector(".live-node-state")?.textContent;
+    unmount();
+    return text;
+  }
+
+  it("waits its turn while the session is live", () => {
+    expect(line("detected_live")).toBe("Waiting its turn");
+  });
+
+  it("was not reached once the session is over", () => {
+    expect(line("completed")).toBe("Not reached");
+    expect(line("failed")).toBe("Not reached");
+  });
+
+  it("may still get its turn when contact was only lost", () => {
+    expect(line("observation_lost")).toBe("Waiting its turn");
+  });
+});
+
 /**
  * A step's name cannot leave the card it is in.
  *
@@ -416,6 +445,48 @@ describe("a step whose name does not fit", () => {
  * workflow already under way. The session beginning and the workflow beginning
  * are different facts and the diagram now keeps them apart.
  */
+/*
+  W13 in the 0.8.3 QA: Review leads to Done when it approves and to "Stopped:
+  report failure" when it fails. The session approved and finished, and both
+  ends were drawn green — nothing it writes says which end it stopped at.
+*/
+describe("a workflow that can end in more than one place", () => {
+  const twoEnds: Workflow = {
+    ...workflow,
+    nodes: [
+      ...workflow.nodes,
+      { id: "stopped", type: "end", name: "Stopped: report failure", config: {}, position: { x: 600, y: 200 } },
+    ],
+    edges: [...workflow.edges, { id: "e3", source: "implement", target: "stopped", kind: "stop" }],
+  };
+
+  function ends(shape: Workflow) {
+    const finishedRun = { ...run, state: "completed" as const };
+    const view = foldLiveSession(shape, finishedRun, []);
+    const shown = {
+      ...view,
+      empty: false,
+      blocks: { ...view.blocks, implement: { ...view.blocks.implement, state: "done" as const, passes: 1 } },
+    };
+    const { unmount } = render(
+      <LiveWorkflowGraph workflow={shape} view={shown} sessionState="completed" onSelect={vi.fn()} />,
+    );
+    const classes = [...document.querySelectorAll(".live-node")]
+      .filter((el) => /^(Done|Stopped)/.test(el.querySelector("title")?.textContent ?? ""))
+      .map((el) => el.getAttribute("class") ?? "");
+    unmount();
+    return classes;
+  }
+
+  it("claims neither end when the record cannot say which was reached", () => {
+    expect(ends(twoEnds).some((cls) => cls.includes("state-done"))).toBe(false);
+  });
+
+  it("still claims the one end a workflow has", () => {
+    expect(ends(workflow).some((cls) => cls.includes("state-done"))).toBe(true);
+  });
+});
+
 describe("the Start block before any step is announced", () => {
   let seq = 0;
   function event(kind: ObservationEvent["kind"], title: string, at: string): ObservationEvent {
@@ -785,6 +856,59 @@ describe("edges only carry control where control demonstrably went", () => {
       expect(document.querySelector(".live-detour")).toBeNull();
       unmount();
     });
+  });
+
+  /*
+    ANT-170. A run that ended cleanly without taking a branch — no scenario
+    left, straight to the checkpoint — never reached Done on the diagram,
+    because the branch's steps stayed unreached and "every step done" was
+    the only way there.
+  */
+  it("reaches Done along the step that led there when the session ended with a branch not taken", () => {
+    const ended = { ...run, state: "completed" as const };
+    const view = foldLiveSession(branching, ended, withWork([
+      announce("select", "2026-08-29T10:00:05.000Z"),
+      announce("checkpoint", "2026-08-29T10:00:10.000Z"),
+    ]));
+    const { unmount } = render(<LiveWorkflowGraph workflow={branching} view={view} sessionState="completed" onSelect={vi.fn()} />);
+    const tone = (id: string) => document.querySelector(`[data-edge="${id}"]`)?.getAttribute("class") ?? "";
+    expect(tone("to-end")).toContain("tone-seen");
+    expect(tone("to-scenario")).toContain("tone-idle");
+    const end = [...document.querySelectorAll("g.live-node")].find((node) =>
+      node.querySelector("title")?.textContent?.startsWith("Done –"),
+    );
+    expect(end?.getAttribute("class")).toContain("state-done");
+    unmount();
+  });
+
+  it("does not reach Done while the session is still going, whatever is finished", () => {
+    const view = foldLiveSession(branching, run, withWork([
+      announce("select", "2026-08-29T10:00:05.000Z"),
+      announce("checkpoint", "2026-08-29T10:00:10.000Z"),
+    ]));
+    const { unmount } = render(<LiveWorkflowGraph workflow={branching} view={view} sessionState="detected_live" onSelect={vi.fn()} />);
+    expect(document.querySelector(`[data-edge="to-end"]`)?.getAttribute("class") ?? "").toContain("tone-idle");
+    unmount();
+  });
+
+  /*
+    ANT-174. A loop enters its steps again, and the connection that started
+    the loop went grey the moment it came round, though it was exactly the
+    move that happened.
+  */
+  it("keeps a connection a loop took coloured after the loop comes round", () => {
+    const { tone, unmount } = draw([
+      ...workingUpstream(),
+      announce("record", "2026-08-29T10:00:20.000Z"),
+      announce("select", "2026-08-29T10:00:30.000Z"),
+      announce("checkpoint", "2026-08-29T10:00:40.000Z"),
+    ]);
+    // select → scenario was taken on the first pass, before select ran again.
+    expect(tone("to-scenario")).toBe("tone-seen");
+    expect(tone("to-record")).toBe("tone-seen");
+    expect(tone("back-to-select")).toBe("tone-seen");
+    expect(tone("to-checkpoint")).toBe("tone-live");
+    unmount();
   });
 });
 

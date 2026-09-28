@@ -108,3 +108,17 @@ describe("reading the name out of a saved file", () => {
     expect(nameInSavedFile(JSON.stringify({ name: 7 }))).toBeUndefined();
   });
 });
+
+/* ANT-177: a save nobody is asked about never overwrites a file. */
+describe("a free path for a save made without asking", () => {
+  it("keeps the suggested name when nothing is there", async () => {
+    const { freePath } = await import("./save-destination.js");
+    expect(freePath("/w/Fix bug.workflow.json", () => false)).toBe("/w/Fix bug.workflow.json");
+  });
+
+  it("numbers the name past every file already there", async () => {
+    const { freePath } = await import("./save-destination.js");
+    const taken = new Set(["/w/Fix bug.workflow.json", "/w/Fix bug 2.workflow.json"]);
+    expect(freePath("/w/Fix bug.workflow.json", (path) => taken.has(path))).toBe("/w/Fix bug 3.workflow.json");
+  });
+});

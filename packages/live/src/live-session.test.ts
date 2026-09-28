@@ -1226,3 +1226,316 @@ describe("a step left with nothing done in it", () => {
     expect(view.blocks.implement.state).toBe("done");
   });
 });
+
+/*
+  ANT-184. Claude Code starts a step's subagent in the same message as the
+  command that prints the step's line, and the line is recorded only when that
+  command returns — after the subagent has already opened the step. The line
+  then read as the step being entered a second time: "pass 2" on the first
+  visit, and a step still working counted among the finished.
+*/
+describe("a step line recorded after its subagent was started", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-27T19:39:00.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  /** One step as the recorded W3 run did it: command, dispatch, then the line, then the subagent's work. */
+  const visit = (blockId: string, n: number, s: number) => [
+    tx({ kind: "tool.start", title: "Bash", toolUseId: `p${n}`, at: T(s) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: `a${n}`, stepTag: blockId, at: T(s + 1.7) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: `p${n}`, at: T(s + 3.1) }),
+    tx({ kind: "step.marker", title: `Step ${blockId}`, blockId, printedBy: `p${n}`, at: T(s + 3.1) }),
+    tx({ kind: "tool.start", title: "Read", toolUseId: `r${n}`, parentToolUseId: `a${n}`, at: T(s + 4) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: `a${n}`, at: T(s + 5) }),
+  ];
+
+  it("is the first pass, not the second", () => {
+    const view = foldLiveSession(workflow, run(), [...visit("implement", 1, 1), ...visit("test", 2, 7)]);
+    expect(view.blocks.implement).toMatchObject({ state: "done", passes: 1 });
+    expect(view.blocks.test).toMatchObject({ state: "running", passes: 1 });
+    expect(view.spans.map((span) => [span.blockId, span.pass])).toEqual([
+      ["implement", 1],
+      ["test", 1],
+    ]);
+  });
+
+  it("does not count the step still working as finished", () => {
+    const journal = [...visit("implement", 1, 1), ...visit("test", 2, 7)];
+    // Right after the second step's line: only the first is finished.
+    const view = foldLiveSession(workflow, run(), journal.slice(0, 6 + 4));
+    expect(view.blocks.test.state).toBe("running");
+    expect(finishedSteps(view)).toBe(1);
+  });
+
+  it("still counts a real return to a step, done the same way, as its second pass", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      ...visit("implement", 1, 1),
+      ...visit("test", 2, 7),
+      ...visit("fix", 3, 13),
+      ...visit("test", 4, 19),
+    ]);
+    expect(view.blocks.implement.passes).toBe(1);
+    expect(view.blocks.fix.passes).toBe(1);
+    expect(view.blocks.test.passes).toBe(2);
+    // The second pass began when its subagent was started, and the first
+    // was not stretched over the fix in between.
+    const tests = view.spans.filter((span) => span.blockId === "test");
+    expect(tests.map((span) => span.pass)).toEqual([1, 2]);
+    expect(tests[0].endedAt).toBe(T(16.1));
+    expect(tests[1].startedAt).toBe(T(20.7));
+  });
+
+  it("is no detour and moves the session onto the step", () => {
+    const view = foldLiveSession(workflow, run(), [...visit("implement", 1, 1), ...visit("test", 2, 7)]);
+    expect(view.detours).toEqual([]);
+    expect(view.activeBlockId).toBe("test");
+  });
+});
+
+/*
+  ANT-179. Codex announced three parallel checks, spawned a checker for
+  each, and when the results came back announced each check again to report
+  it — as the prompt asks, "each time you come back to it". Two of the three
+  were drawn as pass 2, though no connection can lead back into them.
+*/
+describe("a parallel branch announced again to report its result", () => {
+  const fork: Workflow = {
+    id: "workflow-fork",
+    name: "Checks in parallel",
+    version: "1",
+    target: "codex",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "prep", type: "agent", name: "Prepare checks", config: { actionKind: "agent-step", task: "Prepare", agentId: "agent-dev" } },
+      { id: "chk-a", type: "agent", name: "Check: import", config: { actionKind: "verify", task: "a", agentId: "agent-qa" } },
+      { id: "chk-b", type: "agent", name: "Check: values", config: { actionKind: "verify", task: "b", agentId: "agent-qa" } },
+      { id: "chk-c", type: "agent", name: "Check: files", config: { actionKind: "verify", task: "c", agentId: "agent-qa" } },
+      { id: "sum", type: "agent", name: "Summarize", config: { actionKind: "agent-step", task: "Sum up", agentId: "agent-dev" } },
+      { id: "end", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "prep" },
+      { id: "e2", source: "prep", target: "chk-a" },
+      { id: "e3", source: "prep", target: "chk-b" },
+      { id: "e4", source: "prep", target: "chk-c" },
+      { id: "e5", source: "chk-a", target: "sum" },
+      { id: "e6", source: "chk-b", target: "sum" },
+      { id: "e7", source: "chk-c", target: "sum" },
+      { id: "e8", source: "sum", target: "end" },
+    ],
+    metadata: {
+      workflow: { formatVersion: 4, agents: [{ id: "agent-dev", name: "Developer" }, { id: "agent-qa", name: "Checker" }] },
+    },
+  };
+
+  it("is the same pass, not a second", () => {
+    const view = foldLiveSession(fork, run(), [
+      step("prep"), worked(),
+      step("chk-a"), worked(),
+      step("chk-b"), worked(),
+      step("chk-c"), worked(),
+      step("chk-b"), worked(),
+      step("chk-c"), worked(),
+      step("sum"), worked(),
+    ]);
+    for (const id of ["chk-a", "chk-b", "chk-c"]) expect(view.blocks[id].passes).toBe(1);
+    expect(view.detours).toEqual([]);
+  });
+
+  it("still counts a return from a later step as a second pass", () => {
+    const view = foldLiveSession(fork, run(), [
+      step("prep"), worked(),
+      step("chk-a"), worked(),
+      step("sum"), worked(),
+      step("chk-a"), worked(),
+    ]);
+    expect(view.blocks["chk-a"].passes).toBe(2);
+  });
+});
+
+/*
+  ANT-176. The agent reached the Decide gate, asked its question and ended its
+  turn; `claude -p` exited, the hooks wrote Stop and SessionEnd and no
+  Notification. The gate was drawn Done, and the report read as approved,
+  though nobody had answered.
+*/
+describe("a session that stopped at an Approval Gate", () => {
+  const gated: Workflow = {
+    ...workflow,
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "implement", type: "agent", name: "Research", config: { actionKind: "agent-step", task: "Look", agentId: "agent-dev" } },
+      { id: "decide", type: "approval", name: "Decide", config: { prompt: "Which way?" } },
+      { id: "test", type: "agent", name: "Present", config: { actionKind: "agent-step", task: "Present", agentId: "agent-dev" } },
+      { id: "end", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "implement" },
+      { id: "e2", source: "implement", target: "decide" },
+      { id: "e3", source: "decide", target: "test", label: "Approved" },
+      { id: "e4", source: "decide", target: "end", label: "Rejected", kind: "stop" },
+      { id: "e5", source: "test", target: "end" },
+    ],
+  };
+  const hookTurnEnd = () => event({ kind: "turn.end", title: "The agent finished its turn" });
+
+  it("stays waiting on you when the turn and the session end there", () => {
+    const view = foldLiveSession(gated, run({ state: "completed" }), [
+      step("implement"), worked(),
+      step("decide"),
+      hookTurnEnd(),
+      event({ kind: "session.end", title: "Session ended" }),
+    ]);
+    expect(view.blocks.decide.state).toBe("needsYou");
+    expect(view.blocks.decide.note).toContain("nobody answered");
+    expect(view.blocks.implement.state).toBe("done");
+  });
+
+  it("is passed once the next step is announced", () => {
+    const view = foldLiveSession(gated, run({ state: "completed" }), [
+      step("implement"), worked(),
+      step("decide"),
+      hookTurnEnd(),
+      step("test"), worked(),
+      hookTurnEnd(),
+    ]);
+    expect(view.blocks.decide.state).toBe("done");
+  });
+
+  it("is settled by the session's own word that the work is done", () => {
+    const view = foldLiveSession(gated, run({ state: "completed" }), [
+      step("implement"), worked(),
+      step("decide"),
+      event({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", source: "transcript", channel: "claude-code:transcript" }),
+    ]);
+    expect(view.blocks.decide.state).toBe("done");
+  });
+});
+
+/*
+  ANT-190. Two parallel Developer subagents were sent off on their own and
+  stopped by hand from Claude Code's Background tasks panel before either
+  handed back. Their transcripts end "[Request interrupted by user]"; the
+  steps must not end as done.
+*/
+describe("a subagent stopped by hand", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-27T23:25:00.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+
+  it("ends its step failed, not done, even once the run completes", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+      tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "call-a", stepTag: "implement", background: true, at: T(1) }),
+      tx({ kind: "tool.end", title: "Tool finished", toolUseId: "call-a", background: true, at: T(1.2) }),
+      tx({ kind: "step.marker", title: "Step test", blockId: "test", at: T(2) }),
+      tx({ kind: "tool.start", title: "Edit", toolUseId: "own", at: T(3) }),
+      tx({ kind: "notification", title: "Stopped by hand", parentToolUseId: "call-a", at: T(40) }),
+      tx({ kind: "turn.end", title: "The agent finished its turn", at: T(45) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("failed");
+    expect(view.blocks.implement.note).toContain("stopped by hand");
+    // A stopped step is not a finished one.
+    expect(finishedSteps(view)).toBe(0);
+  });
+
+  it("leaves a subagent that finished its turn done", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+      tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "call-a", stepTag: "implement", background: true, at: T(1) }),
+      tx({ kind: "tool.end", title: "Tool finished", toolUseId: "call-a", background: true, at: T(1.2) }),
+      tx({ kind: "step.marker", title: "Step test", blockId: "test", at: T(2) }),
+      tx({ kind: "tool.start", title: "Edit", toolUseId: "own", at: T(3) }),
+      tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "call-a", author: { kind: "subagent" }, at: T(40) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+  });
+});
+
+/*
+  W9 in the 0.8.3 QA: the session sent two subagents off on their own, ended
+  its turn waiting for them, and was killed. Neither handed back, and both
+  steps were drawn green and counted as finished.
+*/
+/*
+  W15 in the 0.8.3 QA: two checkers sent off on their own. Claude Code wrote
+  the Quantity Checker's last message with no stop reason, so its transcript
+  never recorded the end of its turn — only the SubagentStop hook said it was
+  over, naming no subagent. Its step stayed "Working" for a minute after the
+  session had both verdicts and moved on.
+*/
+describe("a subagent whose end only the SubagentStop hook records", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-28T03:59:45.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const hook = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "hook", channel: "claude-code:hook", ...partial });
+  const sub = { kind: "subagent" as const };
+
+  const dispatch = [
+    tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+    tx({ kind: "step.marker", title: "Step test", blockId: "test", at: T(0.1) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "qty", stepTag: "implement", background: true, at: T(4) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "qty", background: true, at: T(4.1) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "name", stepTag: "test", background: true, at: T(6) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "name", background: true, at: T(6.1) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", at: T(8) }),
+  ];
+
+  it("is over when the hook says a subagent stopped, right after it last spoke", () => {
+    const view = foldLiveSession(workflow, run({ state: "detected_live" }), [
+      ...dispatch,
+      tx({ kind: "tool.start", title: "Read", toolUseId: "n1", parentToolUseId: "name", author: sub, at: T(9) }),
+      tx({ kind: "message", title: "Message", detail: "Qty column verdict: PASS", parentToolUseId: "qty", author: sub, at: T(11) }),
+      hook({ kind: "subagent.end", title: "A subagent finished", at: T(11.4) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+    // The other one is still at work.
+    expect(view.blocks.test.state).toBe("running");
+  });
+
+  it("leaves a running subagent alone when the stop was owed to one whose end was recorded", () => {
+    const view = foldLiveSession(workflow, run({ state: "detected_live" }), [
+      ...dispatch,
+      tx({ kind: "tool.start", title: "Read", toolUseId: "q1", parentToolUseId: "qty", author: sub, at: T(12) }),
+      tx({ kind: "message", title: "Message", detail: "Name check complete", parentToolUseId: "name", author: sub, at: T(13) }),
+      tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "name", author: sub, at: T(13) }),
+      hook({ kind: "subagent.end", title: "A subagent finished", at: T(13.8) }),
+    ]);
+    // Its stop was the Name Checker's, whose end was already recorded; the
+    // Quantity Checker, heard from a second earlier, is still at work.
+    expect(view.blocks.implement.state).toBe("running");
+  });
+});
+
+describe("a session that ends with its subagents still out", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-28T03:33:40.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const hook = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "hook", channel: "claude-code:hook", ...partial });
+
+  const killed = [
+    tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "call-a", stepTag: "implement", background: true, at: T(7) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "call-a", background: true, at: T(8) }),
+    tx({ kind: "message", title: "Message", detail: "The Developer is running.", author: { kind: "main" }, at: T(14) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", at: T(14) }),
+    hook({ kind: "session.end", title: "Session ended", at: T(16) }),
+  ];
+
+  it("does not call the step done: nothing came back from it", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), killed);
+    expect(view.blocks.implement.state).toBe("unknown");
+    expect(view.blocks.implement.note).toContain("never handed back");
+    expect(finishedSteps(view)).toBe(0);
+  });
+
+  it("still calls it done once the subagent has finished its turn", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      ...killed.slice(0, 3),
+      tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "call-a", author: { kind: "subagent" }, at: T(12) }),
+      ...killed.slice(3),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+  });
+});

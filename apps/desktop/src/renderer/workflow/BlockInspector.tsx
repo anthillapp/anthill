@@ -148,6 +148,20 @@ export function BlockInspector({
   const setConfig = (patch: Record<string, unknown>) =>
     onChange(updateNodeConfig(workflow, node.id, patch));
 
+  // What points at this block. A step nothing reaches is a step the workflow
+  // never runs, and the inspector should say so where the step is, not only in
+  // an index somewhere else. A gate as well as a step: it was always shown
+  // "In – 0", however many steps led into it (ANT-187).
+  const incoming = workflow.edges
+    .filter((edge) => edge.target === node.id)
+    .map((edge) => ({
+      edgeId: edge.id,
+      sourceId: edge.source,
+      sourceName: workflow.nodes.find((item) => item.id === edge.source)?.name ?? edge.source,
+      label: edge.label,
+      kind: edge.kind ?? "next",
+    }));
+
   if (node.type === "approval") {
     const config = approvalConfig(node);
     return (
@@ -175,6 +189,7 @@ export function BlockInspector({
         <OutputsList
           workflow={workflow}
           node={node}
+          incoming={incoming}
           onChange={onChange}
           onStartLinking={onStartLinking}
           onSelectOutput={onSelectOutput}
@@ -219,19 +234,6 @@ export function BlockInspector({
   const sharedWith = agent
     ? stepsUsingAgent(workflow, agent.id).filter((step) => step.id !== node.id)
     : [];
-
-  // What points at this block. A step nothing reaches is a step the workflow never
-  // runs, and the inspector should say so where the step is, not only in an
-  // index somewhere else.
-  const incoming = workflow.edges
-    .filter((edge) => edge.target === node.id)
-    .map((edge) => ({
-      edgeId: edge.id,
-      sourceId: edge.source,
-      sourceName: workflow.nodes.find((item) => item.id === edge.source)?.name ?? edge.source,
-      label: edge.label,
-      kind: edge.kind ?? "next",
-    }));
 
   /** Create an agent and assign it to this step in one move. */
   const createAgentForStep = () => {

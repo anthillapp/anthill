@@ -415,6 +415,27 @@ describe("compile – outcome kinds", () => {
     );
   });
 
+  /*
+    ANT-175. Two labelled paths with no condition — a step's "decided" and its
+    rework "needs another option" — both compiled to "otherwise", and the agent
+    had to guess which answer led where.
+  */
+  it("tells paths with no condition apart by their labels, and says otherwise once at most", () => {
+    const workflow = reviewLoop();
+    const loopBack = workflow.edges.find((edge) => edge.id === "e3")!;
+    delete loopBack.condition;
+    loopBack.kind = "rework";
+    const { prompt } = compile(workflow);
+    expect(prompt).toContain('- if the outcome is "changes requested", send the work back to step 1 (Implement)');
+    expect(prompt).toContain('- if the outcome is "approved", stop');
+    expect(prompt).not.toMatch(/- otherwise[\s\S]*- otherwise/);
+  });
+
+  it("keeps otherwise for the one path the conditions leave", () => {
+    const { prompt } = compile(reviewLoop());
+    expect(prompt).toContain("- otherwise (approved), stop");
+  });
+
   it("treats an output with no kind as `next`, as before", () => {
     const workflow = reviewLoop();
     delete workflow.edges.find((edge) => edge.id === "e2")!.kind;

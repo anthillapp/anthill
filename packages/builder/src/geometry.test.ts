@@ -150,6 +150,21 @@ describe("curve", () => {
 describe("labelSpot", () => {
   const geometry = curve({ x: 0, y: 100 }, { x: 300, y: 100, side: "left" });
 
+  /*
+    ANT-178. Two connections out of a fork part at once, one climbing and one
+    falling. With the handle at each line's middle, the falling one's label
+    was pushed up — onto the climbing one — so each label read as the other's.
+  */
+  it("puts a falling connection's label on its own side of a fork, not on the climbing one", () => {
+    const up = curve({ x: 0, y: 200 }, { x: 300, y: 60, side: "left" });
+    const down = curve({ x: 0, y: 206 }, { x: 300, y: 346, side: "left" });
+    const handle = (mid: { x: number; y: number }): Rect => ({ left: mid.x - 8, top: mid.y - 8, w: 16, h: 16 });
+    const upLabel = labelSpot(up, 30, 12, [handle(up.mid), handle(down.mid)]);
+    const downLabel = labelSpot(down, 30, 12, [handle(up.mid), handle(down.mid)]);
+    expect(upLabel.y).toBeLessThan(up.mid.y);
+    expect(downLabel.y).toBeGreaterThan(down.mid.y);
+  });
+
   it("sits on the line when nothing is in the way", () => {
     const spot = labelSpot(geometry, 30, 12, []);
     expect(spot).toEqual(geometry.mid);
@@ -207,6 +222,16 @@ describe("labelHalfSize", () => {
     expect(labelHalfSize("x", { hasCondition: true }).halfH).toBeGreaterThan(
       labelHalfSize("x").halfH,
     );
+  });
+
+  // ANT-195: "Tests passed" over `tester.result == "passed"` was sized by the
+  // name, and the condition ran under the steps beside it.
+  it("is as wide as its condition when that is the longer line", () => {
+    const named = labelHalfSize("Tests passed", { hasCondition: true });
+    const full = labelHalfSize("Tests passed", { condition: 'tester.result == "passed"' });
+    expect(full.halfW).toBeGreaterThan(named.halfW);
+    expect(full.halfW * 2).toBeGreaterThanOrEqual('tester.result == "passed"'.length * 6.3);
+    expect(full.halfH).toBe(named.halfH);
   });
 });
 

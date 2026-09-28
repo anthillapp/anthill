@@ -180,6 +180,15 @@ describe("the workflow agent editor and a discovered catalogue", () => {
   const labelsOf = (select: HTMLSelectElement) =>
     Array.from(select.options).map((option) => option.textContent ?? "");
 
+  // ANT-169: while the list is being read, that is not the list missing.
+  it("does not say the list was never given while it is still being read", async () => {
+    bridge(() => new Promise<never>(() => undefined));
+    const { workflow, agentId } = withAgent(codexBase);
+    renderEditor(workflow, agentId);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText(/has not been given .*model list/)).toBeNull();
+  });
+
   it("lists the models Codex discovered, with Default still first", async () => {
     bridge(catalogue);
     const { workflow, agentId } = withAgent(codexBase);

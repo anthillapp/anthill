@@ -106,26 +106,68 @@ function kicker(node: Workflow["nodes"][number]): string {
  * and `unknown` says so instead of guessing either way.
  */
 /**
- * Whether every step the workflow has has finished.
+ * Whether the run reached its end.
+ *
+ * Every step finished is the plain case. But a workflow with a branch the run
+ * did not take — a rework loop nobody needed, an "otherwise" path — has steps
+ * that stay unreached for good, and requiring every step to finish meant such
+ * a run never reached Done on the diagram however cleanly it ended (ANT-170).
+ * So a run the session said was over, with nothing still running, waiting,
+ * failed or unknown, has reached its end too; the steps it skipped stay grey
+ * as "not reached", which is what the report already calls them.
  *
  * `every` over no blocks is vacuously true, so a session nothing has been
  * observed for would otherwise read as a completed one — hence the guard.
  */
-function runFinished(view: LiveSessionView): boolean {
-  return !view.empty && Object.values(view.blocks).every((block) => block.state === "done");
+function runFinished(view: LiveSessionView, sessionState: LiveSessionState): boolean {
+  if (view.empty) return false;
+  const blocks = Object.values(view.blocks);
+  if (blocks.every((block) => block.state === "done")) return true;
+  const ended = view.endedAt !== undefined || sessionState === "completed";
+  return ended && blocks.some((block) => block.state === "done") && blocks.every((block) => block.state === "done" || block.state === "queued");
+}
+
+/**
+ * The End the finished run reached, when the record can say which.
+ *
+ * A workflow may end in more than one place — Done, and "Stopped: report
+ * failure" — and nothing the session writes says which end it stopped at:
+ * the steps announce themselves, the ends do not. Colouring every end a
+ * finished step leads to drew both green, and the run read as having
+ * approved and failed at once (W13 in the 0.8.3 QA). So an end is claimed
+ * only when it is the one end the finished steps lead to.
+ */
+function reachedEnds(
+  workflow: Workflow,
+  view: LiveSessionView,
+  finished: boolean,
+  boundaryKind: (id: string) => "start" | "end" | undefined,
+): ReadonlySet<string> {
+  if (!finished) return new Set();
+  const fed = workflow.nodes.filter(
+    (node) =>
+      node.type === "end" &&
+      workflow.edges.some(
+        (edge) =>
+          edge.target === node.id &&
+          (boundaryKind(edge.source) === "start" || view.blocks[edge.source]?.state === "done"),
+      ),
+  );
+  return new Set(fed.length === 1 ? [fed[0].id] : []);
 }
 
 function boundaryState(
   view: LiveSessionView,
   node: Workflow["nodes"][number],
   sessionState: LiveSessionState,
+  endsReached: ReadonlySet<string>,
 ): DrawnRunState {
   if (node.type === "start") {
     if (view.empty) return "queued";
     if (hasStepEvidence(view)) return "done";
     return sessionState === "detected_live" ? "observing" : "unknown";
   }
-  return runFinished(view) ? "done" : "queued";
+  return endsReached.has(node.id) ? "done" : "queued";
 }
 
 /**
@@ -146,13 +188,34 @@ function carriedControl(
   source: string,
   target: string,
   boundaryKind: (id: string) => "start" | "end" | undefined,
+  endsReached: ReadonlySet<string>,
 ): boolean {
-  if (boundaryKind(target) === "end") return runFinished(view);
+  // Into the end, along the step that actually led there: a step the run
+  // skipped did not carry it anywhere (ANT-170).
+  if (boundaryKind(target) === "end") {
+    return endsReached.has(target) && (boundaryKind(source) === "start" || view.blocks[source]?.state === "done");
+  }
 
   const to = view.blocks[target];
   if (!to || to.passes < 1) return false;
 
   if (boundaryKind(source) === "start") return true;
+
+  /*
+    Any pass, not only the last. A loop enters its steps again, and comparing
+    the last entry of each end lost the colour of the connection that started
+    the loop the moment the loop came round: Run tests → Fix failures went grey
+    once Run tests ran its second pass, though it was exactly the move that
+    happened (ANT-174). A connection carried control if some pass of its
+    source finished and its target was entered after that pass began.
+  */
+  const finishedPasses = view.spans.filter((span) => span.blockId === source && span.endedAt !== undefined);
+  const arrivals = view.spans.filter((span) => span.blockId === target);
+  if (finishedPasses.length > 0 && arrivals.length > 0) {
+    return arrivals.some((arrival) =>
+      finishedPasses.some((pass) => Date.parse(pass.startedAt) <= Date.parse(arrival.startedAt)),
+    );
+  }
 
   const from = view.blocks[source];
   if (from?.state !== "done") return false;
@@ -225,10 +288,11 @@ function deliveringSources(
   workflow: Workflow,
   view: LiveSessionView,
   boundaryKind: (id: string) => "start" | "end" | undefined,
+  endsReached: ReadonlySet<string>,
 ): Map<string, string> {
   const best = new Map<string, { source: string; at: number }>();
   for (const edge of workflow.edges) {
-    if (!carriedControl(view, edge.source, edge.target, boundaryKind)) continue;
+    if (!carriedControl(view, edge.source, edge.target, boundaryKind, endsReached)) continue;
     const at = enteredAt(view.blocks[edge.source]);
     if (at === undefined) continue;
     const held = best.get(edge.target);
@@ -265,8 +329,9 @@ function edgeTone(
   boundaryKind: (id: string) => "start" | "end" | undefined,
   delivering: Map<string, string>,
   joins: ReadonlyMap<string, readonly string[]>,
+  endsReached: ReadonlySet<string>,
 ): EdgeTone {
-  if (!carriedControl(view, source, target, boundaryKind)) return "idle";
+  if (!carriedControl(view, source, target, boundaryKind, endsReached)) return "idle";
   if (boundaryKind(target) === "end") return "seen";
 
   const to = view.blocks[target];
@@ -341,10 +406,26 @@ export function LiveWorkflowGraph({
   /** Where parallel branches meet — every branch into it pulses (ANT-166). */
   const joins = useMemo(() => parallelPlan(workflow).joins, [workflow]);
 
+  /** Whether the run reached its end, branches not taken included (ANT-170). */
+  const finished = runFinished(view, sessionState);
+
+  /*
+    Whether the session is over, however it ended. A step it never entered
+    then will not get a turn, and "Waiting its turn" under a "Session
+    finished" header said otherwise (ANT-193): it reads "Not reached", as the
+    report does. A session that only went quiet may still come back, so a
+    lost one keeps the waiting words.
+  */
+  const over = view.endedAt !== undefined || sessionState === "completed" || sessionState === "failed";
+
   /** Recomputed with the view, since it is entirely a fact about the events. */
+  const endsReached = useMemo(
+    () => reachedEnds(workflow, view, finished, boundaryKind),
+    [workflow, view, finished, boundaryKind],
+  );
   const delivering = useMemo(
-    () => deliveringSources(workflow, view, boundaryKind),
-    [workflow, view, boundaryKind],
+    () => deliveringSources(workflow, view, boundaryKind, endsReached),
+    [workflow, view, boundaryKind, endsReached],
   );
 
   const bounds = useMemo(() => {
@@ -509,7 +590,7 @@ export function LiveWorkflowGraph({
       {model.connected.map((path) => {
         const edge = workflow.edges.find((item) => item.id === path.output.id);
         const target = edge?.target ?? "";
-        const tone = edgeTone(view, path.nodeId, target, boundaryKind, delivering, joins);
+        const tone = edgeTone(view, path.nodeId, target, boundaryKind, delivering, joins, endsReached);
         const style = EDGE_TONE[tone];
         return (
           <path
@@ -531,9 +612,10 @@ export function LiveWorkflowGraph({
         const structural = node.type === "start" || node.type === "end";
         const block = view.blocks[node.id];
         const state: DrawnRunState = structural
-          ? boundaryState(view, node, sessionState)
+          ? boundaryState(view, node, sessionState, endsReached)
           : (block?.state ?? "queued");
         const style = RUN_STATE[state];
+        const label = state === "queued" && over && !structural ? "Not reached" : style.label;
         const selected = selectedBlockId === node.id;
         const passes = block?.passes ?? 0;
 
@@ -549,7 +631,7 @@ export function LiveWorkflowGraph({
               if (event.key === "Enter" || event.key === " ") onSelect(selected ? undefined : node.id);
             }}
           >
-            <title>{`${node.name} – ${style.label}${block?.note ? `. ${block.note}` : ""}`}</title>
+            <title>{`${node.name} – ${label}${block?.note ? `. ${block.note}` : ""}`}</title>
 
             {/*
               One border, and it is the block's own.
@@ -602,7 +684,7 @@ export function LiveWorkflowGraph({
                   <span className="live-node-kicker">{kicker(node)}</span>
                   <span className="live-node-name">{node.name}</span>
                   <span className="live-node-state">
-                    {style.label}
+                    {label}
                     {passes > 1 ? ` · pass ${passes}` : ""}
                     {/* How long the agent has been on this step — elapsed since
                         its own announcement, ticking, and plainly not a promise

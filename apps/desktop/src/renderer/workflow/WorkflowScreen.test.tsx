@@ -7,7 +7,7 @@
  */
 
 import { StrictMode } from "react";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PendingRun } from "@anthill/live";
@@ -529,6 +529,58 @@ describe("stepping through edits", () => {
 
     expect(unavailable(forward())).toBe(false);
     fireEvent.click(forward());
+    expect(screen.getByDisplayValue("Renamed workflow")).toBeTruthy();
+  });
+
+  /*
+    ANT-192. In the app the Edit menu takes ⌘Z before the page sees it, so the
+    canvas could only be stepped from its buttons. The menu now tells the page.
+  */
+  it("steps back and forward when the Edit menu asks, outside a text field", async () => {
+    let menu: ((action: "undo" | "redo") => void) | undefined;
+    await workflow();
+    // Registered after mount in the app; here the stub is given one and the screen remounted.
+    cleanup();
+    const api = stubApi() as ReturnType<typeof stubApi> & { onEditHistory: unknown };
+    api.onEditHistory = vi.fn((listener: (action: "undo" | "redo") => void) => {
+      menu = listener;
+      return () => undefined;
+    });
+    render(
+      <StrictMode>
+        <WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />
+      </StrictMode>,
+    );
+    fireEvent.click((await screen.findByText(/Implement, test, fix/)).closest("button") as HTMLElement);
+    await screen.findByRole("button", { name: "Prompt" });
+
+    const name = screen.getByDisplayValue(/Implement, test, fix/) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Renamed workflow" } });
+    name.blur();
+    act(() => menu?.("undo"));
+    expect(screen.getByDisplayValue(/Implement, test, fix/)).toBeTruthy();
+    act(() => menu?.("redo"));
+    expect(screen.getByDisplayValue("Renamed workflow")).toBeTruthy();
+  });
+
+  it("leaves the menu's undo to a text field that has focus", async () => {
+    let menu: ((action: "undo" | "redo") => void) | undefined;
+    const api = stubApi() as ReturnType<typeof stubApi> & { onEditHistory: unknown };
+    api.onEditHistory = vi.fn((listener: (action: "undo" | "redo") => void) => {
+      menu = listener;
+      return () => undefined;
+    });
+    render(
+      <StrictMode>
+        <WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />
+      </StrictMode>,
+    );
+    fireEvent.click((await screen.findByText(/Implement, test, fix/)).closest("button") as HTMLElement);
+    await screen.findByRole("button", { name: "Prompt" });
+    const name = screen.getByDisplayValue(/Implement, test, fix/) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Renamed workflow" } });
+    name.focus();
+    act(() => menu?.("undo"));
     expect(screen.getByDisplayValue("Renamed workflow")).toBeTruthy();
   });
 
@@ -1068,5 +1120,54 @@ describe("clicking a problem", () => {
       const inspector = document.querySelector(".inspector");
       expect(inspector?.textContent).toContain("Do the work");
     });
+  });
+});
+
+/*
+  ANT-177 and ANT-180: the prompt's folder and the run it starts.
+*/
+describe("handing over the prompt", () => {
+  const api = () => (window as unknown as { anthill: ReturnType<typeof stubApi> }).anthill;
+
+  async function copyFromPrompt() {
+    Object.assign(navigator, { clipboard: { writeText: vi.fn(async () => undefined) } });
+    fireEvent.click(screen.getByRole("button", { name: /^Prompt$/ }));
+    const dialog = await screen.findByRole("dialog", { name: /Hand over the prompt/ });
+    fireEvent.click(within(dialog).getAllByRole("button", { name: "Choose folder…" })[0]);
+    // Past the observation step, whatever it offers.
+    const next = await within(dialog).findByRole("button", { name: /^(Continue|Continue with basic progress|Copy prompt)$/ });
+    if (next.textContent !== "Copy prompt") fireEvent.click(next);
+    const copy = await within(dialog).findByRole("button", { name: "Copy prompt" });
+    await waitFor(() => expect((copy as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(copy);
+    await waitFor(() => expect(api().liveObserve).toHaveBeenCalled());
+  }
+
+  // ANT-177: a run from a workflow never saved had nowhere to be found.
+  it("saves a workflow that was never saved as its prompt is copied, without asking", async () => {
+    await workflow();
+    await copyFromPrompt();
+    await waitFor(() =>
+      expect(api().saveWorkflow).toHaveBeenCalledWith(expect.objectContaining({ quiet: true })),
+    );
+  });
+
+  // ANT-180: the run folder is not an edit the author made.
+  it("keeps a saved, unchanged workflow saved when its run folder is chosen", async () => {
+    await workflow();
+    // Saved once, by hand.
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api().saveWorkflow).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api().setWorkflowDirty).toHaveBeenLastCalledWith(false));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Prompt$/ }));
+    const dialog = await screen.findByRole("dialog", { name: /Hand over the prompt/ });
+    fireEvent.click(within(dialog).getAllByRole("button", { name: "Choose folder…" })[0]);
+
+    // Written into its file on the spot, to the path it was saved at.
+    await waitFor(() => expect(api().saveWorkflow).toHaveBeenCalledTimes(2));
+    const [request] = api().saveWorkflow.mock.calls.at(-1) as unknown as [{ path?: string; quiet?: boolean }];
+    expect(request.path).toBe("/tmp/w.workflow.json");
+    await waitFor(() => expect(api().setWorkflowDirty).toHaveBeenLastCalledWith(false));
   });
 });

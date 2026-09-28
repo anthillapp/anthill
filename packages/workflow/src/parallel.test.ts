@@ -185,3 +185,74 @@ describe("the compiled prompt", () => {
     expect(compile(sequential).prompt).toContain("- Follow the steps in the order given; do not skip ahead.");
   });
 });
+
+/*
+  ANT-187. A gate's paths are a person's answers. Drawn as two plain
+  connections — "approved" and "declined" — the gate read as a fork: both
+  branches ran at once, writing the same file, and the step after them waited
+  for both.
+*/
+describe("an Approval Gate's paths", () => {
+  const gated = () =>
+    flow(
+      [
+        step("read", "Read the request"),
+        { id: "gate", type: "approval", name: "Approve the codename", config: { prompt: "May it appear?" } },
+        step("with", "Write note including it"),
+        step("without", "Write note omitting it"),
+        step("verify", "Verify"),
+      ],
+      [
+        edge("start", "read"),
+        edge("read", "gate"),
+        edge("gate", "with", { label: "approved" }),
+        edge("gate", "without", { label: "declined" }),
+        edge("with", "verify"),
+        edge("without", "verify"),
+        edge("verify", "end"),
+      ],
+    );
+
+  it("are alternatives, never a fork, so nothing after them is a join", () => {
+    const plan = parallelPlan(gated());
+    expect(plan.forks.has("gate")).toBe(false);
+    expect(plan.joins.has("verify")).toBe(false);
+    expect(plan.parallel("with", "without")).toBe(false);
+  });
+
+  it("compile to one answer each, and nothing at the same time", () => {
+    const steps = compile(gated()).prompt;
+    expect(steps).toContain('- if they answer "approved", continue to step 3 (Write note including it).');
+    expect(steps).toContain('- if they answer "declined", continue to step 4 (Write note omitting it).');
+    expect(steps).not.toContain("at the same time");
+    expect(steps).not.toContain("are both finished");
+  });
+});
+
+/*
+  ANT-182. Pi has no subagents, so its fork says "do all of them, in
+  whichever order suits" — and then the join said they "run in parallel",
+  and the rules spoke of steps "marked to run at the same time", which
+  nothing in a Pi prompt is.
+*/
+describe("a fork in a prompt for a tool with no subagents", () => {
+  const pi = () => {
+    const workflow = fanOutFromStep();
+    return { ...workflow, target: "pi" as const };
+  };
+
+  it("never says the branches run in parallel or at the same time", () => {
+    const { prompt } = compile(pi());
+    expect(prompt).toContain("in whichever order suits");
+    expect(prompt).toContain("they are independent branches and meet here");
+    expect(prompt).toContain("steps marked as independent can be done in any order");
+    expect(prompt).not.toContain("run in parallel");
+    expect(prompt).not.toContain("at the same time");
+  });
+
+  it("leaves the wording for tools with subagents as it was", () => {
+    const { prompt } = compile(fanOutFromStep());
+    expect(prompt).toContain("they run in parallel and meet here");
+    expect(prompt).toContain("steps marked to run at the same time start together");
+  });
+});

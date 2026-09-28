@@ -76,6 +76,8 @@ export type WorkflowStatus = {
   runId: string;
   /** The step the session last announced, when it announced one. */
   stepId?: string;
+  /** The author stopped observing it, rather than Anthill losing it (ANT-191). */
+  stopped?: boolean;
 };
 
 type Stored = { version: number; workflows: Record<string, WorkflowStatus> };
@@ -115,7 +117,13 @@ function parse(text: string): Record<string, WorkflowStatus> {
     if (!isEnding(state)) continue;
     if (Number.isNaN(Date.parse(at))) continue;
     const stepId = str(entry.stepId);
-    workflows[workflowId] = { state, at, runId, ...(stepId ? { stepId } : {}) };
+    workflows[workflowId] = {
+      state,
+      at,
+      runId,
+      ...(stepId ? { stepId } : {}),
+      ...(entry.stopped === true ? { stopped: true } : {}),
+    };
   }
   return workflows;
 }
@@ -159,6 +167,7 @@ export class WorkflowStatusStore {
       state: run.state,
       at,
       runId: run.anthillRunId,
+      ...(run.observationStoppedAt ? { stopped: true } : {}),
     };
     await this.flush();
   }

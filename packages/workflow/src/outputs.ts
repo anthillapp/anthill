@@ -20,6 +20,7 @@
  */
 
 import type {
+  EdgeAnchor,
   EdgeAnchorPoint,
   EdgeBend,
   EdgeRouting,
@@ -125,6 +126,39 @@ export function isOutcomeKind(value: unknown): value is OutcomeKind {
   );
 }
 
+/**
+ * A point on the side a handle names, in fractions of the block.
+ *
+ * Not the middle: a template's loop can leave one side of a block that another
+ * connection arrives at (Implement, test, fix leaves Run tests from the bottom
+ * and comes back into its bottom), and a port drawn on an arrowhead reads as
+ * neither. Leaving at two thirds along and arriving at one third keeps them
+ * apart, and keeps a pair of opposite connections from crossing.
+ */
+function handlePoint(handle: EdgeAnchor | undefined, end: "leave" | "arrive"): EdgeAnchorPoint | undefined {
+  if (!handle) return undefined;
+  const along = end === "leave" ? 0.65 : 0.35;
+  switch (handle) {
+    case "top":
+      return { u: along, v: 0 };
+    case "bottom":
+      return { u: along, v: 1 };
+    case "left":
+      return { u: 0, v: along };
+    case "right":
+      return { u: 1, v: along };
+  }
+}
+
+/*
+  A connection may say only which side it leaves from and arrives at
+  (`sourceHandle`, `targetHandle`), as the templates' rework loops do. Those
+  sides were never read, so a loop meant to run under the row was routed along
+  it instead: from the step it leaves, straight through the step it returns
+  to, and hidden behind that step (ANT-194). A point on the named side
+  stands in when no exact point was placed. A port or landing point the author
+  placed by hand still wins.
+*/
 function edgeToOutput(edge: WorkflowEdge): BlockOutput {
   return {
     id: edge.id,
@@ -132,8 +166,8 @@ function edgeToOutput(edge: WorkflowEdge): BlockOutput {
     kind: edge.kind ?? DEFAULT_OUTCOME_KIND,
     condition: edge.condition,
     target: edge.target,
-    anchor: edge.anchor,
-    port: edge.port,
+    anchor: edge.anchor ?? handlePoint(edge.targetHandle, "arrive"),
+    port: edge.port ?? handlePoint(edge.sourceHandle, "leave"),
     routing: edge.routing,
     bend: edge.bend,
   };
@@ -308,7 +342,12 @@ export function patchOutput(
       edges: workflow.edges.map((item) => {
         if (item.id !== outputId) return item;
         const updated = applyPatch(item, patch);
+        // A port or landing set, or put back, replaces the side a template
+        // named for it: otherwise putting a port back on the right edge would
+        // leave it on the named side instead (ANT-194).
+        if ("port" in patch) delete updated.sourceHandle;
         if ("anchor" in patch) {
+          delete updated.targetHandle;
           if (patch.anchor === null || patch.anchor === undefined) delete updated.anchor;
           else updated.anchor = patch.anchor;
         }
@@ -384,6 +423,8 @@ export function setOutputTarget(
       edges: workflow.edges.map((edge) => {
         if (edge.id !== outputId) return edge;
         const next: WorkflowEdge = { ...edge, target };
+        // The side it arrived at belonged to the old target.
+        if (target !== edge.target) delete next.targetHandle;
         if (anchor === null) delete next.anchor;
         else if (anchor) next.anchor = anchor;
         return next;

@@ -65,6 +65,19 @@ export function SessionReport({ workflow, run, view, end, usage, endedAt, onPick
   const loops = usage.blocks.filter((block) => block.passes.length > 1);
   const name = (blockId: string) => workflow.nodes.find((node) => node.id === blockId)?.name ?? blockId;
 
+  // A session that ended at an Approval Gate nobody answered did not finish
+  // the workflow; it stopped where a person has to decide (ANT-176).
+  const gate =
+    end === "completed"
+      ? workflow.nodes.find((node) => node.type === "approval" && view.blocks[node.id]?.state === "needsYou")
+      : undefined;
+  // Not lost: the author asked Anthill to stop reading it (ANT-191).
+  const title = run.observationStoppedAt && end === "lost"
+    ? "You stopped observing"
+    : gate
+      ? `Stopped at ${gate.name}`
+      : END_TITLE[end];
+
   const chips = OUTCOME_ORDER.filter((outcome) => (counts.get(outcome)?.length ?? 0) > 0);
   // The collapsed line names only what ended somewhere, not every empty bucket.
   const summary = chips.map((outcome) => outcomeWord(outcome, counts.get(outcome)!.length)).join(" · ");
@@ -85,7 +98,7 @@ export function SessionReport({ workflow, run, view, end, usage, endedAt, onPick
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <strong>{END_TITLE[end]}</strong>
+        <strong>{title}</strong>
         {endedAt ? <span className="quiet">{end === "lost" ? "Last read" : "Ended"} {clock(endedAt)}</span> : null}
         {summary ? <span className="session-report-counts">{summary}</span> : null}
         <span className="spacer" />
@@ -105,7 +118,12 @@ export function SessionReport({ workflow, run, view, end, usage, endedAt, onPick
             {verdictSource(end, view.events)}
           </p>
 
-          {words ? (
+          {words?.closing ? (
+            <p className="session-report-words is-empty">
+              {cli} said the work is done and is writing its closing reply. It shows here as soon as
+              it is recorded.
+            </p>
+          ) : words ? (
             <blockquote className={`session-report-words${words.asksUser ? " is-asking" : ""}`}>
               <span className="kicker">
                 {words.asksUser

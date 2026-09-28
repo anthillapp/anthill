@@ -450,6 +450,67 @@ describe("the Codex observer", () => {
     expect(events.map((event) => event.kind)).not.toContain("turn.end");
     expect(events.filter((event) => event.kind === "message")).toEqual([]);
   });
+
+  /*
+    ANT-171. The reviewer rule also caught real subagents: every subagent's
+    file was dropped, so nothing they said or ran reached the feed and the
+    Agents filter was always empty. A subagent names itself with
+    thread_source "subagent" and the path its spawn returned.
+  */
+  it("reads a spawned subagent's thread as that agent's work, tied to the spawn", async () => {
+    const dir = await root();
+    const at = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString();
+    const lines = (rows: unknown[]) => rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+    await writeCodex(
+      dir,
+      "sess-cx",
+      lines([
+        { timestamp: at(0), type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx", cwd: "/tmp/scratch" } },
+        { timestamp: at(1), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: MARKED_PROMPT }] } },
+        { timestamp: at(2), type: "response_item", payload: { type: "function_call", name: "spawn_agent", call_id: "call-spawn", arguments: JSON.stringify({ task_name: "developer_a", agent_type: "developer" }) } },
+        { timestamp: at(2.4), type: "response_item", payload: { type: "function_call_output", call_id: "call-spawn", output: JSON.stringify({ task_name: "/root/developer_a" }) } },
+      ]),
+    );
+    await writeCodex(
+      dir,
+      "sub-a",
+      lines([
+        {
+          timestamp: at(3),
+          type: "session_meta",
+          payload: {
+            session_id: "sess-cx",
+            id: "sub-a",
+            parent_thread_id: "sess-cx",
+            thread_source: "subagent",
+            agent_path: "/root/developer_a",
+            agent_nickname: "Dewey",
+            source: { subagent: { thread_spawn: { parent_thread_id: "sess-cx", agent_path: "/root/developer_a", agent_role: "developer" } } },
+          },
+        },
+        { timestamp: at(4), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Add shout(name)." }] } },
+        { timestamp: at(5), type: "response_item", payload: { type: "function_call", name: "exec_command", call_id: "call-edit" } },
+        { timestamp: at(6), type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: `Added shout(name).\nANTHILL-DONE ${RUN_ID} ${NONCE}` }] } },
+        { timestamp: at(7), type: "event_msg", payload: { type: "task_complete" } },
+      ]),
+    );
+
+    const run = { ...pending("codex"), detectedSessionId: "sess-cx", state: "detected_live" as const };
+    const { evidence, events } = await new CodexObserver(dir).poll(run, new Date().toISOString());
+
+    // The spawn is a delegation, sent off on its own.
+    expect(events).toContainEqual(
+      expect.objectContaining({ kind: "subagent.start", toolUseId: "call-spawn", agentName: "developer_a", background: true }),
+    );
+    // Its work reaches the feed as the agent's, tied to the spawn.
+    const theirs = events.filter((event) => event.parentToolUseId === "call-spawn");
+    expect(theirs.map((event) => event.kind)).toEqual(expect.arrayContaining(["tool.start", "message", "turn.end"]));
+    expect(theirs.every((event) => event.author?.kind === "subagent" && event.author.name === "developer_a")).toBe(true);
+    // Its task is not the author's prompt, and its ending is not the session's.
+    expect(events.filter((event) => event.kind === "prompt.submit")).toHaveLength(1);
+    expect(evidence).not.toContainEqual(expect.objectContaining({ kind: "completed" }));
+    expect(events.filter((event) => event.kind === "session.end")).toEqual([]);
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -2280,6 +2341,60 @@ describe("the harness's own done line, journalled", () => {
     expect(events).toContainEqual(
       expect.objectContaining({ kind: "session.end", completion: "done", author: { kind: "main" } }),
     );
+  });
+
+  /*
+    ANT-188. Claude Code prints the done line and goes on writing: the
+    closing reply, the turn ending. Read as activity, those turned the
+    finished run back into a live one that nothing ever finished again.
+  */
+  it("keeps the run finished through the rest of the turn, and a new prompt starts it again", async () => {
+    const dir = await root();
+    const t = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString();
+    const rows: Record<string, unknown>[] = [
+      { type: "user", sessionId: "sess-cc", timestamp: t(0), cwd: "/tmp/scratch", message: { role: "user", content: MARKED_PROMPT } },
+      {
+        type: "assistant", sessionId: "sess-cc", timestamp: t(5),
+        message: { role: "assistant", content: [{ type: "text", text: `All green.\nANTHILL-DONE ${RUN_ID} ${NONCE}` }] },
+      },
+    ];
+    const write = () => writeClaude(dir, "-tmp-scratch", "sess-cc", rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const observer = new ClaudeCodeObserver(dir);
+    let run: PendingRun = { ...pending("claude-code"), detectedSessionId: "sess-cc", state: "detected_live" as const };
+    const poll = async () => {
+      const { evidence } = await observer.poll(run, new Date().toISOString());
+      for (const item of evidence) run = applyEvidence(run, item);
+      return evidence;
+    };
+
+    await write();
+    await poll();
+    expect(run.state).toBe("completed");
+
+    // The closing reply, seconds later, with the turn ending.
+    rows.push({
+      type: "assistant", sessionId: "sess-cc", timestamp: t(12),
+      message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "Here is what I did." }] },
+    });
+    await write();
+    const tail = await poll();
+    expect(tail).toContainEqual(expect.objectContaining({ kind: "activity", resumes: false }));
+    expect(run.state).toBe("completed");
+
+    // Somebody asks for more: the session goes on, and the old done no longer holds.
+    rows.push({ type: "user", sessionId: "sess-cc", timestamp: t(30), message: { role: "user", content: "One more thing." } });
+    await write();
+    await poll();
+    expect(run.state).toBe("detected_live");
+
+    // And a new done ends it again.
+    rows.push({
+      type: "assistant", sessionId: "sess-cc", timestamp: t(40),
+      message: { role: "assistant", content: [{ type: "text", text: `Done.\nANTHILL-DONE ${RUN_ID} ${NONCE}` }] },
+    });
+    await write();
+    await poll();
+    expect(run.state).toBe("completed");
   });
 
   it("is not journalled for a done line that does not carry this run's nonce", async () => {

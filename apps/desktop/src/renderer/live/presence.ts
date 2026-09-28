@@ -162,6 +162,8 @@ const FROM_STATE: Record<LiveSessionState, PresenceKey> = {
  * way in a test as it does at that moment on screen.
  */
 export function presenceKey(run: PendingRun, now: number = Date.now()): PresenceKey {
+  // The author stopped observing it: say that, not that Anthill lost it (ANT-191).
+  if (run.observationStoppedAt && run.state === "observation_lost") return "stopped";
   const key = FROM_STATE[run.state];
   // `failed` covers two different things, and only one of them is a failure.
   // A run whose window ran out without ever matching a session did not have a
@@ -255,8 +257,12 @@ export function runsFor(runs: PendingRun[], workflowId: string | undefined): Pen
  * than one they copied and forgot about half an hour ago.
  */
 export function mostRelevant(runs: PendingRun[]): PendingRun | undefined {
+  // A run the author stopped observing is a result they chose, ranked with the
+  // finished ones — so the chip opens it rather than an older run (ANT-191).
+  const rank = (run: PendingRun) =>
+    PRIORITY.indexOf(run.observationStoppedAt && run.state === "observation_lost" ? "completed" : run.state);
   return [...runs].sort((a, b) => {
-    const byState = PRIORITY.indexOf(a.state) - PRIORITY.indexOf(b.state);
+    const byState = rank(a) - rank(b);
     return byState !== 0 ? byState : Date.parse(b.createdAt) - Date.parse(a.createdAt);
   })[0];
 }

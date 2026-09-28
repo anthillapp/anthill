@@ -200,6 +200,16 @@ describe("the About page", () => {
     expect(screen.queryByText(/Nothing here is sent anywhere/)).toBeNull();
   });
 
+  // ANT-189: About said diagnostics were off until turned on, while Privacy
+  // shows them on by default. It now says what Privacy says.
+  it("does not claim diagnostics are off until turned on", async () => {
+    stub();
+    show();
+    fireEvent.click(page("About"));
+    expect(await screen.findByText(/Anonymous diagnostics can be turned off under Privacy/)).toBeTruthy();
+    expect(screen.queryByText(/unless you turn it on/)).toBeNull();
+  });
+
   // ANT-154: the product's statement of scope, on every platform, and the
   // way to report a Windows problem.
   it("says where Anthill runs, and links the Windows issue form", async () => {
@@ -236,6 +246,18 @@ describe("privacy controls", () => {
     render(<PrivacyPage available />);
     await screen.findByText(/never from this page/);
     expect(screen.queryByRole("switch", { name: "Native crash reports" })).toBeNull();
+  });
+
+  // ANT-156: the public description of what is collected, and how to get a
+  // new identifier.
+  it("links the privacy notes by name, and says how to get a new identifier", async () => {
+    const api = stub();
+    const openLink = vi.fn(async () => undefined);
+    (api as unknown as { openLink: typeof openLink }).openLink = openLink;
+    render(<PrivacyPage available />);
+    fireEvent.click(await screen.findByRole("button", { name: "Read the privacy notes" }));
+    expect(openLink).toHaveBeenCalledWith("privacy");
+    expect(screen.getByText(/turning it back on starts a new one/)).toBeTruthy();
   });
 
   it("starts with sharing off and writes analytics consent only after a click", async () => {

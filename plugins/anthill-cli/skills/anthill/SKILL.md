@@ -174,7 +174,10 @@ Handle the returned outcome literally:
 - `created`: stored, not opened yet;
 - `already_exists`: the identical handover already exists;
 - `incomplete`: ask the returned questions or use an answer the user already
-  gave, then retry the corrected document under the same identity;
+  gave, then retry the corrected document under the same identity. The model
+  question is the common one: unless the user named a model, the answer is the
+  session's own, `"models": { "codex": { "id": "__default__" } }` on every
+  agent — write it in the first submission and the question never comes back;
 - `invalid`: correct the reported call/document problems.
 
 Once the workflow is stored, settle detailed progress (the section above), then

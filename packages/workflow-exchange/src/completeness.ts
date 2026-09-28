@@ -204,8 +204,9 @@ export function checkCompleteness(workflow: Workflow, source: ExchangeSource): E
     );
   }
 
-  for (const error of validation.errors) problems.push(fromValidation(error));
-  for (const advisory of validation.warnings ?? []) problems.push(fromValidation(advisory));
+  const target = workflow.target ?? source.harness;
+  for (const error of validation.errors) problems.push(fromValidation(error, target));
+  for (const advisory of validation.warnings ?? []) problems.push(fromValidation(advisory, target));
 
   return problems;
 }
@@ -217,8 +218,17 @@ export function checkCompleteness(workflow: Workflow, source: ExchangeSource): E
  * is already the wording the canvas shows, and two descriptions of one problem
  * would eventually disagree. Only the question is added.
  */
-function fromValidation(error: ValidationError): ExchangeProblem {
-  return problem(error.code, error.message, {
+function fromValidation(error: ValidationError, target?: string): ExchangeProblem {
+  // The one answer most callers want here has a spelling nothing else tells
+  // them, and a session that could not find it spent ten commands grepping for
+  // it — or invented a model id instead, which validates and pins the agent to
+  // something nobody chose (ANT-124). The canvas message is left as it is; the
+  // handover's reader is the one who has to write it.
+  const message =
+    error.code === WORKFLOWNER_ADVISORY_CODES.AGENT_NO_MODEL_FOR_TARGET && target
+      ? `${error.message} To use whatever the session is on, give the agent "models": { "${target}": { "id": "__default__" } }; to pin a model, put its exact id there instead.`
+      : error.message;
+  return problem(error.code, message, {
     ...(error.nodeId ? { nodeId: error.nodeId } : {}),
     ...(error.edgeId ? { edgeId: error.edgeId } : {}),
   });

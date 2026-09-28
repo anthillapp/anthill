@@ -1100,4 +1100,22 @@ describe("handing over the prompt", () => {
     );
   });
 
+  // ANT-180: the run folder is not an edit the author made.
+  it("keeps a saved, unchanged workflow saved when its run folder is chosen", async () => {
+    await workflow();
+    // Saved once, by hand.
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api().saveWorkflow).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api().setWorkflowDirty).toHaveBeenLastCalledWith(false));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Prompt$/ }));
+    const dialog = await screen.findByRole("dialog", { name: /Hand over the prompt/ });
+    fireEvent.click(within(dialog).getAllByRole("button", { name: "Choose folder…" })[0]);
+
+    // Written into its file on the spot, to the path it was saved at.
+    await waitFor(() => expect(api().saveWorkflow).toHaveBeenCalledTimes(2));
+    const [request] = api().saveWorkflow.mock.calls.at(-1) as unknown as [{ path?: string; quiet?: boolean }];
+    expect(request.path).toBe("/tmp/w.workflow.json");
+    await waitFor(() => expect(api().setWorkflowDirty).toHaveBeenLastCalledWith(false));
+  });
 });

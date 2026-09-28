@@ -482,6 +482,17 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   saveNow.current = save;
   useEffect(() => window.anthill.onSaveWorkflow(() => void saveNow.current()), []);
 
+  /**
+   * A save the run folder asked for, made once the edit is in the workflow
+   * (ANT-180): `save` reads the workflow it closes over, so it has to wait
+   * for the render that carries the change.
+   */
+  const quietSave = useRef(false);
+  useEffect(() => {
+    if (!quietSave.current) return;
+    quietSave.current = false;
+    void save();
+  }, [workflow, save]);
 
   // "Saved" is about the click, so it goes when the click stops being recent.
   // A failure stays until something else happens: it is the author's to read.
@@ -768,7 +779,15 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         <PromptModal
           workflow={workflow}
           validation={validation}
-          onRunRoot={(root) => editWorkflow((current) => withRunRoot(current, root))}
+          onRunRoot={(root) => {
+            // Where the agent files go is not an edit the author made. A
+            // workflow that was saved and unchanged stays saved: the folder is
+            // written into its file on the spot, rather than leaving it
+            // "Unsaved" and every run ending on a discard-changes dialog
+            // (ANT-180).
+            if (!dirty && path) quietSave.current = true;
+            editWorkflow((current) => withRunRoot(current, root));
+          }}
           onObserving={() => {
             // A run from a workflow that was never saved had nowhere to be
             // found once the editor closed: no file, so no row on the launch

@@ -47,7 +47,7 @@ import {
   type SaveWorkflowResult,
 } from "../shared/ipc.js";
 import { createServices, type RunServices } from "./services.js";
-import { destinationInside, FileGrants, FolderGrants, writeAllOrNothing } from "./safe-write.js";
+import { destinationInside, FileGrants, FolderGrants, rootToWrite, writeAllOrNothing } from "./safe-write.js";
 import { detectInterpreters, runDraft, signInToInterpreter } from "./interpreters.js";
 import { readCodexModels } from "./codex-models.js";
 import { readPiModels } from "./pi-models.js";
@@ -1464,13 +1464,21 @@ function registerIpcHandlers(): void {
       let root: string;
       if (request.root) {
         // A root that arrives from the renderer is only as good as the dialog
-        // it came from. One this process never handed out is refused rather
-        // than written to, whatever it points at.
-        const granted = await grants.resolveGranted(request.root);
-        if (!granted) {
-          return { ok: false, error: "That folder was not chosen in this session. Choose it again." };
-        }
-        root = granted;
+        // it came from. One this process never handed out is confirmed in a
+        // dialog pointing at it, never written to on the renderer's word
+        // alone (ANT-200).
+        const decided = await rootToWrite(request.root, grants, async (defaultPath) => {
+          const result = await dialog.showOpenDialog({
+            title: "Confirm the folder to write the agent files into",
+            message: "Anthill remembered this folder from an earlier session. Confirm it to write the agent files.",
+            buttonLabel: "Use This Folder",
+            defaultPath,
+            properties: ["openDirectory", "createDirectory"],
+          });
+          return result.canceled || result.filePaths.length === 0 ? undefined : result.filePaths[0];
+        });
+        if ("cancelled" in decided) return { ok: false, cancelled: true };
+        root = decided.root;
       } else {
         const result = await dialog.showOpenDialog({
           title: "Choose the repository to write the workflow into",

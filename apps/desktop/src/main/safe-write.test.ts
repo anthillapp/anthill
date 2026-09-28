@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { destinationInside, FolderGrants, writeAllOrNothing, type StagedFile } from "./safe-write.js";
+import { destinationInside, FolderGrants, rootToWrite, writeAllOrNothing, type StagedFile } from "./safe-write.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -130,6 +130,55 @@ describe("the folders a dialog handed out", () => {
   it("refuses everything before anything is granted", async () => {
     const { root } = await sandbox();
     expect(await new FolderGrants().resolveGranted(root)).toBeUndefined();
+  });
+});
+
+/*
+  ANT-200. A workflow remembers its run folder, and a restart forgets every
+  grant: re-running a saved workflow after relaunching Anthill refused its own
+  folder, and no agent files were written.
+*/
+describe("a run folder remembered from an earlier session", () => {
+  it("is written to as it is when this session granted it", async () => {
+    const { root } = await sandbox();
+    const grants = new FolderGrants();
+    await grants.grant(root);
+    let asked = false;
+    const decided = await rootToWrite(root, grants, async () => {
+      asked = true;
+      return undefined;
+    });
+    expect(decided).toEqual({ root: await realpath(root) });
+    expect(asked).toBe(false);
+  });
+
+  it("is confirmed in a dialog pointing at it, and the confirmation grants it", async () => {
+    const { root } = await sandbox();
+    const grants = new FolderGrants();
+    let pointedAt: string | undefined;
+    const decided = await rootToWrite(root, grants, async (defaultPath) => {
+      pointedAt = defaultPath;
+      return defaultPath;
+    });
+    expect(pointedAt).toBe(root);
+    expect(decided).toEqual({ root: await realpath(root) });
+    expect(await grants.resolveGranted(root)).toBeTruthy();
+  });
+
+  it("goes where the dialog says when the author picks another folder", async () => {
+    const { root, outside } = await sandbox();
+    const grants = new FolderGrants();
+    const decided = await rootToWrite(root, grants, async () => outside);
+    expect(decided).toEqual({ root: await realpath(outside) });
+    // The remembered one was never confirmed, so it is still not granted.
+    expect(await grants.resolveGranted(root)).toBeUndefined();
+  });
+
+  it("writes nowhere when the confirmation is closed", async () => {
+    const { root } = await sandbox();
+    const grants = new FolderGrants();
+    expect(await rootToWrite(root, grants, async () => undefined)).toEqual({ cancelled: true });
+    expect(await grants.resolveGranted(root)).toBeUndefined();
   });
 });
 

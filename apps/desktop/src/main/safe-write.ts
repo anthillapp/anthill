@@ -129,6 +129,29 @@ export class FolderGrants {
   }
 }
 
+/**
+ * The folder an export may write to, given the one the renderer remembered.
+ *
+ * A folder granted in this process is used as it is. One remembered from an
+ * earlier session — saved with the workflow as its run folder — is not
+ * refused, which is what every re-run after a restart used to meet ("That
+ * folder was not chosen in this session", and no agent files written): the
+ * author is asked to confirm it, in a dialog already pointing at it, and the
+ * dialog is the grant (ANT-200). Nothing is written anywhere a dialog did
+ * not return.
+ */
+export async function rootToWrite(
+  remembered: string,
+  grants: FolderGrants,
+  confirm: (defaultPath: string) => Promise<string | undefined>,
+): Promise<{ root: string } | { cancelled: true }> {
+  const granted = await grants.resolveGranted(remembered);
+  if (granted) return { root: granted };
+  const chosen = await confirm(remembered);
+  if (!chosen) return { cancelled: true };
+  return { root: await grants.grant(chosen) };
+}
+
 /** Exact workflow files opened/saved through a trusted main-process path. */
 export class FileGrants {
   private readonly granted = new Set<string>();

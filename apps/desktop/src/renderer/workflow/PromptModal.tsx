@@ -368,7 +368,20 @@ export function PromptModal({
           if (response.ok) {
             setPlacement("written");
             setFailure(null);
-          } else if (!("cancelled" in response)) {
+            // A remembered folder is confirmed in a dialog after a restart,
+            // and the author may pick another there (ANT-200): what was
+            // written to is the run folder from now on.
+            if (response.directory && response.directory !== folder) {
+              setFolder(response.directory);
+              onRunRoot?.(response.directory);
+            }
+          } else if ("cancelled" in response) {
+            // Closed the confirmation: nothing was written, and the receipt
+            // says so rather than still promising the files.
+            setPlacement("failed");
+            setFailure("The folder was not confirmed, so nothing was written. Choose it again to write the agent files.");
+            setRolledBack(true);
+          } else {
             setPlacement("failed");
             setFailure(response.error);
             setRolledBack(response.rolledBack !== false);
@@ -397,7 +410,7 @@ export function PromptModal({
         setError(problem instanceof Error ? problem.message : "The prompt could not be copied.");
       }
     },
-    [files, folder, hasAgents, marker, onObserving, result, reportViaCli, workflow.id, workflow.name],
+    [files, folder, hasAgents, marker, onObserving, onRunRoot, result, reportViaCli, workflow.id, workflow.name],
   );
 
   /** Back to naming a folder. The copy, if there was one, is not undone. */

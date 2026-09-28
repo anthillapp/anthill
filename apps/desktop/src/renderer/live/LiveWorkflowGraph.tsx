@@ -171,6 +171,22 @@ function carriedControl(
 
   if (boundaryKind(source) === "start") return true;
 
+  /*
+    Any pass, not only the last. A loop enters its steps again, and comparing
+    the last entry of each end lost the colour of the connection that started
+    the loop the moment the loop came round: Run tests → Fix failures went grey
+    once Run tests ran its second pass, though it was exactly the move that
+    happened (ANT-174). A connection carried control if some pass of its
+    source finished and its target was entered after that pass began.
+  */
+  const finishedPasses = view.spans.filter((span) => span.blockId === source && span.endedAt !== undefined);
+  const arrivals = view.spans.filter((span) => span.blockId === target);
+  if (finishedPasses.length > 0 && arrivals.length > 0) {
+    return arrivals.some((arrival) =>
+      finishedPasses.some((pass) => Date.parse(pass.startedAt) <= Date.parse(arrival.startedAt)),
+    );
+  }
+
   const from = view.blocks[source];
   if (from?.state !== "done") return false;
   const left = enteredAt(from);

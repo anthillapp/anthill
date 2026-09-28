@@ -820,6 +820,25 @@ describe("edges only carry control where control demonstrably went", () => {
     unmount();
   });
 
+  /*
+    ANT-174. A loop enters its steps again, and the connection that started
+    the loop went grey the moment it came round, though it was exactly the
+    move that happened.
+  */
+  it("keeps a connection a loop took coloured after the loop comes round", () => {
+    const { tone, unmount } = draw([
+      ...workingUpstream(),
+      announce("record", "2026-08-29T10:00:20.000Z"),
+      announce("select", "2026-08-29T10:00:30.000Z"),
+      announce("checkpoint", "2026-08-29T10:00:40.000Z"),
+    ]);
+    // select → scenario was taken on the first pass, before select ran again.
+    expect(tone("to-scenario")).toBe("tone-seen");
+    expect(tone("to-record")).toBe("tone-seen");
+    expect(tone("back-to-select")).toBe("tone-seen");
+    expect(tone("to-checkpoint")).toBe("tone-live");
+    unmount();
+  });
 });
 
 /**

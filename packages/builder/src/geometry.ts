@@ -786,10 +786,15 @@ export function labelSpot(
   const dy = to.y - from.y;
   const length = Math.hypot(dx, dy) || 1;
 
-  // Normal to the chord, flipped so it points upwards on screen.
+  // Normal to the chord, pointing the way the connection itself goes: up for
+  // one that climbs, down for one that falls. Two connections out of a fork
+  // leave from ports a few pixels apart and part at once; a normal that always
+  // pointed up sent the falling one's label up onto the climbing one, so each
+  // label read as the other connection's (ANT-178). A level one keeps up.
   let nx = -dy / length;
   let ny = dx / length;
-  if (ny > 0) {
+  const falling = dy > length * 0.2;
+  if (falling ? ny < 0 : ny > 0) {
     nx = -nx;
     ny = -ny;
   }

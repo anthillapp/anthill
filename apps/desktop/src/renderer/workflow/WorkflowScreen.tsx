@@ -975,6 +975,14 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
               />{" "}
               question
             </span>
+            {/* Drawn on the canvas, so it has its entry here (W2, ANT-178). */}
+            <span>
+              <i
+                className="legend-line"
+                style={{ borderColor: "#ec3013", borderTopStyle: "dashed" }}
+              />{" "}
+              stop
+            </span>
           </div>
         </div>
 

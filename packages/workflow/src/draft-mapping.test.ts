@@ -13,6 +13,7 @@ import { mapDraftToWorkflow, workflowSource, reviewDraft } from "./draft-mapping
 import { agentConfig, validateWorkflow } from "./workflow.js";
 import { outputsOf } from "./outputs.js";
 import { compile } from "./compile.js";
+import { buildDraftInstruction } from "./draft-instruction.js";
 import { WORKFLOW_FORMAT_VERSION, migrateWorkflow } from "./format.js";
 
 const OPTIONS = {
@@ -427,6 +428,60 @@ describe("mapping connections", () => {
     const { workflow } = mapDraftToWorkflow(draft(), OPTIONS);
     const ids = workflow.edges.map((edge) => edge.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+/*
+  ANT-185. A draft has no Start of its own, so work that begins with two checks
+  side by side could put only one of them first; the other had no way in, was
+  unreachable, and Prompt stayed blocked until the author wired it by hand.
+*/
+describe("work that begins with several steps at once", () => {
+  const parallel = (): WorkflowDraft =>
+    draft({
+      agents: [
+        { id: "qty", name: "Quantity Checker" },
+        { id: "names", name: "Name Checker" },
+        { id: "reporter", name: "Reporter" },
+      ],
+      steps: [
+        { id: "check-qty", name: "Check Qty", kind: "step", agent: "qty", action: "agent-step", task: "Check quantities.", outputs: [{ to: "join", kind: "next" }] },
+        { id: "check-name", name: "Check Name values", kind: "step", agent: "names", action: "agent-step", task: "Check names.", outputs: [{ to: "join", kind: "next" }] },
+        { id: "join", name: "Join results", kind: "step", agent: "reporter", action: "agent-step", task: "Write SUMMARY.md.", outputs: [{ to: "end", kind: "next" }] },
+      ],
+      questions: [],
+    });
+
+  it("starts a step nothing leads into with the workflow, beside the first", () => {
+    const { workflow } = mapDraftToWorkflow(parallel(), OPTIONS);
+    const fromStart = workflow.edges.filter((edge) => edge.source === "start").map((edge) => edge.target);
+    expect(fromStart.sort()).toEqual(["n1", "n2"]);
+  });
+
+  it("validates as it stands, with nothing unreachable", () => {
+    const { workflow } = mapDraftToWorkflow(parallel(), OPTIONS);
+    const result = validateWorkflow(workflow);
+    expect(result.errors.map((issue) => issue.code)).not.toContain("UNREACHABLE_BLOCK");
+    expect(result.errors).toEqual([]);
+  });
+
+  it("says it did so, so a step that was merely forgotten is noticed", () => {
+    const { warnings } = mapDraftToWorkflow(parallel(), OPTIONS);
+    expect(warnings).toContainEqual(
+      expect.objectContaining({ where: 'step "check-name"', message: expect.stringContaining("starts with the workflow") }),
+    );
+  });
+
+  it("adds nothing to a draft whose steps are all led into", () => {
+    const { workflow, warnings } = mapDraftToWorkflow(draft(), OPTIONS);
+    expect(workflow.edges.filter((edge) => edge.source === "start")).toHaveLength(1);
+    expect(warnings.some((item) => item.message.includes("starts with the workflow"))).toBe(false);
+  });
+
+  it("tells the drafter how such work is written", () => {
+    const text = buildDraftInstruction("anything");
+    expect(text).toContain("a step that no output points at");
+    expect(text).toContain("run their steps at the same time");
   });
 });
 

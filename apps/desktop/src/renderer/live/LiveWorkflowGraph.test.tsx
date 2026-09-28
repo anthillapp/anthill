@@ -445,6 +445,48 @@ describe("a step whose name does not fit", () => {
  * workflow already under way. The session beginning and the workflow beginning
  * are different facts and the diagram now keeps them apart.
  */
+/*
+  W13 in the 0.8.3 QA: Review leads to Done when it approves and to "Stopped:
+  report failure" when it fails. The session approved and finished, and both
+  ends were drawn green — nothing it writes says which end it stopped at.
+*/
+describe("a workflow that can end in more than one place", () => {
+  const twoEnds: Workflow = {
+    ...workflow,
+    nodes: [
+      ...workflow.nodes,
+      { id: "stopped", type: "end", name: "Stopped: report failure", config: {}, position: { x: 600, y: 200 } },
+    ],
+    edges: [...workflow.edges, { id: "e3", source: "implement", target: "stopped", kind: "stop" }],
+  };
+
+  function ends(shape: Workflow) {
+    const finishedRun = { ...run, state: "completed" as const };
+    const view = foldLiveSession(shape, finishedRun, []);
+    const shown = {
+      ...view,
+      empty: false,
+      blocks: { ...view.blocks, implement: { ...view.blocks.implement, state: "done" as const, passes: 1 } },
+    };
+    const { unmount } = render(
+      <LiveWorkflowGraph workflow={shape} view={shown} sessionState="completed" onSelect={vi.fn()} />,
+    );
+    const classes = [...document.querySelectorAll(".live-node")]
+      .filter((el) => /^(Done|Stopped)/.test(el.querySelector("title")?.textContent ?? ""))
+      .map((el) => el.getAttribute("class") ?? "");
+    unmount();
+    return classes;
+  }
+
+  it("claims neither end when the record cannot say which was reached", () => {
+    expect(ends(twoEnds).some((cls) => cls.includes("state-done"))).toBe(false);
+  });
+
+  it("still claims the one end a workflow has", () => {
+    expect(ends(workflow).some((cls) => cls.includes("state-done"))).toBe(true);
+  });
+});
+
 describe("the Start block before any step is announced", () => {
   let seq = 0;
   function event(kind: ObservationEvent["kind"], title: string, at: string): ObservationEvent {

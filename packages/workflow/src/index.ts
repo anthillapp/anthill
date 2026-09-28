@@ -234,3 +234,4 @@ export {
   type InterpreterDefinition,
   type InterpreterId,
 } from "./interpreters.js";
+export { openSpot } from "./placement.js";

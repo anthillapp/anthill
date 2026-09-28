@@ -28,6 +28,7 @@ import {
   stepsUsingAgent,
   stampWorkflowFormat,
   validateWorkflow,
+  openSpot,
   withRunRoot,
   type WorkflowTemplate,
 } from "@anthill/workflow";
@@ -520,7 +521,9 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         const position =
           at && canvasSize
             ? dropPosition(at, canvasSize)
-            : { x: 120 + current.nodes.length * 30, y: 160 + (current.nodes.length % 4) * 40 };
+            : // A free spot, never on top of a block or across the top row's
+              // connections (ANT-183).
+              openSpot(current.nodes);
 
         const node = createNode(current, block.nodeType ?? "agent", {
           name: block.label,

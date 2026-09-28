@@ -80,7 +80,18 @@ type FileState = {
   openingReported?: boolean;
   /** The done line already reported, so a reply and a command echoing it are one ending. */
   doneReported?: boolean;
+  /**
+   * A subagent's thread: Codex writes one per `spawn_agent`, carrying the
+   * session's id and the path the spawn gave it (ANT-171). Its work is the
+   * session's work, done through that agent — read, and signed as the agent's.
+   */
+  delegate?: { path: string; name: string };
+  /** The calls this file made, by call id: which were `spawn_agent`. */
+  spawnCalls?: Set<string>;
 };
+
+/** Where a subagent's events wait until the spawn that started it is known. */
+const PENDING_SPAWN = "agent-path:";
 
 export class CodexObserver implements LiveSessionObserver {
   readonly cli = "codex" as const;
@@ -92,6 +103,12 @@ export class CodexObserver implements LiveSessionObserver {
     this.root = root;
   }
   private readonly seen = new Map<string, Map<string, FileState>>();
+  /**
+   * Per run, the call that spawned each subagent, by the agent path the spawn
+   * returned — `{"task_name":"/root/developer_a"}` — which is the path the
+   * subagent's own thread names itself by (ANT-171).
+   */
+  private readonly spawned = new Map<string, Map<string, string>>();
 
   async detectCapabilities(): Promise<ObserverCapabilities> {
     const available = await stat(this.root).then(
@@ -112,6 +129,7 @@ export class CodexObserver implements LiveSessionObserver {
 
   forget(runId: string): void {
     this.seen.delete(runId);
+    this.spawned.delete(runId);
   }
 
   async poll(run: PendingRun, now: string): Promise<PollResult> {
@@ -131,6 +149,11 @@ export class CodexObserver implements LiveSessionObserver {
     }
 
     const states = this.statesFor(run.anthillRunId);
+    let spawns = this.spawned.get(run.anthillRunId);
+    if (!spawns) {
+      spawns = new Map();
+      this.spawned.set(run.anthillRunId, spawns);
+    }
     const evidence: Evidence[] = [];
     const events: ObservationEventDraft[] = [];
     /** Files that actually grew this poll. Nothing else counts as activity. */
@@ -144,7 +167,15 @@ export class CodexObserver implements LiveSessionObserver {
       const chunk = await readNewLines(path, state.cursor);
       if (!chunk.grew) continue;
       grew.add(path);
-      scan(chunk.lines, state, now, { runId: run.anthillRunId, nonce: run.correlationNonce }, events);
+      scan(chunk.lines, state, now, { runId: run.anthillRunId, nonce: run.correlationNonce }, events, spawns);
+    }
+
+    // A subagent's work, tied to the call that started it — known by now even
+    // when the subagent's file was read before the session's in this poll.
+    for (const event of events) {
+      if (!event.parentToolUseId?.startsWith(PENDING_SPAWN)) continue;
+      const call = spawns.get(event.parentToolUseId.slice(PENDING_SPAWN.length));
+      if (call) event.parentToolUseId = call;
     }
 
     // Only the opening, never the history before the marker: a session reused
@@ -355,6 +386,18 @@ function contends(state: FileState, now: string): boolean {
   return Date.parse(now) - Date.parse(state.lastActivityAt) <= TIMING.activityTtlMs;
 }
 
+/** A call's JSON arguments or output, when that is what it carries. */
+function parseArguments(value: unknown): Record<string, unknown> | undefined {
+  if (isRecord(value) && !Array.isArray(value)) return value;
+  if (typeof value !== "string") return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -441,6 +484,7 @@ function scan(
   now: string,
   marker: { runId: string; nonce: string },
   events: ObservationEventDraft[],
+  spawns: Map<string, string> = new Map(),
 ): void {
   for (const line of lines) {
     // Nothing a sub-thread writes is the session's own doing (ANT-129).
@@ -477,6 +521,24 @@ function scan(
       */
       const session = str(payload.session_id);
       const thread = str(payload.id);
+      /*
+        A subagent the session spawned (ANT-171). The rule below was written
+        for the reviewer and caught these too, so everything a subagent said
+        and ran was dropped and the Agents filter was always empty. The
+        records tell them apart: a subagent is `thread_source: "subagent"`
+        with a `thread_spawn`, the reviewer is `guardian_review`.
+      */
+      const source = isRecord(payload.source) && isRecord(payload.source.subagent) ? payload.source.subagent : undefined;
+      const spawn = source && isRecord(source.thread_spawn) ? source.thread_spawn : undefined;
+      if (str(payload.thread_source) === "subagent" || spawn) {
+        const path = str(payload.agent_path) ?? str(spawn?.agent_path) ?? thread ?? "subagent";
+        const name = path.split("/").filter(Boolean).pop() ?? path;
+        state.delegate = { path, name };
+        const id = session ?? str(spawn?.parent_thread_id);
+        if (id) state.sessionId = id;
+        if (stamped) state.lastActivityAt = stamped;
+        continue;
+      }
       if (str(payload.parent_thread_id) || (session && thread && thread !== session)) {
         state.subthread = true;
         return;
@@ -504,10 +566,19 @@ function scan(
       source: "rollout" as const,
       channel: CHANNEL,
       ...(state.sessionId ? { sessionId: state.sessionId } : {}),
+      // A subagent's work carries the call that started it, and its name.
+      ...(state.delegate
+        ? {
+            parentToolUseId: spawns.get(state.delegate.path) ?? `${PENDING_SPAWN}${state.delegate.path}`,
+            author: { kind: "subagent" as const, name: state.delegate.name },
+          }
+        : {}),
     };
 
     if (row.type === "response_item" && payload.type === "message") {
       if (payload.role === "user") {
+        // A subagent's task is the session's message to it, not the author's.
+        if (state.delegate) continue;
         if (textCarriesMarker(messageText(payload), marker)) {
           state.matched = true;
           events.push({ ...base, kind: "prompt.submit", title: "The workflow was pasted in" });
@@ -516,22 +587,23 @@ function scan(
       }
       if (payload.role === "assistant") {
         const text = messageText(payload);
-        announceSteps(text, "reply", state, marker, base, events);
-        announceDone(text, state, marker, base, events);
+        // A subagent's word is not where the session is, nor its ending.
+        if (!state.delegate) {
+          announceSteps(text, "reply", state, marker, base, events);
+          announceDone(text, state, marker, base, events);
+        }
         // And one cut-down line of what it said. Codex writes its reasoning to
         // a different record type entirely, which this branch never sees.
         const said = messageExcerpt(text, marker);
         if (said) {
-          // A rollout's assistant messages are the session's own. Codex has no
-          // subagent concept in these records, so there is no other author
-          // this could be — and nothing to be unsure about.
+          // The session's own, or — in a subagent's thread — that agent's.
           const tag = parseStepTag(text);
           events.push({
             ...base,
             kind: "message",
             title: "Message",
             detail: said,
-            author: { kind: "main" },
+            author: base.author ?? { kind: "main" },
             ...(tag ? { stepTag: tag } : {}),
           });
         }
@@ -542,20 +614,47 @@ function scan(
     if (row.type === "response_item") {
       if (payload.type === "function_call" || payload.type === "custom_tool_call") {
         const name = str(payload.name) ?? "a tool";
+        const call = str(payload.call_id);
+        // Starting a subagent: a delegation, sent off on its own — the call
+        // returns at once and the subagent's own turn ending is its end.
+        if (name === "spawn_agent" && call) {
+          (state.spawnCalls ??= new Set()).add(call);
+          const args = parseArguments(payload.arguments ?? payload.input);
+          const agent = str(args?.task_name) ?? str(args?.agent_type);
+          events.push({
+            ...base,
+            kind: "subagent.start",
+            title: "Delegated to a subagent",
+            toolName: name,
+            toolUseId: call,
+            background: true,
+            ...(agent ? { agentName: agent } : {}),
+          });
+          continue;
+        }
         events.push({
           ...base,
           kind: "tool.start",
           title: name,
           toolName: name,
-          ...(str(payload.call_id) ? { toolUseId: str(payload.call_id) as string } : {}),
+          ...(call ? { toolUseId: call } : {}),
         });
       }
       if (payload.type === "function_call_output" || payload.type === "custom_tool_call_output") {
+        const call = str(payload.call_id);
+        const spawnReceipt = call !== undefined && state.spawnCalls?.has(call);
+        if (spawnReceipt && call) {
+          // The path the subagent will name itself by.
+          const receipt = parseArguments(payload.output);
+          const path = str(receipt?.task_name);
+          if (path) spawns.set(path, call);
+        }
         events.push({
           ...base,
           kind: "tool.end",
           title: "Tool finished",
-          ...(str(payload.call_id) ? { toolUseId: str(payload.call_id) as string } : {}),
+          ...(call ? { toolUseId: call } : {}),
+          ...(spawnReceipt ? { background: true } : {}),
         });
         // Asked to "print" a marker, an agent whose only way to print is a
         // shell prints it with one: Codex Desktop writes `printf 'ANTHILL-STEP
@@ -565,7 +664,8 @@ function scan(
         // Not a command that printed the prompt itself, though: that carries
         // every step's line at once, and would announce them all (ANT-162).
         const output = outputText(payload.output);
-        if (!textCarriesMarker(output, marker)) {
+        // A subagent's commands are not where the session is, nor its ending.
+        if (!state.delegate && !textCarriesMarker(output, marker)) {
           const call = str(payload.call_id);
           announceSteps(output, "command", state, marker, call ? { ...base, printedBy: call } : base, events);
           announceDone(output, state, marker, base, events);

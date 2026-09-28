@@ -29,6 +29,7 @@ import {
   OPEN_SETTINGS_CHANNEL,
   OPEN_WORKFLOW_CHANNEL,
   SAVE_WORKFLOW_CHANNEL,
+  EDIT_HISTORY_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
   type AppSettings,
   type IpcCapabilities,
@@ -1638,6 +1639,17 @@ for (const url of linksFromArgv(process.argv)) receiveLink(url);
  * the app menu's own title comes from the bundle — which is why the packaged
  * build says Anthill and a dev run says Electron (ANT-13).
  */
+/** Undo or Redo from the Edit menu: the text field's own, and the page's (ANT-192). */
+function editHistory(window: unknown, action: "undo" | "redo"): void {
+  const target = window instanceof BrowserWindow ? window : BrowserWindow.getFocusedWindow();
+  if (!target) return;
+  // Typing in a field is undone where it happened; outside one this does
+  // nothing, and the page is told instead.
+  if (action === "undo") target.webContents.undo();
+  else target.webContents.redo();
+  target.webContents.send(EDIT_HISTORY_CHANNEL, action);
+}
+
 function applyMenu(): void {
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
@@ -1683,7 +1695,35 @@ function applyMenu(): void {
           { role: "close" },
         ],
       },
-      { role: "editMenu" },
+      /*
+        Spelled out for Undo and Redo, as File is for Save. The role's Undo
+        took ⌘Z before the page saw it and undid nothing outside a text field,
+        so the canvas shortcut was dead in the app (ANT-192). These still undo
+        typing — the text field's own undo — and tell the page, which steps
+        the workflow's history when no text field has focus.
+      */
+      {
+        label: "Edit",
+        submenu: [
+          {
+            label: "Undo",
+            accelerator: "CmdOrCtrl+Z",
+            click: (_item, window) => editHistory(window, "undo"),
+          },
+          {
+            label: "Redo",
+            accelerator: "Shift+CmdOrCtrl+Z",
+            click: (_item, window) => editHistory(window, "redo"),
+          },
+          { type: "separator" },
+          { role: "cut" },
+          { role: "copy" },
+          { role: "paste" },
+          { role: "pasteAndMatchStyle" },
+          { role: "delete" },
+          { role: "selectAll" },
+        ],
+      },
       { role: "viewMenu" },
       { role: "windowMenu" },
     ]),

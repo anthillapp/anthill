@@ -121,7 +121,8 @@ export const IpcChannel = {
  */
 // 24: choosing the workflow folder on Settings ▸ General, and the setting it writes.
 // 25: the platform in the capabilities, and quitting from the Windows gate (ANT-154).
-export const IPC_CONTRACT = 25;
+// 26: Edit ▸ Undo / Redo sent to the page (ANT-192).
+export const IPC_CONTRACT = 26;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -194,6 +195,17 @@ export const OPEN_SETTINGS_CHANNEL = "app:open-settings";
  * which also settles ⌘S never reaching the browser's own Save Page (ANT-59).
  */
 export const SAVE_WORKFLOW_CHANNEL = "app:save-workflow";
+
+/**
+ * Edit ▸ Undo or Redo, for the page to apply to what it is editing (ANT-192).
+ *
+ * The menu's own Undo took ⌘Z before the page saw it — an accelerator is
+ * consumed first, as with ⌘S — and undid nothing outside a text field, so
+ * the canvas shortcut was dead in the app. The menu now does the text field's
+ * undo itself and tells the page; the page steps its history when no text
+ * field has focus.
+ */
+export const EDIT_HISTORY_CHANNEL = "app:edit-history";
 
 /**
  * A workflow a harness handed over, ready for the page to show.
@@ -946,6 +958,11 @@ export interface AnthillApi {
   saveWorkflow(request: SaveWorkflowRequest): Promise<SaveWorkflowResult>;
   /** File ▸ Save, or ⌘S. Returns the unsubscribe. */
   onSaveWorkflow(listener: () => void): () => void;
+  /**
+   * Edit ▸ Undo or Redo, or ⌘Z / ⇧⌘Z (ANT-192). Absent where there is no
+   * application menu — the CLI's browser page — and the keys reach the page.
+   */
+  onEditHistory?(listener: (action: "undo" | "redo") => void): () => void;
   listRuns(): Promise<WorkflowRun[]>;
   getRun(runId: string): Promise<StoredRunView | undefined>;
   /** Ask the user for a folder, then write the generated workflow files into it. */

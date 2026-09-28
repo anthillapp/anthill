@@ -7,7 +7,7 @@
  */
 
 import { StrictMode } from "react";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PendingRun } from "@anthill/live";
@@ -529,6 +529,58 @@ describe("stepping through edits", () => {
 
     expect(unavailable(forward())).toBe(false);
     fireEvent.click(forward());
+    expect(screen.getByDisplayValue("Renamed workflow")).toBeTruthy();
+  });
+
+  /*
+    ANT-192. In the app the Edit menu takes ⌘Z before the page sees it, so the
+    canvas could only be stepped from its buttons. The menu now tells the page.
+  */
+  it("steps back and forward when the Edit menu asks, outside a text field", async () => {
+    let menu: ((action: "undo" | "redo") => void) | undefined;
+    await workflow();
+    // Registered after mount in the app; here the stub is given one and the screen remounted.
+    cleanup();
+    const api = stubApi() as ReturnType<typeof stubApi> & { onEditHistory: unknown };
+    api.onEditHistory = vi.fn((listener: (action: "undo" | "redo") => void) => {
+      menu = listener;
+      return () => undefined;
+    });
+    render(
+      <StrictMode>
+        <WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />
+      </StrictMode>,
+    );
+    fireEvent.click((await screen.findByText(/Implement, test, fix/)).closest("button") as HTMLElement);
+    await screen.findByRole("button", { name: "Prompt" });
+
+    const name = screen.getByDisplayValue(/Implement, test, fix/) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Renamed workflow" } });
+    name.blur();
+    act(() => menu?.("undo"));
+    expect(screen.getByDisplayValue(/Implement, test, fix/)).toBeTruthy();
+    act(() => menu?.("redo"));
+    expect(screen.getByDisplayValue("Renamed workflow")).toBeTruthy();
+  });
+
+  it("leaves the menu's undo to a text field that has focus", async () => {
+    let menu: ((action: "undo" | "redo") => void) | undefined;
+    const api = stubApi() as ReturnType<typeof stubApi> & { onEditHistory: unknown };
+    api.onEditHistory = vi.fn((listener: (action: "undo" | "redo") => void) => {
+      menu = listener;
+      return () => undefined;
+    });
+    render(
+      <StrictMode>
+        <WorkflowScreen onExit={() => undefined} onSettings={() => undefined} />
+      </StrictMode>,
+    );
+    fireEvent.click((await screen.findByText(/Implement, test, fix/)).closest("button") as HTMLElement);
+    await screen.findByRole("button", { name: "Prompt" });
+    const name = screen.getByDisplayValue(/Implement, test, fix/) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Renamed workflow" } });
+    name.focus();
+    act(() => menu?.("undo"));
     expect(screen.getByDisplayValue("Renamed workflow")).toBeTruthy();
   });
 

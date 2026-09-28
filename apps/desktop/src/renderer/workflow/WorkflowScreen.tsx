@@ -87,6 +87,18 @@ export type WorkflowScreenProps = {
     | { kind: "open"; path?: string; live?: PendingRun; deliveryId?: number };
 };
 
+/** Whether a text field has focus, where ⌘Z belongs to the text. */
+function typingInAField(): boolean {
+  const active = document.activeElement;
+  const tag = active?.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    Boolean((active as HTMLElement | null)?.isContentEditable)
+  );
+}
+
 export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProps) {
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   /**
@@ -351,25 +363,35 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    * of what was typed, and stealing it would make correcting a typo throw away
    * the whole edit instead.
    */
+  /** When the keys last stepped the history, so the menu's echo of them is not a second step. */
+  const keyStepAt = useRef(0);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") return;
-      const active = document.activeElement;
-      const tag = active?.tagName;
-      if (
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        tag === "SELECT" ||
-        (active as HTMLElement | null)?.isContentEditable
-      ) {
-        return;
-      }
+      if (typingInAField()) return;
       event.preventDefault();
+      keyStepAt.current = Date.now();
       step(event.shiftKey ? "forward" : "back");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [step]);
+
+  /*
+    The same two, from the app's Edit menu. In the app the menu takes ⌘Z and
+    ⇧⌘Z before this page sees them, so the handler above never ran there and
+    the canvas could only be stepped from its buttons (ANT-192). The menu undoes
+    typing in a field itself; here, outside one, the workflow steps.
+  */
+  useEffect(
+    () =>
+      window.anthill.onEditHistory?.((action) => {
+        if (typingInAField()) return;
+        if (Date.now() - keyStepAt.current < 400) return;
+        step(action === "redo" ? "forward" : "back");
+      }),
+    [step],
+  );
 
   const replaceWorkflow = useCallback(
     (next: Workflow, nextPath?: string) => {

@@ -18,6 +18,7 @@ import {
   OPEN_SETTINGS_CHANNEL,
   OPEN_WORKFLOW_CHANNEL,
   SAVE_WORKFLOW_CHANNEL,
+  EDIT_HISTORY_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
   type AnthillApi,
   type AppSettings,
@@ -132,6 +133,13 @@ const api: AnthillApi = {
     const handler = () => listener();
     ipcRenderer.on(SAVE_WORKFLOW_CHANNEL, handler);
     return () => ipcRenderer.removeListener(SAVE_WORKFLOW_CHANNEL, handler);
+  },
+  onEditHistory: (listener: (action: "undo" | "redo") => void) => {
+    const handler = (_event: unknown, action: unknown) => {
+      if (action === "undo" || action === "redo") listener(action);
+    };
+    ipcRenderer.on(EDIT_HISTORY_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(EDIT_HISTORY_CHANNEL, handler);
   },
   onLiveSnapshot: (listener: (snapshot: LiveSnapshot) => void) => {
     const handler = (_event: unknown, snapshot: LiveSnapshot) => listener(snapshot);

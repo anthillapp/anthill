@@ -638,7 +638,9 @@ function buildPrompt(
     });
     return [
       "",
-      `Start this step only once ${joinList(names)} are ${names.length === 2 ? "both" : "all"} finished – they run in parallel and meet here.`,
+      // Without subagents the branches are done one after another, and the
+      // fork said so; "in parallel" here contradicted it (ANT-182).
+      `Start this step only once ${joinList(names)} are ${names.length === 2 ? "both" : "all"} finished – ${usesSubagents ? "they run in parallel and meet here" : "they are independent branches and meet here"}.`,
     ];
   };
   ordered.forEach((node) => {
@@ -747,7 +749,9 @@ function buildPrompt(
       "## Rules",
       "",
       plan.forks.size > 0
-        ? "- Follow the steps in the order given – steps marked to run at the same time start together; do not skip ahead."
+        ? usesSubagents
+          ? "- Follow the steps in the order given – steps marked to run at the same time start together; do not skip ahead."
+          : "- Follow the steps in the order given – steps marked as independent can be done in any order; do not skip ahead."
         : "- Follow the steps in the order given; do not skip ahead.",
       "- After each step, state which branch you are taking and why.",
       "- If a step's result is ambiguous, ask rather than guessing which branch to take.",

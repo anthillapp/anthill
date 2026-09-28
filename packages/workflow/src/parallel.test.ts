@@ -228,3 +228,31 @@ describe("an Approval Gate's paths", () => {
     expect(steps).not.toContain("are both finished");
   });
 });
+
+/*
+  ANT-182. Pi has no subagents, so its fork says "do all of them, in
+  whichever order suits" — and then the join said they "run in parallel",
+  and the rules spoke of steps "marked to run at the same time", which
+  nothing in a Pi prompt is.
+*/
+describe("a fork in a prompt for a tool with no subagents", () => {
+  const pi = () => {
+    const workflow = fanOutFromStep();
+    return { ...workflow, target: "pi" as const };
+  };
+
+  it("never says the branches run in parallel or at the same time", () => {
+    const { prompt } = compile(pi());
+    expect(prompt).toContain("in whichever order suits");
+    expect(prompt).toContain("they are independent branches and meet here");
+    expect(prompt).toContain("steps marked as independent can be done in any order");
+    expect(prompt).not.toContain("run in parallel");
+    expect(prompt).not.toContain("at the same time");
+  });
+
+  it("leaves the wording for tools with subagents as it was", () => {
+    const { prompt } = compile(fanOutFromStep());
+    expect(prompt).toContain("they run in parallel and meet here");
+    expect(prompt).toContain("steps marked to run at the same time start together");
+  });
+});

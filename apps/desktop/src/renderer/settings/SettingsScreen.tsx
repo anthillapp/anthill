@@ -802,7 +802,10 @@ function AboutPage() {
     <SettingGroup title="Anthill">
       <SettingRow
         label="Version"
-        note="Local-first. Nothing is sent anywhere unless you turn it on under Privacy."
+        // What the Privacy page says, not the opposite of it: diagnostics are
+        // on by default in a released build and each can be turned off there
+        // (ANT-189). Workflows and sessions never leave the machine either way.
+        note="Local-first: your workflows and sessions stay on this machine. Anonymous diagnostics can be turned off under Privacy."
       >
         <span className="set-note">{__ANTHILL_VERSION__}</span>
       </SettingRow>

@@ -200,6 +200,16 @@ describe("the About page", () => {
     expect(screen.queryByText(/Nothing here is sent anywhere/)).toBeNull();
   });
 
+  // ANT-189: About said diagnostics were off until turned on, while Privacy
+  // shows them on by default. It now says what Privacy says.
+  it("does not claim diagnostics are off until turned on", async () => {
+    stub();
+    show();
+    fireEvent.click(page("About"));
+    expect(await screen.findByText(/Anonymous diagnostics can be turned off under Privacy/)).toBeTruthy();
+    expect(screen.queryByText(/unless you turn it on/)).toBeNull();
+  });
+
   // ANT-154: the product's statement of scope, on every platform, and the
   // way to report a Windows problem.
   it("says where Anthill runs, and links the Windows issue form", async () => {

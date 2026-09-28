@@ -1070,3 +1070,34 @@ describe("clicking a problem", () => {
     });
   });
 });
+
+/*
+  ANT-177 and ANT-180: the prompt's folder and the run it starts.
+*/
+describe("handing over the prompt", () => {
+  const api = () => (window as unknown as { anthill: ReturnType<typeof stubApi> }).anthill;
+
+  async function copyFromPrompt() {
+    Object.assign(navigator, { clipboard: { writeText: vi.fn(async () => undefined) } });
+    fireEvent.click(screen.getByRole("button", { name: /^Prompt$/ }));
+    const dialog = await screen.findByRole("dialog", { name: /Hand over the prompt/ });
+    fireEvent.click(within(dialog).getAllByRole("button", { name: "Choose folder…" })[0]);
+    // Past the observation step, whatever it offers.
+    const next = await within(dialog).findByRole("button", { name: /^(Continue|Continue with basic progress|Copy prompt)$/ });
+    if (next.textContent !== "Copy prompt") fireEvent.click(next);
+    const copy = await within(dialog).findByRole("button", { name: "Copy prompt" });
+    await waitFor(() => expect((copy as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(copy);
+    await waitFor(() => expect(api().liveObserve).toHaveBeenCalled());
+  }
+
+  // ANT-177: a run from a workflow never saved had nowhere to be found.
+  it("saves a workflow that was never saved as its prompt is copied, without asking", async () => {
+    await workflow();
+    await copyFromPrompt();
+    await waitFor(() =>
+      expect(api().saveWorkflow).toHaveBeenCalledWith(expect.objectContaining({ quiet: true })),
+    );
+  });
+
+});

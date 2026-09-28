@@ -54,6 +54,7 @@ import { readCodexAgentSupport } from "./codex-capability.js";
 import { adoptUserPath } from "./user-path.js";
 import { isRealLoadFailure, loadFailureUrl } from "./load-failure.js";
 import {
+  freePath,
   nameInSavedFile,
   saveDestination,
   type SavedRecord,
@@ -1115,7 +1116,12 @@ function registerIpcHandlers(): void {
         ? { kind: "write" as const, path: request.path }
         : saveDestination(request.workflow.name ?? "", request.path, saved, folder);
       let path = request.path;
-      if (destination.kind === "ask") {
+      if (destination.kind === "ask" && request.quiet) {
+        // Nobody to ask: only a first save, into the workflow folder, and
+        // never over a file that is already there (ANT-177).
+        if (request.path || !folder) return { kind: "cancelled" };
+        path = freePath(destination.suggested, (candidate) => existsSync(candidate));
+      } else if (destination.kind === "ask") {
         const result = await dialog.showSaveDialog({
           title: "Save workflow",
           // New saves get the ".workflow.json" suffix. The open side matches

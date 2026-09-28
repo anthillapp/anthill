@@ -424,7 +424,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     void open(start.path);
   }, [start, open]);
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (options: { quiet?: boolean } = {}) => {
     if (!workflow) return;
     // One press, one write. A second click while the first is in flight would
     // race it to the same file and could report the older answer last, so it
@@ -437,6 +437,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
       const result = await window.anthill.saveWorkflow({
         workflow: stampWorkflowFormat(workflow),
         path,
+        ...(options.quiet ? { quiet: true } : {}),
       });
       if (result.kind === "saved") {
         setPath(result.path);
@@ -480,6 +481,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   const saveNow = useRef(save);
   saveNow.current = save;
   useEffect(() => window.anthill.onSaveWorkflow(() => void saveNow.current()), []);
+
 
   // "Saved" is about the click, so it goes when the click stops being recent.
   // A failure stays until something else happens: it is the author's to read.
@@ -767,6 +769,13 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
           workflow={workflow}
           validation={validation}
           onRunRoot={(root) => editWorkflow((current) => withRunRoot(current, root))}
+          onObserving={() => {
+            // A run from a workflow that was never saved had nowhere to be
+            // found once the editor closed: no file, so no row on the launch
+            // window (ANT-177). The workflow is saved into the workflow folder
+            // as the prompt leaves, so the run it starts can be reached again.
+            if (!path) void save({ quiet: true });
+          }}
           onClose={() => setShowPrompt(false)}
         />
       ) : null}
@@ -785,7 +794,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         canStepBack={canStepBack(history)}
         canStepForward={canStepForward(history)}
         onStep={step}
-        onSave={save}
+        onSave={() => void save()}
         onPrompt={() => setShowPrompt(true)}
         {...(handover ? { handover } : {})}
       />

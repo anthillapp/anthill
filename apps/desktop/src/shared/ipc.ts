@@ -330,6 +330,14 @@ export type SaveWorkflowRequest = {
    * been renamed since (ANT-57).
    */
   path?: string;
+  /**
+   * Save without asking: a workflow never saved goes into the workflow folder
+   * under a name nothing occupies. For the saves Anthill makes on the author's
+   * behalf — copying a prompt from a workflow that was never saved, so the run
+   * it starts has somewhere to be found (ANT-177). A save that would have to
+   * ask is not made.
+   */
+  quiet?: boolean;
 };
 
 export type ExchangeView = {

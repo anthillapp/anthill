@@ -381,3 +381,63 @@ describe("who wrote it", () => {
     expect(card.title).toBe("Bash");
   });
 });
+
+/*
+  ANT-173. Every dispatch card stayed "Running…" after the session finished,
+  and each subagent was drawn twice — once running, once completed from the
+  hooks' SubagentStop. The hooks' PreToolUse for the same Agent call took the
+  pairing key from the dispatch card, so the end closed that one instead.
+*/
+describe("a subagent's dispatch card", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-27T18:13:00.000Z") + s * 1000).toISOString();
+  const tx = { channel: "claude-code:transcript", source: "transcript" as const };
+  const hook = { channel: "claude-code:hook", source: "hook" as const };
+
+  it("closes on its end however many channels opened it, and is drawn once", () => {
+    const cards = buildFeed(
+      [
+        event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "reviewer", toolUseId: "call-r", at: T(59.6), ...tx }),
+        event({ kind: "tool.start", title: "Agent", toolName: "Agent", toolUseId: "call-r", at: T(59.7), ...hook }),
+        event({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "call-r", author: { kind: "subagent", name: "Review" }, at: T(90.6), ...tx }),
+        event({ kind: "subagent.end", title: "A subagent finished", at: T(90.7), ...hook }),
+        event({ kind: "tool.end", title: "Agent", toolName: "Agent", toolUseId: "call-r", at: T(90.9), ...hook }),
+      ],
+      true,
+    );
+    const agents = cards.filter((card) => card.kind === "agent");
+    expect(agents).toHaveLength(1);
+    expect(agents[0]).toMatchObject({ state: "done", agentName: "reviewer" });
+    expect(agents[0].durationMs).toBeGreaterThan(30_000);
+    expect(cards.some((card) => card.kind === "tool" && card.toolUseId === "call-r")).toBe(false);
+    expect(cards.some((card) => card.state === "working")).toBe(false);
+  });
+
+  it("stays running past a background launch receipt, and finishes when the subagent's turn ends", () => {
+    const journal = [
+      event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "specialist-a", toolUseId: "call-a", at: T(0), ...tx }),
+      event({ kind: "tool.start", title: "Agent", toolName: "Agent", toolUseId: "call-a", at: T(0.1), ...hook }),
+      event({ kind: "tool.end", title: "Agent", toolName: "Agent", toolUseId: "call-a", at: T(0.3), ...hook }),
+      event({ kind: "tool.end", title: "Tool finished", toolUseId: "call-a", background: true, at: T(0.35), ...tx }),
+    ];
+    const running = buildFeed(journal, false).filter((card) => card.kind === "agent");
+    expect(running).toHaveLength(1);
+    expect(running[0].state).toBe("working");
+
+    const finished = buildFeed(
+      [
+        ...journal,
+        event({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "call-a", author: { kind: "subagent" }, at: T(27), ...tx }),
+        event({ kind: "subagent.end", title: "A subagent finished", at: T(27.1), ...hook }),
+      ],
+      true,
+    ).filter((card) => card.kind === "agent");
+    expect(finished).toHaveLength(1);
+    expect(finished[0]).toMatchObject({ state: "done", durationMs: 27_000 });
+  });
+
+  it("keeps a SubagentStop it cannot tie to anything as a card of its own", () => {
+    const cards = buildFeed([event({ kind: "subagent.end", title: "A subagent finished", at: T(1), ...hook })], true);
+    expect(cards).toHaveLength(1);
+  });
+});
+

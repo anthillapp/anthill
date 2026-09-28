@@ -106,13 +106,25 @@ function kicker(node: Workflow["nodes"][number]): string {
  * and `unknown` says so instead of guessing either way.
  */
 /**
- * Whether every step the workflow has has finished.
+ * Whether the run reached its end.
+ *
+ * Every step finished is the plain case. But a workflow with a branch the run
+ * did not take — a rework loop nobody needed, an "otherwise" path — has steps
+ * that stay unreached for good, and requiring every step to finish meant such
+ * a run never reached Done on the diagram however cleanly it ended (ANT-170).
+ * So a run the session said was over, with nothing still running, waiting,
+ * failed or unknown, has reached its end too; the steps it skipped stay grey
+ * as "not reached", which is what the report already calls them.
  *
  * `every` over no blocks is vacuously true, so a session nothing has been
  * observed for would otherwise read as a completed one — hence the guard.
  */
-function runFinished(view: LiveSessionView): boolean {
-  return !view.empty && Object.values(view.blocks).every((block) => block.state === "done");
+function runFinished(view: LiveSessionView, sessionState: LiveSessionState): boolean {
+  if (view.empty) return false;
+  const blocks = Object.values(view.blocks);
+  if (blocks.every((block) => block.state === "done")) return true;
+  const ended = view.endedAt !== undefined || sessionState === "completed";
+  return ended && blocks.some((block) => block.state === "done") && blocks.every((block) => block.state === "done" || block.state === "queued");
 }
 
 function boundaryState(
@@ -125,7 +137,7 @@ function boundaryState(
     if (hasStepEvidence(view)) return "done";
     return sessionState === "detected_live" ? "observing" : "unknown";
   }
-  return runFinished(view) ? "done" : "queued";
+  return runFinished(view, sessionState) ? "done" : "queued";
 }
 
 /**
@@ -146,8 +158,13 @@ function carriedControl(
   source: string,
   target: string,
   boundaryKind: (id: string) => "start" | "end" | undefined,
+  finished: boolean,
 ): boolean {
-  if (boundaryKind(target) === "end") return runFinished(view);
+  // Into the end, along the step that actually led there: a step the run
+  // skipped did not carry it anywhere (ANT-170).
+  if (boundaryKind(target) === "end") {
+    return finished && (boundaryKind(source) === "start" || view.blocks[source]?.state === "done");
+  }
 
   const to = view.blocks[target];
   if (!to || to.passes < 1) return false;
@@ -225,10 +242,11 @@ function deliveringSources(
   workflow: Workflow,
   view: LiveSessionView,
   boundaryKind: (id: string) => "start" | "end" | undefined,
+  finished: boolean,
 ): Map<string, string> {
   const best = new Map<string, { source: string; at: number }>();
   for (const edge of workflow.edges) {
-    if (!carriedControl(view, edge.source, edge.target, boundaryKind)) continue;
+    if (!carriedControl(view, edge.source, edge.target, boundaryKind, finished)) continue;
     const at = enteredAt(view.blocks[edge.source]);
     if (at === undefined) continue;
     const held = best.get(edge.target);
@@ -265,8 +283,9 @@ function edgeTone(
   boundaryKind: (id: string) => "start" | "end" | undefined,
   delivering: Map<string, string>,
   joins: ReadonlyMap<string, readonly string[]>,
+  finished: boolean,
 ): EdgeTone {
-  if (!carriedControl(view, source, target, boundaryKind)) return "idle";
+  if (!carriedControl(view, source, target, boundaryKind, finished)) return "idle";
   if (boundaryKind(target) === "end") return "seen";
 
   const to = view.blocks[target];
@@ -341,10 +360,13 @@ export function LiveWorkflowGraph({
   /** Where parallel branches meet — every branch into it pulses (ANT-166). */
   const joins = useMemo(() => parallelPlan(workflow).joins, [workflow]);
 
+  /** Whether the run reached its end, branches not taken included (ANT-170). */
+  const finished = runFinished(view, sessionState);
+
   /** Recomputed with the view, since it is entirely a fact about the events. */
   const delivering = useMemo(
-    () => deliveringSources(workflow, view, boundaryKind),
-    [workflow, view, boundaryKind],
+    () => deliveringSources(workflow, view, boundaryKind, finished),
+    [workflow, view, boundaryKind, finished],
   );
 
   const bounds = useMemo(() => {
@@ -509,7 +531,7 @@ export function LiveWorkflowGraph({
       {model.connected.map((path) => {
         const edge = workflow.edges.find((item) => item.id === path.output.id);
         const target = edge?.target ?? "";
-        const tone = edgeTone(view, path.nodeId, target, boundaryKind, delivering, joins);
+        const tone = edgeTone(view, path.nodeId, target, boundaryKind, delivering, joins, finished);
         const style = EDGE_TONE[tone];
         return (
           <path

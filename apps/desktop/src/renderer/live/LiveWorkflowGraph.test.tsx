@@ -786,6 +786,40 @@ describe("edges only carry control where control demonstrably went", () => {
       unmount();
     });
   });
+
+  /*
+    ANT-170. A run that ended cleanly without taking a branch — no scenario
+    left, straight to the checkpoint — never reached Done on the diagram,
+    because the branch's steps stayed unreached and "every step done" was
+    the only way there.
+  */
+  it("reaches Done along the step that led there when the session ended with a branch not taken", () => {
+    const ended = { ...run, state: "completed" as const };
+    const view = foldLiveSession(branching, ended, withWork([
+      announce("select", "2026-08-29T10:00:05.000Z"),
+      announce("checkpoint", "2026-08-29T10:00:10.000Z"),
+    ]));
+    const { unmount } = render(<LiveWorkflowGraph workflow={branching} view={view} sessionState="completed" onSelect={vi.fn()} />);
+    const tone = (id: string) => document.querySelector(`[data-edge="${id}"]`)?.getAttribute("class") ?? "";
+    expect(tone("to-end")).toContain("tone-seen");
+    expect(tone("to-scenario")).toContain("tone-idle");
+    const end = [...document.querySelectorAll("g.live-node")].find((node) =>
+      node.querySelector("title")?.textContent?.startsWith("Done –"),
+    );
+    expect(end?.getAttribute("class")).toContain("state-done");
+    unmount();
+  });
+
+  it("does not reach Done while the session is still going, whatever is finished", () => {
+    const view = foldLiveSession(branching, run, withWork([
+      announce("select", "2026-08-29T10:00:05.000Z"),
+      announce("checkpoint", "2026-08-29T10:00:10.000Z"),
+    ]));
+    const { unmount } = render(<LiveWorkflowGraph workflow={branching} view={view} sessionState="detected_live" onSelect={vi.fn()} />);
+    expect(document.querySelector(`[data-edge="to-end"]`)?.getAttribute("class") ?? "").toContain("tone-idle");
+    unmount();
+  });
+
 });
 
 /**

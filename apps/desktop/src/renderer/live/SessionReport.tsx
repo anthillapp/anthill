@@ -118,7 +118,12 @@ export function SessionReport({ workflow, run, view, end, usage, endedAt, onPick
             {verdictSource(end, view.events)}
           </p>
 
-          {words ? (
+          {words?.closing ? (
+            <p className="session-report-words is-empty">
+              {cli} said the work is done and is writing its closing reply. It shows here as soon as
+              it is recorded.
+            </p>
+          ) : words ? (
             <blockquote className={`session-report-words${words.asksUser ? " is-asking" : ""}`}>
               <span className="kicker">
                 {words.asksUser

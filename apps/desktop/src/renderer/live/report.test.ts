@@ -133,3 +133,54 @@ describe("the last words' heading", () => {
     expect(lastWords(said(), "completed")?.asksUser).toBe(false);
   });
 });
+
+/*
+  ANT-186. Right after the done line the report quoted "Both tests fail.
+  Next: diagnosing the cause." — the last message so far — as what the agent
+  said, though its closing reply seconds later said the tests passed.
+*/
+describe("the last words while the closing reply is still being written", () => {
+  const msg = (seq: number, at: string, detail: string) => ({
+    runId: "r", seq, at, recordedAt: at, cli: "claude-code" as const, source: "transcript" as const,
+    channel: "claude-code:transcript", kind: "message" as const, title: "Message", detail,
+    author: { kind: "main" as const }, mapping: { confidence: "unmapped" as const, how: "" },
+  });
+  const turnEnd = (seq: number, at: string) => ({
+    runId: "r", seq, at, recordedAt: at, cli: "claude-code" as const, source: "transcript" as const,
+    channel: "claude-code:transcript", kind: "turn.end" as const, title: "The agent finished its turn",
+    mapping: { confidence: "unmapped" as const, how: "" },
+  });
+  const ended = (events: LiveSessionView["events"]): LiveSessionView => ({
+    ...view({ a: "done", b: "done" }),
+    endedAt: "2026-08-29T10:05:00.000Z",
+    events,
+  });
+
+  it("does not pass off an earlier progress note as the agent's last word", () => {
+    const at = (s: number) => Date.parse("2026-08-29T10:05:00.000Z") + s * 1000;
+    const words = lastWords(ended([msg(1, "2026-08-29T10:03:00.000Z", "Both tests fail. Next: diagnosing the cause.")]), "completed", at(3));
+    expect(words?.closing).toBe(true);
+    // And not for ever, if the turn's end is never recorded.
+    expect(lastWords(ended([msg(1, "2026-08-29T10:03:00.000Z", "Both tests fail.")]), "completed", at(180))?.closing).toBe(false);
+  });
+
+  it("quotes the closing reply once it is recorded", () => {
+    const words = lastWords(
+      ended([
+        msg(1, "2026-08-29T10:03:00.000Z", "Both tests fail. Next: diagnosing the cause."),
+        msg(2, "2026-08-29T10:05:04.000Z", "Both tests pass after the fix."),
+        turnEnd(3, "2026-08-29T10:05:06.000Z"),
+      ]),
+      "completed",
+    );
+    expect(words).toMatchObject({ closing: false, text: "Both tests pass after the fix." });
+  });
+
+  it("quotes an earlier message once the turn that said done has ended", () => {
+    const words = lastWords(
+      ended([msg(1, "2026-08-29T10:03:00.000Z", "All done."), turnEnd(2, "2026-08-29T10:05:02.000Z")]),
+      "completed",
+    );
+    expect(words?.closing).toBe(false);
+  });
+});

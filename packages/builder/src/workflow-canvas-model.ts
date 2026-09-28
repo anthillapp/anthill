@@ -19,6 +19,7 @@ import {
   entryPoint,
   labelHalfSize,
   labelSpot,
+  loopBelow,
   passesUnder,
   portFromAnchor,
   portPoint,
@@ -175,6 +176,10 @@ export type CanvasModel = {
  * Labels are placed last and against every block, so a label pushed off one
  * curve does not land on a card belonging to another.
  */
+/** How far under its row a loop back along the row runs, and how much deeper for each loop it spans. */
+const LOOP_DEPTH = 30;
+const LOOP_STEP = 22;
+
 export function buildCanvasModel(workflow: Workflow): CanvasModel {
   const rects = new Map<string, Rect>();
   for (const node of workflow.nodes) rects.set(node.id, blockRect(node));
@@ -190,6 +195,69 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
   const placed: Rect[] = [];
   const pending: PendingPath[] = [];
 
+  /*
+    A loop back to a step earlier in the same row, with nothing placed by
+    hand, leaves the bottom of its step and arrives at the bottom of the step
+    it returns to. Landed on that step's left side, as any connection from the
+    same row is, it could only get there straight through the step — along
+    the forward line and behind the card, where it read as nothing (ANT-196).
+    Under the row is where the templates' own loops say they go (ANT-194).
+    Several loops leaving or arriving at one step are spread along its
+    bottom, nearest source innermost, so they nest rather than cross.
+  */
+  const sameRow = (a: Rect, b: Rect) => a.top < b.top + b.h && b.top < a.top + a.h;
+  const loopsUnder = new Map<string, { leave: number; arrive: number; depth: number }>();
+  {
+    const loops: { key: string; source: string; target: string; reach: number; left: number; right: number; row: Rect }[] = [];
+    for (const node of workflow.nodes) {
+      const rect = rects.get(node.id);
+      if (!rect) continue;
+      for (const output of outputsOf(workflow, node.id)) {
+        if (output.target === null || output.port || output.anchor) continue;
+        const targetRect = rects.get(output.target);
+        if (!targetRect || !sameRow(rect, targetRect)) continue;
+        if (portSideToward(rect, targetRect) !== "left") continue;
+        loops.push({
+          key: `${node.id}:${output.id}`,
+          source: node.id,
+          target: output.target,
+          reach: rect.left - targetRect.left,
+          left: targetRect.left,
+          right: rect.left + rect.w,
+          row: rect,
+        });
+      }
+    }
+    const spread = (group: typeof loops, from: number, sign: 1 | -1, field: "leave" | "arrive") => {
+      const ordered = [...group].sort((a, b) => a.reach - b.reach);
+      ordered.forEach((loop, index) => {
+        const at = from + sign * 0.3 * ((index + 1) / (ordered.length + 1) - 0.5);
+        const current = loopsUnder.get(loop.key) ?? { leave: 0.65, arrive: 0.35, depth: LOOP_DEPTH };
+        loopsUnder.set(loop.key, { ...current, [field]: at });
+      });
+    };
+    for (const id of new Set(loops.map((loop) => loop.source))) {
+      spread(loops.filter((loop) => loop.source === id), 0.65, -1, "leave");
+    }
+    for (const id of new Set(loops.map((loop) => loop.target))) {
+      spread(loops.filter((loop) => loop.target === id), 0.35, -1, "arrive");
+    }
+    // Deeper for every loop in the same row it spans, so the outer one runs
+    // under the inner one instead of across it.
+    for (const loop of loops) {
+      const inside = loops.filter(
+        (other) =>
+          other !== loop &&
+          sameRow(other.row, loop.row) &&
+          other.left >= loop.left &&
+          other.right <= loop.right &&
+          other.reach < loop.reach,
+      ).length;
+      const current = loopsUnder.get(loop.key) ?? { leave: 0.65, arrive: 0.35, depth: LOOP_DEPTH };
+      loopsUnder.set(loop.key, { ...current, depth: LOOP_DEPTH + inside * LOOP_STEP });
+    }
+  }
+
   for (const node of workflow.nodes) {
     const outputs = outputsOf(workflow, node.id);
     const rect = rects.get(node.id);
@@ -200,7 +268,8 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
     // moving one does not shuffle the others, and a block with two forward
     // outputs and one rework output shows two ports on the right and one on
     // the left rather than three on the right.
-    const automatic = outputs.filter((output) => !output.port);
+    const under = (output: (typeof outputs)[number]) => loopsUnder.get(`${node.id}:${output.id}`);
+    const automatic = outputs.filter((output) => !output.port && !under(output));
     const sideOf = new Map<(typeof outputs)[number], "left" | "right">();
     for (const output of automatic) {
       const targetRect = output.target === null ? undefined : rects.get(output.target);
@@ -212,9 +281,12 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
     outputs.forEach((output, index) => {
       const side = sideOf.get(output) ?? "right";
       const sharing = automatic.filter((item) => sideOf.get(item) === side);
+      const loop = under(output);
       const port = output.port
         ? portFromAnchor(rect, output.port)
-        : portPoint(rect, sharing.indexOf(output), sharing.length, side);
+        : loop
+          ? portFromAnchor(rect, { u: loop.leave, v: 1 })
+          : portPoint(rect, sharing.indexOf(output), sharing.length, side);
       const style = OUTCOME_STYLES[output.kind];
 
       if (output.target === null) {
@@ -242,8 +314,14 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
         // blocks is drawn straight through them.
         blocks,
       };
-      let landing = entryPoint(targetRect, port, output.anchor);
+      let landing = entryPoint(targetRect, port, output.anchor ?? (loop ? { u: loop.arrive, v: 1 } : undefined));
       let geometry = route(port, landing, options);
+      if (loop && !output.bend) {
+        const below = loopBelow(port, landing, loop.depth, output.routing ?? "curved");
+        // Unless something sits under the row in the way; then the router's
+        // own way round stands.
+        if (!passesUnder(port, landing, below, blocks)) geometry = below;
+      }
       /*
         A step stacked under a sibling is entered from above by default, and
         the line down to it then runs behind the sibling in between: a fork's

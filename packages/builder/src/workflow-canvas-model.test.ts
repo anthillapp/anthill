@@ -308,11 +308,16 @@ describe("snapTarget", () => {
  * crossed the whole diagram.
  */
 describe("ports and the direction of their work", () => {
-  /** Review sends work back to Implement, which sits well behind it. */
+  /**
+   * Review sends work back to Implement, which sits well behind it and a row
+   * higher. (Behind it in the same row, the loop runs under the row instead —
+   * ANT-196, below.)
+   */
   function withRework(): Workflow {
     const base = makeWorkflow();
     return {
       ...base,
+      nodes: base.nodes.map((node) => (node.id === "a" ? { ...node, position: { x: 200, y: 0 } } : node)),
       edges: [...base.edges, { id: "e4", source: "b", target: "a", kind: "rework", label: "again" }],
     };
   }
@@ -534,4 +539,58 @@ describe("labels on a template's connections", () => {
       }
     });
   }
+});
+
+/*
+  ANT-196. A workflow drafted by Codex names no sides. Its loop from Run tests
+  back to Implement, the step just before it in the row, was drawn straight
+  along the row, on the forward line and behind the Implement card.
+*/
+describe("a loop back along its row, with nothing placed by hand", () => {
+  const step = (id: string, x: number): WorkflowNode => ({
+    id,
+    type: "agent",
+    name: id,
+    config: { actionKind: "agent-step" },
+    position: { x, y: 44 },
+  });
+  const row: Workflow = {
+    id: "row",
+    name: "Row",
+    version: "1",
+    nodes: [step("implement", 286), step("test", 616), step("review", 946)],
+    edges: [
+      { id: "forward-1", source: "implement", target: "test" },
+      { id: "forward-2", source: "test", target: "review" },
+      { id: "tests-failed", source: "test", target: "implement", kind: "rework", label: "Tests failed" },
+      { id: "changes", source: "review", target: "implement", kind: "rework", label: "Changes requested" },
+    ],
+  };
+  const path = (model: ReturnType<typeof buildCanvasModel>, id: string) =>
+    model.connected.find((item) => item.output.id === id)!;
+
+  it("leaves the bottom of its step and arrives at the bottom of the one it returns to", () => {
+    const model = buildCanvasModel(row);
+    const loop = path(model, "tests-failed");
+    expect(loop.geometry.from.side).toBe("bottom");
+    expect(loop.geometry.to.side).toBe("bottom");
+    expect(loop.geometry.to.y).toBe(model.rects.get("implement")!.top + model.rects.get("implement")!.h);
+  });
+
+  it("nests the longer loop under the shorter one, landing apart", () => {
+    const model = buildCanvasModel(row);
+    const inner = path(model, "tests-failed");
+    const outer = path(model, "changes");
+    expect(outer.geometry.mid.y).toBeGreaterThan(inner.geometry.mid.y);
+    // The outer one lands further out, so it never crosses the inner one's run.
+    expect(outer.geometry.to.x).toBeLessThan(inner.geometry.to.x);
+  });
+
+  it("keeps a port or landing that was placed by hand", () => {
+    const placed: Workflow = {
+      ...row,
+      edges: row.edges.map((edge) => (edge.id === "tests-failed" ? { ...edge, port: { u: 0, v: 0.5 } } : edge)),
+    };
+    expect(path(buildCanvasModel(placed), "tests-failed").geometry.from.side).toBe("left");
+  });
 });

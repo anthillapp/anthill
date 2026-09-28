@@ -727,6 +727,28 @@ export function passesUnder(a: LooseFrom, b: EntryPoint, geometry: CurveGeometry
   return crossed(samplesAlong(geometry), blocks, departure(a), b).length > 0;
 }
 
+/**
+ * A loop back along a row, drawn under it: down from the step it leaves, along
+ * at `depth` below the lower of its two ends, and up into the step it returns
+ * to — the shape a detour takes, so a loop reads the same wherever it runs.
+ * `depth` grows for a loop that spans another, so loops nest rather than
+ * cross (ANT-196).
+ */
+export function loopBelow(a: LooseFrom, b: EntryPoint, depth: number, routing: Routing = "curved"): CurveGeometry {
+  const from = departure(a);
+  const points = detour(from, b, Math.max(from.y, b.y) + depth);
+  return {
+    path:
+      routing === "orthogonal"
+        ? points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ")
+        : roundedPath(points, DETOUR_RADIUS),
+    mid: polylineMid(points),
+    from,
+    to: b,
+    ...(routing === "orthogonal" ? { turn: "y" as const } : {}),
+  };
+}
+
 export const BEND_LIMIT = 1.5;
 
 /**

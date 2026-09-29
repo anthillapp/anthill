@@ -498,9 +498,27 @@ export function foldLiveSession(
     the line it printed (ANT-164).
   */
   const plumbing = new Set<string>();
+  /*
+    The step each subagent says it is working on, by the call that started
+    it: the tag on the first of its own messages that carries one. Codex
+    encrypts what a spawn hands over, so its subagent.start names no step,
+    and three checks announced together and then spawned together all went to
+    the last one announced — two drawn "Done · took 0ms", the third with all
+    three's work (ANT-203). Each subagent's thread names its step itself.
+    Known up front, like `plumbing`, because the spawn is read first.
+  */
+  const saysItWorksOn = new Map<string, string>();
   for (const event of journal) {
     if (event.printedBy) plumbing.add(event.printedBy);
     if (event.kind === "subagent.start" && event.toolUseId) plumbing.add(event.toolUseId);
+    if (
+      event.kind === "message" &&
+      event.parentToolUseId &&
+      event.stepTag &&
+      !saysItWorksOn.has(event.parentToolUseId)
+    ) {
+      saysItWorksOn.set(event.parentToolUseId, event.stepTag);
+    }
   }
   for (const event of journal) {
     const mapping = attribute(event, index, announced, delegatedFrom);
@@ -624,14 +642,21 @@ export function foldLiveSession(
 
     /*
       A subagent started for a step: the one its call names, when the session
-      put the step's tag in what it handed over, else the step the session is
-      on. The call's own word comes first because the session can announce
+      put the step's tag in what it handed over, else the one the subagent's
+      own messages name (ANT-203), else the step the session is on. The
+      call's own word comes first because the session can announce
       several steps and only then start their subagents together — measured,
       that is exactly how Claude Code fans out, and by the moment of dispatch
       every subagent looked like the last-announced step's (ANT-163).
     */
     if (event.kind === "subagent.start" && event.toolUseId) {
-      const target = event.stepTag && blocks[event.stepTag] ? event.stepTag : announced;
+      const own = saysItWorksOn.get(event.toolUseId);
+      const target =
+        event.stepTag && blocks[event.stepTag]
+          ? event.stepTag
+          : own && blocks[own]
+            ? own
+            : announced;
       if (target && blocks[target]) {
         delegations.set(event.toolUseId, {
           blockId: target,

@@ -1327,6 +1327,66 @@ describe("a parallel branch announced again to report its result", () => {
     },
   };
 
+  /*
+    ANT-203: Codex announced the three checks together, then spawned their
+    subagents one after another. Its spawn_agent hands the task over
+    encrypted, so no spawn names a step; each subagent's own messages do.
+  */
+  describe("spawned by Codex, whose spawns name no step", () => {
+    const T = (s: number) => new Date(Date.parse("2026-09-29T03:48:40.000Z") + s * 1000).toISOString();
+    const rollout = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+      event({ cli: "codex", source: "rollout", channel: "codex:rollout", ...partial });
+    const spawn = (call: string, at: number) => [
+      rollout({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: call, background: true, at: T(at) }),
+      rollout({ kind: "tool.end", title: "Tool finished", toolUseId: call, background: true, at: T(at + 0.1) }),
+    ];
+    const says = (call: string, tag: string, at: number) =>
+      rollout({ kind: "message", title: "Message", detail: "Checking.", stepTag: tag, parentToolUseId: call, author: { kind: "subagent", name: call }, at: T(at) });
+    const ends = (call: string, at: number) =>
+      rollout({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: call, author: { kind: "subagent", name: call }, at: T(at) });
+    const journal = [
+      rollout({ kind: "step.marker", title: "Step prep", blockId: "prep", at: T(0) }),
+      rollout({ kind: "tool.start", title: "exec_command", toolUseId: "own", at: T(1) }),
+      rollout({ kind: "step.marker", title: "Step chk-a", blockId: "chk-a", at: T(8) }),
+      rollout({ kind: "step.marker", title: "Step chk-b", blockId: "chk-b", at: T(8) }),
+      rollout({ kind: "step.marker", title: "Step chk-c", blockId: "chk-c", at: T(8) }),
+      ...spawn("call-a", 10),
+      says("call-a", "chk-a", 11),
+      ...spawn("call-b", 12),
+      says("call-b", "chk-b", 13),
+      ...spawn("call-c", 14),
+      says("call-c", "chk-c", 15),
+      ends("call-a", 17),
+      ends("call-b", 20),
+      ends("call-c", 33),
+    ];
+
+    it("gives each check its own subagent, not the last one announced", () => {
+      const view = foldLiveSession(fork, run(), journal);
+      expect(view.blocks["chk-a"].state).toBe("done");
+      expect(view.blocks["chk-b"].state).toBe("done");
+      // Each ran for as long as its own subagent did.
+      expect(view.blocks["chk-a"].spentMs).toBe(9_000);
+      expect(view.blocks["chk-b"].spentMs).toBe(12_000);
+    });
+
+    it("draws a check working while its subagent is out", () => {
+      const view = foldLiveSession(fork, run(), journal.slice(0, 12));
+      expect(view.blocks["chk-a"].state).toBe("running");
+      expect(view.blocks["chk-b"].state).toBe("running");
+    });
+
+    it("puts a subagent's work on the step it names", () => {
+      const view = foldLiveSession(fork, run(), [
+        ...journal.slice(0, 7),
+        rollout({ kind: "tool.start", title: "exec_command", toolUseId: "a-own", parentToolUseId: "call-a", at: T(10.5) }),
+        ...journal.slice(7),
+      ]);
+      const work = view.events.find((item) => item.toolUseId === "a-own");
+      expect(work?.mapping.blockId).toBe("chk-a");
+    });
+  });
+
   it("is the same pass, not a second", () => {
     const view = foldLiveSession(fork, run(), [
       step("prep"), worked(),

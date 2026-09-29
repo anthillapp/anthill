@@ -619,3 +619,53 @@ describe("compile – refusal", () => {
     }
   });
 });
+
+/*
+  ANT-165. A switcher's exits are written as any branch is, and a condition
+  in plain words is said as written.
+*/
+function reviewSwitch(): Workflow {
+  const workflow = reviewLoop();
+  workflow.nodes.splice(3, 0, {
+    id: "doc",
+    type: "agent",
+    name: "Write the release note",
+    config: {
+      actionKind: "agent-step",
+      agentId: "agent-dev",
+      purpose: "Writes the release note",
+      task: "Write the release note.",
+    },
+  });
+  workflow.edges = [
+    { id: "e1", source: "s", target: "dev" },
+    { id: "e2", source: "dev", target: "rev" },
+    {
+      id: "approved",
+      source: "rev",
+      target: "doc",
+      kind: "switch",
+      label: "approved",
+      condition: "the reviewer approves the change",
+    },
+    { id: "declined", source: "rev", target: "e", kind: "switch", label: "declined" },
+    { id: "e5", source: "doc", target: "e" },
+  ];
+  return workflow;
+}
+
+describe("compile – switcher", () => {
+  it("writes a switcher as a branch, with its plain-words condition as written", () => {
+    const { prompt } = compile(reviewSwitch());
+    expect(prompt).toContain(
+      "- if the reviewer approves the change (approved), continue to step 3 (Write the release note).",
+    );
+    expect(prompt).toContain("- otherwise (declined), stop");
+  });
+
+  it("still reads an expression on a switch exit as one", () => {
+    const workflow = reviewSwitch();
+    workflow.edges.find((edge) => edge.id === "approved")!.condition = 'reviewer.decision == "approved"';
+    expect(compile(workflow).prompt).toContain('- if `reviewer.decision` is "approved" (approved)');
+  });
+});

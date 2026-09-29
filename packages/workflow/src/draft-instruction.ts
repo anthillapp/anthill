@@ -190,6 +190,12 @@ If the work has a loop – build, check, fix, check again – model it by pointi
 the loop. A workflow with a loop must have "doneCriteria", or nothing says when to
 stop going round.
 
+If a step chooses exactly one of several paths, once – approved goes one way,
+declined another – give each of those outputs "kind": "switch" and a "label"
+naming the path. Give every one but the last a "condition"; the last, with no
+condition, is the otherwise path. A switch is a choice, not a loop: work sent
+back to be redone is "rework".
+
 Each entry in "questions" is something the prompt did not settle and you had to
 guess at or leave open. Ask it where it belongs:
 

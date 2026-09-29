@@ -12,6 +12,7 @@ import type { Workflow } from "@anthill/workflow-schema";
 import { outputsOf } from "@anthill/workflow";
 
 import {
+  FIT_SCALE,
   NO_SELECTION,
   WorkflowCanvas,
   type LinkingState,
@@ -408,6 +409,9 @@ describe("WorkflowCanvas – deleting a block", () => {
 });
 
 describe("WorkflowCanvas – reconnecting with a generous target", () => {
+  /** Where a point of the workflow is on screen: the graph is drawn at FIT_SCALE (ANT-165). */
+  const onScreen = (x: number, y: number) => ({ clientX: x * FIT_SCALE, clientY: y * FIT_SCALE });
+
   const dragArrowheadTo = (x: number, y: number, overrides = {}) => {
     const props = renderCanvas({
       selection: { kind: "output", nodeId: "a", outputId: "e2" },
@@ -415,8 +419,8 @@ describe("WorkflowCanvas – reconnecting with a generous target", () => {
     });
     const canvas = screen.getByTestId("workflow-canvas");
     fireEvent.pointerDown(screen.getByTestId("arrow-handle-e2"));
-    fireEvent.pointerMove(canvas, { clientX: x, clientY: y });
-    fireEvent.pointerUp(canvas, { clientX: x, clientY: y });
+    fireEvent.pointerMove(canvas, onScreen(x, y));
+    fireEvent.pointerUp(canvas, onScreen(x, y));
     return props;
   };
 
@@ -455,7 +459,7 @@ describe("WorkflowCanvas – reconnecting with a generous target", () => {
       linking: { nodeId: "a", outputId: "e2" },
     });
     fireEvent.pointerDown(screen.getByTestId("arrow-handle-e2"));
-    fireEvent.pointerMove(screen.getByTestId("workflow-canvas"), { clientX: 560, clientY: 230 });
+    fireEvent.pointerMove(screen.getByTestId("workflow-canvas"), onScreen(560, 230));
 
     expect(screen.getByTestId("workflow-block-b")).toHaveAttribute("data-snap-target", "true");
     expect(screen.getByTestId("workflow-block-start")).not.toHaveAttribute("data-snap-target");
@@ -468,7 +472,7 @@ describe("WorkflowCanvas – reconnecting with a generous target", () => {
     });
     fireEvent.pointerDown(screen.getByTestId("arrow-handle-e2"));
     // Straight over Start, which nothing may point at.
-    fireEvent.pointerMove(screen.getByTestId("workflow-canvas"), { clientX: 40, clientY: 210 });
+    fireEvent.pointerMove(screen.getByTestId("workflow-canvas"), onScreen(40, 210));
     expect(screen.getByTestId("workflow-block-start")).not.toHaveAttribute("data-snap-target");
   });
 
@@ -478,7 +482,7 @@ describe("WorkflowCanvas – reconnecting with a generous target", () => {
       linking: { nodeId: "a", outputId: "e2" },
     });
     fireEvent.pointerDown(screen.getByTestId("arrow-handle-e2"));
-    fireEvent.pointerMove(screen.getByTestId("workflow-canvas"), { clientX: 260, clientY: 230 });
+    fireEvent.pointerMove(screen.getByTestId("workflow-canvas"), onScreen(260, 230));
     expect(screen.getByTestId("workflow-block-a")).not.toHaveAttribute("data-snap-target");
   });
 });
@@ -568,13 +572,13 @@ describe("WorkflowCanvas – zoom shortcuts", () => {
   it("accepts the unshifted key that carries the plus sign", () => {
     renderCanvas();
     fireEvent.keyDown(window, { key: "=", metaKey: true });
-    expect(zoomLabel()).toBe("115%");
+    expect(zoomLabel()).toBe(`${Math.round(FIT_SCALE * 115)}%`);
   });
 
   it("zooms out on ⌘−", () => {
     renderCanvas();
     fireEvent.keyDown(window, { key: "-", metaKey: true });
-    expect(zoomLabel()).toBe("87%");
+    expect(zoomLabel()).toBe(`${Math.round((FIT_SCALE / 1.15) * 100)}%`);
   });
 
   it("stops the application zooming instead", () => {

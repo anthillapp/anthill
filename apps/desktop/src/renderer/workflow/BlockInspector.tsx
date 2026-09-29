@@ -21,6 +21,7 @@ import {
   DEFAULT_TARGET,
   OUTCOME_LABELS,
   OUTCOME_MEANINGS,
+  SWITCHER_NOTE,
   actionDefinition,
   addAgentProfile,
   addOutput,
@@ -31,10 +32,12 @@ import {
   assignAgent,
   harnessProfile,
   isConfiguredFor,
+  isSwitcher,
   modelFor,
   outputsOf,
   removeOutput,
   stepsUsingAgent,
+  switcherProblem,
   type ActionKind,
   type BlockOutput,
 } from "@anthill/workflow";
@@ -568,8 +571,12 @@ function OutputsList({
   const nameOf = (id: string) =>
     workflow.nodes.find((item) => item.id === id)?.name ?? id;
 
-  const add = (kind: OutcomeKind) => {
-    const { workflow: next, outputId } = addOutput(workflow, node.id, kind);
+  // Two or more connected switch exits are one choice, taken exactly once.
+  const switcher = isSwitcher(outputs);
+  const problem = switcher ? switcherProblem(outputs) : undefined;
+
+  const add = (kind: OutcomeKind, label?: string) => {
+    const { workflow: next, outputId } = addOutput(workflow, node.id, kind, label);
     onChange(next);
     // A new output has nowhere to go yet, so go straight to pointing it.
     onStartLinking(node.id, outputId);
@@ -639,12 +646,33 @@ function OutputsList({
       ))}
 
       <div className="row" style={{ marginTop: 12 }}>
-        {(["next", "rework", "question"] as const).map((kind) => (
-          <button key={kind} onClick={() => add(kind)} title={OUTCOME_MEANINGS[kind]}>
-            + {OUTCOME_LABELS[kind]}
-          </button>
-        ))}
+        {(["next", "rework", "switch", "question"] as const).map((kind) =>
+          kind === "switch" ? (
+            <button
+              key={kind}
+              className="add-switch"
+              onClick={() => add(kind, "choice")}
+              title="The agent chooses one of several paths."
+            >
+              <i aria-hidden="true" />+ {OUTCOME_LABELS[kind]}
+            </button>
+          ) : (
+            <button key={kind} onClick={() => add(kind)} title={OUTCOME_MEANINGS[kind]}>
+              + {OUTCOME_LABELS[kind]}
+            </button>
+          ),
+        )}
       </div>
+      {switcher ? (
+        <>
+          {problem ? (
+            <p className="switch-warn" role="alert">
+              {problem}
+            </p>
+          ) : null}
+          <p className="switch-note">{SWITCHER_NOTE}</p>
+        </>
+      ) : null}
     </>
   );
 }

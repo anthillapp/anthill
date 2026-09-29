@@ -40,11 +40,17 @@ import { moveNode, removeNode } from "./document";
 import {
   GRID,
   OUTCOME_STYLES,
+  SWITCH_GLYPH_PATHS,
+  SWITCH_HUB_RADIUS,
+  SWITCH_INK,
+  SWITCH_WARN,
   blockColor,
   blockRect,
   buildCanvasModel,
   snapTarget,
   snapToGrid,
+  switchGlyphTransform,
+  switchStemPath,
 } from "./workflow-canvas-model";
 import { assemblyPlan } from "./assembly";
 import { useDisplayLayout } from "./use-display-layout";
@@ -62,6 +68,15 @@ export type LinkingState = { nodeId: string; outputId: string } | null;
 
 /** Pan and zoom of the canvas. */
 type View = { x: number; y: number; scale: number };
+
+/**
+ * The most a framed workflow is drawn at: a zoomed-out graph, so a workflow
+ * reads as a whole with room around it (ANT-165). Only the graph layer is
+ * scaled — the zoom control and everything else over the canvas stay 1:1 —
+ * and pointer maths divides by the scale, so drops and links land where
+ * pointed. The author can still zoom in.
+ */
+export const FIT_SCALE = 0.7;
 
 export type WorkflowCanvasProps = {
   workflow: Workflow;
@@ -171,7 +186,7 @@ export function WorkflowCanvas({
    * "clicked the background" and clear the selection the author was working on.
    */
   const justDragged = useRef(false);
-  const [view, setView] = useState<View>({ x: 0, y: 0, scale: 1 });
+  const [view, setView] = useState<View>({ x: 0, y: 0, scale: FIT_SCALE });
 
   const model = useMemo(() => buildCanvasModel(workflow), [workflow]);
 
@@ -215,7 +230,7 @@ export function WorkflowCanvas({
     // A canvas measured at nothing — before layout, or while hidden — would
     // otherwise produce a negative scale and put the workflow inside out.
     if (!box || box.width <= 0 || box.height <= 0 || rects.length === 0) {
-      setView({ x: 0, y: 0, scale: 1 });
+      setView({ x: 0, y: 0, scale: FIT_SCALE });
       return;
     }
     const left = Math.min(...rects.map((rect) => rect.left));
@@ -227,7 +242,7 @@ export function WorkflowCanvas({
     const scale = Math.max(
       ZOOM_MIN,
       Math.min(
-        1,
+        FIT_SCALE,
         ZOOM_MAX,
         (box.width - margin) / Math.max(1, right - left),
         (box.height - margin) / Math.max(1, bottom - top),
@@ -722,6 +737,36 @@ export function WorkflowCanvas({
           );
         })}
 
+        {/* Switchers go over their fingers: the hub has to cover where they
+            start, or they read as separate arrows from one spot (ANT-165). */}
+        {model.switchers.map((shape) => {
+          const stroke = shape.problem ? SWITCH_WARN.stroke : SWITCH_INK;
+          return (
+            <g
+              key={`switcher-${shape.nodeId}`}
+              data-testid={`switcher-${shape.nodeId}`}
+              data-problem={shape.problem ? "true" : undefined}
+              className={assembly ? "canvas-assemble" : undefined}
+              style={{ pointerEvents: "none", ...appear(assembly?.blocks.get(shape.nodeId)) }}
+            >
+              <path d={switchStemPath(shape)} stroke={stroke} strokeWidth={3.25} strokeLinecap="round" fill="none" />
+              <circle
+                cx={shape.hub.x}
+                cy={shape.hub.y}
+                r={SWITCH_HUB_RADIUS}
+                fill={shape.problem ? SWITCH_WARN.fill : "#ffffff"}
+                stroke={stroke}
+                strokeWidth={2.5}
+              />
+              <g transform={switchGlyphTransform(shape.hub)}>
+                {SWITCH_GLYPH_PATHS.map((d) => (
+                  <path key={d} d={d} stroke={stroke} strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                ))}
+              </g>
+            </g>
+          );
+        })}
+
         {model.pending.map((path) => (
           liveEdge && linking?.outputId === path.output.id ? null :
           <path
@@ -756,7 +801,10 @@ export function WorkflowCanvas({
           selection.nodeId === path.nodeId &&
           selection.outputId === path.output.id;
         const quiet = path.output.kind === "next" && !path.output.condition;
-        if (!path.output.label && !path.output.condition) return null;
+        // A switcher's finger is labelled with the exit's name only; the
+        // condition is in the inspector (ANT-165).
+        const condition = path.switcher ? undefined : path.output.condition;
+        if (!path.output.label && !condition) return null;
 
         return (
           <div
@@ -775,20 +823,20 @@ export function WorkflowCanvas({
               left: path.label.x,
               top: path.label.y,
               transform: "translate(-50%, -50%)",
-              padding: quiet ? "1px 4px" : "4px 8px",
+              padding: quiet ? "1px 4px" : path.switcher ? "5px 9px" : "4px 8px",
               borderRadius: 7,
               background: quiet ? "rgba(248,247,247,0.92)" : "#ffffff",
               border: quiet ? "none" : `1px solid ${selected ? path.style.color : "#e2dfdf"}`,
               boxShadow: selected ? `0 2px 10px ${path.style.color}33` : undefined,
               fontSize: quiet ? 11 : 12,
               fontWeight: quiet ? 400 : 600,
-              color: quiet ? "#8a8584" : "#201e1d",
+              color: quiet ? "#8a8584" : path.switcher ? SWITCH_INK : "#201e1d",
               cursor: "pointer",
               whiteSpace: "nowrap",
             }}
           >
             {path.output.label}
-            {path.output.condition ? (
+            {condition ? (
               <div
                 style={{
                   fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
@@ -797,7 +845,7 @@ export function WorkflowCanvas({
                   color: "#7d7979",
                 }}
               >
-                {path.output.condition}
+                {condition}
               </div>
             ) : null}
           </div>
@@ -1048,8 +1096,42 @@ export function WorkflowCanvas({
         );
       })}
 
+      {/* A switcher has one port dot, where its stem leaves the block. Its
+          exits are chosen between, not moved one by one, so the dot selects
+          the block and the inspector lists them. */}
+      {model.switchers.map((shape) => {
+        const stroke = shape.problem ? SWITCH_WARN.stroke : SWITCH_INK;
+        return (
+          <div
+            key={`switch-port-${shape.nodeId}`}
+            data-testid={`switch-port-${shape.nodeId}`}
+            title={`Switcher — the agent takes exactly one of ${shape.outputIds.length} paths`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (!linking) onSelectionChange({ kind: "block", nodeId: shape.nodeId });
+            }}
+            style={{
+              pointerEvents: "auto",
+              position: "absolute",
+              left: shape.port.x - 6,
+              top: shape.port.y - 6,
+              width: 12,
+              height: 12,
+              borderRadius: "50%",
+              background: "#ffffff",
+              border: `2px solid ${stroke}`,
+              boxShadow: "0 0 0 2px #f8f7f7",
+              cursor: "pointer",
+            }}
+          />
+        );
+      })}
+
       {/* Ports, drawn above the cards so they stay clickable. */}
       {[...model.connected, ...model.pending].map((path) => {
+        // A switcher's fingers leave from its hub, not from ports of their own.
+        if ("switcher" in path && path.switcher) return null;
         const active = linking?.nodeId === path.nodeId && linking.outputId === path.output.id;
         return (
           <div

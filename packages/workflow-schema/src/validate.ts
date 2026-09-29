@@ -305,7 +305,8 @@ export function validateWorkflow(
   for (const edge of edges) {
     if (edge.condition === undefined) continue;
     const parsed = parseEdgeCondition(edge.condition);
-    if (!parsed.ok) {
+    // A switcher's exit may say when it is taken in plain words (ANT-165).
+    if (!parsed.ok && edge.kind !== "switch") {
       errors.push({
         code: VALIDATION_CODES.INVALID_EDGE_CONDITION,
         message: `Edge "${edge.id}" has an unsupported condition: ${parsed.error}.`,

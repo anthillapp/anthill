@@ -66,6 +66,7 @@ export const OUTCOME_LABELS: Record<OutcomeKind, string> = {
   rework: "Rework",
   question: "Question",
   stop: "Stop",
+  switch: "Switch",
 };
 
 /** What each kind means, shown next to the picker so the choice is informed. */
@@ -74,6 +75,7 @@ export const OUTCOME_MEANINGS: Record<OutcomeKind, string> = {
   rework: "The work was not accepted and goes back to be redone.",
   question: "Someone else has to answer before the workflow can continue.",
   stop: "This path ends here.",
+  switch: "One of several paths; the agent takes exactly one of them, once.",
 };
 
 export const DEFAULT_OUTCOME_KIND: OutcomeKind = "next";
@@ -122,7 +124,11 @@ export function isEdgeRouting(value: unknown): value is EdgeRouting {
 
 export function isOutcomeKind(value: unknown): value is OutcomeKind {
   return (
-    value === "next" || value === "rework" || value === "question" || value === "stop"
+    value === "next" ||
+    value === "rework" ||
+    value === "question" ||
+    value === "stop" ||
+    value === "switch"
   );
 }
 
@@ -462,4 +468,45 @@ export function unconnectedOutputs(
     }
   }
   return result;
+}
+
+/*
+  A switcher (ANT-165): two or more connected `switch` exits on one block. The
+  agent takes exactly one of them, once, so they read as one path that splits
+  rather than as several arrows that happen to start at the same block. Only
+  connected exits count — an exit still being routed is not yet a choice.
+*/
+
+/** The block's connected `switch` exits, in port order. */
+export function switchExits(workflow: Workflow, nodeId: string): BlockOutput[] {
+  return outputsOf(workflow, nodeId).filter(
+    (output) => output.kind === "switch" && output.target !== null,
+  );
+}
+
+/** Whether a block's exits form a switcher: two or more connected `switch` exits. */
+export function isSwitcher(exits: readonly BlockOutput[]): boolean {
+  return exits.filter((output) => output.kind === "switch" && output.target !== null).length >= 2;
+}
+
+export const SWITCHER_NOTE =
+  "These exits form a switcher: the agent takes exactly one, once. Put the one without a condition last — it is the otherwise path.";
+
+/**
+ * What breaks "exactly one" among a switcher's exits, if anything.
+ *
+ * Checked in order: each exit's condition is tried in turn and the one with
+ * none is the otherwise path. Two without a condition leave the choice
+ * undecided; one without a condition ahead of the others shadows everything
+ * after it.
+ */
+export function switcherProblem(exits: readonly BlockOutput[]): string | undefined {
+  const switches = exits.filter((output) => output.kind === "switch" && output.target !== null);
+  if (switches.length < 2) return undefined;
+  const open = switches.filter((output) => !output.condition?.trim());
+  if (open.length > 1) return "Two exits have no condition — only one can be the otherwise path.";
+  if (open.length === 1 && switches[switches.length - 1] !== open[0]) {
+    return "The otherwise exit must be the last one.";
+  }
+  return undefined;
 }

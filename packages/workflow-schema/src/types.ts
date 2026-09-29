@@ -145,14 +145,21 @@ export const EDGE_ANCHORS = [
  * The kind decides how the path is drawn and how the generated workflow describes
  * it: `next` is work accepted, `rework` is work sent back, `question` needs an
  * answer from someone else, `stop` ends the path.
+ *
+ * `switch` is one of several paths of which exactly one is taken, once (ANT-165).
+ * Two or more `switch` exits on a block are drawn as a single switcher — one
+ * stem, one hub, a finger per exit. It is a choice, never rework: rework always
+ * goes back, so it has no alternative and never forms a switcher. A `switch`
+ * exit has no pass count and no loop limit.
  */
-export type OutcomeKind = "next" | "rework" | "question" | "stop";
+export type OutcomeKind = "next" | "rework" | "question" | "stop" | "switch";
 
 export const OUTCOME_KINDS = [
   "next",
   "rework",
   "question",
   "stop",
+  "switch",
 ] as const satisfies readonly OutcomeKind[];
 
 /**

@@ -333,3 +333,66 @@ describe("the agent profile inspector", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 });
+
+/* ANT-165 */
+describe("a switcher in the inspector", () => {
+  const withExits = (edges: Workflow["edges"]): Workflow => ({
+    ...workflow,
+    edges: [...workflow.edges.filter((edge) => edge.source !== "check"), ...edges],
+  });
+
+  function inspect(subject: Workflow) {
+    const onChange = vi.fn<(next: Workflow) => void>();
+    const onStartLinking = vi.fn();
+    render(
+      <BlockInspector
+        workflow={subject}
+        node={subject.nodes.find((node) => node.id === "check") as Workflow["nodes"][number]}
+        onChange={onChange}
+        onStartLinking={onStartLinking}
+        onSelectOutput={() => undefined}
+        onEditAgent={() => undefined}
+        onSelectStep={() => undefined}
+        validation={validateWorkflow(subject)}
+      />,
+    );
+    return { onChange, onStartLinking };
+  }
+
+  it("adds a switch exit named choice and goes straight to pointing it", () => {
+    const { onChange, onStartLinking } = inspect(workflow);
+    fireEvent.click(screen.getByRole("button", { name: "+ Switch" }));
+    const next = onChange.mock.calls[0][0];
+    const pending = (next.nodes.find((node) => node.id === "check")!.config.pendingOutputs ?? []) as {
+      id: string;
+      kind: string;
+      label: string;
+    }[];
+    expect(pending).toEqual([expect.objectContaining({ kind: "switch", label: "choice" })]);
+    expect(onStartLinking).toHaveBeenCalledWith("check", pending[0].id);
+  });
+
+  it("explains the switcher once its exits form one", () => {
+    inspect(
+      withExits([
+        { id: "pass", source: "check", target: "end", kind: "switch", label: "pass", condition: "the tests pass" },
+        { id: "fail", source: "check", target: "build", kind: "switch", label: "fail" },
+      ]),
+    );
+    expect(screen.getByText(/These exits form a switcher/)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("warns above the note when exactly one path is not decided", () => {
+    inspect(
+      withExits([
+        { id: "pass", source: "check", target: "end", kind: "switch", label: "pass" },
+        { id: "fail", source: "check", target: "build", kind: "switch", label: "fail" },
+      ]),
+    );
+    const warning = screen.getByRole("alert");
+    expect(warning.textContent).toBe("Two exits have no condition — only one can be the otherwise path.");
+    const note = screen.getByText(/These exits form a switcher/);
+    expect(warning.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});

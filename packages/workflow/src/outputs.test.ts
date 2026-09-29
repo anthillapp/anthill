@@ -8,8 +8,12 @@ import {
   outputsOf,
   patchOutput,
   removeOutput,
+  isSwitcher,
   setOutputTarget,
+  switchExits,
+  switcherProblem,
   unconnectedOutputs,
+  type BlockOutput,
 } from "./outputs.js";
 
 function makeWorkflow(): Workflow {
@@ -224,5 +228,45 @@ describe("allOutputs", () => {
     expect(Object.keys(map)).toEqual(["a", "b", "c"]);
     expect(map.a).toHaveLength(1);
     expect(map.b).toEqual([]);
+  });
+});
+
+/* ANT-165 */
+describe("switcher", () => {
+  const exit = (id: string, extra: Partial<BlockOutput> = {}): BlockOutput => ({
+    id,
+    label: id,
+    kind: "switch",
+    target: "t",
+    ...extra,
+  });
+
+  it("is two or more connected switch exits", () => {
+    expect(isSwitcher([exit("a")])).toBe(false);
+    expect(isSwitcher([exit("a"), exit("b", { target: null })])).toBe(false);
+    expect(isSwitcher([exit("a"), exit("b", { kind: "rework" })])).toBe(false);
+    expect(isSwitcher([exit("a"), exit("b")])).toBe(true);
+  });
+
+  it("holds when only the last exit has no condition", () => {
+    expect(switcherProblem([exit("a", { condition: "x" }), exit("b")])).toBeUndefined();
+  });
+
+  it("reports two otherwise paths, then an otherwise path out of place", () => {
+    expect(switcherProblem([exit("a"), exit("b")])).toBe(
+      "Two exits have no condition — only one can be the otherwise path.",
+    );
+    expect(switcherProblem([exit("a"), exit("b", { condition: "x" })])).toBe(
+      "The otherwise exit must be the last one.",
+    );
+  });
+
+  it("finds a block's connected switch exits in port order", () => {
+    const workflow = makeWorkflow();
+    workflow.edges.push(
+      { id: "s1", source: workflow.nodes[1].id, target: workflow.nodes[2].id, kind: "switch" },
+      { id: "s2", source: workflow.nodes[1].id, target: workflow.nodes[2].id, kind: "switch" },
+    );
+    expect(switchExits(workflow, workflow.nodes[1].id).map((output) => output.id)).toEqual(["s1", "s2"]);
   });
 });

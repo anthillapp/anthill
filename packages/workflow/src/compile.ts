@@ -402,7 +402,12 @@ function renderTransitions(
   for (const edge of edges) {
     const label = edge.label?.trim();
     if (edge.condition !== undefined) {
-      lines.push(`- if ${describeCondition(edge.condition)}${label ? ` (${label})` : ""}, ${describeTarget(edge)}.`);
+      // A switcher's exit may be taken on plain words, said as written.
+      const when =
+        edge.kind === "switch" && !parseEdgeCondition(edge.condition).ok
+          ? edge.condition.trim()
+          : describeCondition(edge.condition);
+      lines.push(`- if ${when}${label ? ` (${label})` : ""}, ${describeTarget(edge)}.`);
     } else if (byLabel && label) {
       lines.push(`- if ${gate ? "they answer" : "the outcome is"} "${label}", ${describeTarget(edge)}.`);
     } else if (!otherwiseSaid) {

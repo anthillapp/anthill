@@ -452,6 +452,30 @@ describe("writing the agent files", () => {
     expect(screen.getByRole("button", { name: "Copy again" })).toBeTruthy();
   });
 
+  // ANT-200: after a restart the remembered folder is confirmed in a dialog,
+  // where the author may pick another — that one is the run folder from then.
+  it("keeps the folder the confirmation wrote to as the run folder", async () => {
+    const { api } = stub();
+    api.exportWorkflow.mockResolvedValueOnce({ ok: true, directory: "/elsewhere", written: ["x"] });
+    const onRunRoot = open();
+    await toHandover();
+    fireEvent.click(await copyButton());
+    await screen.findByText(/1 agent file written/);
+    expect(onRunRoot).toHaveBeenCalledWith("/elsewhere");
+    expect(screen.getByText("/elsewhere")).toBeTruthy();
+  });
+
+  it("says nothing was written when the confirmation is closed", async () => {
+    const { api, order } = stub();
+    api.exportWorkflow.mockResolvedValueOnce({ ok: false, cancelled: true });
+    open();
+    await toHandover();
+    fireEvent.click(await copyButton());
+    await waitFor(() => expect(order).toContain("clipboard"));
+    expect(screen.getByText("No agent files were written")).toBeTruthy();
+    expect(screen.getByText(/not confirmed/)).toBeTruthy();
+  });
+
   it("still copies when the write fails, and says what failed", async () => {
     // A failed export is worth naming; withholding the prompt over it would
     // leave the author with nothing at all.

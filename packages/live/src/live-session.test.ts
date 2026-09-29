@@ -1539,3 +1539,62 @@ describe("a session that ends with its subagents still out", () => {
     expect(view.blocks.implement.state).toBe("done");
   });
 });
+
+/*
+  ANT-204, W9 in the 0.8.4 QA: two parallel steps both sent off to subagents,
+  then the session itself interrupted by hand while its subagents worked. The
+  main session's "Stopped by hand" was read as a question to a person, and the
+  last step announced was left "Waiting on you" after the run ended.
+*/
+describe("a session stopped by hand", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-29T04:10:00.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+
+  const delegatedBoth = [
+    tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+    tx({ kind: "step.marker", title: "Step test", blockId: "test", at: T(0.1) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "call-a", stepTag: "implement", background: true, at: T(3) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "call-a", background: true, at: T(3.1) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "call-b", stepTag: "test", background: true, at: T(4) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "call-b", background: true, at: T(4.1) }),
+    tx({ kind: "tool.start", title: "Read", toolUseId: "own", at: T(5) }),
+  ];
+  const stopped = tx({ kind: "notification", title: "Stopped by hand", at: T(6) });
+
+  it("leaves no step waiting on you once the run ends", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [...delegatedBoth, stopped]);
+    expect(view.blocks.implement.state).toBe("unknown");
+    expect(view.blocks.test.state).toBe("unknown");
+    expect(view.blocks.test.note).toContain("never handed back");
+  });
+
+  it("is not presented as a question while the session is still open", () => {
+    const view = foldLiveSession(workflow, run(), [...delegatedBoth, stopped]);
+    expect(view.blocks.test.state).toBe("needsYou");
+    expect(view.blocks.test.waitReason).not.toBe("asked");
+    expect(view.blocks.test.note).toContain("stopped by hand");
+  });
+
+  it("ends a step the session itself was working on as stopped, not done", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+      tx({ kind: "tool.start", title: "Edit", toolUseId: "own", at: T(1) }),
+      stopped,
+    ]);
+    expect(view.blocks.implement.state).toBe("failed");
+    expect(view.blocks.implement.note).toContain("stopped by hand");
+  });
+
+  it("goes back to working when the person sets it going again", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+      tx({ kind: "tool.start", title: "Edit", toolUseId: "own", at: T(1) }),
+      stopped,
+      tx({ kind: "tool.start", title: "Edit", toolUseId: "own-2", at: T(20) }),
+      tx({ kind: "turn.end", title: "The agent finished its turn", at: T(30) }),
+      event({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", source: "transcript", channel: "claude-code:transcript", at: T(31) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+  });
+});

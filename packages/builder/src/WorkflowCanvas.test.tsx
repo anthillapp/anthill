@@ -234,6 +234,23 @@ describe("WorkflowCanvas – linking", () => {
     expect(props.onLinkingChange).toHaveBeenCalledWith(null);
   });
 
+  it("stays in link mode while the output being linked exists", () => {
+    const props = renderCanvas({ linking: { nodeId: "a", outputId: "e2" } });
+    expect(props.onLinkingChange).not.toHaveBeenCalled();
+  });
+
+  // ANT-202: Remove output in the inspector while linking.
+  it("ends link mode when the output being linked is gone", () => {
+    const props = renderCanvas({ linking: { nodeId: "a", outputId: "removed" } });
+    expect(props.onLinkingChange).toHaveBeenCalledWith(null);
+  });
+
+  it("does not count a link to a missing output as an edit", () => {
+    const props = renderCanvas({ linking: { nodeId: "a", outputId: "removed" } });
+    fireEvent.click(screen.getByTestId("workflow-block-b"));
+    expect(props.onChange).not.toHaveBeenCalled();
+  });
+
   it("shows what is being connected while linking", () => {
     renderCanvas({ linking: { nodeId: "a", outputId: "e2" } });
     const hint = screen.getByTestId("linking-hint");

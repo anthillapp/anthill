@@ -70,8 +70,15 @@ but a desktop watching another directory cannot see it.
 ```text
 $anthill design Add retry-once to checkout; let me edit the workflow first
 $anthill watch Fix the importer and show the work in Anthill while you do it
+$anthill design --dev Add retry-once to checkout, in the development build
 $anthill Describe this task as a workflow
 ```
+
+On macOS, `--dev` directly after the mode sends the task to the development
+build of an Anthill checkout (`npm run dev:desktop`), which Anthill starts if it
+is not running; without it, the installed app. The first result says which one
+the task reaches, and switching takes a new task. On Linux and Windows every
+task reaches the web shell from source, with or without `--dev`.
 
 `design` asks for missing scope, constraints, success criteria, and fixed
 decisions, then stops after opening the draft. `watch` binds immediately and

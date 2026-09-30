@@ -108,7 +108,14 @@ to them and works the same under each.
 ```
 /anthill:workflow design Add retry-once to the checkout flow, let me read it first
 /anthill:workflow watch  Rework the importer — show me the work as it happens
+/anthill:workflow design --dev Add retry-once to the checkout flow, in the dev build
 ```
+
+On macOS, `--dev` directly after the command sends the chat to the development
+build of an Anthill checkout (`npm run dev:desktop`), which Anthill starts if it
+is not running; without it, the installed app. The first result says which one
+the chat reaches, and switching takes a new chat. On Linux and Windows every chat
+reaches the web shell from source, with or without `--dev`.
 
 Two commands, and the difference is whose workflow it is.
 

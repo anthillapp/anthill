@@ -3,7 +3,7 @@ name: workflow
 description: Use when the user wants the work of this session laid out as a workflow in Anthill — "show this in Anthill", "plan this out in Anthill", "/anthill:workflow design …" — or wants to watch this session do a job as a diagram, "/anthill:workflow watch …". Covers handing a task over as a graph, asking the questions that make it complete, binding a run to the graph the user settled on, and reporting progress against it. Not for work that is not going to be done in this session.
 version: 0.8.5
 user-invocable: true
-argument-hint: "[design|create · display|watch] [task]"
+argument-hint: "[design|create · display|watch] [--dev] [task]"
 ---
 
 Anthill is a desktop app that draws the work of a coding session as a diagram and
@@ -38,6 +38,50 @@ unclear, **ask** — the difference is whether the user gets to write the plan.
 Nothing else is a command. Checking that Anthill is reachable is the first thing
 this skill does anyway, and picking up an existing handover is a section near the
 bottom; neither needs a word of its own in front of the user.
+
+## Which Anthill: `--dev`
+
+On macOS a chat reaches one of two Anthills: the installed app, or the
+development build of an Anthill checkout. Which one is the user's to say, in
+the command itself:
+
+* `/anthill:workflow design <task>` (or `watch <task>`) — the installed app.
+* `/anthill:workflow design --dev <task>` (or `watch --dev <task>`) — the development
+  build. Anthill starts it if it is not running.
+
+The same words work when the plugin is tagged rather than typed:
+`@anthill design --dev …`.
+
+**`--dev` is the flag only as its own word directly after the mode** —
+`design`, `watch`, or their aliases. Everything after it is the task. A bare
+`dev` is never the flag: `design dev server for staging` is a task about a dev
+server, for the installed app. `--dev` anywhere else in the text is part of the
+task too. When in doubt, it is part of the task.
+
+When the user's command carries `--dev`, pass `build: "dev"` on **every** call
+to Anthill that takes it for that command — `create_workflow_draft`,
+`open_workflow`, `bind_run`, and `get_workflow` or `get_ready_revision` when
+picking a `--dev` handover back up. Without `--dev`, leave `build` out. The
+chat's first handover pins its Anthill, and every later call goes to the same
+one; a later `--dev` in a chat pinned to the installed app is refused, and a
+read with `build` looks without deciding anything.
+
+The first result says which Anthill the chat reaches: "This chat's handovers go
+to Anthill (dev build)." or "… to Anthill (installed app)." Tell the user in one
+line, with whatever the result says about it running or starting. If it is not
+the one they meant, say that switching takes a new chat: a later call asking for
+another build is refused, because the workflows so far live in this Anthill's
+exchange. Do not try to work around the refusal.
+
+On Linux and Windows there is only one Anthill, the web shell from source, and
+every chat reaches it, with `--dev` or without. There is nothing to say about it.
+
+| The user wrote | The task | `build` |
+| --- | --- | --- |
+| `design Add retry to checkout` | Add retry to checkout | left out |
+| `design --dev Add retry to checkout` | Add retry to checkout | `"dev"` |
+| `design dev server for staging` | dev server for staging | left out |
+| `design --dev …` in a chat that already handed over to the installed app | the rest | `"dev"`, refused: tell them it takes a new chat |
 
 ## Before anything else
 
@@ -141,7 +185,8 @@ plausible guess does more damage than an admitted gap.
 
 4. **Submit it** with `create_workflow_draft`, carrying `idempotencyKey`, `mode`,
    `source` (`harness: "claude-code"`, the session id you established, and
-   `taskText`), and `workflow`.
+   `taskText`), and `workflow` — and `build: "dev"` if the user wrote `--dev`
+   (see "Which Anthill: `--dev`").
 
    `mode` is the command the user ran: **`"design"`** or **`"watch"`**. It is
    what tells Anthill which screen to open — the canvas or the Live Session —

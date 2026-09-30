@@ -18,6 +18,7 @@ import type { Workflow } from "@anthill/workflow-schema";
 
 import { HANDOVER_REFUSED_CHANNEL, IpcChannel, OPEN_WORKFLOW_CHANNEL } from "../../desktop/src/shared/ipc.js";
 import { createBridge, type Bridge } from "./bridge.js";
+import { appendReport } from "./report.js";
 
 vi.mock("../../desktop/src/main/user-path.js", () => ({ adoptUserPath: async () => false }));
 
@@ -145,7 +146,7 @@ async function shell(options: { before?: (store: ExchangeStore) => Promise<void>
   };
   const pending = async () => (await store.listInbox()).drops;
 
-  return { bridge, store, tab, refusals, display, pending, broadcast };
+  return { bridge, store, tab, refusals, display, pending, broadcast, paths: { userData, home: root } };
 }
 
 async function until<T>(read: () => T | undefined | false, ms = 3000): Promise<T> {
@@ -338,3 +339,87 @@ describe("the web shell receives handovers", () => {
     expect(tab.opens()).toEqual([]);
   });
 });
+
+/*
+  ANT-229. What the user does with a handed-over workflow in the web shell,
+  and the run a harness binds to it: saved revisions the harness reads back,
+  and a bound run followed Live until its harness says it is done.
+*/
+describe("the web shell works with a handed-over workflow", () => {
+  /** A workflow handed over and on screen in one tab, as after a `design`. */
+  async function onScreen() {
+    const web = await shell({ before: async (store) => { await store.createWorkflow(submission()); } });
+    const tab = web.tab(1);
+    await tab.connect("workflow-1");
+    const [open] = await until(() => tab.opens().length > 0 && tab.opens());
+    await tab.answer(open!);
+    return { ...web, path: open!.path };
+  }
+
+  it("saves an edit as a new revision, which is what the harness reads back as ready", async () => {
+    const web = await onScreen();
+    const edited = { ...workflow(), name: "Ship the fix, carefully" };
+
+    const saved = await web.bridge.api.saveWorkflow({ path: web.path, workflow: edited });
+
+    expect(saved).toEqual({ kind: "saved", path: web.path });
+    const eligible = await web.store.eligibleRevision("workflow-1");
+    expect(eligible).toMatchObject({ eligible: true, state: "ready_for_agent" });
+    expect(eligible.eligible && eligible.revision).toMatchObject({ revision: 2, workflow: { name: "Ship the fix, carefully" } });
+    expect(await web.bridge.api.exchangeRead(web.path, "workflow-1"))
+      .toMatchObject({ workflowId: "workflow-1", revision: 2, state: "ready_for_agent", bindings: [] });
+  });
+
+  it("refuses to save another workflow over a handed-over one's working copy", async () => {
+    const web = await onScreen();
+
+    // The working copy is open, so the file gate passes; the exchange's own check is what refuses.
+    const saved = await web.bridge.api.saveWorkflow({ path: web.path, workflow: workflow("workflow-other") });
+
+    expect(saved).toMatchObject({ kind: "failed", error: expect.stringContaining("reserved for exchange records or another workflow") });
+    expect((await web.store.readWorkflow("workflow-1"))?.head?.revision).toBe(1);
+  });
+
+  it("follows a run the harness binds, draws it from the bound revision, and ends it when the harness says done", async () => {
+    const web = await onScreen();
+    const bound = await web.store.bindRequest("workflow-1", 1, (await web.store.readRevision("workflow-1", 1))!.digest,
+      "bind-1", undefined, () => ({ runId: "ANT-RUN1", nonce: "nonce1" }));
+    expect(bound.outcome).toBe("bound");
+    await web.store.dropInbox({ kind: "bind", key: "bind-ANT-RUN1", workflowId: "workflow-1", revision: 1, runId: "ANT-RUN1" });
+
+    // The inbox registers it with the live service, and the bind request is consumed.
+    const registered = await waitFor(async () => (await web.bridge.api.liveSnapshot()).runs.find((r) => r.anthillRunId === "ANT-RUN1"));
+    expect(registered).toMatchObject({ workflowId: "workflow-1", exchange: { revision: 1 } });
+    await waitFor(async () => (await web.pending()).length === 0);
+
+    // An edit saved after the bind is a new head; Live still draws what the run was bound to.
+    await web.bridge.api.saveWorkflow({ path: web.path, workflow: { ...workflow(), name: "Edited after the bind" } });
+    expect((await web.store.readWorkflow("workflow-1"))?.head?.revision).toBe(2);
+    expect(await web.bridge.api.liveWorkflow("ANT-RUN1"))
+      .toMatchObject({ ok: true, revision: 1, workflow: { id: "workflow-1", name: "Ship the fix" } });
+
+    // What `anthill run/step/done` write, in this shell's own data directory.
+    const at = () => new Date().toISOString();
+    await appendReport(web.paths, { kind: "run", runId: "ANT-RUN1", nonce: "nonce1", at: at() });
+    await appendReport(web.paths, { kind: "step", runId: "ANT-RUN1", nonce: "nonce1", stepId: "step-1", at: at() });
+    await appendReport(web.paths, { kind: "done", runId: "ANT-RUN1", nonce: "nonce1", at: at() });
+
+    // Read on the live service's own poll.
+    const finished = await waitFor(async () => {
+      const current = (await web.bridge.api.liveSnapshot()).runs.find((r) => r.anthillRunId === "ANT-RUN1");
+      return current?.state === "completed" && current;
+    }, 8000);
+    expect(finished).toMatchObject({ state: "completed" });
+  }, 15000);
+});
+
+async function waitFor<T>(read: () => Promise<T | undefined | false>, ms = 5000): Promise<T> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const value = await read();
+    if (value) return value;
+    if (Date.now() > deadline) throw new Error("timed out waiting");
+    await new Promise((done) => setTimeout(done, 25));
+  }
+}
+

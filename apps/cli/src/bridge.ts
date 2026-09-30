@@ -14,11 +14,16 @@ import {
 import type { Workflow } from "@anthill/workflow-schema";
 
 import { ExchangeStore } from "@anthill/exchange-store";
+import { MARKER_VERSION, workflowSteps } from "@anthill/live";
 import {
   ExchangeInbox,
   SerialDrain,
   WindowOperations,
   WorkflowDelivery,
+  boundWorkflow,
+  exchangeDestination,
+  readExchangeView,
+  saveExchangeCopy,
   workflowIdFromLink,
   writeWorkingCopy,
   type OpenOutcome,
@@ -445,8 +450,30 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     mayOpen: mayShowWorkflow,
     open: showWorkflow,
     refuse: refuseHandover,
-    // Following bound runs is ANT-229; until then a bind request waits.
-    register: async () => false,
+    // A run the harness bound (`bind_run`), followed as the desktop follows
+    // one (ANT-229): registered once with the live service, which then reads
+    // its session and the `anthill run/step/done` reports in this data dir.
+    register: async (run): Promise<boolean> => {
+      try {
+        return await liveService().registerBinding({
+          boundAt: run.boundAt,
+          exchange: { revision: run.revision.revision, digest: run.revision.digest, ...(run.sessionId ? { sessionId: run.sessionId } : {}) },
+          anthillRunId: run.runId,
+          correlationNonce: run.nonce,
+          selectedCli: run.harness,
+          promptVersion: MARKER_VERSION,
+          // The revision's digest stands in for the prompt hash, as in the
+          // desktop: it identifies the content the run started from.
+          bootstrapPromptHash: run.revision.digest,
+          workflowId: run.workflowId,
+          ...(run.revision.workflow.name ? { workflowName: run.revision.workflow.name } : {}),
+          steps: workflowSteps(run.revision.workflow),
+        });
+      } catch (error) {
+        console.error("[anthill] could not register a bound run:", error);
+        return false;
+      }
+    },
   }, options.exchangePollMs);
   // At once, so a handover stored while the shell was closed is waiting for
   // the first tab rather than for the next one after it.
@@ -477,9 +504,13 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
       workflowDelivery.acknowledge(path, undefined, outcome);
     }
   });
-  // Saving into the exchange is ANT-229.
-  register(IpcChannel.exchangeRead, async () => undefined);
-  register(IpcChannel.liveWorkflow, async () => ({ ok: false, error: "Bound revisions are available in Anthill desktop." }));
+  // What the editor shows about a handed-over workflow, and the revision a
+  // bound run works from (ANT-229): the desktop's own readers over this store.
+  register(IpcChannel.exchangeRead, async (args) => readExchangeView(exchange, String(args[0]), String(args[1])));
+  register(IpcChannel.liveWorkflow, async (args) => {
+    await liveService().start();
+    return boundWorkflow(exchange, liveService().registered(String(args[0])));
+  });
 
   /**
    * The workflow files the CLI can name: the recents (most recent first), then
@@ -513,6 +544,21 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     const request = args[0] as SaveWorkflowRequest;
     if (request.path && !await workflowFiles.has(request.path)) {
       return { kind: "failed" as const, error: "Open this workflow before saving changes to its file." };
+    }
+    // A handed-over workflow saves as a new revision in the exchange, which is
+    // what the harness reads back with get_ready_revision (ANT-229). Only its
+    // own working copy is such a destination; anything else in the exchange
+    // is refused, as in the desktop.
+    try {
+      if (request.path && await exchangeDestination(exchange, request.path, request.workflow.id)) {
+        await saveExchangeCopy(exchange, request.path, request.workflow);
+        await workflowFiles.grant(request.path);
+        await rememberRecent(request.path);
+        diagnostics?.analytics.capture("workflow_saved");
+        return { kind: "saved" as const, path: request.path };
+      }
+    } catch (error) {
+      return { kind: "failed" as const, error: error instanceof Error ? error.message : String(error) };
     }
     const { readFile, access } = await import("node:fs/promises");
     // What the last successful save left behind, read from the file itself.

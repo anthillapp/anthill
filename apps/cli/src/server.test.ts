@@ -292,6 +292,29 @@ describe("the CLI web server's tabs", () => {
     expect(server.clientCount()).toBe(0);
   });
 
+  // ANT-230: what the MCP server's web launcher asks before it opens a tab.
+  it("reports its port and how many tabs are connected on /health, for 0, 1 and 2 tabs", async () => {
+    const health = async () => (await (await fetch(`http://127.0.0.1:${server.port}/health`)).json()) as Record<string, unknown>;
+    const open = (): Promise<WebSocket> => new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${server.port}/api?token=${server.token}`);
+      ws.onopen = () => resolve(ws);
+      ws.onerror = reject;
+    });
+    const settled = async (count: number) => {
+      for (let i = 0; i < 200 && (await health()).clients !== count; i += 1) await new Promise((r) => setTimeout(r, 10));
+      return health();
+    };
+
+    expect(await settled(0)).toEqual({ ok: true, name: "anthill-cli", port: server.port, clients: 0 });
+    const first = await open();
+    expect(await settled(1)).toMatchObject({ port: server.port, clients: 1 });
+    const second = await open();
+    expect(await settled(2)).toMatchObject({ port: server.port, clients: 2 });
+    first.close();
+    second.close();
+    expect(await settled(0)).toMatchObject({ clients: 0 });
+  });
+
   it("tells the bridge which tab a message came from, sends to one tab, and says when one closes", async () => {
     const open = (): Promise<WebSocket> => new Promise((resolve, reject) => {
       const ws = new WebSocket(`ws://127.0.0.1:${server.port}/api?token=${server.token}`);

@@ -264,7 +264,17 @@ export async function runReportCommand(
   return 0;
 }
 
-/** The single-instance lock, in the data directory. */
+/**
+ * The single-instance lock, in the data directory.
+ *
+ * Its contents are a contract with the MCP server (apps/mcp/src/target.ts,
+ * `webShellRunning`), which reads it to find a running web shell:
+ * `{ pid, port, host, startedAt }` as JSON. `port` is the one `--port` asked
+ * for — never assume 4173 — and, since 0 is refused, the one the server binds
+ * or fails on. The lock is written just before the server listens, so a
+ * reader treats the shell as running only while `pid` is alive, and a
+ * `/health` that does not answer yet as starting, not as an error (ANT-230).
+ */
 const LOCK_FILE = "instance.lock";
 /** A lock older than this is stale even if its pid is still alive (pid reuse). */
 const LOCK_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -449,38 +459,77 @@ function releaseLock(lockPath: string): () => Promise<void> {
   };
 }
 
-/** The "open a URL" programs, in the order to try them on Linux. */
-const BROWSER_OPENERS = ["xdg-open", "wslview", "sensible-browser"] as const;
+/** One way to ask the platform to open a URL: a program and its arguments, never a shell string. */
+export type BrowserOpener = { command: string; args: string[] };
+
+/**
+ * The "open a URL" programs for a platform, in the order to try them.
+ *
+ * - macOS: `/usr/bin/open`, by absolute path so a PATH cannot substitute it.
+ * - Windows: `rundll32 url.dll,FileProtocolHandler <url>`, the URL one
+ *   argument through `spawn`, so it never meets `cmd /c start`'s quoting,
+ *   where `&` in a query string ends the command (ANT-230). Windows is
+ *   experimental.
+ * - Linux: there is no single API, so `xdg-open` and the usual fallbacks.
+ */
+export function browserOpeners(platform: NodeJS.Platform, url: string): BrowserOpener[] {
+  if (platform === "darwin") return [{ command: "/usr/bin/open", args: [url] }];
+  if (platform === "win32") {
+    // By absolute path, as `open` is. It exits 0 whether or not anything
+    // opened, so a headless Windows machine is not detected.
+    const rundll32 = `${process.env.SystemRoot ?? "C:\\Windows"}\\System32\\rundll32.exe`;
+    return [{ command: rundll32, args: ["url.dll,FileProtocolHandler", url] }];
+  }
+  return ["xdg-open", "wslview", "sensible-browser"].map((command) => ({ command, args: [url] }));
+}
 /** How long to give each opener before trying the next. */
 const OPENER_TIMEOUT_MS = 3000;
+
+/** What `openBrowser` needs from the machine; injected so the tests run none of it. */
+export type OpenerDeps = {
+  platform: NodeJS.Platform;
+  spawn: (command: string, args: string[], options: { stdio: "ignore"; windowsHide: true }) => ChildProcessLike;
+  log: (line: string) => void;
+};
+type ChildProcessLike = { on(event: "error", listener: () => void): unknown; on(event: "exit", listener: (code: number | null) => void): unknown };
 
 /**
  * Best-effort open of the author's default browser.
  *
- * Linux has no single "open a URL" API, so this tries `xdg-open` (and the
- * usual fallbacks) without ever blocking the server: if nothing can be
- * opened, the URL is printed and the run continues.
+ * Never blocks the server. If nothing can be opened — a headless machine —
+ * the URL is printed and the answer is `false`, so a caller can say so. An
+ * opener still running after a few seconds counts as opened: `xdg-open` can
+ * stay in the foreground as long as the browser does, and trying the next
+ * one would open a second tab.
  */
-export function openBrowser(url: string): void {
-  void (async () => {
-    for (const opener of BROWSER_OPENERS) {
-      if (await tryOpen(opener, url)) return;
-    }
-    console.log(`Open this in a browser: ${url}`);
-  })();
+export async function openBrowser(
+  url: string,
+  deps: OpenerDeps = { platform: process.platform, spawn: (command, args, options) => spawn(command, args, options), log: (line) => console.log(line) },
+): Promise<boolean> {
+  for (const opener of browserOpeners(deps.platform, url)) {
+    if (await tryOpen(opener, deps)) return true;
+  }
+  deps.log(`Open this in a browser: ${url}`);
+  return false;
 }
 
-function tryOpen(opener: string, url: string): Promise<boolean> {
+function tryOpen(opener: BrowserOpener, deps: OpenerDeps): Promise<boolean> {
   return new Promise((resolve) => {
-    const child = spawn(opener, [url], { stdio: "ignore" });
     let settled = false;
-    const timer = setTimeout(() => finish(false), OPENER_TIMEOUT_MS);
     const finish = (ok: boolean): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       resolve(ok);
     };
+    const timer = setTimeout(() => finish(true), OPENER_TIMEOUT_MS);
+    let child: ChildProcessLike;
+    try {
+      child = deps.spawn(opener.command, opener.args, { stdio: "ignore", windowsHide: true });
+    } catch {
+      finish(false);
+      return;
+    }
     // ENOENT (not there) or EACCES (not executable): try the next opener.
     child.on("error", () => finish(false));
     child.on("exit", (code) => finish(code === 0));
@@ -572,7 +621,7 @@ export async function main(): Promise<void> {
 
   const url = `http://${options.host}:${server.port}/?token=${server.token}`;
   if (options.openBrowser) {
-    openBrowser(url);
+    void openBrowser(url);
   } else {
     console.log(`Open this in a browser: ${url}`);
   }

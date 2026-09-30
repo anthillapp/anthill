@@ -243,6 +243,7 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
     tab: number,
   ) => void) | null = null;
   const closedListeners: ((tab: number) => void)[] = [];
+  const clientCount = (): number => [...clients].filter((client) => !client.closed).length;
   let nextClientId = 1;
   let closePromise: Promise<void> | null = null;
   // The token is generated per process and held only here; it is never written
@@ -324,7 +325,12 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
     }
 
     if (url.pathname === "/health") {
-      sendJson(res, 200, { ok: true, name: "anthill-cli" });
+      // What the MCP server's web launcher asks before it opens a tab
+      // (ANT-230, ANT-231): whether this is Anthill, where it listens, and
+      // whether a tab is already connected to show a handover in. Served on
+      // the address the server is bound to, which is loopback unless --host
+      // says otherwise.
+      sendJson(res, 200, { ok: true, name: "anthill-cli", port: boundPort, clients: clientCount() });
       return;
     }
 
@@ -602,7 +608,6 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
       const bound =
         address !== null && typeof address === "object" ? address.port : port;
       boundPort = bound;
-      const clientCount = (): number => [...clients].filter((client) => !client.closed).length;
       resolveStart({ server, port: bound, token, broadcast, onMessage, clientCount, sendTo, onClientClosed, close });
     });
   });

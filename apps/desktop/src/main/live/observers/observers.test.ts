@@ -118,15 +118,15 @@ async function writeClaude(dir: string, project: string, sessionId: string, body
 }
 
 describe("the Claude Code observer", () => {
-  it("says so when there is nothing on this machine to read", async () => {
+  it("waits, saying nothing, when the CLI has written no sessions here yet", async () => {
     const observer = new ClaudeCodeObserver(join(await root(), "missing"));
     const capabilities = await observer.detectCapabilities();
     expect(capabilities.available).toBe(false);
 
     const { evidence } = await observer.poll(pending("claude-code"), new Date().toISOString());
-    expect(evidence).toEqual([
-      expect.objectContaining({ kind: "unobservable", channel: "claude-code:transcript" }),
-    ]);
+    // Its first session creates the folder: nothing to read yet is not
+    // nothing that can be read (ANT-212).
+    expect(evidence).toEqual([]);
   });
 
   it("recognises the session whose recorded user message carries the marker", async () => {
@@ -819,15 +819,15 @@ function piSessionWithEarlierWork(
 }
 
 describe("the pi observer", () => {
-  it("says so when there is nothing on this machine to read", async () => {
+  it("waits, saying nothing, when the CLI has written no sessions here yet", async () => {
     const observer = new PiObserver(join(await root(), "missing"));
     const capabilities = await observer.detectCapabilities();
     expect(capabilities.available).toBe(false);
 
     const { evidence } = await observer.poll(pending("pi"), new Date().toISOString());
-    expect(evidence).toEqual([
-      expect.objectContaining({ kind: "unobservable", channel: "pi:session" }),
-    ]);
+    // Its first session creates the folder: nothing to read yet is not
+    // nothing that can be read (ANT-212).
+    expect(evidence).toEqual([]);
   });
 
   it("recognises the session whose recorded user message carries the marker", async () => {

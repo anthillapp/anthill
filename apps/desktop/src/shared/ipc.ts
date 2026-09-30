@@ -498,7 +498,8 @@ export type RecentWorkflow = {
    * a day later, which turned every row grey a day after it was last used
    * (ANT-84).
    */
-  lastRun?: { state: LiveSessionState; at: string; stopped?: boolean };
+  /** `unclaimed`: no session ever carried the copied prompt (ANT-212). */
+  lastRun?: { state: LiveSessionState; at: string; stopped?: boolean; unclaimed?: boolean };
   /**
    * Step id → step name, for the workflows in this list.
    *

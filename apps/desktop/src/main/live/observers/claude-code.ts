@@ -263,19 +263,15 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
 
   async poll(run: PendingRun, now: string, context?: ObservationContext): Promise<PollResult> {
     const files = await this.candidates(run);
-    if (files === undefined) {
-      return {
-        events: [],
-        evidence: [
-          {
-            kind: "unobservable",
-            channel: CHANNEL,
-            at: now,
-            detail: "Claude Code has no local session records on this machine.",
-          },
-        ],
-      };
-    }
+    /*
+      No sessions folder yet. That is a CLI that has not run a session on this
+      machine, and its first one creates the folder: not a CLI Anthill cannot
+      read. Reported as unobservable, it cut the wait for a session to two
+      minutes and then called the copied prompt a failed session, for exactly
+      the person trying the CLI for the first time (ANT-212). Nothing to say
+      yet; the ordinary wait applies.
+    */
+    if (files === undefined) return { events: [], evidence: [] };
 
     const states = this.statesFor(run.anthillRunId);
     const evidence: Evidence[] = [];

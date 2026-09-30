@@ -108,6 +108,9 @@ export function targetDataDir(target: Target, environment: TargetEnvironment): s
  * place a checkout path comes from: never a harness, never a workflow, both of
  * which Anthill does not control. The development build and the web shell are
  * started from here, so a server without one can serve neither.
+ *
+ * scripts/plugin-target.mjs makes the same test before a build exists; keep
+ * the two in step.
  */
 export function checkoutOf(serverFile: string, read: (path: string) => string = (path) => readFileSync(path, "utf8")): string | undefined {
   if (!/[\\/]apps[\\/]mcp[\\/]dist[\\/]server\.js$/.test(serverFile)) return undefined;

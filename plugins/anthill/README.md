@@ -60,10 +60,39 @@ answers "no".
 
 ### Which Anthill it talks to
 
-By default, the installed desktop app's own data directory — right if you use
-the app you downloaded. A development build keeps its data somewhere else; see
-below for switching to it. Any other directory can be named outright by adding
-arguments in `.mcp.json`:
+A chat's first handover decides, and every later call in that chat goes to the
+same Anthill; switching takes a new chat. The first result says which one it is.
+
+| Where | You type | Handovers go to |
+| --- | --- | --- |
+| macOS | `/anthill:workflow design …` | the installed app (`@anthill/desktop`), which is opened for you |
+| macOS | `/anthill:workflow design --dev …` | the development build of this checkout (`@anthill/desktop-dev`); `npm run dev:desktop` is started if it is not running |
+| Linux, Windows | either | the web shell from source (`~/.anthill/cli`) |
+
+`--dev` counts only as its own word directly after the mode; a bare `dev`, or
+`--dev` anywhere else, is part of the task. It needs the server to be built in
+an Anthill checkout, which is where `npm run dev:desktop` is run from.
+
+**For scripted QA**, where a run has nobody to type `--dev`, set the default
+for every chat instead:
+
+```bash
+npm run plugin:target                   # what it is now, and what is running
+npm run plugin:target -- electron-dev   # builds the server, then serves the dev build
+npm run plugin:target -- web            # builds the server and the CLI, serves the web shell
+npm run plugin:target -- app            # back to the default: the installed app, or --dev
+```
+
+It writes `"target"` into `~/.anthill/plugin.json` and touches nothing else there
+(`--no-build` skips the build). The server reads the same file, and so does the
+Codex plugin's, so both switch together, from the next harness session on. A
+chat's `--dev` still outranks it, and on Linux and Windows every chat reaches the
+web shell whatever it says. The skill text still comes from the installed
+plugin copy; a change to the skill itself needs
+`claude plugin update anthill@anthill`.
+
+Any other data directory can be named outright by adding arguments in
+`.mcp.json`; it overrides only the directory:
 
 ```json
 { "args": ["${CLAUDE_PLUGIN_ROOT}/bin/anthill-mcp", "--data-dir", "/abs/path"] }
@@ -73,25 +102,6 @@ Getting this wrong is quiet rather than loud: the server stores every handover
 happily while the app watches a directory nothing arrives in. Every refusal
 from the server names the directory it is actually serving, which is how you
 find out you have two.
-
-### Testing against the development build
-
-To run a change end to end through the plugin before it is released, point the
-plugins at the development build of Anthill instead of the installed app:
-
-```bash
-npm run plugin:target -- dev        # builds the server, then serves the dev build
-npm run dev:desktop                 # the dev build must be running to show a handover
-npm run plugin:target -- installed  # back to the installed app
-npm run plugin:target               # which one it is now
-```
-
-It writes `"target": "dev"` into `~/.anthill/plugin.json`, which the server reads:
-handovers go to the development build's data directory (`@anthill/desktop-dev`),
-and the installed app is never opened — it could not see them. The same file is
-read by the Codex plugin's server, so both switch together. Start a new harness
-session afterwards. The skill text still comes from the installed plugin copy;
-a change to the skill itself needs `claude plugin update anthill@anthill`.
 
 ## Scopes
 

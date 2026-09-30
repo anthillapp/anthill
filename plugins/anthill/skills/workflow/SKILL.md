@@ -52,6 +52,10 @@ the command itself:
 The same words work when the plugin is tagged rather than typed:
 `@anthill design --dev …`.
 
+A machine set up for scripted QA (`npm run plugin:target`) can send a chat
+without `--dev` somewhere other than the installed app. The first result names
+the Anthill the chat reached; tell the user that one, not this list.
+
 **`--dev` is the flag only as its own word directly after the mode** —
 `design`, `watch`, or their aliases. Everything after it is the task. A bare
 `dev` is never the flag: `design dev server for staging` is a task about a dev

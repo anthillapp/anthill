@@ -67,7 +67,11 @@ export type LaunchOutcome =
   /** The Anthill this chat reaches is already running, and picks the handover up itself. */
   | "running"
   /** The Anthill this chat reaches is not running, and nothing was started. */
-  | "not_running";
+  | "not_running"
+  /** The Anthill this chat reaches was not running, and this handover started it. */
+  | "started"
+  /** An earlier handover started it moments ago, and it is still coming up. */
+  | "starting";
 
 export type LaunchReport = {
   outcome: LaunchOutcome;

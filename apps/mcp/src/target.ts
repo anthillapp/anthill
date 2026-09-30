@@ -31,10 +31,10 @@
  */
 
 import { defaultDataDir, ExchangeStore } from "@anthill/exchange-store";
-import { execFile } from "node:child_process";
-import { existsSync, readFileSync, readlinkSync } from "node:fs";
+import { execFile, spawn } from "node:child_process";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
 import type { LaunchReport, Launcher } from "./launch.js";
 
@@ -346,26 +346,6 @@ export class TargetSession {
 }
 
 /**
- * The launcher for the development build: it opens nothing.
- *
- * The installed app is the only one macOS can be asked to open — a development
- * build runs as the stock Electron bundle, which is every dev Electron on the
- * machine (ANT-137) — and it could not see this handover anyway. A running
- * development build picks the handover up from its own exchange.
- */
-export function devLauncher(dataDir: string, running: (dir: string) => boolean = appRunning): Launcher {
-  return async (url: string): Promise<LaunchReport> =>
-    running(dataDir)
-      ? { outcome: "running", message: "The development build is running and shows the handover from its own exchange." }
-      : {
-          outcome: "not_running",
-          message:
-            "The development build is not running, so nothing shows the handover yet. " +
-            `Start it from the checkout with \`npm run dev:desktop\`; the handover is stored and ${url} opens it there.`,
-        };
-}
-
-/**
  * The launcher for the web shell: it opens nothing yet.
  *
  * A running web shell picks the handover up from its own exchange. Starting
@@ -383,5 +363,148 @@ export function webLauncher(
           outcome: "not_running",
           message: "The web shell is not running, so nothing shows the handover yet. Start it with `anthill` from the checkout; the handover is stored and waits for it.",
         };
+  };
+}
+
+/**
+ * The installed app's launcher, which also points at `--dev` when it cannot
+ * find the app and this server was built in a checkout (ANT-225).
+ */
+export function appLauncher(open: Launcher, checkout: string | undefined): Launcher {
+  return async (url) => {
+    const report = await open(url);
+    if (report.outcome !== "no_handler" || !checkout) return report;
+    return {
+      ...report,
+      message:
+        `${report.message ?? "Anthill is not installed."} ` +
+        "This server was built in an Anthill checkout, so `/anthill:workflow design --dev …` in a new chat reaches its development build instead.",
+    };
+  };
+}
+
+/** How long a start the server made counts as still coming up. */
+export const DEV_START_WINDOW_MS = 3 * 60 * 1000;
+
+/** What starting the development build needs, injected so a test starts nothing. */
+export type DevStart = {
+  /** Whether the build is running on its data directory. */
+  running: (dataDir: string) => boolean;
+  now: () => number;
+  /** The start marker: when this server last started the build. */
+  readMarker: () => { pid?: number; at: number } | undefined;
+  writeMarker: (marker: { pid?: number; at: number }) => void;
+  /** Start `command args` in `cwd`, detached, writing its output to `log`. */
+  start: (command: string, args: readonly string[], cwd: string, log: string) => Promise<{ pid?: number } | { error: string }>;
+  /** `npm`, found next to this Node rather than on the harness's PATH. */
+  npm: string;
+  logFile: string;
+};
+
+/**
+ * The launcher for the development build (ANT-225).
+ *
+ * Running: nothing to do — it picks the handover up from its own exchange.
+ * Not running: start `npm run dev:desktop` in the checkout, detached, and say
+ * it takes about a minute; the handover waits in its inbox and is shown when
+ * the build comes up. A start marker keeps two handovers in quick succession
+ * from starting it twice: for three minutes, or until the build's own lock
+ * appears, a second handover only says it is still starting.
+ *
+ * Nothing goes through a shell: `npm` and its arguments are an argument array,
+ * and the working directory is the checkout this server was built in — the only
+ * place a checkout path comes from.
+ */
+export function electronDevLauncher(dataDir: string, checkout: string | undefined, dependencies: DevStart): Launcher {
+  const { running, now, readMarker, writeMarker, start, npm, logFile } = dependencies;
+  const command = `cd ${checkout ?? "<your Anthill checkout>"} && npm run dev:desktop`;
+  return async (url) => {
+    if (running(dataDir)) {
+      return { outcome: "running", message: "The development build is running and shows the handover from its own exchange." };
+    }
+    if (!checkout) {
+      return {
+        outcome: "failed",
+        message: `The development build is not running, and this server was not built in an Anthill checkout, so there is nothing to start. Run \`${command}\` in one; the handover is stored and ${url} opens it there.`,
+      };
+    }
+    const marker = readMarker();
+    if (marker && now() - marker.at < DEV_START_WINDOW_MS) {
+      return { outcome: "starting", message: "The development build was started moments ago and is still coming up; it shows the handover once it is." };
+    }
+    const started = await start(npm, ["run", "dev:desktop"], checkout, logFile);
+    if ("error" in started) {
+      return {
+        outcome: "failed",
+        message: `The development build is not running, and starting it failed (${started.error}). Run \`${command}\` yourself; its log is ${logFile}. The handover is stored and waits for it.`,
+      };
+    }
+    writeMarker({ ...(started.pid ? { pid: started.pid } : {}), at: now() });
+    return {
+      outcome: "started",
+      message: `Starting the development build (npm run dev:desktop in ${checkout}); it takes about a minute, and the handover waits in its inbox until it is up. Its log is ${logFile}.`,
+    };
+  };
+}
+
+/** The real start: a detached `npm` whose output goes to a log file. */
+export function devStart(home: string = homedir()): DevStart {
+  const logs = join(home, ".anthill", "logs");
+  const markerFile = join(logs, "dev-desktop.starting");
+  const logFile = join(logs, "dev-desktop.log");
+  const beside = join(dirname(process.execPath), process.platform === "win32" ? "npm.cmd" : "npm");
+  return {
+    running: appRunning,
+    now: () => Date.now(),
+    readMarker: () => {
+      try {
+        const marker = JSON.parse(readFileSync(markerFile, "utf8")) as { pid?: unknown; at?: unknown };
+        return typeof marker.at === "number" ? { at: marker.at, ...(typeof marker.pid === "number" ? { pid: marker.pid } : {}) } : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    writeMarker: (marker) => {
+      try {
+        mkdirSync(logs, { recursive: true });
+        writeFileSync(markerFile, JSON.stringify(marker));
+      } catch {
+        // A marker that cannot be written only means a second handover might
+        // start the build again, which its own lock then refuses.
+      }
+    },
+    start: (command, args, cwd, log) =>
+      new Promise((settle) => {
+        let out: number;
+        try {
+          mkdirSync(dirname(log), { recursive: true });
+          out = openSync(log, "a");
+        } catch (error) {
+          settle({ error: `the log ${log} could not be opened: ${(error as Error).message}` });
+          return;
+        }
+        const child = spawn(command, [...args], {
+          cwd,
+          detached: true,
+          stdio: ["ignore", out, out],
+          // `npm` finds `node` on PATH; give it the directory of this one.
+          env: { ...process.env, PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ""}` },
+        });
+        // Either event may come first, and an error can still follow a spawn; the
+        // log is closed once and the first answer stands.
+        let open = true;
+        const close = () => { if (open) { open = false; closeSync(out); } };
+        child.once("spawn", () => {
+          child.unref();
+          close();
+          settle({ ...(child.pid ? { pid: child.pid } : {}) });
+        });
+        child.on("error", (error) => {
+          close();
+          settle({ error: error.message });
+        });
+      }),
+    npm: existsSync(beside) ? beside : "npm",
+    logFile,
   };
 }

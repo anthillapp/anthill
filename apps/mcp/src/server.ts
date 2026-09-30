@@ -37,9 +37,11 @@ import { disabledLauncher, openUrl } from "./launch.js";
 import { readOptions, type ServerOptions } from "./options.js";
 import {
   TargetSession,
+  appLauncher,
   checkoutOf,
   currentEnvironment,
-  devLauncher,
+  devStart,
+  electronDevLauncher,
   readTargetSetting,
   resolveTarget,
   webLauncher,
@@ -131,9 +133,9 @@ function targetContext(options: ServerOptions): TargetContext {
 function launcherFor(options: ServerOptions) {
   return (resolved: ResolvedTarget) => {
     if (!options.launch) return disabledLauncher;
-    if (resolved.target === "electron-dev") return devLauncher(resolved.dataDir);
+    if (resolved.target === "electron-dev") return electronDevLauncher(resolved.dataDir, resolved.checkout, devStart());
     if (resolved.target === "web") return webLauncher(resolved.dataDir);
-    return openUrl;
+    return appLauncher(openUrl, resolved.checkout);
   };
 }
 

@@ -526,8 +526,12 @@ export function bindText(answer: BindAnswer): string {
 }
 
 export function callText(answer: CallAnswer): string {
+  // Only a missing or blank workflowId means the call names no workflow. A
+  // refused build names one, and saying otherwise sends the agent looking for
+  // another id instead of dropping --dev (ANT-237).
+  const unnamed = answer.problems.every((problem) => problem.field === "workflowId");
   return join([
-    "This call names no workflow to act on. Nothing was looked up and nothing was written:",
+    `${unnamed ? "This call names no workflow to act on." : "This call was refused."} Nothing was looked up and nothing was written:`,
     numbered(answer.problems.map(sentence)),
     "Correct the call and try again. Nothing here is a question for the user.",
   ]);

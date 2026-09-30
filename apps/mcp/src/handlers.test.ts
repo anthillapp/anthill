@@ -1400,6 +1400,20 @@ describe("a chat that asks for the development build", () => {
     expect(await exchange("electron-dev").readWorkflow("workflow-1")).toBeUndefined();
   });
 
+  // ANT-237: the call names its workflow; the refusal is about the build, and
+  // must not send the agent looking for another workflow id.
+  it("refuses --dev without a checkout on the calls that name a workflow, without saying they name none", async () => {
+    const { handlers } = await chat({ checkout: undefined });
+    for (const refused of [
+      await handlers.openWorkflow({ workflowId: "workflow-1", build: "dev" }),
+      await handlers.getReadyRevision({ workflowId: "workflow-1", build: "dev" }),
+    ]) {
+      expect((refused.structuredContent as { outcome: string }).outcome).toBe("invalid");
+      expect(text(refused)).toContain("checkout");
+      expect(text(refused)).not.toContain("names no workflow");
+    }
+  });
+
   it("ignores the build on Linux and Windows, where the web shell is the only Anthill", async () => {
     for (const platform of ["linux", "win32"] as const) {
       const { handlers, targets, exchange } = await chat({ platform });

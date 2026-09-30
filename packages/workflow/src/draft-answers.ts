@@ -37,6 +37,21 @@ const isProseField = (field: string): field is ProseField =>
 const isListField = (field: string): field is ListField =>
   (LIST_FIELDS as readonly string[]).includes(field);
 
+/**
+ * An answer, with the question it answers.
+ *
+ * An answer alone is often half a sentence. "End and report the result as not
+ * approved", picked for "If the Reviewer still requests changes after the
+ * second attempt, how should the workflow end?", landed in the Reviewer's task
+ * as an unconditional order — reject everything — and contradicted the rest of
+ * it (ANT-219). The question carries the condition, so it goes with the answer.
+ * A brief field needs none of this: its question is what the field is.
+ */
+function answered(question: DraftQuestion, answer: string): string {
+  const asked = clean(question.question);
+  return asked ? `${asked} Answer: ${answer}` : answer;
+}
+
 /** Answers keyed by question id, as the clarification screen collects them. */
 export type DraftAnswers = Record<string, string>;
 
@@ -102,12 +117,12 @@ export function applyAnswers(draft: WorkflowDraft, answers: DraftAnswers): Apply
       case "step":
       case "output": {
         const stepId = question.about.stepId;
-        taskAdditions.set(stepId, [...(taskAdditions.get(stepId) ?? []), answer]);
+        taskAdditions.set(stepId, [...(taskAdditions.get(stepId) ?? []), answered(question, answer)]);
         break;
       }
       default:
         // Nowhere narrower to put it, so it becomes context for the whole workflow.
-        workflowLevel.push(answer);
+        workflowLevel.push(answered(question, answer));
     }
 
     return { ...question, answer };

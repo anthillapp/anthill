@@ -1593,6 +1593,60 @@ describe("a run read back through Anthill's own tools after it said it was done"
   });
 });
 
+/*
+  ANT-218, W5/W18 in the 0.8.5 QA. Claude Code reused the Developer and the
+  Tester through SendMessage for the Fix stage and the second check. The
+  Developer's Fix work carried the id of the call that first started it for
+  Implement, and was filed there. After the done line, Claude Code's own
+  helper fired one hook-only Bash call, which put the last step back to
+  Working.
+*/
+describe("subagents reused for a later step", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-30T07:03:40.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const sub = { kind: "subagent" as const };
+  const journal = [
+    step("implement"),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "dev", stepTag: "implement", at: T(1) }),
+    tx({ kind: "tool.start", title: "Write", toolUseId: "w1", parentToolUseId: "dev", author: sub, at: T(6) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "dev", author: sub, at: T(14) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "dev", at: T(14.5) }),
+    step("test"),
+    tx({ kind: "tool.start", title: "Read", toolUseId: "r1", at: T(25) }),
+    step("fix"),
+    tx({ kind: "tool.start", title: "SendMessage", toolName: "SendMessage", toolUseId: "send", at: T(40) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "send", at: T(42) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", at: T(45) }),
+    tx({ kind: "tool.start", title: "Edit", toolUseId: "e1", parentToolUseId: "dev", author: sub, at: T(46) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "dev", author: sub, at: T(54) }),
+  ];
+
+  it("files the reused agent's work under the step it was reused for", () => {
+    const view = foldLiveSession(workflow, run(), journal);
+    const edit = view.events.find((item) => item.toolUseId === "e1");
+    expect(edit?.mapping.blockId).toBe("fix");
+    const write = view.events.find((item) => item.toolUseId === "w1");
+    expect(write?.mapping.blockId).toBe("implement");
+  });
+
+  it("holds that step open while the reused agent works", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), journal.slice(0, 12));
+    expect(view.blocks.fix.state).toBe("unknown");
+    expect(view.blocks.fix.note).toContain("never handed back");
+  });
+
+  it("is not put back to work by a hook-only call after the done line", () => {
+    const view = foldLiveSession(workflow, run(), [
+      ...journal,
+      event({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", source: "transcript", channel: "claude-code:transcript", at: T(60) }),
+      event({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "helper", source: "hook", channel: "claude-code:hook", at: T(64) }),
+    ]);
+    expect(view.blocks.fix.state).toBe("done");
+    expect(view.activeBlockIds).toEqual([]);
+  });
+});
+
 describe("a session that ends with its subagents still out", () => {
   const T = (s: number) => new Date(Date.parse("2026-09-28T03:33:40.000Z") + s * 1000).toISOString();
   const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>

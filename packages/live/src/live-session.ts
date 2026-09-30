@@ -532,6 +532,31 @@ export function foldLiveSession(
     }
   }
   for (const event of journal) {
+    /*
+      A subagent that had handed back, at work again: the session reused it —
+      Claude Code's SendMessage, Codex's send_message — and what it does now is
+      for the step the session is on, not the one it was first started for.
+      Its Fix-stage edits were filed under Implement, and the step it was
+      reused for never waited on it (ANT-218).
+    */
+    const reused = event.parentToolUseId ? delegations.get(event.parentToolUseId) : undefined;
+    if (reused && reused.delegateEnded && (event.kind === "tool.start" || event.kind === "message")) {
+      reused.delegateEnded = false;
+      reused.returned = false;
+      // Its next ending is a new one, to be paired with its own hook.
+      endedByHook.delete(event.parentToolUseId as string);
+      if (announced && blocks[announced] && reused.blockId !== announced) {
+        reused.blockId = announced;
+        delegatedFrom.set(event.parentToolUseId as string, announced);
+      }
+      // The session's turn ending before the reused agent began was the
+      // session waiting for it, not for a person.
+      const step = blocks[reused.blockId];
+      if (step?.state === "needsYou" && step.waitReason === "yielded" && !finishedAt && !stoppedHere) {
+        const { note: _note, waitReason: _why, ...rest } = step;
+        blocks[reused.blockId] = { ...rest, state: "running" };
+      }
+    }
     const mapping = attribute(event, index, announced, delegatedFrom);
     attributed.push({ ...event, mapping });
     // Usage is bookkeeping, not activity; counting it against "events not
@@ -765,7 +790,11 @@ export function foldLiveSession(
       } else if (
         resumesWork(event) &&
         event.kind !== "session.start" &&
-        !(event.toolUseId && plumbing.has(event.toolUseId))
+        !(event.toolUseId && plumbing.has(event.toolUseId)) &&
+        // A call only the hooks saw, after the ending: Claude Code's own
+        // helper, which fires hooks under the session and is in no
+        // transcript (ANT-218).
+        !(hookOnly && event.kind === "tool.start")
       ) {
         blocks[announced] = { ...blocks[announced], state: "running", enteredAt: event.at };
         spans.push({ blockId: announced, pass: blocks[announced].passes, startedAt: event.at });

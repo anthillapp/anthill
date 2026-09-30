@@ -128,6 +128,17 @@ export class HookLogObserver {
    */
   private readonly reportedAt = new Map<string, string>();
   /**
+   * Runs whose session printed its done line and has not been prompted since.
+   *
+   * A finished turn starts nothing on its own. What still fires hooks under
+   * the session's id is Claude Code's own helper — it runs after the turn
+   * ends, calls a tool that never reports back ("No-op; nothing to suggest"),
+   * and appears in no transcript — and it put a finished run back to Live
+   * until the run was called lost half an hour later (ANT-218). Only a new
+   * prompt is the session going on.
+   */
+  private readonly doneFor = new Set<string>();
+  /**
    * Tool calls this session started that have not reported back, per run.
    *
    * A `PreToolUse` with no `PostToolUse` is the strongest thing either channel
@@ -171,6 +182,7 @@ export class HookLogObserver {
   forget(runId: string): void {
     this.cursors.delete(runId);
     this.reportedAt.delete(runId);
+    this.doneFor.delete(runId);
     this.open.delete(runId);
     this.background.delete(runId);
     this.covered.delete(runId);
@@ -223,6 +235,8 @@ export class HookLogObserver {
     if (!chunk.grew) return { evidence: this.stillWorking(inFlight, delegated, sessionId, now), events: [] };
 
     const events: ObservationEventDraft[] = [];
+    /** Positions in `events` of tool calls made after the done line (ANT-218). */
+    const notWork = new Set<number>();
     /** The session saying it is over, if this read contained that. */
     let ended: { at: string; cli: MarkerCli; detail: string } | undefined;
     for (const line of chunk.lines) {
@@ -278,11 +292,14 @@ export class HookLogObserver {
 
       // Opened and closed, tracked by the id the tool call carries. A call
       // with no id cannot be paired, so it is not counted either way.
+      if (name === "UserPromptSubmit") this.doneFor.delete(run.anthillRunId);
+      const afterDone = this.doneFor.has(run.anthillRunId);
       const useId = str(data.tool_use_id);
       if (useId) {
         // A call from before the person stopped the session is over, whether
-        // or not anything ever wrote its `PostToolUse`.
-        if (name === "PreToolUse" && !(stoppedAt && at <= stoppedAt)) {
+        // or not anything ever wrote its `PostToolUse`. One after the session
+        // said it was done is not the session's (ANT-218).
+        if (name === "PreToolUse" && !afterDone && !(stoppedAt && at <= stoppedAt)) {
           inFlight.set(useId, { at, ...(toolName ? { toolName } : {}) });
         } else if (name === "PostToolUse") inFlight.delete(useId);
       }
@@ -336,6 +353,7 @@ export class HookLogObserver {
 
       if (kind === "tool.start" || kind === "tool.end") {
         const target = toolTarget(toolName, data.tool_input);
+        if (afterDone) notWork.add(events.length);
         events.push({
           ...base,
           title: toolName ?? "A tool",
@@ -370,6 +388,7 @@ export class HookLogObserver {
           nonce: run.correlationNonce,
         })) {
           ended = { at, cli, detail: "The harness reported the work as finished." };
+          this.doneFor.add(run.anthillRunId);
           events.push(base);
           // The same ending the transcript journals, so whichever channel is
           // read first settles the step and the other merges into it (ANT-161).
@@ -401,9 +420,10 @@ export class HookLogObserver {
       // not read as the session going on (ANT-188). Nor is a call to
       // Anthill's own tools (ANT-215).
       const resumes = events.some(
-        (event) =>
+        (event, index) =>
           (!already || event.at > already) &&
-          (event.kind === "prompt.submit" || (event.kind === "tool.start" && !isAnthillTool(event.toolName))),
+          (event.kind === "prompt.submit" ||
+            (event.kind === "tool.start" && !isAnthillTool(event.toolName) && !notWork.has(index))),
       );
       evidence.push({ kind: "activity", sessionId, at: newest, resumes });
     }

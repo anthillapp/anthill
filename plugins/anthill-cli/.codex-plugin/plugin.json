@@ -1,6 +1,6 @@
 {
   "name": "anthill-cli",
-  "version": "0.8.4+codex.20260929012352",
+  "version": "0.8.5+codex.20260930025609",
   "description": "Hand work from Codex to Anthill as a local, reviewable workflow and report progress against the bound revision.",
   "author": {
     "name": "Nick Nesterov",

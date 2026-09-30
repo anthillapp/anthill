@@ -1,6 +1,6 @@
 {
   "name": "@anthill/cli",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "private": true,
   "type": "module",
   "description": "Anthill as a CLI that opens the app as a web interface on 127.0.0.1. Supported on macOS and Linux; experimental and unsupported on Windows.",

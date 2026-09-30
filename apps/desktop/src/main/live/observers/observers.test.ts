@@ -511,6 +511,85 @@ describe("the Codex observer", () => {
     expect(evidence).not.toContainEqual(expect.objectContaining({ kind: "completed" }));
     expect(events.filter((event) => event.kind === "session.end")).toEqual([]);
   });
+
+  /*
+    ANT-211, W17 in the 0.8.5 QA. A subagent's file opens with a copy of the
+    parent's history — its session record, the marked prompt, its step-tagged
+    replies and task_completes — before the subagent's own lines, which begin
+    at subagent_history_start_ordinal. The copy was read as the subagent's:
+    the gate's tagged reply re-entered it ("pass 3"), and the first tagged
+    message named the wrong step for the subagent's work.
+  */
+  describe("a subagent's file that opens with the parent's history", () => {
+    const at = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString();
+    const lines = (rows: unknown[]) => rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+    const said = (text: string, s: number) => ({
+      timestamp: at(s),
+      type: "response_item",
+      payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] },
+    });
+    const copied = [
+      { timestamp: at(3), type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx", thread_source: "user" } },
+      { timestamp: at(3), type: "event_msg", payload: { type: "task_started" } },
+      { timestamp: at(3), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: MARKED_PROMPT }] } },
+      said("[//]: # (anthill:gate)\n\nThe gate needs your answer.", 3),
+      { timestamp: at(3), type: "event_msg", payload: { type: "task_complete" } },
+      { timestamp: at(3), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "declined" }] } },
+    ];
+    const own = [
+      { timestamp: at(3), type: "response_item", payload: { type: "message", role: "developer", content: [{ type: "input_text", text: "<multi_agent_role>You are an agent in a team." }] } },
+      { timestamp: at(3), type: "event_msg", payload: { type: "thread_settings_applied", thread_id: "sub-w" } },
+      said("[//]: # (anthill:without)\n\nWriting the note.", 5),
+      { timestamp: at(6), type: "response_item", payload: { type: "function_call", name: "exec_command", call_id: "call-write" } },
+      { timestamp: at(7), type: "event_msg", payload: { type: "task_complete" } },
+    ];
+    const meta = (ordinal?: number) => ({
+      timestamp: at(3),
+      type: "session_meta",
+      payload: {
+        session_id: "sess-cx",
+        id: "sub-w",
+        thread_source: "subagent",
+        agent_path: "/root/writer",
+        ...(ordinal ? { subagent_history_start_ordinal: ordinal } : {}),
+        source: { subagent: { thread_spawn: { parent_thread_id: "sess-cx", agent_path: "/root/writer" } } },
+      },
+    });
+
+    async function observe(sub: unknown[]) {
+      const dir = await root();
+      await writeCodex(
+        dir,
+        "sess-cx",
+        lines([
+          { timestamp: at(0), type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx" } },
+          { timestamp: at(1), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: MARKED_PROMPT }] } },
+          { timestamp: at(2), type: "response_item", payload: { type: "function_call", name: "spawn_agent", call_id: "call-spawn", arguments: JSON.stringify({ task_name: "writer" }) } },
+          { timestamp: at(2.4), type: "response_item", payload: { type: "function_call_output", call_id: "call-spawn", output: JSON.stringify({ task_name: "/root/writer" }) } },
+        ]),
+      );
+      await writeCodex(dir, "sub-w", lines(sub));
+      const run = { ...pending("codex"), detectedSessionId: "sess-cx", state: "detected_live" as const };
+      return new CodexObserver(dir).poll(run, new Date().toISOString());
+    }
+
+    for (const [how, sub] of [
+      ["by the ordinal Codex records", [meta(copied.length + 1), ...copied, ...own].map((row, ordinal) => ({ ...row, ordinal }))],
+      ["by position, when records carry no ordinal", [meta(copied.length + 1), ...copied, ...own]],
+      ["by the role it is given, with no ordinal", [meta(), ...copied, ...own]],
+    ] as const) {
+      it(`reads only the subagent's own lines, found ${how}`, async () => {
+        const { events } = await observe([...sub]);
+        const theirs = events.filter((event) => event.parentToolUseId === "call-spawn");
+        const tags = theirs.filter((event) => event.kind === "message").map((event) => event.stepTag);
+        expect(tags).toEqual(["without"]);
+        expect(theirs.map((event) => event.kind)).toEqual(["message", "tool.start", "turn.end"]);
+        // The copied marked prompt is not another start of the run.
+        expect(events.filter((event) => event.kind === "prompt.submit")).toHaveLength(1);
+        expect(events.filter((event) => event.kind === "session.start")).toHaveLength(1);
+      });
+    }
+  });
 });
 
 /* ------------------------------------------------------------------ */

@@ -86,6 +86,24 @@ type FileState = {
    * session's work, done through that agent — read, and signed as the agent's.
    */
   delegate?: { path: string; name: string };
+  /** Records read from this file so far. */
+  linesRead?: number;
+  /**
+   * Where a subagent's own record begins. Codex starts a subagent's file with
+   * a copy of the parent thread's history — its session record, its messages,
+   * step tags and all, stamped with the subagent's start — and says where the
+   * copy ends in `subagent_history_start_ordinal`, counted in the `ordinal`
+   * every record carries. Read as the subagent's,
+   * the copied messages re-entered steps long finished ("pass 3" on a gate)
+   * and named the wrong step for the subagent's work (ANT-211).
+   */
+  ownFrom?: number;
+  /**
+   * Inside the copied history of a subagent's file whose record gives no
+   * ordinal: from the parent's session record until the subagent's own
+   * settings are applied.
+   */
+  inheriting?: boolean;
   /** The calls this file made, by call id: which were `spawn_agent`. */
   spawnCalls?: Set<string>;
 };
@@ -489,6 +507,10 @@ function scan(
   for (const line of lines) {
     // Nothing a sub-thread writes is the session's own doing (ANT-129).
     if (state.subthread) return;
+    // Counted from 0, as Codex counts `ordinal`; a record without one is
+    // placed by how many came before it.
+    const read = state.linesRead ?? 0;
+    state.linesRead = read + 1;
     if (!line.startsWith("{")) continue;
     let row: Record<string, unknown>;
     try {
@@ -496,6 +518,10 @@ function scan(
     } catch {
       continue;
     }
+    const ordinal = typeof row.ordinal === "number" ? row.ordinal : read;
+    // A subagent's copy of the parent's history is the parent's, already read
+    // from the parent's own file (ANT-211).
+    if (state.delegate && state.ownFrom !== undefined && ordinal < state.ownFrom) continue;
 
     const payload = isRecord(row.payload) ? row.payload : undefined;
     if (!payload) continue;
@@ -519,6 +545,12 @@ function scan(
         request, its assistant message is the verdict, and its `task_complete`
         is the verdict's, not the session's.
       */
+      // A second session record in a subagent's file is the parent's, at the
+      // head of the history copied in from it (ANT-211).
+      if (state.delegate) {
+        if (state.ownFrom === undefined) state.inheriting = true;
+        continue;
+      }
       const session = str(payload.session_id);
       const thread = str(payload.id);
       /*
@@ -534,6 +566,8 @@ function scan(
         const path = str(payload.agent_path) ?? str(spawn?.agent_path) ?? thread ?? "subagent";
         const name = path.split("/").filter(Boolean).pop() ?? path;
         state.delegate = { path, name };
+        const from = payload.subagent_history_start_ordinal;
+        if (typeof from === "number" && Number.isInteger(from) && from > ordinal) state.ownFrom = from;
         const id = session ?? str(spawn?.parent_thread_id);
         if (id) state.sessionId = id;
         if (stamped) state.lastActivityAt = stamped;
@@ -557,6 +591,14 @@ function scan(
         ...(str(payload.cli_version) ? { detail: `Codex ${str(payload.cli_version)}` } : {}),
       };
       continue;
+    }
+
+    // Without an ordinal, the copy ends where the subagent's own settings are
+    // applied, just after the role it is given.
+    if (state.inheriting) {
+      const role = payload.type === "message" && payload.role === "developer" && messageText(payload).trimStart().startsWith("<multi_agent_role>");
+      if (payload.type !== "thread_settings_applied" && !role) continue;
+      state.inheriting = false;
     }
 
     if (stamped) state.lastActivityAt = stamped;

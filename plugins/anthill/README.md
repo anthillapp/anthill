@@ -61,8 +61,9 @@ answers "no".
 ### Which Anthill it talks to
 
 By default, the installed desktop app's own data directory — right if you use
-the app you downloaded. A development build keeps its data somewhere else, so
-point the server at it explicitly by adding arguments in `.mcp.json`:
+the app you downloaded. A development build keeps its data somewhere else; see
+below for switching to it. Any other directory can be named outright by adding
+arguments in `.mcp.json`:
 
 ```json
 { "args": ["${CLAUDE_PLUGIN_ROOT}/bin/anthill-mcp", "--data-dir", "/abs/path"] }
@@ -72,6 +73,25 @@ Getting this wrong is quiet rather than loud: the server stores every handover
 happily while the app watches a directory nothing arrives in. Every refusal
 from the server names the directory it is actually serving, which is how you
 find out you have two.
+
+### Testing against the development build
+
+To run a change end to end through the plugin before it is released, point the
+plugins at the development build of Anthill instead of the installed app:
+
+```bash
+npm run plugin:target -- dev        # builds the server, then serves the dev build
+npm run dev:desktop                 # the dev build must be running to show a handover
+npm run plugin:target -- installed  # back to the installed app
+npm run plugin:target               # which one it is now
+```
+
+It writes `"target": "dev"` into `~/.anthill/plugin.json`, which the server reads:
+handovers go to the development build's data directory (`@anthill/desktop-dev`),
+and the installed app is never opened — it could not see them. The same file is
+read by the Codex plugin's server, so both switch together. Start a new harness
+session afterwards. The skill text still comes from the installed plugin copy;
+a change to the skill itself needs `claude plugin update anthill@anthill`.
 
 ## Scopes
 

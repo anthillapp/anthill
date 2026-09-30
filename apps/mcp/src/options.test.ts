@@ -18,19 +18,19 @@ describe("readOptions", () => {
   it("falls back to the app's own data directory when told nothing", () => {
     const read = readOptions([], FALLBACK);
 
-    expect(read).toEqual({ ok: true, options: { dataDir: FALLBACK, launch: true } });
+    expect(read).toEqual({ ok: true, options: { dataDir: FALLBACK, launch: true, target: "installed" } });
   });
 
   it("takes the data directory as a separate argument", () => {
     const read = readOptions(["--data-dir", "/var/anthill"], FALLBACK);
 
-    expect(read).toEqual({ ok: true, options: { dataDir: "/var/anthill", launch: true } });
+    expect(read).toEqual({ ok: true, options: { dataDir: "/var/anthill", launch: true, target: "installed" } });
   });
 
   it("takes the data directory joined with an equals sign", () => {
     const read = readOptions(["--data-dir=/var/anthill"], FALLBACK);
 
-    expect(read).toEqual({ ok: true, options: { dataDir: "/var/anthill", launch: true } });
+    expect(read).toEqual({ ok: true, options: { dataDir: "/var/anthill", launch: true, target: "installed" } });
   });
 
   it("rejects a relative path rather than choosing an exchange based on harness CWD", () => {
@@ -73,13 +73,13 @@ describe("readOptions", () => {
   // instead of it.
   it("takes --no-launch, in any order, and defaults to launching", () => {
     expect(readOptions(["--no-launch"], FALLBACK)).toEqual({
-      ok: true, options: { dataDir: FALLBACK, launch: false },
+      ok: true, options: { dataDir: FALLBACK, launch: false, target: "installed" },
     });
     expect(readOptions(["--no-launch", "--data-dir", "/var/anthill"], FALLBACK)).toEqual({
-      ok: true, options: { dataDir: "/var/anthill", launch: false },
+      ok: true, options: { dataDir: "/var/anthill", launch: false, target: "installed" },
     });
     expect(readOptions(["--data-dir", "/var/anthill", "--no-launch"], FALLBACK)).toEqual({
-      ok: true, options: { dataDir: "/var/anthill", launch: false },
+      ok: true, options: { dataDir: "/var/anthill", launch: false, target: "installed" },
     });
   });
 
@@ -89,5 +89,39 @@ describe("readOptions", () => {
     const read = readOptions(["--nolaunch"], FALLBACK);
     expect(read.ok).toBe(false);
     expect("message" in read && read.message).toContain("--no-launch");
+  });
+});
+
+/*
+  Serving the development build, so a change can be tested end to end through
+  a harness plugin before it is released: its data directory, and never the
+  installed app. Said by --dev, or once for every plugin by "target": "dev" in
+  ~/.anthill/plugin.json.
+*/
+describe("the development build", () => {
+  const DEV = "/tmp/anthill-dev";
+
+  it("is served with --dev: its data directory, not the installed app's", () => {
+    expect(readOptions(["--dev"], FALLBACK, { devDataDir: DEV })).toEqual({
+      ok: true, options: { dataDir: DEV, launch: true, target: "dev" },
+    });
+  });
+
+  it("is served when the settings file says so", () => {
+    expect(readOptions([], FALLBACK, { target: "dev", devDataDir: DEV })).toEqual({
+      ok: true, options: { dataDir: DEV, launch: true, target: "dev" },
+    });
+  });
+
+  it("still takes a data directory given outright", () => {
+    expect(readOptions(["--data-dir", "/var/anthill"], FALLBACK, { target: "dev", devDataDir: DEV })).toEqual({
+      ok: true, options: { dataDir: "/var/anthill", launch: true, target: "dev" },
+    });
+  });
+
+  it("is not served when the settings file says installed, or nothing", () => {
+    expect(readOptions([], FALLBACK, { target: "installed", devDataDir: DEV })).toEqual({
+      ok: true, options: { dataDir: FALLBACK, launch: true, target: "installed" },
+    });
   });
 });

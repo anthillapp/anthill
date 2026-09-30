@@ -36,6 +36,7 @@ import { createHandlers } from "./handlers.js";
 import { SERVER_INSTRUCTIONS } from "./instructions.js";
 import { disabledLauncher, openUrl } from "./launch.js";
 import { readOptions, type ServerOptions } from "./options.js";
+import { devLauncher, readTargetSetting } from "./target.js";
 import { PLUGIN_HOST_ENV, PLUGIN_VERSION_ENV, pluginDriftNotice } from "./plugin-drift.js";
 import { registerExchangeTools } from "./tools.js";
 
@@ -100,7 +101,7 @@ function createMcpServer(options: ServerOptions, drift: string | undefined): Mcp
     server,
     createHandlers({
       store: new ExchangeStore(options.dataDir),
-      launch: options.launch ? openUrl : disabledLauncher,
+      launch: !options.launch ? disabledLauncher : options.target === "dev" ? devLauncher(options.dataDir) : openUrl,
     }),
   );
   return server;
@@ -114,7 +115,8 @@ function createMcpServer(options: ServerOptions, drift: string | undefined): Mcp
  * function can be called from a test.
  */
 async function runServer(argv: readonly string[]): Promise<number> {
-  const read = readOptions(argv);
+  const target = readTargetSetting();
+  const read = readOptions(argv, undefined, target ? { target } : {});
   if (!read.ok) {
     process.stderr.write(`${read.message}\n`);
     return 2;
@@ -149,6 +151,7 @@ async function runServer(argv: readonly string[]): Promise<number> {
   // app is not reading answers every call happily and opens nothing.
   process.stderr.write(
     `${SERVER_NAME} mcp server ready; exchange under ${read.options.dataDir}` +
+      `${read.options.target === "dev" ? "; serving the development build" : ""}` +
       `${read.options.launch ? "" : "; not opening Anthill (--no-launch)"}\n`,
   );
   return 0;

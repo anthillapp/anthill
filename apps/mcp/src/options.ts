@@ -20,6 +20,8 @@
 import { defaultDataDir } from "@anthill/exchange-store";
 import { isAbsolute, resolve } from "node:path";
 
+import type { Target } from "./target.js";
+
 export type ServerOptions = {
   /** Anthill's user-data directory. The exchange is a directory inside it. */
   dataDir: string;
@@ -33,6 +35,11 @@ export type ServerOptions = {
    * not open an application on whoever is running it.
    */
   launch: boolean;
+  /**
+   * Which Anthill this is: the installed app, or the development build of a
+   * checkout. The development build is never launched; see `target.ts`.
+   */
+  target: Target;
 };
 
 type OptionsResult =
@@ -42,6 +49,7 @@ type OptionsResult =
 /** The flags, spelled once so the parser and the message cannot disagree. */
 const DATA_DIR_FLAG = "--data-dir";
 const NO_LAUNCH_FLAG = "--no-launch";
+const DEV_FLAG = "--dev";
 
 const USAGE = `anthill-mcp [${DATA_DIR_FLAG} <path>]
 
@@ -49,7 +57,11 @@ const USAGE = `anthill-mcp [${DATA_DIR_FLAG} <path>]
                     server writes into. Defaults to the installed desktop app's,
                     which is ${defaultDataDir()} on this machine.
   ${NO_LAUNCH_FLAG}       Do not open Anthill when a workflow is handed over. The
-                    anthill:// link is still returned; nothing opens it.`;
+                    anthill:// link is still returned; nothing opens it.
+  ${DEV_FLAG}             Serve the development build (\`npm run dev:desktop\`): its data
+                    directory, ${defaultDataDir({ packaged: false })}, and never
+                    the installed app. Also set by "target": "dev" in
+                    ~/.anthill/plugin.json.`;
 
 /**
  * Read the arguments a harness spawned this server with.
@@ -61,15 +73,26 @@ const USAGE = `anthill-mcp [${DATA_DIR_FLAG} <path>]
 export function readOptions(
   argv: readonly string[],
   fallbackDataDir: string = defaultDataDir(),
+  /**
+   * What `~/.anthill/plugin.json` says, and where the development build keeps
+   * its data. Injected, like the fallback, so a test decides both.
+   */
+  settings: { target?: Target; devDataDir?: string } = {},
 ): OptionsResult {
   let dataDir: string | undefined;
   let launch = true;
+  let dev = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
 
     if (argument === NO_LAUNCH_FLAG) {
       launch = false;
+      continue;
+    }
+
+    if (argument === DEV_FLAG) {
+      dev = true;
       continue;
     }
 
@@ -97,9 +120,13 @@ export function readOptions(
     return { ok: false, message: `Unrecognised argument ${argument}.\n\n${USAGE}` };
   }
 
-  const selected = dataDir ?? fallbackDataDir;
+  // A flag outranks the settings file, and a data directory given outright
+  // outranks both: it is the one thing that cannot be wrong about where.
+  const target: Target = dev ? "dev" : (settings.target ?? "installed");
+  const selected =
+    dataDir ?? (target === "dev" ? (settings.devDataDir ?? defaultDataDir({ packaged: false })) : fallbackDataDir);
   if (!selected.trim() || !isAbsolute(selected)) {
     return { ok: false, message: `${DATA_DIR_FLAG} needs an absolute path; harness working directories can change.` };
   }
-  return { ok: true, options: { dataDir: resolve(selected), launch } };
+  return { ok: true, options: { dataDir: resolve(selected), launch, target } };
 }

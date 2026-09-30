@@ -14,7 +14,8 @@
     "test": "npm run test --workspaces --if-present",
     "pretypecheck": "npm run build:deps",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "version:set": "node scripts/set-version.mjs"
+    "version:set": "node scripts/set-version.mjs",
+    "plugin:target": "node scripts/plugin-target.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

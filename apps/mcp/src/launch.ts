@@ -63,7 +63,9 @@ export type LaunchOutcome =
   /** No opener this server is willing to use on this platform. */
   | "unsupported"
   /** The user started this server with launching turned off. */
-  | "disabled";
+  | "disabled"
+  /** This server serves the development build, which is never launched. */
+  | "dev";
 
 export type LaunchReport = {
   outcome: LaunchOutcome;

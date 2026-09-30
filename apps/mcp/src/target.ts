@@ -316,9 +316,11 @@ export type Reach = {
   /**
    * The link a result gives for a workflow: `anthill://workflow/<id>` for the
    * desktop builds, the web shell's own `http://` link for `web` while it is
-   * running, which is when there is a port to put in it.
+   * running, which is when there is a port to put in it. None for `web`
+   * before then: `anthill://` opens nothing where the web shell is the only
+   * Anthill (ANT-238).
    */
-  link: (workflowId: string) => string;
+  link: (workflowId: string) => string | undefined;
 };
 
 export type Refusal = { refused: string };
@@ -400,7 +402,7 @@ export class TargetSession {
           // Only a link a page can use: one that carries the shell's token,
           // which it records once it listens.
           const shell = webShellRunning(resolved.dataDir);
-          return shell?.token ? webShellLink(shell, workflowId) : workflowUrl(workflowId);
+          return shell?.token ? webShellLink(shell, workflowId) : undefined;
         }
       : workflowUrl;
     return { store, launch: this.launcherFor(resolved), resolved, link };

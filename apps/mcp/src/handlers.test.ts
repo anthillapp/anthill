@@ -1227,6 +1227,17 @@ describe("the Anthill a chat reaches", () => {
     expect(text).toContain("This chat's handovers go to Anthill (dev build).");
   });
 
+  // ANT-238: before the web shell runs there is no port or token to link to,
+  // and anthill:// opens nothing on Linux and Windows: no link at all.
+  it("gives a web chat no anthill:// link while the web shell is not running", async () => {
+    const { handlers } = await throughTargets({ platform: "linux" });
+    const created = await handlers.createWorkflowDraft(draftInput({ open: false }));
+    expect((created.structuredContent as { url?: string }).url).toBeUndefined();
+    const text = (created.content[0] as { text: string }).text;
+    expect(text).not.toContain("anthill://");
+    expect(text).toContain("This chat's handovers go to Anthill (web).");
+  });
+
   // ANT-231: there is no anthill:// handler on Linux and Windows, so a web
   // chat's results carry the web shell's own link, with the port and token
   // its lock records, on the handovers and the reads alike.
@@ -1256,7 +1267,10 @@ describe("the Anthill a chat reaches", () => {
 
     const created = await handlers.createWorkflowDraft(draftInput());
 
-    expect(created.structuredContent).toMatchObject({ url: "anthill://workflow/workflow-1" });
+    // Nor an anthill:// one, which opens nothing where the web shell is the
+    // only Anthill (ANT-238).
+    expect((created.structuredContent as { url?: string }).url).toBeUndefined();
+    expect((created.content[0] as { text: string }).text).not.toContain("anthill://");
   });
 
   // ANT-232: the commands bind_run returns work where the harness runs them.

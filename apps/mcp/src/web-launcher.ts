@@ -97,7 +97,7 @@ export function webLauncher(dataDir: string, checkout: string | undefined, depen
         return { outcome: "starting", ...withLink(link), message: `The web shell at ${webShellOrigin(shell)} is starting, and shows the handover once it is up.` };
       }
       if (answer.clients > 0) {
-        return { outcome: "running", ...withLink(link), message: "The web shell is open in a browser tab, and the handover is shown there." };
+        return { outcome: "running", ...withLink(link), message: "The web shell is open in a browser tab, which takes the handover from its inbox and shows it." };
       }
       if (link && await open(link)) return { outcome: "opened", link };
       return {

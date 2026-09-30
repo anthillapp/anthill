@@ -258,7 +258,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       // happened and the link in the result still works by hand.
       return {
         outcome: "failed",
-        message: `Anthill could not be opened: ${error instanceof Error ? error.message : String(error)}. The handover is stored; ${reach.link(workflowId)} opens it.`,
+        message: `Anthill could not be opened: ${error instanceof Error ? error.message : String(error)}. The handover is stored${opensIt(reach.link(workflowId))}.`,
         ...target,
       };
     }
@@ -825,8 +825,8 @@ type Reached = {
   store: ExchangeStore;
   launch: Launcher;
   resolved?: ResolvedTarget;
-  /** The link a result gives for a workflow (see `Reach.link`): the web shell's `http://` link, or `anthill://`. */
-  link: (workflowId: string) => string;
+  /** The link a result gives for a workflow (see `Reach.link`): the web shell's `http://` link, `anthill://`, or none. */
+  link: (workflowId: string) => string | undefined;
 };
 
 /**
@@ -1070,4 +1070,9 @@ function displayKey(workflowId: string, idempotencyKey: string): string {
 
 function bindKey(runId: string): string {
   return `bind-${runId}`;
+}
+
+/** "; <link> opens it" where there is a link to give, and nothing where there is none. */
+function opensIt(link: string | undefined): string {
+  return link ? `; ${link} opens it` : "";
 }

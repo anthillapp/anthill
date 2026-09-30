@@ -532,6 +532,24 @@ describe("stepping through edits", () => {
     expect(screen.getByDisplayValue("Renamed workflow")).toBeTruthy();
   });
 
+  // ANT-207: undone back to the file, nothing is unsaved.
+  it("is not unsaved once every edit is undone, and is again when one is redone", async () => {
+    await workflow();
+    const dirty = () => {
+      const calls = (window.anthill.setWorkflowDirty as unknown as { mock: { calls: [boolean][] } }).mock.calls;
+      return calls[calls.length - 1]?.[0];
+    };
+    const name = screen.getByDisplayValue(/Implement, test, fix/) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Renamed workflow" } });
+    expect(dirty()).toBe(true);
+
+    fireEvent.click(back());
+    expect(dirty()).toBe(false);
+
+    fireEvent.click(forward());
+    expect(dirty()).toBe(true);
+  });
+
   /*
     ANT-192. In the app the Edit menu takes ⌘Z before the page sees it, so the
     canvas could only be stepped from its buttons. The menu now tells the page.

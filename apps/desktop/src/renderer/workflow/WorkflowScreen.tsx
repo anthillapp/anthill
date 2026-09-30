@@ -544,8 +544,9 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
           at && canvasSize
             ? dropPosition(at, canvasSize)
             : // A free spot, never on top of a block or across the top row's
-              // connections (ANT-183).
-              openSpot(current.nodes);
+              // connections (ANT-183), nor on anyone's unconnected outputs
+              // (ANT-205). Every block but End starts with one of its own.
+              openSpot(current.nodes, { unconnectedOutputs: block.nodeType !== "end" });
 
         const node = createNode(current, block.nodeType ?? "agent", {
           name: block.label,

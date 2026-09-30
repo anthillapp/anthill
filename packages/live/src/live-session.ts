@@ -142,6 +142,9 @@ export type LiveSessionView = {
  * (ANT-47). The longer a reader believes that, the longer the session sits
  * there waiting to be answered.
  */
+/** The title the observers give Claude Code's "[Request interrupted by user]". */
+const STOPPED_BY_HAND = "Stopped by hand";
+
 function yieldsToYou(event: ObservationEvent): boolean {
   return event.kind === "notification" || event.kind === "turn.end";
 }
@@ -258,6 +261,13 @@ export function foldLiveSession(
   const hooksCarried = events.some((event) => event.channel.endsWith(":hook"));
   /** Whether the CLI said it was waiting for a person since the announced step began. */
   let askedSinceEntered = false;
+  /*
+    The session itself was stopped by hand on the step it is on — Claude
+    Code's "[Request interrupted by user]" in the session's own record. That
+    is not a question put to a person, and a run that ends there must not be
+    left "Waiting on you" (ANT-204).
+  */
+  let stoppedHere = false;
   /**
    * When the session last said the work was over, while nothing has resumed
    * since. An explicit ending settles the step it lands on without the
@@ -357,6 +367,7 @@ export function foldLiveSession(
       enteredByTag = viaTag;
       workSinceEntered = false;
       askedSinceEntered = false;
+      stoppedHere = false;
       finishedAt = undefined;
       return;
     }
@@ -419,6 +430,7 @@ export function foldLiveSession(
     // A subagent already at work for the step is work in it.
     workSinceEntered = continuing;
     askedSinceEntered = false;
+    stoppedHere = false;
     finishedAt = undefined;
   };
 
@@ -452,6 +464,7 @@ export function foldLiveSession(
    */
   const stoppedFor = new Set<string>();
   const STOPPED_NOTE = "A subagent working on this step was stopped by hand before it handed back.";
+  const STOPPED_HERE_NOTE = "The session was stopped by hand on this step.";
 
   /*
     A session that ended with a subagent still out on a step: killed, or
@@ -485,9 +498,27 @@ export function foldLiveSession(
     the line it printed (ANT-164).
   */
   const plumbing = new Set<string>();
+  /*
+    The step each subagent says it is working on, by the call that started
+    it: the tag on the first of its own messages that carries one. Codex
+    encrypts what a spawn hands over, so its subagent.start names no step,
+    and three checks announced together and then spawned together all went to
+    the last one announced — two drawn "Done · took 0ms", the third with all
+    three's work (ANT-203). Each subagent's thread names its step itself.
+    Known up front, like `plumbing`, because the spawn is read first.
+  */
+  const saysItWorksOn = new Map<string, string>();
   for (const event of journal) {
     if (event.printedBy) plumbing.add(event.printedBy);
     if (event.kind === "subagent.start" && event.toolUseId) plumbing.add(event.toolUseId);
+    if (
+      event.kind === "message" &&
+      event.parentToolUseId &&
+      event.stepTag &&
+      !saysItWorksOn.has(event.parentToolUseId)
+    ) {
+      saysItWorksOn.set(event.parentToolUseId, event.stepTag);
+    }
   }
   for (const event of journal) {
     const mapping = attribute(event, index, announced, delegatedFrom);
@@ -542,7 +573,7 @@ export function foldLiveSession(
         release(via.blockId, event.at);
       }
       // Stopped by the person: over, and not finished (ANT-190).
-      if (via && event.kind === "notification" && event.title === "Stopped by hand") {
+      if (via && event.kind === "notification" && event.title === STOPPED_BY_HAND) {
         via.delegateEnded = true;
         via.returned = true;
         stoppedFor.add(via.blockId);
@@ -611,14 +642,21 @@ export function foldLiveSession(
 
     /*
       A subagent started for a step: the one its call names, when the session
-      put the step's tag in what it handed over, else the step the session is
-      on. The call's own word comes first because the session can announce
+      put the step's tag in what it handed over, else the one the subagent's
+      own messages name (ANT-203), else the step the session is on. The
+      call's own word comes first because the session can announce
       several steps and only then start their subagents together — measured,
       that is exactly how Claude Code fans out, and by the moment of dispatch
       every subagent looked like the last-announced step's (ANT-163).
     */
     if (event.kind === "subagent.start" && event.toolUseId) {
-      const target = event.stepTag && blocks[event.stepTag] ? event.stepTag : announced;
+      const own = saysItWorksOn.get(event.toolUseId);
+      const target =
+        event.stepTag && blocks[event.stepTag]
+          ? event.stepTag
+          : own && blocks[own]
+            ? own
+            : announced;
       if (target && blocks[target]) {
         delegations.set(event.toolUseId, {
           blockId: target,
@@ -681,6 +719,22 @@ export function foldLiveSession(
       continue;
     }
 
+    // The session stopped by hand: over for now, and not asking anybody
+    // anything. Waiting on the person only in that nothing goes on until
+    // they type again, so it is never presented as a question (ANT-204).
+    if (event.kind === "notification" && event.title === STOPPED_BY_HAND) {
+      if (!finishedAt && announced && blocks[announced]?.state === "running") {
+        stoppedHere = true;
+        blocks[announced] = {
+          ...blocks[announced],
+          state: "needsYou",
+          note: STOPPED_HERE_NOTE,
+          waitReason: "yielded",
+        };
+      }
+      continue;
+    }
+
     if (event.kind === "notification" && announced) askedSinceEntered = true;
 
     if (finishedAt && announced && blocks[announced]?.state === "done") {
@@ -732,6 +786,7 @@ export function foldLiveSession(
       const waiting = blocks[announced];
       const { note: _left, waitReason: _why, ...rest } = waiting;
       blocks[announced] = { ...rest, state: "running" };
+      stoppedHere = false;
       continue;
     }
 
@@ -768,6 +823,9 @@ export function foldLiveSession(
     const atGate = gates.has(announced);
     const yieldedOnlyByTurnEnd =
       blocks[announced].state === "needsYou" && hooksCarried && !askedSinceEntered && !atGate;
+    // Stopped by hand and never taken up again: the session is over, so it is
+    // not waiting on anybody.
+    const stoppedAndEnded = blocks[announced].state === "needsYou" && stoppedHere && !askedSinceEntered;
     if (open && atGate && run.state === "completed") {
       const { note: _note, waitReason: _why, ...rest } = blocks[announced];
       blocks[announced] = {
@@ -779,13 +837,14 @@ export function foldLiveSession(
     } else if (
       open &&
       run.state === "completed" &&
-      (blocks[announced].state !== "needsYou" || yieldedOnlyByTurnEnd)
+      (blocks[announced].state !== "needsYou" || yieldedOnlyByTurnEnd || stoppedAndEnded)
     ) {
       // Nothing announced a departure, so the last thing anything was recorded
       // at is as close as the record gets to when this step stopped.
       if (lastSeenAt) {
         if (stoppedFor.has(announced)) finish(announced, lastSeenAt, "failed", STOPPED_NOTE);
         else if (outstanding(announced)) finish(announced, lastSeenAt, "unknown", CUT_OFF_NOTE);
+        else if (stoppedAndEnded) finish(announced, lastSeenAt, "failed", STOPPED_HERE_NOTE);
         else finish(announced, lastSeenAt);
       }
     } else if (open && run.state === "failed") {

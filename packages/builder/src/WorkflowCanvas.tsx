@@ -302,19 +302,30 @@ export function WorkflowCanvas({
         return;
       }
 
-      onChange(
-        setOutputTarget(
-          workflow,
-          linking.nodeId,
-          linking.outputId,
-          targetId,
-          anchorFromPoint(blockRect(target), at),
-        ),
+      const next = setOutputTarget(
+        workflow,
+        linking.nodeId,
+        linking.outputId,
+        targetId,
+        anchorFromPoint(blockRect(target), at),
       );
+      // A link that could not be made is not an edit, and must not mark the
+      // workflow Unsaved.
+      if (next !== workflow) onChange(next);
       onLinkingChange(null);
     },
     [linking, workflow, onChange, onLinkingChange, eligibleTarget],
   );
+
+  // The output being linked can go away underneath link mode (the inspector's
+  // Remove output). There is nothing left to point at, so link mode ends.
+  useEffect(() => {
+    if (!linking) return;
+    const exists = outputsOf(workflow, linking.nodeId).some(
+      (output) => output.id === linking.outputId,
+    );
+    if (!exists) onLinkingChange(null);
+  }, [linking, workflow, onLinkingChange]);
 
   // Nothing has been changed while dragging — the live arrow is a drawing, not
   // an edit — so letting go of the preview is all "restore the original" takes.

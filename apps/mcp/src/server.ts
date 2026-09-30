@@ -26,17 +26,26 @@
  * Diagnostics go to stderr, which the harness shows as server output.
  */
 
-import { ExchangeStore } from "@anthill/exchange-store";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { createHandlers } from "./handlers.js";
 import { SERVER_INSTRUCTIONS } from "./instructions.js";
 import { disabledLauncher, openUrl } from "./launch.js";
 import { readOptions, type ServerOptions } from "./options.js";
-import { devLauncher, readTargetSetting } from "./target.js";
+import {
+  TargetSession,
+  checkoutOf,
+  currentEnvironment,
+  devLauncher,
+  readTargetSetting,
+  resolveTarget,
+  webLauncher,
+  type ResolvedTarget,
+  type TargetContext,
+} from "./target.js";
 import { PLUGIN_HOST_ENV, PLUGIN_VERSION_ENV, pluginDriftNotice } from "./plugin-drift.js";
 import { registerExchangeTools } from "./tools.js";
 
@@ -89,7 +98,7 @@ function transportFailureLine(error: unknown): string {
  * test — the wiring test spawns the built program and speaks JSON-RPC to it,
  * which is the only way to see what a harness sees.
  */
-function createMcpServer(options: ServerOptions, drift: string | undefined): McpServer {
+function createMcpServer(options: ServerOptions, drift: string | undefined, targets: TargetSession): McpServer {
   const server = new McpServer(
     { name: SERVER_NAME, title: "Anthill", version: SERVER_VERSION },
     // An out-of-date installed plugin leads the instructions, because the
@@ -97,14 +106,35 @@ function createMcpServer(options: ServerOptions, drift: string | undefined): Mcp
     { instructions: drift ? `${drift}\n\n${SERVER_INSTRUCTIONS}` : SERVER_INSTRUCTIONS },
   );
 
-  registerExchangeTools(
-    server,
-    createHandlers({
-      store: new ExchangeStore(options.dataDir),
-      launch: !options.launch ? disabledLauncher : options.target === "dev" ? devLauncher(options.dataDir) : openUrl,
-    }),
-  );
+  registerExchangeTools(server, createHandlers({ targets }));
   return server;
+}
+
+/**
+ * Everything the target rule reads, gathered when the server starts: the
+ * platform, this plugin copy's flag, the machine's setting, a directory given
+ * outright, and the checkout this server was built in.
+ */
+function targetContext(options: ServerOptions): TargetContext {
+  const setting = readTargetSetting();
+  const checkout = checkoutOf(fileURLToPath(import.meta.url));
+  return {
+    ...currentEnvironment(),
+    ...(options.target ? { flag: options.target } : {}),
+    ...(setting ? { setting } : {}),
+    ...(options.dataDir ? { dataDir: options.dataDir } : {}),
+    ...(checkout ? { checkout } : {}),
+  };
+}
+
+/** How each target is brought up, unless launching was turned off. */
+function launcherFor(options: ServerOptions) {
+  return (resolved: ResolvedTarget) => {
+    if (!options.launch) return disabledLauncher;
+    if (resolved.target === "electron-dev") return devLauncher(resolved.dataDir);
+    if (resolved.target === "web") return webLauncher(resolved.dataDir);
+    return openUrl;
+  };
 }
 
 /**
@@ -115,8 +145,7 @@ function createMcpServer(options: ServerOptions, drift: string | undefined): Mcp
  * function can be called from a test.
  */
 async function runServer(argv: readonly string[]): Promise<number> {
-  const target = readTargetSetting();
-  const read = readOptions(argv, undefined, target ? { target } : {});
+  const read = readOptions(argv);
   if (!read.ok) {
     process.stderr.write(`${read.message}\n`);
     return 2;
@@ -131,7 +160,13 @@ async function runServer(argv: readonly string[]): Promise<number> {
   );
   if (drift) process.stderr.write(`${SERVER_NAME} mcp server: ${drift}\n`);
 
-  const server = createMcpServer(read.options, drift);
+  const context = targetContext(read.options);
+  const targets = new TargetSession(context, launcherFor(read.options), (resolved) => {
+    process.stderr.write(
+      `${SERVER_NAME} mcp server: this chat's handovers go to ${resolved.label} (${resolved.source}); exchange under ${resolved.dataDir}\n`,
+    );
+  });
+  const server = createMcpServer(read.options, drift, targets);
 
   const transport = new StdioServerTransport();
   // Set before `connect`, and both halves of that matter. `connect` chains
@@ -149,9 +184,15 @@ async function runServer(argv: readonly string[]): Promise<number> {
   // Said on stderr once the transport is up, because the data directory is the
   // one thing that can be silently wrong: a server pointed at a directory the
   // app is not reading answers every call happily and opens nothing.
+  // Before any handover, what the rule answers without a build request: the
+  // first handover may still ask for the development build (--dev), and it is
+  // then that the target is pinned and said again.
+  const tentative = resolveTarget(context);
   process.stderr.write(
-    `${SERVER_NAME} mcp server ready; exchange under ${read.options.dataDir}` +
-      `${read.options.target === "dev" ? "; serving the development build" : ""}` +
+    `${SERVER_NAME} mcp server ready; ` +
+      (tentative.ok
+        ? `handovers go to ${tentative.resolved.label} unless the first asks for the dev build; exchange under ${tentative.resolved.dataDir}`
+        : "the target is settled at the first handover") +
       `${read.options.launch ? "" : "; not opening Anthill (--no-launch)"}\n`,
   );
   return 0;

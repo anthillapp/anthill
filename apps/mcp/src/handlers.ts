@@ -71,6 +71,7 @@ import {
   type WorkflowAnswer,
 } from "./text.js";
 import { openUrl, type LaunchReport, type Launcher } from "./launch.js";
+import type { ResolvedTarget, TargetSession } from "./target.js";
 import { workflowUrl } from "./url.js";
 
 /**
@@ -111,7 +112,16 @@ export const MCP_PROBLEM_CODES = {
 } as const;
 
 export type HandlerDependencies = {
-  store: ExchangeStore;
+  /**
+   * The Anthill a chat's handovers reach, resolved at the first handover and
+   * pinned (see `target.ts`). The server always passes one.
+   */
+  targets?: TargetSession;
+  /**
+   * A fixed exchange instead, for a test that has nothing to resolve: every
+   * call uses it, with `launch` below.
+   */
+  store?: ExchangeStore;
   /** Injected so a test can pin the ids a bind mints; defaults to `@anthill/live`'s. */
   mintRunId?: () => string;
   mintNonce?: () => string;
@@ -201,10 +211,9 @@ export type Handlers = {
 };
 
 export function createHandlers(dependencies: HandlerDependencies): Handlers {
-  const { store } = dependencies;
+  const targets = targetAccess(dependencies);
   const mintRunId = dependencies.mintRunId ?? (() => newRunId());
   const mintNonce = dependencies.mintNonce ?? (() => newNonce());
-  const launch = dependencies.launch ?? openUrl;
 
   /**
    * Ask the machine to bring Anthill up for a workflow this call just acted on.
@@ -222,15 +231,19 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
    * Never allowed to fail the call. What is stored is stored, and the report
    * travels in the answer.
    */
-  async function bringUp(workflowId: string): Promise<LaunchReport> {
+  async function bringUp(reach: Reached, workflowId: string): Promise<LaunchReport> {
+    // Every result names the Anthill it reached, so a chat on the wrong build
+    // is seen at the first handover rather than discovered later.
+    const target = reach.resolved ? { target: { id: reach.resolved.target, label: reach.resolved.label } } : {};
     try {
-      return await launch(workflowUrl(workflowId));
+      return { ...(await reach.launch(workflowUrl(workflowId))), ...target };
     } catch (error) {
       // A launcher that throws is still only a launcher. The message says what
       // happened and the link in the result still works by hand.
       return {
         outcome: "failed",
         message: `Anthill could not be opened: ${error instanceof Error ? error.message : String(error)}. The handover is stored; ${workflowUrl(workflowId)} opens it.`,
+        ...target,
       };
     }
   }
@@ -244,6 +257,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
    * workflow rather than about anything inside it.
    */
   async function incompleteRevision(
+    store: ExchangeStore,
     workflowId: string,
     reason: EligibilityRefusal | undefined,
     revision: number | undefined,
@@ -274,6 +288,8 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       if (!read.ok) return result(draftText, invalidDraft(read.problems));
 
       const submission = read.submission;
+      const reach = targets.handover();
+      const { store } = reach;
       const created = await store.createWorkflow(submission);
       const problems = created.problems ?? [];
 
@@ -340,7 +356,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       // starts reading, and on a conflicting drop too: a conflict means this
       // same request is already queued, and the app still has to be running to
       // take it.
-      const app = await bringUp(created.workflowId);
+      const app = await bringUp(reach, created.workflowId);
       return result(draftText, {
         outcome: problems.length > 0 ? "incomplete" : created.outcome,
         workflowId: created.workflowId,
@@ -378,6 +394,8 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         return result(reviseText, { outcome: "invalid", problems: [addressed.problem] });
       }
       const { workflowId } = addressed;
+      const reach = targets.handover();
+      const { store } = reach;
 
       // Read before writing, for two reasons that both matter: a workflow this
       // Anthill has never been given is a different answer from one that
@@ -450,7 +468,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       });
 
       const bound = stored.bindings.at(-1)?.revision;
-      const app = await bringUp(workflowId);
+      const app = await bringUp(reach, workflowId);
       return result(reviseText, {
         outcome: added.outcome === "added" ? "revised" : "unchanged",
         workflowId,
@@ -475,6 +493,8 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       const addressed = readWorkflowId(input.workflowId);
       if ("problem" in addressed) return result(callText, invalidCall([addressed.problem]));
       const workflowId = addressed.workflowId;
+      const reach = targets.handover();
+      const { store } = reach;
 
       const stored = await store.readWorkflow(workflowId);
       const revision = stored?.head?.revision;
@@ -486,7 +506,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         workflowId,
         revision,
       });
-      const app = await bringUp(workflowId);
+      const app = await bringUp(reach, workflowId);
       return result(openText, {
         outcome: "open_requested",
         workflowId,
@@ -503,6 +523,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       const addressed = readWorkflowId(input.workflowId);
       if ("problem" in addressed) return result(callText, invalidCall([addressed.problem]));
       const workflowId = addressed.workflowId;
+      const { store } = targets.read();
 
       const stored = await store.readWorkflow(workflowId);
       if (!stored) return result(workflowText, { outcome: "not_found", workflowId });
@@ -546,11 +567,12 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       const addressed = readWorkflowId(input.workflowId);
       if ("problem" in addressed) return result(callText, invalidCall([addressed.problem]));
       const workflowId = addressed.workflowId;
+      const { store } = targets.read();
 
       const eligibility = await store.eligibleRevision(workflowId);
 
       if (!eligibility.eligible) {
-        const refused = await incompleteRevision(workflowId, eligibility.reason, eligibility.revision);
+        const refused = await incompleteRevision(store, workflowId, eligibility.reason, eligibility.revision);
         // An id nothing was stored under is not a workflow that is not ready
         // yet. Relaying it as one tells the caller to wait for a user who has
         // nothing in front of them to approve, and no amount of waiting turns
@@ -665,11 +687,13 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         });
       }
       const url = workflowUrl(workflowId);
+      const reach = targets.handover();
+      const { store } = reach;
       const bound = await store.bindRequest(workflowId, exactRevision, exactDigest, bindingKey, session,
         () => ({ runId: mintRunId(), nonce: mintNonce() }));
 
       if (bound.outcome !== "bound" && bound.outcome !== "already_bound") {
-        const refused = await incompleteRevision(workflowId, bound.reason, bound.revision);
+        const refused = await incompleteRevision(store, workflowId, bound.reason, bound.revision);
         return result(bindText, {
           outcome:
             bound.outcome === "no_such_workflow"
@@ -739,7 +763,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         // The one place the app being up is not a convenience: nothing but a
         // running Anthill registers the run, and the reporting commands below
         // are about to start arriving for it.
-        app: await bringUp(workflowId),
+        app: await bringUp(reach, workflowId),
         reportingCommands,
         steps,
         ...problemFields(drop.problems),
@@ -751,6 +775,34 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
 /* -------------------------------------------------------------------------- */
 /* The pieces the four share                                                  */
 /* -------------------------------------------------------------------------- */
+
+/** The exchange and launcher a call works with, and the target they belong to. */
+type Reached = { store: ExchangeStore; launch: Launcher; resolved?: ResolvedTarget };
+
+/**
+ * How a call reaches its Anthill: through the chat's pinned target, or through
+ * the one fixed exchange a test gave.
+ *
+ * A handover without a build request cannot be refused by the rule, so a
+ * refusal here would be a fault; the build request that can be refused is
+ * answered where it is read.
+ */
+function targetAccess(dependencies: HandlerDependencies): { handover(): Reached; read(): Reached } {
+  const { targets, store } = dependencies;
+  if (targets) {
+    return {
+      handover() {
+        const reach = targets.handover();
+        if ("refused" in reach) throw new Error(reach.refused);
+        return reach;
+      },
+      read: () => targets.read(),
+    };
+  }
+  if (!store) throw new Error("createHandlers needs either targets or a store.");
+  const fixed: Reached = { store, launch: dependencies.launch ?? openUrl };
+  return { handover: () => fixed, read: () => fixed };
+}
 
 /**
  * One answer, rendered for both of its readers.

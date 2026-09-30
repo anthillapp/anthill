@@ -273,8 +273,12 @@ export function openText(answer: OpenAnswer): string {
  * the model is the only one in a position to tell them.
  */
 function appText(report: LaunchReport | undefined): string[] {
-  if (!report || report.outcome === "opened") return [];
-  return report.message ? [report.message] : [];
+  if (!report) return [];
+  // Which Anthill, always: a chat pinned to the wrong build is seen here, at
+  // the first handover, rather than when nothing appears.
+  const named = report.target ? [`This chat's handovers go to ${report.target.label}.`] : [];
+  if (report.outcome === "opened") return named;
+  return [...named, ...(report.message ? [report.message] : [])];
 }
 
 export function draftText(answer: DraftAnswer): string {

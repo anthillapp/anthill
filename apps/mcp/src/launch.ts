@@ -64,13 +64,20 @@ export type LaunchOutcome =
   | "unsupported"
   /** The user started this server with launching turned off. */
   | "disabled"
-  /** This server serves the development build, which is never launched. */
-  | "dev";
+  /** The Anthill this chat reaches is already running, and picks the handover up itself. */
+  | "running"
+  /** The Anthill this chat reaches is not running, and nothing was started. */
+  | "not_running";
 
 export type LaunchReport = {
   outcome: LaunchOutcome;
   /** What to tell the user, on every outcome that is not `opened`. */
   message?: string;
+  /**
+   * Which Anthill the handover went to, named in every result so a chat on
+   * the wrong build is seen at once (architecture doc, §5.6).
+   */
+  target?: { id: "app" | "electron-dev" | "web"; label: string };
 };
 
 /** Asks the machine to open one `anthill://` link. Injected, so tests do not open anything. */

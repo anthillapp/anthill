@@ -32,6 +32,7 @@ import {
   type BindRunInput,
 } from "./handlers.js";
 import type { Launcher } from "./launch.js";
+import { TargetSession, type TargetContext } from "./target.js";
 
 const roots: string[] = [];
 
@@ -1183,5 +1184,51 @@ describe("storing now and opening later", () => {
     const { handlers, opened } = await openTools();
     await handlers.createWorkflowDraft(draftInput());
     expect(opened).toHaveLength(1);
+  });
+});
+
+/*
+  ANT-222. A chat's handovers go to one Anthill, pinned at the first handover,
+  and every result says which.
+*/
+describe("the Anthill a chat reaches", () => {
+  async function throughTargets(context: Partial<TargetContext> = {}) {
+    const home = await mkdtemp(join(tmpdir(), "anthill-mcp-home-"));
+    roots.push(home);
+    const opened: string[] = [];
+    const targets = new TargetSession(
+      { platform: "darwin", home, env: {}, checkout: "/src/anthill", ...context },
+      (resolved) => async (url) => {
+        opened.push(`${resolved.target} ${url}`);
+        return { outcome: "opened" };
+      },
+    );
+    return { handlers: createHandlers({ targets }), targets, home, opened };
+  }
+
+  it("names the target in the handover's result", async () => {
+    const { handlers } = await throughTargets();
+    const result = await handlers.createWorkflowDraft(draftInput());
+    const answer = result.structuredContent as { app?: { target?: { id: string; label: string } } };
+    expect(answer.app?.target).toEqual({ id: "app", label: "Anthill (installed app)" });
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("This chat's handovers go to Anthill (installed app).");
+  });
+
+  it("writes into the pinned target's own exchange", async () => {
+    const { handlers, home } = await throughTargets({ setting: "web" });
+    await handlers.createWorkflowDraft(draftInput());
+    const web = new ExchangeStore(join(home, ".anthill", "cli"));
+    expect((await web.readWorkflow("workflow-1"))?.identity).toBeTruthy();
+    const app = new ExchangeStore(join(home, "Library", "Application Support", "@anthill", "desktop"));
+    expect(await app.readWorkflow("workflow-1")).toBeUndefined();
+  });
+
+  it("is not decided by a read before the first handover", async () => {
+    const { handlers, targets } = await throughTargets();
+    await handlers.getWorkflow({ workflowId: "workflow-1" });
+    expect(targets.target).toBeUndefined();
+    await handlers.createWorkflowDraft(draftInput());
+    expect(targets.target?.target).toBe("app");
   });
 });

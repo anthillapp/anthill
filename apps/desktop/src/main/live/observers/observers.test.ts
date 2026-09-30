@@ -513,6 +513,59 @@ describe("the Codex observer", () => {
   });
 
   /*
+    ANT-208, W9 on Codex in the 0.8.5 QA: Stop pressed while the tester
+    subagent worked. Codex wrote turn_aborted in the session's file and in
+    the subagent's, and nothing else; Anthill read neither, and the step
+    stayed "Working" with the session Live.
+  */
+  describe("a turn stopped by hand", () => {
+    const at = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString();
+    const lines = (rows: unknown[]) => rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+    const session = [
+      { timestamp: at(0), type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx" } },
+      { timestamp: at(1), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: MARKED_PROMPT }] } },
+      { timestamp: at(2), type: "response_item", payload: { type: "function_call", name: "spawn_agent", call_id: "call-spawn", arguments: JSON.stringify({ task_name: "tester" }) } },
+      { timestamp: at(2.4), type: "response_item", payload: { type: "function_call_output", call_id: "call-spawn", output: JSON.stringify({ task_name: "/root/tester" }) } },
+      { timestamp: at(9), type: "response_item", payload: { type: "function_call_output", call_id: "call-wait", output: "aborted by user after 6.1s" } },
+      { timestamp: at(9.1), type: "event_msg", payload: { type: "turn_aborted", reason: "interrupted" } },
+    ];
+    const tester = [
+      { timestamp: at(3), type: "session_meta", payload: { session_id: "sess-cx", id: "sub-t", thread_source: "subagent", agent_path: "/root/tester", source: { subagent: { thread_spawn: { parent_thread_id: "sess-cx", agent_path: "/root/tester" } } } } },
+      { timestamp: at(4), type: "response_item", payload: { type: "function_call", name: "exec_command", call_id: "call-test" } },
+      { timestamp: at(10), type: "event_msg", payload: { type: "turn_aborted", reason: "interrupted" } },
+    ];
+    const run = () => ({ ...pending("codex"), detectedSessionId: "sess-cx", state: "detected_live" as const });
+
+    it("reports the session stopped, and the subagent stopped as its own", async () => {
+      const dir = await root();
+      await writeCodex(dir, "sess-cx", lines(session));
+      await writeCodex(dir, "sub-t", lines(tester));
+      const { evidence, events } = await new CodexObserver(dir).poll(run(), new Date().toISOString());
+
+      expect(evidence).toContainEqual(expect.objectContaining({ kind: "interrupted", sessionId: "sess-cx" }));
+      const stops = events.filter((event) => event.kind === "notification" && event.title === "Stopped by hand");
+      expect(stops.map((event) => event.parentToolUseId)).toEqual(expect.arrayContaining([undefined, "call-spawn"]));
+      expect(stops).toHaveLength(2);
+      // Not an ending: the chat is still open.
+      expect(evidence).not.toContainEqual(expect.objectContaining({ kind: "completed" }));
+    });
+
+    it("says nothing of a stop the session has since gone on from", async () => {
+      const dir = await root();
+      await writeCodex(
+        dir,
+        "sess-cx",
+        lines([
+          ...session,
+          { timestamp: at(20), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Continue." }] } },
+        ]),
+      );
+      const { evidence } = await new CodexObserver(dir).poll(run(), new Date().toISOString());
+      expect(evidence).not.toContainEqual(expect.objectContaining({ kind: "interrupted" }));
+    });
+  });
+
+  /*
     ANT-211, W17 in the 0.8.5 QA. A subagent's file opens with a copy of the
     parent's history — its session record, the marked prompt, its step-tagged
     replies and task_completes — before the subagent's own lines, which begin

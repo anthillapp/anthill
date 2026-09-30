@@ -60,6 +60,12 @@ type FileState = {
   reportedActivityAt?: string;
   /** Set once `task_complete` has been seen and reported. */
   completedAt?: string;
+  /**
+   * When the person pressed Stop: Codex's `turn_aborted`, the only record of
+   * it. A stop fires nothing else, so without it the step went on "Working"
+   * and the session "Live" for as long as the window stayed open (ANT-208).
+   */
+  interruptedAt?: string;
   reportedComplete: boolean;
   failure?: string;
   /**
@@ -323,6 +329,19 @@ export class CodexObserver implements LiveSessionObserver {
           detail: state.failure,
         });
         continue;
+      }
+
+      // Still the last thing the session wrote, so a session somebody carried
+      // on with is not held down by the Stop they pressed earlier — the same
+      // rule as Claude Code's (ANT-122).
+      if (state.interruptedAt && state.interruptedAt === state.lastActivityAt) {
+        evidence.push({
+          kind: "interrupted",
+          sessionId,
+          channel: CHANNEL,
+          at: state.interruptedAt,
+          detail: "You stopped this session. Anthill is no longer reading it; nothing was sent to the session.",
+        });
       }
 
       if (state.completedAt && !state.reportedComplete) {
@@ -741,6 +760,12 @@ function scan(
         // Codex's own word that the task is over — typed, so the fold does not
         // have to recognise it by where it came from (ANT-158).
         events.push({ ...base, kind: "turn.end", title: "Codex finished the turn", completion: "task_complete" });
+      }
+      // Stopped by the person. In the session's own file that is the session
+      // stopping; in a subagent's, only that subagent (ANT-208).
+      if (payload.type === "turn_aborted") {
+        if (!state.delegate) state.interruptedAt = at;
+        events.push({ ...base, kind: "notification", title: "Stopped by hand" });
       }
       if (payload.type === "error" || payload.type === "stream_error") {
         const message = str(payload.message) ?? "Codex recorded an error.";

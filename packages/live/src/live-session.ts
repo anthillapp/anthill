@@ -269,6 +269,12 @@ export function foldLiveSession(
   */
   let stoppedHere = false;
   /**
+   * The session's last word was a stop by hand, nothing started since. A run
+   * a stop closes is `observation_lost`, and what it was doing is known: it
+   * was stopped, not lost sight of (ANT-208).
+   */
+  let sessionStopped = false;
+  /**
    * When the session last said the work was over, while nothing has resumed
    * since. An explicit ending settles the step it lands on without the
    * hooks' help, and a generic turn end after it cannot reopen it (ANT-158,
@@ -722,7 +728,9 @@ export function foldLiveSession(
     // The session stopped by hand: over for now, and not asking anybody
     // anything. Waiting on the person only in that nothing goes on until
     // they type again, so it is never presented as a question (ANT-204).
+    if (resumesWork(event)) sessionStopped = false;
     if (event.kind === "notification" && event.title === STOPPED_BY_HAND) {
+      if (!finishedAt) sessionStopped = true;
       if (!finishedAt && announced && blocks[announced]?.state === "running") {
         stoppedHere = true;
         blocks[announced] = {
@@ -849,6 +857,11 @@ export function foldLiveSession(
       }
     } else if (open && run.state === "failed") {
       finish(announced, lastSeenAt ?? run.lastObservedAt ?? run.createdAt, "failed", run.statusMessage);
+    } else if (open && run.state === "observation_lost" && sessionStopped) {
+      const at = lastSeenAt ?? run.createdAt;
+      if (stoppedFor.has(announced)) finish(announced, at, "failed", STOPPED_NOTE);
+      else if (outstanding(announced)) finish(announced, at, "unknown", CUT_OFF_NOTE);
+      else finish(announced, at, "failed", STOPPED_HERE_NOTE);
     } else if (open && (run.state === "observation_lost" || run.state === "ambiguous_match")) {
       finish(announced, lastSeenAt ?? run.createdAt, "unknown", "Anthill stopped being able to read this session.");
     }
@@ -867,6 +880,10 @@ export function foldLiveSession(
       else finish(id, at);
     }
     else if (run.state === "failed") finish(id, at, "failed", run.statusMessage);
+    else if (run.state === "observation_lost" && sessionStopped) {
+      if (stoppedFor.has(id)) finish(id, at, "failed", STOPPED_NOTE);
+      else finish(id, at, "unknown", CUT_OFF_NOTE);
+    }
     else if (run.state === "observation_lost" || run.state === "ambiguous_match") {
       finish(id, at, "unknown", "Anthill stopped being able to read this session.");
     }

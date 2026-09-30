@@ -1646,6 +1646,33 @@ describe("a session stopped by hand", () => {
     expect(view.blocks.implement.note).toContain("stopped by hand");
   });
 
+  // ANT-208: a stop closes the run as observation_lost, and that is not the
+  // same as Anthill losing sight of it.
+  it("reads as stopped, not lost, once the stop closes the run", () => {
+    const lost = run({ state: "observation_lost" });
+    const own = foldLiveSession(workflow, lost, [
+      tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+      tx({ kind: "tool.start", title: "Edit", toolUseId: "own", at: T(1) }),
+      stopped,
+    ]);
+    expect(own.blocks.implement.state).toBe("failed");
+    expect(own.blocks.implement.note).toContain("stopped by hand");
+
+    const delegated = foldLiveSession(workflow, lost, [...delegatedBoth, stopped]);
+    expect(delegated.blocks.implement.state).toBe("unknown");
+    expect(delegated.blocks.test.state).toBe("unknown");
+    expect(delegated.blocks.test.note).toContain("never handed back");
+  });
+
+  it("still reads as lost when nobody stopped it", () => {
+    const view = foldLiveSession(workflow, run({ state: "observation_lost" }), [
+      tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+      tx({ kind: "tool.start", title: "Edit", toolUseId: "own", at: T(1) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("unknown");
+    expect(view.blocks.implement.note).toContain("stopped being able to read");
+  });
+
   it("goes back to working when the person sets it going again", () => {
     const view = foldLiveSession(workflow, run({ state: "completed" }), [
       tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),

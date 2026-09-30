@@ -66,6 +66,13 @@ type FileState = {
    * and the session "Live" for as long as the window stayed open (ANT-208).
    */
   interruptedAt?: string;
+  /**
+   * When the session ended its turn at an Approval Gate with nothing done:
+   * the gate's question asked, the answer not given. Codex writes
+   * `task_complete` there as after every turn, and that is not the session
+   * finishing (ANT-210). Cleared by the next turn starting.
+   */
+  awaitingAt?: string;
   reportedComplete: boolean;
   failure?: string;
   /**
@@ -173,6 +180,7 @@ export class CodexObserver implements LiveSessionObserver {
     }
 
     const states = this.statesFor(run.anthillRunId);
+    const gates = new Set((run.steps ?? []).filter((step) => step.gate).map((step) => step.id));
     let spawns = this.spawned.get(run.anthillRunId);
     if (!spawns) {
       spawns = new Map();
@@ -191,7 +199,7 @@ export class CodexObserver implements LiveSessionObserver {
       const chunk = await readNewLines(path, state.cursor);
       if (!chunk.grew) continue;
       grew.add(path);
-      scan(chunk.lines, state, now, { runId: run.anthillRunId, nonce: run.correlationNonce }, events, spawns);
+      scan(chunk.lines, state, now, { runId: run.anthillRunId, nonce: run.correlationNonce, gates }, events, spawns);
     }
 
     // A subagent's work, tied to the call that started it — known by now even
@@ -341,6 +349,22 @@ export class CodexObserver implements LiveSessionObserver {
           channel: CHANNEL,
           at: state.interruptedAt,
           detail: "You stopped this session. Anthill is no longer reading it; nothing was sent to the session.",
+        });
+      }
+
+      // Waiting for an answer at a gate: still the session, still open. Said on
+      // every look while it holds, and only for as long as a copied prompt is
+      // given to be claimed — past that, silence is silence again (ANT-210).
+      if (
+        state.awaitingAt &&
+        Date.parse(now) - Date.parse(state.awaitingAt) < TIMING.pendingTtlMs
+      ) {
+        evidence.push({
+          kind: "awaiting",
+          sessionId,
+          at: now,
+          since: state.awaitingAt,
+          detail: "Codex asked at the approval and is waiting for your answer.",
         });
       }
 
@@ -519,7 +543,8 @@ function scan(
   lines: string[],
   state: FileState,
   now: string,
-  marker: { runId: string; nonce: string },
+  /** And the run's Approval Gates, by step id (ANT-210). */
+  marker: { runId: string; nonce: string; gates?: ReadonlySet<string> },
   events: ObservationEventDraft[],
   spawns: Map<string, string> = new Map(),
 ): void {
@@ -754,7 +779,24 @@ function scan(
           });
         }
       }
-      if (payload.type === "task_complete") {
+      if (payload.type === "task_started" && !state.delegate) state.awaitingAt = undefined;
+      // A turn that ended on an Approval Gate, with no done line: the gate's
+      // question put to a person, not the session finishing (ANT-210).
+      if (
+        payload.type === "task_complete" &&
+        !state.delegate &&
+        !state.doneReported &&
+        state.lastStep &&
+        marker.gates?.has(state.lastStep.blockId)
+      ) {
+        state.awaitingAt = at;
+        events.push({
+          ...base,
+          kind: "notification",
+          title: "Waiting for your answer",
+          detail: "Codex asked at the approval and ended its turn. Nobody has answered yet.",
+        });
+      } else if (payload.type === "task_complete") {
         state.completedAt = at;
         state.reportedComplete = false;
         // Codex's own word that the task is over — typed, so the fold does not

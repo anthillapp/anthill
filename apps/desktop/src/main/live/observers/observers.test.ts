@@ -513,6 +513,78 @@ describe("the Codex observer", () => {
   });
 
   /*
+    ANT-210, W8 on Codex in the 0.8.5 QA. Codex announced the Decide gate,
+    asked, and ended its turn with task_complete, as after every turn. Read
+    as the session finishing, it closed the run: "Session finished", the gate
+    Done and Present Not reached, with the chat open waiting for an answer.
+  */
+  describe("a turn that ends at an Approval Gate", () => {
+    const at = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString();
+    const lines = (rows: unknown[]) => rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+    const said = (text: string, s: number) => ({
+      timestamp: at(s),
+      type: "response_item",
+      payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] },
+    });
+    const asked = [
+      { timestamp: at(0), type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx" } },
+      { timestamp: at(1), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: MARKED_PROMPT }] } },
+      said(`ANTHILL-STEP ${RUN_ID} ${NONCE} implement`, 2),
+      { timestamp: at(3), type: "response_item", payload: { type: "function_call", name: "exec_command", call_id: "call-1" } },
+      said(`ANTHILL-STEP ${RUN_ID} ${NONCE} decide`, 4),
+      said("[//]: # (anthill:decide)\n\nWhich way do we go?", 5),
+      { timestamp: at(5.1), type: "event_msg", payload: { type: "task_complete" } },
+    ];
+    const run = () => ({
+      ...pending("codex"),
+      detectedSessionId: "sess-cx",
+      state: "detected_live" as const,
+      steps: [
+        { id: "implement", name: "Implement" },
+        { id: "decide", name: "Decide", gate: true as const },
+        { id: "test", name: "Present" },
+      ],
+    });
+
+    it("is waiting for an answer, not the session finishing", async () => {
+      const dir = await root();
+      await writeCodex(dir, "sess-cx", lines(asked));
+      const { evidence, events } = await new CodexObserver(dir).poll(run(), new Date().toISOString());
+
+      expect(evidence).not.toContainEqual(expect.objectContaining({ kind: "completed" }));
+      expect(evidence).toContainEqual(expect.objectContaining({ kind: "awaiting", sessionId: "sess-cx" }));
+      expect(events).toContainEqual(expect.objectContaining({ kind: "notification", title: "Waiting for your answer" }));
+      expect(events.filter((event) => event.kind === "turn.end")).toEqual([]);
+    });
+
+    it("finishes as usual once the answer is given and the work is done", async () => {
+      const dir = await root();
+      await writeCodex(
+        dir,
+        "sess-cx",
+        lines([
+          ...asked,
+          { timestamp: at(20), type: "event_msg", payload: { type: "task_started" } },
+          { timestamp: at(20.1), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "decided" }] } },
+          said(`ANTHILL-STEP ${RUN_ID} ${NONCE} test`, 21),
+          said(`Presented.\nANTHILL-DONE ${RUN_ID} ${NONCE}`, 22),
+          { timestamp: at(22.1), type: "event_msg", payload: { type: "task_complete" } },
+        ]),
+      );
+      const { evidence } = await new CodexObserver(dir).poll(run(), new Date().toISOString());
+      expect(evidence).toContainEqual(expect.objectContaining({ kind: "completed" }));
+      expect(evidence).not.toContainEqual(expect.objectContaining({ kind: "awaiting" }));
+    });
+
+    it("still finishes a turn that ends on an ordinary step", async () => {
+      const dir = await root();
+      await writeCodex(dir, "sess-cx", lines([...asked.slice(0, 4), { timestamp: at(5.1), type: "event_msg", payload: { type: "task_complete" } }]));
+      const { evidence } = await new CodexObserver(dir).poll(run(), new Date().toISOString());
+      expect(evidence).toContainEqual(expect.objectContaining({ kind: "completed" }));
+    });
+  });
+
+  /*
     ANT-208, W9 on Codex in the 0.8.5 QA: Stop pressed while the tester
     subagent worked. Codex wrote turn_aborted in the session's file and in
     the subagent's, and nothing else; Anthill read neither, and the step

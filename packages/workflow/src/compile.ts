@@ -168,8 +168,8 @@ function indentBlock(text: string, indent: string): string {
  * `buildPrompt` below) — purpose, task, inputs, expected output, success
  * criteria, handoff — so a subagent reads the same picture of its own work
  * that the orchestrator reads about it. Constraints are handled separately by
- * the caller: they are gathered once across every stage an agent does, not
- * repeated per step. `category` is included because it is what an author sees
+ * the caller: those every stage shares are said once for the whole agent, and
+ * the rest stay with the stage they belong to (ANT-216). `category` is included because it is what an author sees
  * first in the inspector (`{category} · {label}`) and in the main prompt's
  * own "Action:" line — the same label everywhere a step's action is named.
  */
@@ -231,6 +231,17 @@ function buildAgentFile(
   if (profile.role?.trim()) body.push("", profile.role.trim());
   if (profile.description?.trim()) body.push("", profile.description.trim());
 
+  /*
+    Constraints every stage shares are the agent's; the rest are one stage's.
+    Gathered into one global list, two exclusive branches' rules — "write
+    KEEP.md, never DECLINED.md" and the reverse — forbade the agent both of the
+    files it existed to write, one of them each time (ANT-216).
+  */
+  const constraintsOf = (step: WorkflowNode) => agentConfig(step).constraints ?? [];
+  const shared = [...new Set(steps.flatMap(constraintsOf))].filter((item) =>
+    steps.every((step) => constraintsOf(step).includes(item)),
+  );
+
   if (steps.length === 1) {
     const config = agentConfig(steps[0]);
     const action = config.actionKind ? actionDefinition(config.actionKind) : undefined;
@@ -247,14 +258,20 @@ function buildAgentFile(
       const action = config.actionKind ? actionDefinition(config.actionKind) : undefined;
       body.push("", `## ${step.name} (${action ? actionLabel(action) : "Step"})`);
       body.push(...renderStepDetail(config));
+      const own = [...new Set(constraintsOf(step))].filter((item) => !shared.includes(item));
+      if (own.length > 0) {
+        body.push("", "Constraints for this stage only:", ...own.map((item) => `- ${item}`));
+      }
     }
   }
 
-  const constraints = [
-    ...new Set(steps.flatMap((step) => agentConfig(step).constraints ?? [])),
-  ];
-  if (constraints.length > 0) {
-    body.push("", "## Constraints", "", ...constraints.map((item) => `- ${item}`));
+  if (shared.length > 0) {
+    body.push(
+      "",
+      steps.length > 1 ? "## Constraints for every stage" : "## Constraints",
+      "",
+      ...shared.map((item) => `- ${item}`),
+    );
   }
 
   const instructions = body.join("\n").trim();

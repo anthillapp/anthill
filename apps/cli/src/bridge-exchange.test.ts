@@ -117,8 +117,10 @@ async function shell(options: { before?: (store: ExchangeStore) => Promise<void>
   cleanup.push(() => bridge.close());
 
   let nextCall = 1;
+  // Through JSON, as the /api socket carries it: an argument left undefined
+  // arrives as null (ANT-234).
   const call = (tab: number, channel: string, ...args: unknown[]): Promise<unknown> =>
-    new Promise((settleCall) => handler!({ id: nextCall++, channel, args }, settleCall, tab));
+    new Promise((settleCall) => handler!(JSON.parse(JSON.stringify({ id: nextCall++, channel, args })), settleCall, tab));
 
   const tab = (id: number) => ({
     /** What a page does on mount: collect anything waiting, naming the workflow in its URL if any. */
@@ -129,8 +131,12 @@ async function shell(options: { before?: (store: ExchangeStore) => Promise<void>
     /** A socket that is open but whose page has not asked yet. */
     socket: () => { connected.add(id); },
     opens: (): Open[] => (sent.get(id) ?? []).filter((m) => m.channel === OPEN_WORKFLOW_CHANNEL).map((m) => m.payload as Open),
-    /** What a page does once the document is on screen, or when the user says no. */
-    answer: (open: Open, outcome: "shown" | "declined" | "confirming" = "shown") =>
+    /**
+     * What a page does once the document is on screen, or when the user says
+     * no. On screen, the canvas names no outcome (`workflowOpened(path, id)`),
+     * and the web bridge still sends all three places.
+     */
+    answer: (open: Open, outcome?: "shown" | "declined" | "confirming") =>
       call(id, IpcChannel.workflowOpened, open.path, open.deliveryId, outcome),
     close: () => {
       connected.delete(id);

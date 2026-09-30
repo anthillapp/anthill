@@ -89,6 +89,9 @@ import { writeSettingsWithConsent } from "../../desktop/src/main/diagnostics-con
 
 const moduleDir = fileURLToPath(new URL(".", import.meta.url));
 
+/** The answers a page may give about a delivered workflow. */
+const ACKNOWLEDGED = ["shown", "declined", "confirming", "opening"] as const;
+
 /**
  * The CLI's answer to the desktop's preload: it maps every `IpcChannel`
  * onto the same pure-Node service modules the desktop main process uses
@@ -493,8 +496,12 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     return undefined;
   });
   register(IpcChannel.workflowOpened, async (args, tab = IN_PROCESS_TAB) => {
-    const [path, id, outcome] = args as [unknown, unknown, "shown" | "declined" | "confirming" | "opening" | undefined];
+    const [path, id, answered] = args as [unknown, unknown, unknown];
     if (typeof path !== "string") return;
+    // The page's arguments come through JSON, which has no undefined: the
+    // canvas's `workflowOpened(path, id)` arrives as `[path, id, null]`, and a
+    // null outcome is no outcome — "shown" — not a fourth answer (ANT-234).
+    const outcome = ACKNOWLEDGED.find((known) => known === answered);
     // An answer about a delivery counts only from the tab it was sent to, and
     // what a page is showing only from the handover tab: the desktop takes
     // both from its one window and nothing else.

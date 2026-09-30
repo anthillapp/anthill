@@ -482,6 +482,17 @@ describe("a session that said it was finished", () => {
     expect(second.evidence).toContainEqual(expect.objectContaining({ kind: "activity", resumes: true }));
   });
 
+  // ANT-215: nor is reading the run back through Anthill's own tools.
+  it("does not count a call to Anthill's own tools as work", async () => {
+    const path = await log([
+      at("2026-08-29T10:04:00.000Z", { hook_event_name: "PreToolUse", tool_name: "mcp__plugin_anthill_exchange__get_workflow", tool_use_id: "toolu_1" }),
+      at("2026-08-29T10:04:02.000Z", { hook_event_name: "PostToolUse", tool_name: "mcp__plugin_anthill_exchange__get_workflow", tool_use_id: "toolu_1" }),
+      at("2026-08-29T10:04:05.000Z", { hook_event_name: "Stop", background_tasks: [] }),
+    ]);
+    const { evidence } = await new HookLogObserver(path).poll(pending(), NOW);
+    expect(evidence).toContainEqual(expect.objectContaining({ kind: "activity", resumes: false }));
+  });
+
   it("does not settle on a done marker from another run or another copy", async () => {
     const path = await log([
       at("2026-08-29T10:04:00.000Z", { hook_event_name: "Stop", last_assistant_message: "ANTHILL-DONE ANT-OTHER 9f8e7d" }),

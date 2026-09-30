@@ -1567,6 +1567,32 @@ describe("a subagent whose end only the SubagentStop hook records", () => {
   });
 });
 
+/*
+  ANT-215. A plugin-bound run reported itself done through \`anthill done\`,
+  then read its workflow back with the plugin's get_workflow. That call put
+  the last step back to Working, and the run to Live.
+*/
+describe("a run read back through Anthill's own tools after it said it was done", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-30T06:00:28.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+
+  it("stays done", () => {
+    const view = foldLiveSession(workflow, run(), [
+      event({ kind: "step.marker", title: "Step announced implement", blockId: "implement", source: "anthill", channel: "anthill:report", at: T(0) }),
+      tx({ kind: "tool.start", title: "Write", toolName: "Write", toolUseId: "w", at: T(5) }),
+      event({ kind: "step.marker", title: "Step announced test", blockId: "test", source: "anthill", channel: "anthill:report", at: T(20) }),
+      tx({ kind: "tool.start", title: "Read", toolName: "Read", toolUseId: "r", at: T(25) }),
+      event({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", source: "anthill", channel: "anthill:report", at: T(40) }),
+      tx({ kind: "tool.start", title: "mcp__plugin_anthill_exchange__get_workflow", toolName: "mcp__plugin_anthill_exchange__get_workflow", toolUseId: "g", at: T(41) }),
+      tx({ kind: "tool.end", title: "Tool finished", toolName: "mcp__plugin_anthill_exchange__get_workflow", toolUseId: "g", at: T(43) }),
+      tx({ kind: "turn.end", title: "The agent finished its turn", at: T(50) }),
+    ]);
+    expect(view.blocks.test.state).toBe("done");
+    expect(view.activeBlockIds).toEqual([]);
+  });
+});
+
 describe("a session that ends with its subagents still out", () => {
   const T = (s: number) => new Date(Date.parse("2026-09-28T03:33:40.000Z") + s * 1000).toISOString();
   const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>

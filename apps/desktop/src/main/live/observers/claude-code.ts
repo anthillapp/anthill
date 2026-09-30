@@ -31,6 +31,7 @@ import { join } from "node:path";
 import {
   TIMING,
   boundSessionId,
+  isAnthillTool,
   messageExcerpt,
   parseDoneMarker,
   parseStepMarkers,
@@ -873,8 +874,10 @@ function scan(
         }
 
         if (block.type === "tool_use") {
-          if (stamped) state.lastWorkAt = stamped;
           const name = str(block.name) ?? "a tool";
+          // Reading or reporting on the run through Anthill's own tools is
+          // not the session doing more work (ANT-215).
+          if (stamped && !isAnthillTool(name)) state.lastWorkAt = stamped;
           const input = isRecord(block.input) ? block.input : {};
           const id = str(block.id);
           // Claude Code's delegation tool has been called both `Task` and

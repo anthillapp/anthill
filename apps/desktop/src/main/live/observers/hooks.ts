@@ -37,7 +37,7 @@ import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { TIMING, parseDoneMarker, parseStepMarkers, type Evidence, type MarkerCli, type PendingRun } from "@anthill/live";
+import { TIMING, isAnthillTool, parseDoneMarker, parseStepMarkers, type Evidence, type MarkerCli, type PendingRun } from "@anthill/live";
 
 import type { ObservationEventDraft, PollResult } from "./types.js";
 import { newCursor, readRotatingLinesUpTo, skipRotationOlderThan, type TailCursor } from "./tail.js";
@@ -398,10 +398,12 @@ export class HookLogObserver {
       this.reportedAt.set(run.anthillRunId, newest);
       // Whether any of it is work: a prompt, or a tool called. A Stop or a
       // turn ending after the done line is the same turn finishing, and must
-      // not read as the session going on (ANT-188).
+      // not read as the session going on (ANT-188). Nor is a call to
+      // Anthill's own tools (ANT-215).
       const resumes = events.some(
         (event) =>
-          (!already || event.at > already) && (event.kind === "prompt.submit" || event.kind === "tool.start"),
+          (!already || event.at > already) &&
+          (event.kind === "prompt.submit" || (event.kind === "tool.start" && !isAnthillTool(event.toolName))),
       );
       evidence.push({ kind: "activity", sessionId, at: newest, resumes });
     }

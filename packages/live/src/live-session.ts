@@ -21,7 +21,7 @@ import { nodesOnCycles, parallelPlan } from "@anthill/workflow";
 
 import { attribute, buildWorkflowIndex, type BlockMapping, type WorkflowIndex } from "./attribution.js";
 import { projectJournal } from "./channels.js";
-import { completionOf, type ObservationEvent } from "./observation-event.js";
+import { completionOf, isAnthillTool, type ObservationEvent } from "./observation-event.js";
 import type { PendingRun } from "./pending-run.js";
 
 /** How a block is drawn while a session is being observed. */
@@ -517,6 +517,11 @@ export function foldLiveSession(
   for (const event of journal) {
     if (event.printedBy) plumbing.add(event.printedBy);
     if (event.kind === "subagent.start" && event.toolUseId) plumbing.add(event.toolUseId);
+    // Calls to Anthill's own tools: the session reading or reporting on the
+    // run, not working in it (ANT-215).
+    if ((event.kind === "tool.start" || event.kind === "tool.end") && event.toolUseId && isAnthillTool(event.toolName)) {
+      plumbing.add(event.toolUseId);
+    }
     if (
       event.kind === "message" &&
       event.parentToolUseId &&
@@ -757,7 +762,11 @@ export function foldLiveSession(
         };
         spans.push({ blockId: announced, pass: blocks[announced].passes, startedAt: event.at });
         finishedAt = undefined;
-      } else if (resumesWork(event) && event.kind !== "session.start") {
+      } else if (
+        resumesWork(event) &&
+        event.kind !== "session.start" &&
+        !(event.toolUseId && plumbing.has(event.toolUseId))
+      ) {
         blocks[announced] = { ...blocks[announced], state: "running", enteredAt: event.at };
         spans.push({ blockId: announced, pass: blocks[announced].passes, startedAt: event.at });
         finishedAt = undefined;

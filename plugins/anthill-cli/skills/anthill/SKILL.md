@@ -294,7 +294,15 @@ anthill done <run-id> <nonce>
 ```
 
 Run `anthill run` once immediately before work. Run `anthill step` only when
-actually entering that block. Run `anthill done` only after the bound workflow's
+actually entering that block — and every block you work on gets its own, when you
+enter it. Anthill knows only what you report: a block worked on without a report
+is drawn as never reached, and the jump past it as the work moving on by itself.
+Starting a block while another is still open (a background review, a subagent
+not back yet) is entering it, so report it then; returning to a block you left
+is entering it again. Before reporting the next block, check that each block
+you worked on since the last report had its own, and report a missed one before
+moving on rather than jump past it. Report only blocks you worked on; say in the
+chat why one was not needed. Run `anthill done` only after the bound workflow's
 done criteria and final action are complete. These commands write Anthill's
 local progress journal outside the project workspace. If Codex reports
 `EPERM`/`EACCES` for that journal, request the narrow local permission the host

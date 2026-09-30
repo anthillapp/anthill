@@ -70,3 +70,26 @@ describe.each([
     expect(text()).toContain("A bare\n`dev` is never the flag");
   });
 });
+
+/*
+  A run's graph shows only the steps the agent reports. A block worked on while
+  another waited on a background review was never reported, and the canvas drew
+  it as skipped ("moved on on its own") although it was done. Both skills say
+  every block gets its own report, parallel work included.
+*/
+describe.each([
+  { plugin: "Claude Code", path: "plugins/anthill/skills/workflow/SKILL.md" },
+  { plugin: "Codex", path: "plugins/anthill-cli/skills/anthill/SKILL.md" },
+])("the $plugin skill's progress reports", ({ path }) => {
+  const text = () => readFileSync(join(ROOT, path), "utf8").replace(/\s+/g, " ");
+
+  it("gives every block it works on its own step, parallel work included", () => {
+    expect(text()).toMatch(/every block you work on gets its own/i);
+    expect(text()).toMatch(/background/);
+    expect(text()).toMatch(/subagent not (yet )?back|subagent not back yet/);
+  });
+
+  it("checks for a missed block before moving on, rather than jumping past it", () => {
+    expect(text()).toMatch(/report(s|ing)? (it|a missed one) (now, )?before (the next|moving on)/);
+  });
+});

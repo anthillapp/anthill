@@ -365,6 +365,22 @@ actually start it, not in advance. If a command cannot be run,
 say so once and carry on with the work — the reporting is how the user watches,
 not how the work happens.
 
+**Every block you work on gets its own `step`, when you enter it.** Anthill
+knows only what you report. A block you worked on without reporting it is drawn
+as never reached, and the jump past it as the work having moved on by itself —
+which tells the user a step was skipped when it was done.
+
+* **Work in parallel is still entering a block.** Starting the next block while
+  another is still open — a review running in the background, a subagent not
+  back yet — is entering it. Report it then, not when the other one finishes.
+* **Coming back is entering again.** Returning to a block you left, even for a
+  moment (answering that background review, say), report it again.
+* **Check before you move on.** Before reporting the next block, make sure each
+  block you worked on since your last report has had its own. If one was
+  missed, report it now, before the next, rather than jump past it.
+* **Only blocks you worked on.** A block the work made unnecessary is not
+  reported; say in the chat why it was not needed.
+
 This is the whole of what `watch` shows. A watched session that never reports a
 step is a Live Session page with a graph nobody is moving through, which is the
 one way this command can disappoint somebody who asked for nothing else.

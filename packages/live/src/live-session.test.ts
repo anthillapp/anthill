@@ -1647,6 +1647,82 @@ describe("subagents reused for a later step", () => {
   });
 });
 
+/*
+  ANT-217, a plugin watch run in the 0.8.5 QA. Two parallel writers announced
+  together; the session then wrote the agent files itself, and dispatched both
+  writers in the background with no step tag — only the agent's name as the
+  description. The Caption step was closed "Done · took 287ms" by the session's
+  own setup work, both dispatches went to the Theme step, and the Stop left
+  Captions green with its writer still running.
+*/
+describe("parallel writers dispatched with no step tag", () => {
+  const writers: Workflow = {
+    ...workflow,
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "captions", type: "agent", name: "Write captions", config: { actionKind: "agent-step", task: "a", agentId: "agent-caption" } },
+      { id: "themes", type: "agent", name: "Write themes", config: { actionKind: "agent-step", task: "b", agentId: "agent-theme" } },
+      { id: "review", type: "agent", name: "Review", config: { actionKind: "verify", task: "c", agentId: "agent-review" } },
+      { id: "end", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "captions" },
+      { id: "e2", source: "start", target: "themes" },
+      { id: "e3", source: "captions", target: "review" },
+      { id: "e4", source: "themes", target: "review" },
+      { id: "e5", source: "review", target: "end" },
+    ],
+    metadata: {
+      workflow: {
+        formatVersion: 4,
+        agents: [
+          { id: "agent-caption", name: "Caption Writer" },
+          { id: "agent-theme", name: "Theme Writer" },
+          { id: "agent-review", name: "Reviewer" },
+        ],
+      },
+    },
+  };
+  const T = (s: number) => new Date(Date.parse("2026-09-30T06:48:40.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const report = (blockId: string, s: number) =>
+    event({ kind: "step.marker", title: `Step announced ${blockId}`, blockId, source: "anthill", channel: "anthill:report", at: T(s) });
+  const dispatched = [
+    report("captions", 0),
+    report("themes", 0.3),
+    tx({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "setup", at: T(27) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "setup", at: T(28) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "cap", agentName: "general-purpose", detail: "Caption Writer", background: true, at: T(34) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "thm", agentName: "general-purpose", detail: "Theme Writer", background: true, at: T(38) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "thm", background: true, at: T(39) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "cap", background: true, at: T(39) }),
+    tx({ kind: "tool.start", title: "Read", toolName: "Read", toolUseId: "cap-read", parentToolUseId: "cap", author: { kind: "subagent" }, at: T(41) }),
+  ];
+  const stopped = tx({ kind: "notification", title: "Stopped by hand", at: T(50) });
+
+  it("sends each writer to the step its agent belongs to", () => {
+    const view = foldLiveSession(writers, run(), dispatched);
+    const cards = view.events.filter((item) => item.kind === "subagent.start");
+    expect(cards.map((card) => card.mapping.blockId)).toEqual(["captions", "themes"]);
+    expect(view.events.find((item) => item.toolUseId === "cap-read")?.mapping.blockId).toBe("captions");
+  });
+
+  it("keeps a writer's step open while the writer works, as the same pass", () => {
+    const view = foldLiveSession(writers, run(), dispatched);
+    expect(view.blocks.captions.state).toBe("running");
+    expect(view.blocks.captions.passes).toBe(1);
+    expect(view.blocks.themes.state).toBe("running");
+  });
+
+  it("claims no finish for either writer when the session is stopped", () => {
+    const view = foldLiveSession(writers, run({ state: "observation_lost" }), [...dispatched, stopped]);
+    expect(view.blocks.captions.state).toBe("unknown");
+    expect(view.blocks.themes.state).toBe("unknown");
+    expect(finishedSteps(view)).toBe(0);
+  });
+});
+
 describe("a session that ends with its subagents still out", () => {
   const T = (s: number) => new Date(Date.parse("2026-09-28T03:33:40.000Z") + s * 1000).toISOString();
   const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>

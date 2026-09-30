@@ -133,3 +133,17 @@ export function attribute(
 
   return { confidence: "unmapped", how: "nothing in the record names a step" };
 }
+
+/**
+ * The one step whose agent goes by this name, if exactly one does.
+ *
+ * What a spawn that names no step can still say: Claude Code's Agent call
+ * carries the agent it runs and a short description, and a harness plugin
+ * writes the workflow's own agent name there ("Caption Writer"). Two steps
+ * sharing an agent are evidence for neither (ANT-217).
+ */
+export function stepForAgent(index: WorkflowIndex, name: string | undefined): string | undefined {
+  if (!name) return undefined;
+  const owners = index.byAgent.get(normalizeAgent(name));
+  return owners?.length === 1 ? owners[0] : undefined;
+}

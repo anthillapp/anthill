@@ -19,7 +19,7 @@
 import type { Workflow } from "@anthill/workflow-schema";
 import { nodesOnCycles, parallelPlan } from "@anthill/workflow";
 
-import { attribute, buildWorkflowIndex, type BlockMapping, type WorkflowIndex } from "./attribution.js";
+import { attribute, buildWorkflowIndex, stepForAgent, type BlockMapping, type WorkflowIndex } from "./attribution.js";
 import { projectJournal } from "./channels.js";
 import { completionOf, isAnthillTool, type ObservationEvent } from "./observation-event.js";
 import type { PendingRun } from "./pending-run.js";
@@ -353,15 +353,20 @@ export function foldLiveSession(
    * A step left with no work done turns out to have been finished after all:
    * closed as of the moment it was left, and the move that left it counted.
    */
+  /** Steps whose last pass was closed with nothing done in it. */
+  const closedEmpty = new Set<string>();
+
   const closePending = (id: string) => {
     const pending = pendingClose.get(id);
     if (!pending) return;
     pendingClose.delete(id);
     finish(id, pending.leftAt);
+    closedEmpty.add(id);
     if (pending.detour) detours.push(pending.detour);
   };
 
   const enter = (id: string, at: string, viaTag: boolean) => {
+    closedEmpty.delete(id);
     // Back to a step left with nothing done in it: it never ended, so this is
     // the same pass going on, not another (ANT-166 — "A, B" in one command,
     // then "A" again to start on it).
@@ -687,13 +692,25 @@ export function foldLiveSession(
     */
     if (event.kind === "subagent.start" && event.toolUseId) {
       const own = saysItWorksOn.get(event.toolUseId);
+      // The agent it runs, when exactly one step has that agent (ANT-217).
+      const named = stepForAgent(index, event.agentName) ?? stepForAgent(index, event.detail);
       const target =
         event.stepTag && blocks[event.stepTag]
           ? event.stepTag
           : own && blocks[own]
             ? own
-            : announced;
+            : named && blocks[named]
+              ? named
+              : announced;
       if (target && blocks[target]) {
+        // The dispatch card belongs where its subagent's work goes.
+        const card = attributed[attributed.length - 1];
+        if (card?.toolUseId === event.toolUseId && card.mapping.blockId !== target) {
+          card.mapping =
+            target === named && !event.stepTag && !own
+              ? { blockId: target, confidence: "likely", how: "the agent this subagent runs belongs to this step" }
+              : { blockId: target, confidence: "exact", how: "a subagent started for this step" };
+        }
         delegations.set(event.toolUseId, {
           blockId: target,
           background: event.background === true,
@@ -709,7 +726,10 @@ export function foldLiveSession(
         // coming back to it — a new pass, which its line will then confirm
         // (ANT-184).
         if (target !== announced && blocks[target].state === "done" && !finishedAt) {
-          if (!workSinceEntered) reopen(target);
+          // Closed with nothing done in it, when the session went on to other
+          // work: announced with its sibling, then set up for (ANT-217). Its
+          // subagent says it was not over, and this is the same pass.
+          if (!workSinceEntered || closedEmpty.has(target)) reopen(target);
           else {
             const pass = blocks[target].passes + 1;
             blocks[target] = { ...blocks[target], state: "running", enteredAt: event.at, passes: pass };

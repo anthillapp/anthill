@@ -356,6 +356,18 @@ export function foldLiveSession(
   /** Steps whose last pass was closed with nothing done in it. */
   const closedEmpty = new Set<string>();
 
+  /*
+    Tool calls that failed in a step's current pass and were not made to work
+    after: by step, the tools whose last call there failed. A step whose Write
+    was refused, and the file never written, was settled Done when the run
+    went quiet — the refusal was on the page in red, and the session never said
+    the work was done (ANT-220).
+  */
+  const failedIn = new Map<string, Set<string>>();
+  const toolNames = new Map<string, string>();
+  const UNFINISHED_NOTE = (tool: string) =>
+    `A ${tool} call in this step failed and was never made to work, and the session ended without saying the work was done.`;
+
   const closePending = (id: string) => {
     const pending = pendingClose.get(id);
     if (!pending) return;
@@ -367,6 +379,7 @@ export function foldLiveSession(
 
   const enter = (id: string, at: string, viaTag: boolean) => {
     closedEmpty.delete(id);
+    failedIn.delete(id);
     // Back to a step left with nothing done in it: it never ended, so this is
     // the same pass going on, not another (ANT-166 — "A, B" in one command,
     // then "A" again to start on it).
@@ -545,9 +558,14 @@ export function foldLiveSession(
       reused for never waited on it (ANT-218).
     */
     const reused = event.parentToolUseId ? delegations.get(event.parentToolUseId) : undefined;
-    if (reused && reused.delegateEnded && (event.kind === "tool.start" || event.kind === "message")) {
+    // A tool call, not a message: an agent's closing words and the end of its
+    // turn are one record, stamped alike, and may be read in either order.
+    if (reused && reused.delegateEnded && event.kind === "tool.start") {
       reused.delegateEnded = false;
       reused.returned = false;
+      // Its call returned long ago and will not again: reused, it runs on its
+      // own, and the end of its turn is its end.
+      reused.background = true;
       // Its next ending is a new one, to be paired with its own hook.
       endedByHook.delete(event.parentToolUseId as string);
       if (announced && blocks[announced] && reused.blockId !== announced) {
@@ -564,6 +582,16 @@ export function foldLiveSession(
     }
     const mapping = attribute(event, index, announced, delegatedFrom);
     attributed.push({ ...event, mapping });
+    if (event.kind === "tool.start" && event.toolUseId && event.toolName) toolNames.set(event.toolUseId, event.toolName);
+    if (event.kind === "tool.end" && event.toolUseId && mapping.blockId && event.ok !== undefined) {
+      const tool = event.toolName ?? toolNames.get(event.toolUseId);
+      if (tool && !isAnthillTool(tool)) {
+        const failed = failedIn.get(mapping.blockId) ?? new Set<string>();
+        if (event.ok === false) failed.add(tool);
+        else failed.delete(tool);
+        failedIn.set(mapping.blockId, failed);
+      }
+    }
     // Usage is bookkeeping, not activity; counting it against "events not
     // mapped to a step" would make every quiet turn look like a mystery.
     if (mapping.confidence === "unmapped" && event.kind !== "usage") unmappedCount += 1;
@@ -911,7 +939,9 @@ export function foldLiveSession(
         if (stoppedFor.has(announced)) finish(announced, lastSeenAt, "failed", STOPPED_NOTE);
         else if (outstanding(announced)) finish(announced, lastSeenAt, "unknown", CUT_OFF_NOTE);
         else if (stoppedAndEnded) finish(announced, lastSeenAt, "failed", STOPPED_HERE_NOTE);
-        else finish(announced, lastSeenAt);
+        else if (failedIn.get(announced)?.size) {
+          finish(announced, lastSeenAt, "unknown", UNFINISHED_NOTE([...(failedIn.get(announced) ?? [])][0]));
+        } else finish(announced, lastSeenAt);
       }
     } else if (open && run.state === "failed") {
       finish(announced, lastSeenAt ?? run.lastObservedAt ?? run.createdAt, "failed", run.statusMessage);

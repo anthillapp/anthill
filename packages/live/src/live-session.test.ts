@@ -1723,6 +1723,70 @@ describe("parallel writers dispatched with no step tag", () => {
   });
 });
 
+/*
+  ANT-220, W13 through the Claude plugin in the 0.8.5 QA. The Writer's Write
+  of SUMMARY.md was refused by Claude Code; the file was never written, the
+  session was stopped and said the run was not completed, and never reported
+  done. The run went quiet and the Writer step was settled Done.
+*/
+describe("a step whose work failed and the run went quiet", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-30T07:12:54.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const sub = { kind: "subagent" as const };
+  const refused = [
+    step("implement"),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "writer", stepTag: "implement", at: T(5) }),
+    tx({ kind: "tool.start", title: "Write", toolName: "Write", toolUseId: "w1", parentToolUseId: "writer", author: sub, at: T(12) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "w1", ok: false, parentToolUseId: "writer", author: sub, at: T(12.1) }),
+    tx({ kind: "tool.start", title: "SubagentHandback", toolName: "SubagentHandback", toolUseId: "h1", parentToolUseId: "writer", author: sub, at: T(22) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "h1", ok: true, parentToolUseId: "writer", author: sub, at: T(23) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "writer", author: sub, at: T(25) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "writer", ok: true, at: T(30) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", at: T(60) }),
+    // The hooks carried this run: the Stop hook says only that the turn ended.
+    event({ kind: "turn.end", title: "The agent finished its turn", source: "hook", channel: "claude-code:hook", at: T(60.5) }),
+  ];
+
+  it("is not called done", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), refused);
+    expect(view.blocks.implement.state).toBe("unknown");
+    expect(view.blocks.implement.note).toContain("Write call in this step failed");
+    expect(finishedSteps(view)).toBe(0);
+  });
+
+  it("is done once the same tool was made to work", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      ...refused.slice(0, 4),
+      tx({ kind: "tool.start", title: "Write", toolName: "Write", toolUseId: "w2", parentToolUseId: "writer", author: sub, at: T(14) }),
+      tx({ kind: "tool.end", title: "Tool finished", toolUseId: "w2", ok: true, parentToolUseId: "writer", author: sub, at: T(14.1) }),
+      ...refused.slice(4),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+  });
+
+  it("is done when the session said the work was done", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      ...refused,
+      event({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", source: "transcript", channel: "claude-code:transcript", at: T(61) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+  });
+
+  // The Writer was then reused through SendMessage. Started in the
+  // foreground, its call had already returned, and would never again.
+  it("settles a reused foreground agent when its turn ends", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      ...refused.slice(0, 8),
+      tx({ kind: "tool.start", title: "SubagentHandback", toolName: "SubagentHandback", toolUseId: "h2", parentToolUseId: "writer", author: sub, at: T(48) }),
+      tx({ kind: "tool.end", title: "Tool finished", toolUseId: "h2", ok: true, parentToolUseId: "writer", author: sub, at: T(49) }),
+      tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "writer", author: sub, at: T(51) }),
+      tx({ kind: "turn.end", title: "The agent finished its turn", at: T(60) }),
+    ]);
+    expect(view.blocks.implement.note).not.toContain("never handed back");
+  });
+});
+
 describe("a session that ends with its subagents still out", () => {
   const T = (s: number) => new Date(Date.parse("2026-09-28T03:33:40.000Z") + s * 1000).toISOString();
   const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>

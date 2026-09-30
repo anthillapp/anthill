@@ -222,7 +222,9 @@ plausible guess does more damage than an admitted gap.
      `reference/workflow-format.md`, Agents).
    * `invalid` — nothing was stored, and the problems say what to change.
 
-   The result carries an `anthill://workflow/<id>` link. Give it to the user —
+   The result's `url` is the link to the workflow: `anthill://workflow/<id>`
+   for the desktop app, `http://…/workflow/<id>` for the web shell (Linux,
+   Windows, or macOS set up with `plugin:target -- web`). Give it to the user as it is —
    it opens or focuses the workflow. **Keep the workflow id**; every later call
    needs it, and a new session cannot guess it.
 
@@ -232,7 +234,8 @@ plausible guess does more damage than an admitted gap.
    the user is looking at:
 
    * `opened` — the link was taken. The app is starting or already in front.
-   * anything else — `no_handler`, `failed`, `unsupported`, `disabled` — carries
+   * anything else — `running`, `started`, `starting`, `not_running`,
+     `no_handler`, `failed`, `unsupported`, `disabled` — carries
      a message saying why. Pass it on; the handover is stored either way, and
      the link still opens it by hand.
 
@@ -365,7 +368,8 @@ one way this command can disappoint somebody who asked for nothing else.
 ## Picking a handover back up
 
 A new session knows nothing. Ask the user for the workflow id, or take it from
-the `anthill://` link if they have it, and read it with `get_workflow`. **Never
+the link if they have it (`anthill://workflow/<id>`, or the web shell's
+`http://…/workflow/<id>`), and read it with `get_workflow`. **Never
 guess from recency**: opening somebody else's workflow because it was the most
 recent is worse than asking. Picking up an agreed scope is not a new draft, and
 does not need the clarification questions again.

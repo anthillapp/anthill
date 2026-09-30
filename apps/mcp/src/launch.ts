@@ -82,6 +82,12 @@ export type LaunchReport = {
    * the wrong build is seen at once (architecture doc, §5.6).
    */
   target?: { id: "app" | "electron-dev" | "web"; label: string };
+  /**
+   * The link that opens the workflow in the Anthill this handover reached,
+   * where it is not `anthill://…`: the web shell's `http://…/workflow/<id>`
+   * (ANT-231). The result's `url` is this when it is present.
+   */
+  link?: string;
 };
 
 /** Asks the machine to open one `anthill://` link. Injected, so tests do not open anything. */

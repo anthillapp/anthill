@@ -46,9 +46,10 @@ export type CliServer = {
   /** The port actually bound (the requested port, or the one chosen when 0). */
   port: number;
   /**
-   * The per-process token a client must present to open /api. The CLI prints
-   * it in the URL it tells the author to open; the server holds it and never
-   * serves it in a page, so a page on another origin cannot obtain it.
+   * The per-process token a client must present to open /api. The CLI puts it
+   * in the URL it opens or prints, and in its owner-only instance.lock for the
+   * MCP server's links (ANT-231); the server never serves it in a page, so a
+   * page on another origin cannot obtain it.
    */
   token: string;
   /** Broadcast one JSON-serialisable message to every connected client. */
@@ -246,9 +247,9 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
   const clientCount = (): number => [...clients].filter((client) => !client.closed).length;
   let nextClientId = 1;
   let closePromise: Promise<void> | null = null;
-  // The token is generated per process and held only here; it is never written
-  // into a served page. The CLI prints it in the URL it tells the author to
-  // open, and the browser carries it back in the /api handshake.
+  // The token is generated per process and never written into a served page.
+  // The CLI puts it in the URL it opens or prints and in its owner-only lock,
+  // and the browser carries it back in the /api handshake.
   const token = randomBytes(32).toString("hex");
   // The port the kernel actually bound (set in the `listen` callback below);
   // the Origin check needs it, and it is not known until then for `--port 0`.

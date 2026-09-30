@@ -44,11 +44,11 @@ import {
   electronDevLauncher,
   readTargetSetting,
   resolveTarget,
-  webLauncher,
   type ResolvedTarget,
   type TargetContext,
 } from "./target.js";
 import { PLUGIN_HOST_ENV, PLUGIN_VERSION_ENV, pluginDriftNotice } from "./plugin-drift.js";
+import { webLauncher, webStart } from "./web-launcher.js";
 import { registerExchangeTools } from "./tools.js";
 
 const SERVER_NAME = "anthill";
@@ -134,7 +134,7 @@ function launcherFor(options: ServerOptions) {
   return (resolved: ResolvedTarget) => {
     if (!options.launch) return disabledLauncher;
     if (resolved.target === "electron-dev") return electronDevLauncher(resolved.dataDir, resolved.checkout, devStart());
-    if (resolved.target === "web") return webLauncher(resolved.dataDir);
+    if (resolved.target === "web") return webLauncher(resolved.dataDir, resolved.checkout, webStart());
     return appLauncher(openUrl, resolved.checkout);
   };
 }

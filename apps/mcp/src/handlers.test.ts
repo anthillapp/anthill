@@ -17,7 +17,7 @@
 import { ExchangeStore, type InboxDrop } from "@anthill/exchange-store";
 import { revisionDigest, WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-exchange";
 import type { Workflow } from "@anthill/workflow-schema";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -1213,6 +1213,49 @@ describe("the Anthill a chat reaches", () => {
     expect(answer.app?.target).toEqual({ id: "app", label: "Anthill (installed app)" });
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain("This chat's handovers go to Anthill (installed app).");
+  });
+
+  // ANT-231: there is no anthill:// handler on Linux and Windows, so a web
+  // chat's results carry the web shell's own link, with the port and token
+  // its lock records, on the handovers and the reads alike.
+  it("gives a web chat's results the web shell's http:// link", async () => {
+    const { handlers, home } = await throughTargets({ platform: "linux" });
+    const dir = join(home, ".anthill", "cli");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "instance.lock"), JSON.stringify({ pid: process.pid, port: 4180, host: "127.0.0.1", startedAt: "", token: "t0k" }));
+    const link = "http://127.0.0.1:4180/workflow/workflow-1?token=t0k";
+
+    const created = await handlers.createWorkflowDraft(draftInput());
+    expect(created.structuredContent).toMatchObject({ url: link });
+    expect((created.content[0] as { text: string }).text).toContain(link);
+    expect((await handlers.getWorkflow({ workflowId: "workflow-1" })).structuredContent).toMatchObject({ url: link });
+    expect((await handlers.openWorkflow({ workflowId: "workflow-1" })).structuredContent).toMatchObject({ url: link });
+    const ready = (await handlers.getReadyRevision({ workflowId: "workflow-1" })).structuredContent as { url: string; revision: number; digest: string };
+    expect(ready.url).toBe(link);
+    const bound = await handlers.bindRun({ workflowId: "workflow-1", revision: ready.revision, digest: ready.digest, idempotencyKey: "bind-1" });
+    expect(bound.structuredContent).toMatchObject({ outcome: "bound", url: link });
+  });
+
+  it("gives no http:// link a page could not use, for a shell that has not recorded its token", async () => {
+    const { handlers, home } = await throughTargets({ platform: "linux" });
+    const dir = join(home, ".anthill", "cli");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "instance.lock"), JSON.stringify({ pid: process.pid, port: 4180, host: "127.0.0.1", startedAt: "" }));
+
+    const created = await handlers.createWorkflowDraft(draftInput());
+
+    expect(created.structuredContent).toMatchObject({ url: "anthill://workflow/workflow-1" });
+  });
+
+  it("prefers the link a launcher reports, which knows the port of a shell it just started", async () => {
+    const home = await mkdtemp(join(tmpdir(), "anthill-mcp-home-"));
+    roots.push(home);
+    const targets = new TargetSession(
+      { platform: "linux", home, env: {}, checkout: "/src/anthill" },
+      () => async () => ({ outcome: "started", link: "http://127.0.0.1:4199/workflow/workflow-1?token=new", message: "Started the web shell." }),
+    );
+    const created = await createHandlers({ targets }).createWorkflowDraft(draftInput());
+    expect(created.structuredContent).toMatchObject({ url: "http://127.0.0.1:4199/workflow/workflow-1?token=new" });
   });
 
   it("writes into the pinned target's own exchange", async () => {

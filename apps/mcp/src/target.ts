@@ -37,6 +37,7 @@ import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
 import type { LaunchReport, Launcher } from "./launch.js";
+import { workflowUrl } from "./url.js";
 
 export type Target = "app" | "electron-dev" | "web";
 
@@ -176,25 +177,63 @@ export function appRunning(dataDir: string): boolean {
   }
 }
 
+/** Whether a process is alive, for a caller outside this module (the web launcher's start marker). */
+export function pidAlive(pid: number): boolean {
+  return alive(pid);
+}
+
 /**
  * The web shell running on this data directory, and the port it listens on.
  *
  * `instance.lock` is the web shell's own single-instance lock:
- * `{pid, port, host, startedAt}`. The port is read from it and never assumed.
+ * `{pid, port, host, startedAt, token?}` (apps/cli/src/cli.ts, LOCK_FILE). The
+ * port is read from it and never assumed; the token is there once it listens.
  */
-export function webShellRunning(dataDir: string): { port: number; host: string } | undefined {
+export function webShellRunning(dataDir: string): WebShell | undefined {
   try {
     const lock = JSON.parse(readFileSync(join(dataDir, "instance.lock"), "utf8")) as {
       pid?: unknown;
       port?: unknown;
       host?: unknown;
+      token?: unknown;
     };
     if (typeof lock.pid !== "number" || !alive(lock.pid)) return undefined;
     if (typeof lock.port !== "number") return undefined;
-    return { port: lock.port, host: typeof lock.host === "string" ? lock.host : "127.0.0.1" };
+    return {
+      port: lock.port,
+      host: typeof lock.host === "string" ? lock.host : "127.0.0.1",
+      ...(typeof lock.token === "string" && lock.token ? { token: lock.token } : {}),
+    };
   } catch {
     return undefined;
   }
+}
+
+/** A running web shell, as its `instance.lock` describes it (apps/cli/src/cli.ts, LOCK_FILE). */
+export type WebShell = { port: number; host: string; token?: string };
+
+/**
+ * Where to reach a web shell from this machine: a wildcard bind is reached on
+ * loopback, and an IPv6 address needs its brackets in a URL.
+ */
+function reachableHost(host: string): string {
+  if (host === "" || host === "0.0.0.0" || host === "::") return "127.0.0.1";
+  return host.includes(":") ? `[${host}]` : host;
+}
+
+/** The web shell's origin, e.g. `http://127.0.0.1:4173`. */
+export function webShellOrigin(shell: WebShell): string {
+  return `http://${reachableHost(shell.host)}:${shell.port}`;
+}
+
+/**
+ * The link that opens one handed-over workflow in the web shell (ANT-231):
+ * `http://<host>:<port>/workflow/<id>`, carrying the shell's token so the
+ * page it opens can talk to it. There is no `anthill://` handler on Linux and
+ * Windows; this is the web shell's equivalent.
+ */
+export function webShellLink(shell: WebShell, workflowId: string): string {
+  return `${webShellOrigin(shell)}/workflow/${encodeURIComponent(workflowId)}${shell.token ? `?token=${encodeURIComponent(shell.token)}` : ""}`;
 }
 
 function alive(pid: number): boolean {
@@ -274,6 +313,12 @@ export type Reach = {
   store: ExchangeStore;
   launch: Launcher;
   resolved: ResolvedTarget;
+  /**
+   * The link a result gives for a workflow: `anthill://workflow/<id>` for the
+   * desktop builds, the web shell's own `http://` link for `web` while it is
+   * running, which is when there is a port to put in it.
+   */
+  link: (workflowId: string) => string;
 };
 
 export type Refusal = { refused: string };
@@ -344,30 +389,18 @@ export class TargetSession {
       store = new ExchangeStore(resolved.dataDir);
       this.cache.set(resolved.dataDir, store);
     }
-    return { store, launch: this.launcherFor(resolved), resolved };
+    const link = resolved.target === "web"
+      ? (workflowId: string) => {
+          // Only a link a page can use: one that carries the shell's token,
+          // which it records once it listens.
+          const shell = webShellRunning(resolved.dataDir);
+          return shell?.token ? webShellLink(shell, workflowId) : workflowUrl(workflowId);
+        }
+      : workflowUrl;
+    return { store, launch: this.launcherFor(resolved), resolved, link };
   }
 }
 
-/**
- * The launcher for the web shell: it opens nothing yet.
- *
- * A running web shell picks the handover up from its own exchange. Starting
- * the shell, and opening its tab, is the web launcher's job (ANT-231).
- */
-export function webLauncher(
-  dataDir: string,
-  running: (dir: string) => { port: number; host: string } | undefined = webShellRunning,
-): Launcher {
-  return async (): Promise<LaunchReport> => {
-    const shell = running(dataDir);
-    return shell
-      ? { outcome: "running", message: `The web shell is running at http://${shell.host}:${shell.port}/ and shows the handover from its own exchange.` }
-      : {
-          outcome: "not_running",
-          message: "The web shell is not running, so nothing shows the handover yet. Start it with `anthill` from the checkout; the handover is stored and waits for it.",
-        };
-  };
-}
 
 /**
  * The installed app's launcher, which also points at `--dev` when it cannot
@@ -450,14 +483,26 @@ export function electronDevLauncher(dataDir: string, checkout: string | undefine
   };
 }
 
-/** The real start: a detached `npm` whose output goes to a log file. */
-export function devStart(home: string = homedir()): DevStart {
+/** Starting a program in the background, once: what the dev build and the web shell launchers share. */
+export type DetachedStart = {
+  now: () => number;
+  /** The start marker: when this server last started the program. */
+  readMarker: () => { pid?: number; at: number } | undefined;
+  writeMarker: (marker: { pid?: number; at: number }) => void;
+  /** Start `command args` in `cwd`, detached, writing its output to `log`. */
+  start: (command: string, args: readonly string[], cwd: string, log: string) => Promise<{ pid?: number } | { error: string }>;
+  logFile: string;
+};
+
+/**
+ * The real detached start, for the program called `name`: its log is
+ * `~/.anthill/logs/<name>.log` and its start marker `<name>.starting`.
+ */
+export function detachedStart(name: string, home: string = homedir()): DetachedStart {
   const logs = join(home, ".anthill", "logs");
-  const markerFile = join(logs, "dev-desktop.starting");
-  const logFile = join(logs, "dev-desktop.log");
-  const beside = join(dirname(process.execPath), process.platform === "win32" ? "npm.cmd" : "npm");
+  const markerFile = join(logs, `${name}.starting`);
+  const logFile = join(logs, `${name}.log`);
   return {
-    running: appRunning,
     now: () => Date.now(),
     readMarker: () => {
       try {
@@ -473,15 +518,16 @@ export function devStart(home: string = homedir()): DevStart {
         writeFileSync(markerFile, JSON.stringify(marker));
       } catch {
         // A marker that cannot be written only means a second handover might
-        // start the build again, which its own lock then refuses.
+        // start the program again, which its own lock then refuses.
       }
     },
     start: (command, args, cwd, log) =>
       new Promise((settle) => {
         let out: number;
         try {
-          mkdirSync(dirname(log), { recursive: true });
-          out = openSync(log, "a");
+          // Owner-only: what the program prints can include the web shell's token.
+          mkdirSync(dirname(log), { recursive: true, mode: 0o700 });
+          out = openSync(log, "a", 0o600);
         } catch (error) {
           settle({ error: `the log ${log} could not be opened: ${(error as Error).message}` });
           return;
@@ -490,6 +536,7 @@ export function devStart(home: string = homedir()): DevStart {
           cwd,
           detached: true,
           stdio: ["ignore", out, out],
+          windowsHide: true,
           // `npm` finds `node` on PATH; give it the directory of this one.
           env: { ...process.env, PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ""}` },
         });
@@ -507,7 +554,16 @@ export function devStart(home: string = homedir()): DevStart {
           settle({ error: error.message });
         });
       }),
-    npm: existsSync(beside) ? beside : "npm",
     logFile,
+  };
+}
+
+/** The real start of the development build: a detached `npm` whose output goes to a log file. */
+export function devStart(home: string = homedir()): DevStart {
+  const beside = join(dirname(process.execPath), process.platform === "win32" ? "npm.cmd" : "npm");
+  return {
+    ...detachedStart("dev-desktop", home),
+    running: appRunning,
+    npm: existsSync(beside) ? beside : "npm",
   };
 }

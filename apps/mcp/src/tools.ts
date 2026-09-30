@@ -88,7 +88,8 @@ Returns an outcome of:
   invalid         nothing was stored, and the problems say why.
 
 The result also carries the workflow id and, where something was stored, the
-revision the content is now at and an anthill:// link the user can open. A
+revision the content is now at and a link the user can open (anthill://, or
+the web shell's http:// link). A
 refusal carries no link, because there would be nothing of yours behind it.
 
 Pass open: false to store the workflow without opening Anthill yet – when there

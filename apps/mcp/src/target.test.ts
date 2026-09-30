@@ -215,6 +215,9 @@ describe("whether an Anthill is running", () => {
     await mkdir(root, { recursive: true });
     await writeFile(join(root, "instance.lock"), JSON.stringify({ pid: process.pid, port: 4180, host: "127.0.0.1", startedAt: "" }));
     expect(webShellRunning(root)).toEqual({ port: 4180, host: "127.0.0.1" });
+    // ANT-231: the token the shell records once it listens comes back too.
+    await writeFile(join(root, "instance.lock"), JSON.stringify({ pid: process.pid, port: 4180, host: "127.0.0.1", startedAt: "", token: "t0k" }));
+    expect(webShellRunning(root)).toEqual({ port: 4180, host: "127.0.0.1", token: "t0k" });
     await writeFile(join(root, "instance.lock"), JSON.stringify({ pid: 999999999, port: 4180 }));
     expect(webShellRunning(root)).toBeUndefined();
     expect(webShellRunning(await dir())).toBeUndefined();

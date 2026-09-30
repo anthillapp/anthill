@@ -249,7 +249,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       // happened and the link in the result still works by hand.
       return {
         outcome: "failed",
-        message: `Anthill could not be opened: ${error instanceof Error ? error.message : String(error)}. The handover is stored; ${workflowUrl(workflowId)} opens it.`,
+        message: `Anthill could not be opened: ${error instanceof Error ? error.message : String(error)}. The handover is stored; ${reach.link(workflowId)} opens it.`,
         ...target,
       };
     }
@@ -322,7 +322,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         });
       }
 
-      const url = workflowUrl(created.workflowId);
+      const url = reach.link(created.workflowId);
 
       const revision = created.revision;
       if (revision === undefined) {
@@ -373,7 +373,8 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       return result(draftText, {
         outcome: problems.length > 0 ? "incomplete" : created.outcome,
         workflowId: created.workflowId,
-        url,
+        // Read again: a web shell this handover started has a port by now.
+        url: app.link ?? reach.link(created.workflowId),
         revision,
         ...(stored?.identity ? { mode: stored.identity.mode } : {}),
         displayed: false,
@@ -486,7 +487,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       return result(reviseText, {
         outcome: added.outcome === "added" ? "revised" : "unchanged",
         workflowId,
-        url: workflowUrl(workflowId),
+        url: app.link ?? reach.link(workflowId),
         revision,
         app,
         ...(added.digest ? { digest: added.digest } : {}),
@@ -527,7 +528,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       return result(openText, {
         outcome: "open_requested",
         workflowId,
-        url: workflowUrl(workflowId),
+        url: app.link ?? reach.link(workflowId),
         revision,
         displayed: false,
         displayRequested: drop.outcome !== "conflict",
@@ -549,7 +550,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       const stored = await store.readWorkflow(workflowId);
       if (!stored) return result(workflowText, { outcome: "not_found", workflowId });
 
-      const url = workflowUrl(workflowId);
+      const url = reach.link(workflowId);
 
       // Whether a revision may be worked on is asked of the store rather than
       // assembled here out of readiness and bindings. It is the same question
@@ -613,12 +614,12 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         return result(readyText, {
           outcome: "not_ready",
           workflowId,
-          url: workflowUrl(workflowId),
+          url: reach.link(workflowId),
           ...notReadyFields(eligibility, refused),
         });
       }
 
-      const url = workflowUrl(workflowId);
+      const url = reach.link(workflowId);
       const workflow = eligibility.revision.workflow;
       return result(readyText, {
         outcome: "ready",
@@ -714,11 +715,11 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
           ...problemFields(problems),
         });
       }
-      const url = workflowUrl(workflowId);
       const reach = targets.handover(build.request);
       if ("problem" in reach) {
         return result(bindText, { outcome: "invalid", workflowId, ...problemFields([reach.problem]) });
       }
+      const url = reach.link(workflowId);
       const { store } = reach;
       const bound = await store.bindRequest(workflowId, exactRevision, exactDigest, bindingKey, session,
         () => ({ runId: mintRunId(), nonce: mintNonce() }));
@@ -779,10 +780,14 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         steps,
       );
 
+      // The one place the app being up is not a convenience: nothing but a
+      // running Anthill registers the run, and the reporting commands below
+      // are about to start arriving for it.
+      const app = await bringUp(reach, workflowId);
       return result(bindText, {
         outcome: bound.outcome,
         workflowId,
-        url,
+        url: app.link ?? reach.link(workflowId),
         mode: stored.identity.mode,
         revision: binding.revision,
         digest: snapshot.digest,
@@ -791,10 +796,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         ...(binding.sessionId ? { sessionId: binding.sessionId } : {}),
         registered: false,
         registrationRequested: drop.outcome !== "conflict",
-        // The one place the app being up is not a convenience: nothing but a
-        // running Anthill registers the run, and the reporting commands below
-        // are about to start arriving for it.
-        app: await bringUp(reach, workflowId),
+        app,
         reportingCommands,
         steps,
         ...problemFields(drop.problems),
@@ -808,7 +810,13 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
 /* -------------------------------------------------------------------------- */
 
 /** The exchange and launcher a call works with, and the target they belong to. */
-type Reached = { store: ExchangeStore; launch: Launcher; resolved?: ResolvedTarget };
+type Reached = {
+  store: ExchangeStore;
+  launch: Launcher;
+  resolved?: ResolvedTarget;
+  /** The link a result gives for a workflow (see `Reach.link`): the web shell's `http://` link, or `anthill://`. */
+  link: (workflowId: string) => string;
+};
 
 /**
  * How a call reaches its Anthill: through the chat's pinned target, or through
@@ -834,7 +842,7 @@ function targetAccess(dependencies: HandlerDependencies): {
     };
   }
   if (!store) throw new Error("createHandlers needs either targets or a store.");
-  const fixed: Reached = { store, launch: dependencies.launch ?? openUrl };
+  const fixed: Reached = { store, launch: dependencies.launch ?? openUrl, link: workflowUrl };
   return { handover: () => fixed, read: () => fixed };
 }
 

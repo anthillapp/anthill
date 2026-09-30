@@ -233,9 +233,11 @@ Handle the returned outcome literally:
 Once the workflow is stored, settle detailed progress (the section above), then
 call `open_workflow` with the workflow id. That brings Anthill up for it: a
 closed app is launched, a running one comes to the front. Its `app` field says
-what happened — `opened`, or one of `no_handler`, `failed`, `unsupported`,
-`disabled` with a message to pass on. Give the user the `anthill://workflow/<id>`
-link. A queued request still does not prove that the desktop app opened the
+what happened — `opened`, or one of `running`, `started`, `starting`,
+`not_running`, `no_handler`, `failed`, `unsupported`, `disabled` with a message
+to pass on. Give the user the result's `url` as it is:
+`anthill://workflow/<id>` for the desktop app, `http://…/workflow/<id>` for the
+web shell (Linux, Windows, or macOS set up with `plugin:target -- web`). A queued request still does not prove that the desktop app opened the
 workflow, so say it was handed over and Anthill asked to show it.
 
 ## Design mode: stop for the user
@@ -305,7 +307,8 @@ correlation data. Preserve them exactly and do not print private reasoning.
 ## Resume and recovery
 
 A new Codex task has no reliable knowledge of an earlier handover. Require the
-workflow id or an `anthill://` link, then call `get_workflow`. Never choose by
+workflow id or a link to it (`anthill://workflow/<id>`, or the web shell's
+`http://…/workflow/<id>`), then call `get_workflow`. Never choose by
 recency. If this task will perform work handed over by a different task, pass
 this task's verified `CODEX_SESSION_ID` to `bind_run`.
 

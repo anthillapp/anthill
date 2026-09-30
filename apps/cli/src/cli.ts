@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
-import { open, readFile, rm } from "node:fs/promises";
+import { open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -269,11 +269,17 @@ export async function runReportCommand(
  *
  * Its contents are a contract with the MCP server (apps/mcp/src/target.ts,
  * `webShellRunning`), which reads it to find a running web shell:
- * `{ pid, port, host, startedAt }` as JSON. `port` is the one `--port` asked
- * for — never assume 4173 — and, since 0 is refused, the one the server binds
- * or fails on. The lock is written just before the server listens, so a
- * reader treats the shell as running only while `pid` is alive, and a
- * `/health` that does not answer yet as starting, not as an error (ANT-230).
+ * `{ pid, port, host, startedAt, token? }` as JSON. `port` is the one
+ * `--port` asked for — never assume 4173 — and, since 0 is refused, the one
+ * the server binds or fails on. The lock is written just before the server
+ * listens, so a reader treats the shell as running only while `pid` is alive,
+ * and a `/health` that does not answer yet as starting, not as an error
+ * (ANT-230).
+ *
+ * `token` is added once the server listens: the per-process token a page needs
+ * to open `/api`, so the MCP server can hand the user a link that works
+ * (`/workflow/<id>?token=…`, ANT-231). It is the same token the shell prints
+ * on its own terminal, so the file is the user's alone (mode 0600).
  */
 const LOCK_FILE = "instance.lock";
 /** A lock older than this is stale even if its pid is still alive (pid reuse). */
@@ -290,6 +296,7 @@ type LockRecord = {
   port: number;
   host: string;
   startedAt: string;
+  token?: string;
 };
 
 function isProcessAlive(pid: number): boolean {
@@ -330,6 +337,7 @@ async function readLock(lockPath: string): Promise<LockRecord | undefined> {
       port: record.port,
       host: record.host,
       startedAt: typeof record.startedAt === "string" ? record.startedAt : "",
+      ...(typeof record.token === "string" ? { token: record.token } : {}),
     };
   } catch {
     // Unreadable: treat as stale and take the lock over.
@@ -342,7 +350,7 @@ async function tryCreateFresh(
   record: LockRecord,
 ): Promise<boolean> {
   try {
-    const handle = await open(lockPath, "wx");
+    const handle = await open(lockPath, "wx", 0o600);
     try {
       await handle.writeFile(JSON.stringify(record, null, 2));
     } finally {
@@ -441,6 +449,27 @@ export async function acquireInstanceLock(
     `Could not claim the single-instance lock at ${lockPath} after ` +
       `${MAX_LOCK_ATTEMPTS} attempts; another instance is likely starting. Try again.`,
   );
+}
+
+/**
+ * Add the listening server's token to the lock this process holds.
+ *
+ * Written beside the lock and renamed over it, so a reader sees the old record
+ * or the new one and never half of either; and only while the lock is still
+ * this process's, so it never writes over another instance's.
+ */
+export async function recordListening(paths: Paths, token: string): Promise<void> {
+  const lockPath = join(paths.userData, LOCK_FILE);
+  const record = await readLock(lockPath);
+  if (!record || record.pid !== process.pid) return;
+  const partial = `${lockPath}.${process.pid}.tmp`;
+  try {
+    await writeFile(partial, JSON.stringify({ ...record, token }, null, 2), { mode: 0o600 });
+    await rename(partial, lockPath);
+  } finally {
+    // The partial holds the token; it does not outlive a failed rename.
+    await rm(partial, { force: true });
+  }
 }
 
 function releaseLock(lockPath: string): () => Promise<void> {
@@ -602,6 +631,8 @@ export async function main(): Promise<void> {
     paths,
     rendererDir,
   });
+  // So the MCP server can open a tab that can talk to this one (ANT-231).
+  await recordListening(paths, server.token).catch(() => undefined);
 
   // The bridge: maps every `IpcChannel` onto the reused service modules and
   // broadcasts the push channels over the WebSocket. It installs its request

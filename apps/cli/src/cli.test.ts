@@ -10,7 +10,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { acquireInstanceLock, extractDataDir, parseArgs, runReportCommand } from "./cli.js";
+import { acquireInstanceLock, extractDataDir, parseArgs, recordListening, runReportCommand } from "./cli.js";
 import type { HarnessReport } from "@anthill/live";
 
 /**
@@ -354,3 +354,37 @@ describe("acquireInstanceLock", () => {
     await rm(userData, { recursive: true, force: true });
   });
 });
+
+// ANT-231: the token a page needs to open /api, left where the MCP server can
+// find it, for this user only.
+describe("recordListening", () => {
+  it("adds the token to this process's lock, keeping the rest, readable by the user alone", async () => {
+    const dir = join(tmpdir(), `anthill-listen-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(dir, { recursive: true });
+    const paths = { userData: dir, home: dir };
+    const release = await acquireInstanceLock(paths, 4180, "127.0.0.1");
+    try {
+      await recordListening(paths, "t0k");
+      const lock = JSON.parse(await readFile(join(dir, "instance.lock"), "utf8")) as Record<string, unknown>;
+      expect(lock).toMatchObject({ pid: process.pid, port: 4180, host: "127.0.0.1", token: "t0k" });
+      if (process.platform !== "win32") {
+        const { stat } = await import("node:fs/promises");
+        expect((await stat(join(dir, "instance.lock"))).mode & 0o777).toBe(0o600);
+      }
+    } finally {
+      await release();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes nothing over a lock that is not this process's", async () => {
+    const dir = join(tmpdir(), `anthill-listen-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(dir, { recursive: true });
+    const theirs = JSON.stringify({ pid: process.pid + 100000, port: 4180, host: "127.0.0.1", startedAt: "" });
+    await writeFile(join(dir, "instance.lock"), theirs);
+    await recordListening({ userData: dir, home: dir }, "t0k");
+    expect(await readFile(join(dir, "instance.lock"), "utf8")).toBe(theirs);
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+

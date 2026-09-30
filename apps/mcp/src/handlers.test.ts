@@ -1215,6 +1215,18 @@ describe("the Anthill a chat reaches", () => {
     expect(text).toContain("This chat's handovers go to Anthill (installed app).");
   });
 
+  // ANT-236: design and watch both hand over with open: false first, and that
+  // first result is the one that has to say which Anthill the chat is on.
+  it("names the target when the handover is stored without opening", async () => {
+    const { handlers, opened } = await throughTargets();
+    const result = await handlers.createWorkflowDraft(draftInput({ open: false, build: "dev" }));
+    expect(opened).toEqual([]);
+    const answer = result.structuredContent as { target?: { id: string; label: string } };
+    expect(answer.target).toEqual({ id: "electron-dev", label: "Anthill (dev build)" });
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("This chat's handovers go to Anthill (dev build).");
+  });
+
   // ANT-231: there is no anthill:// handler on Linux and Windows, so a web
   // chat's results carry the web shell's own link, with the port and token
   // its lock records, on the handovers and the reads alike.

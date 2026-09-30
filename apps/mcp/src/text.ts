@@ -72,6 +72,11 @@ export type DraftAnswer = {
    * window that is not coming (ANT-123).
    */
   app?: LaunchReport;
+  /**
+   * The Anthill this chat is pinned to, when nothing was brought up to say so
+   * (`open: false`): the first result of a chat names it either way (ANT-236).
+   */
+  target?: LaunchReport["target"];
 
   problems?: ExchangeProblem[];
   /** The `ask` of every problem that has one, in the order they came back. */
@@ -276,9 +281,14 @@ function appText(report: LaunchReport | undefined): string[] {
   if (!report) return [];
   // Which Anthill, always: a chat pinned to the wrong build is seen here, at
   // the first handover, rather than when nothing appears.
-  const named = report.target ? [`This chat's handovers go to ${report.target.label}.`] : [];
+  const named = targetText(report.target);
   if (report.outcome === "opened") return named;
   return [...named, ...(report.message ? [report.message] : [])];
+}
+
+/** Which Anthill the chat's handovers go to, where a result knows it. */
+function targetText(target: LaunchReport["target"]): string[] {
+  return target ? [`This chat's handovers go to ${target.label}.`] : [];
 }
 
 export function draftText(answer: DraftAnswer): string {
@@ -311,7 +321,7 @@ export function draftText(answer: DraftAnswer): string {
     "Ask the user whether to start. When they say so, call get_ready_revision, then bind_run.",
   );
 
-  parts.push(...appText(answer.app));
+  parts.push(...(answer.app ? appText(answer.app) : targetText(answer.target)));
 
   if (answer.problems && answer.problems.length > 0) {
     parts.push("Also worth knowing:", numbered(answer.problems.map(sentence)));

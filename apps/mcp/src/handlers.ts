@@ -358,6 +358,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
           displayed: false,
           displayRequested: false,
           openDeferred: true,
+          ...(reach.resolved ? { target: { id: reach.resolved.target, label: reach.resolved.label } } : {}),
           ...(problems.length > 0 ? { problems, questions: questionsFrom(problems, submission.workflow) } : {}),
         });
       }

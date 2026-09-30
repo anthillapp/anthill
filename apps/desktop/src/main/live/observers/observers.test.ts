@@ -715,6 +715,116 @@ describe("the Codex observer", () => {
       });
     }
   });
+
+  /*
+    ANT-235. A run bound through the exchange follows every file carrying the
+    session's id, and a subagent's file carries it too. Each subagent's own
+    task_complete was then the session's: the page said "Session finished"
+    while the parent went on working, and back to Live at its next line, once
+    per subagent. Only the parent's own ending ends the session.
+  */
+  describe("a bound session whose subagents finish", () => {
+    const at = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString();
+    const lines = (rows: unknown[]) => rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+    const parent = [
+      { timestamp: at(0), type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx" } },
+      { timestamp: at(1), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Build it." }] } },
+      { timestamp: at(2), type: "response_item", payload: { type: "function_call", name: "spawn_agent", call_id: "call-spawn", arguments: JSON.stringify({ task_name: "developer" }) } },
+      { timestamp: at(2.4), type: "response_item", payload: { type: "function_call_output", call_id: "call-spawn", output: JSON.stringify({ task_name: "/root/developer" }) } },
+    ];
+    const meta = (ordinal?: number) => ({
+      timestamp: at(3),
+      type: "session_meta",
+      payload: {
+        session_id: "sess-cx",
+        id: "sub-d",
+        thread_source: "subagent",
+        agent_path: "/root/developer",
+        ...(ordinal ? { subagent_history_start_ordinal: ordinal } : {}),
+        source: { subagent: { thread_spawn: { parent_thread_id: "sess-cx", agent_path: "/root/developer" } } },
+      },
+    });
+    // The parent's history as the subagent's file opens with it, ending and all.
+    const copied = [
+      { timestamp: at(3), type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx", thread_source: "user" } },
+      { timestamp: at(3), type: "event_msg", payload: { type: "task_started" } },
+      { timestamp: at(3), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Earlier." }] } },
+      { timestamp: at(3), type: "event_msg", payload: { type: "task_complete" } },
+    ];
+    const own = (ending: unknown) => [
+      { timestamp: at(3), type: "response_item", payload: { type: "message", role: "developer", content: [{ type: "input_text", text: "<multi_agent_role>You are an agent in a team." }] } },
+      { timestamp: at(3), type: "event_msg", payload: { type: "thread_settings_applied", thread_id: "sub-d" } },
+      { timestamp: at(5), type: "response_item", payload: { type: "function_call", name: "exec_command", call_id: "call-build" } },
+      { timestamp: at(6), type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Built it." }] } },
+      { timestamp: at(7), type: "event_msg", payload: ending },
+    ];
+    const run = () => ({
+      ...pending("codex"),
+      exchange: { revision: 1, digest: "abcd1234", sessionId: "sess-cx" },
+      detectedSessionId: "sess-cx",
+      state: "detected_live" as const,
+    });
+
+    for (const [how, sub] of [
+      ["by the ordinal Codex records", [meta(copied.length + 1), ...copied, ...own({ type: "task_complete" })].map((row, ordinal) => ({ ...row, ordinal }))],
+      ["by the role it is given, with no ordinal", [meta(), ...copied, ...own({ type: "task_complete" })]],
+    ] as const) {
+      it(`is not ended by a subagent's file, its copy found ${how}`, async () => {
+        const dir = await root();
+        await writeCodex(dir, "sess-cx", lines(parent));
+        await writeCodex(dir, "sub-d", lines([...sub]));
+        const observer = new CodexObserver(dir);
+        const { evidence, events } = await observer.poll(run(), new Date().toISOString());
+        const later = await observer.poll(run(), new Date().toISOString());
+
+        expect([...evidence, ...later.evidence]).not.toContainEqual(expect.objectContaining({ kind: "completed" }));
+        expect([...evidence, ...later.evidence]).not.toContainEqual(expect.objectContaining({ kind: "failed" }));
+        // The subagent's work and its own ending still reach the feed as its (ANT-171).
+        const theirs = events.filter((event) => event.parentToolUseId === "call-spawn");
+        expect(theirs.map((event) => event.kind)).toEqual(["tool.start", "message", "turn.end"]);
+        expect(events.filter((event) => event.kind === "turn.end")).toHaveLength(1);
+        // The session's own opening, once; the copied session record is not another.
+        expect([...events, ...later.events].filter((event) => event.kind === "session.start")).toHaveLength(1);
+      });
+    }
+
+    it("is not failed by an error a subagent recorded", async () => {
+      const dir = await root();
+      await writeCodex(dir, "sess-cx", lines(parent));
+      await writeCodex(dir, "sub-d", lines([meta(), ...own({ type: "error", message: "The subagent's tool broke." })]));
+      const { evidence, events } = await new CodexObserver(dir).poll(run(), new Date().toISOString());
+
+      expect(evidence).not.toContainEqual(expect.objectContaining({ kind: "failed" }));
+      expect(evidence).not.toContainEqual(expect.objectContaining({ kind: "completed" }));
+      // Still said, as the subagent's.
+      expect(events).toContainEqual(
+        expect.objectContaining({ kind: "error", parentToolUseId: "call-spawn", detail: "The subagent's tool broke." }),
+      );
+    });
+
+    it("still ends on the parent's own task_complete", async () => {
+      const dir = await root();
+      await writeCodex(dir, "sess-cx", lines(parent));
+      await writeCodex(dir, "sub-d", lines([meta(), ...copied, ...own({ type: "task_complete" })]));
+      const observer = new CodexObserver(dir);
+      const first = await observer.poll(run(), new Date().toISOString());
+      expect(first.evidence).not.toContainEqual(expect.objectContaining({ kind: "completed" }));
+
+      const ended = at(9);
+      await appendFile(
+        join(dir, "2026", "08", "29", "rollout-2026-08-29T10-00-00-sess-cx.jsonl"),
+        lines([
+          { timestamp: at(8), type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "All done." }] } },
+          { timestamp: ended, type: "event_msg", payload: { type: "task_complete" } },
+        ]),
+        "utf8",
+      );
+      const { evidence } = await observer.poll(run(), new Date().toISOString());
+      expect(evidence.filter((item) => item.kind === "completed")).toEqual([
+        expect.objectContaining({ kind: "completed", sessionId: "sess-cx", at: ended }),
+      ]);
+    });
+  });
 });
 
 /* ------------------------------------------------------------------ */

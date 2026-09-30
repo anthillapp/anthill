@@ -324,6 +324,15 @@ export class CodexObserver implements LiveSessionObserver {
         evidence.push({ kind: "activity", sessionId, at: state.lastActivityAt });
       }
 
+      // A subagent's file carries the session's id, so a binding follows it
+      // too; its ending and its errors are that subagent's, already in the
+      // feed as its own. Read as the session's, every subagent's task_complete
+      // said "Session finished" while the parent worked on (ANT-235).
+      if (state.delegate) {
+        state.reportedActivityAt = state.lastActivityAt;
+        continue;
+      }
+
       if (state.failure) {
         evidence.push({
           kind: "failed",

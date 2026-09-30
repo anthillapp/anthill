@@ -166,6 +166,16 @@ describe("the CLI web server", () => {
     expect(await res.text()).toContain("hello");
   });
 
+  // ANT-228: a tab opened for one handed-over workflow gets the app shell,
+  // and the page reads the id back out of its own URL.
+  it("serves the app shell at /workflow/<id>, and nothing below it", async () => {
+    const shell = await fetch(`http://127.0.0.1:${server.port}/workflow/wf-1`);
+    expect(shell.status).toBe(200);
+    expect(await shell.text()).toContain("hello");
+    expect((await fetch(`http://127.0.0.1:${server.port}/workflow/wf-1/more`)).status).toBe(404);
+    expect((await fetch(`http://127.0.0.1:${server.port}/workflow/`)).status).toBe(404);
+  });
+
   it("refuses a path that escapes the renderer root", async () => {
     const res = await fetch(`http://127.0.0.1:${server.port}/..%2fsecret`);
     expect(res.status).toBe(404);
@@ -239,5 +249,79 @@ describe("the CLI web server", () => {
     });
     expect(response.echo).toEqual({ id: 1, channel: "test", args: [] });
     ws.close();
+  });
+});
+
+// ANT-228: how many tabs a handover can be sent to. On a server of its own, so
+// no connection another test left behind is counted.
+describe("the CLI web server's tabs", () => {
+  let server: CliServer;
+  let dir: string;
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "anthill-cli-"));
+    await writeFile(join(dir, "index.html"), "<html>hello</html>");
+    server = await startServer({ host: "127.0.0.1", port: 0, paths: { userData: dir, home: dir }, rendererDir: dir });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("counts the tabs that have /api open", async () => {
+    const open = (): Promise<WebSocket> => new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${server.port}/api?token=${server.token}`);
+      ws.onopen = () => resolve(ws);
+      ws.onerror = reject;
+    });
+    const settled = async (count: number): Promise<void> => {
+      for (let i = 0; i < 500 && server.clientCount() !== count; i += 1) await new Promise((r) => setTimeout(r, 10));
+    };
+    await settled(0);
+    expect(server.clientCount()).toBe(0);
+    const first = await open();
+    await settled(1);
+    expect(server.clientCount()).toBe(1);
+    const second = await open();
+    await settled(2);
+    expect(server.clientCount()).toBe(2);
+    first.close();
+    second.close();
+    await settled(0);
+    expect(server.clientCount()).toBe(0);
+  });
+
+  it("tells the bridge which tab a message came from, sends to one tab, and says when one closes", async () => {
+    const open = (): Promise<WebSocket> => new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${server.port}/api?token=${server.token}`);
+      ws.onopen = () => resolve(ws);
+      ws.onerror = reject;
+    });
+    const tabs: number[] = [];
+    server.onMessage((_message, _reply, tab) => { tabs.push(tab); });
+    const closed: number[] = [];
+    server.onClientClosed((tab) => closed.push(tab));
+
+    const first = await open();
+    const second = await open();
+    const received: unknown[] = [];
+    second.onmessage = (event) => received.push(JSON.parse(String(event.data)));
+    first.onmessage = () => { throw new Error("the other tab was sent it"); };
+    first.send(JSON.stringify({ hello: 1 }));
+    second.send(JSON.stringify({ hello: 2 }));
+    for (let i = 0; i < 200 && tabs.length < 2; i += 1) await new Promise((r) => setTimeout(r, 10));
+    const [firstTab, secondTab] = tabs;
+    expect(firstTab).not.toBe(secondTab);
+
+    expect(server.sendTo(secondTab!, { only: "second" })).toBe(true);
+    for (let i = 0; i < 200 && received.length === 0; i += 1) await new Promise((r) => setTimeout(r, 10));
+    expect(received).toEqual([{ only: "second" }]);
+
+    first.close();
+    for (let i = 0; i < 200 && closed.length === 0; i += 1) await new Promise((r) => setTimeout(r, 10));
+    expect(closed).toEqual([firstTab]);
+    expect(server.sendTo(firstTab!, { gone: true })).toBe(false);
+    second.close();
   });
 });

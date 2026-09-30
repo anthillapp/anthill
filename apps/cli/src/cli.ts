@@ -562,6 +562,8 @@ export async function main(): Promise<void> {
     workspace: options.workspace,
     broadcast: server.broadcast,
     onMessage: server.onMessage,
+    sendTo: server.sendTo,
+    onTabClosed: server.onClientClosed,
     diagnostics,
   });
   if ((await bridge.api.settingsRead()).analyticsEnabled) {

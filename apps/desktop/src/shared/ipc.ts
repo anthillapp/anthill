@@ -224,6 +224,15 @@ export const EDIT_HISTORY_CHANNEL = "app:edit-history";
  */
 export const OPEN_WORKFLOW_CHANNEL = "app:open-workflow";
 
+/**
+ * A handover that could not be carried out, said to the page (ANT-228).
+ *
+ * The web shell's only. The desktop says the same thing in a native box, and
+ * a browser tab has no process of its own to put one up, so the web shell
+ * pushes the sentence and its page shows it. The payload is the message.
+ */
+export const HANDOVER_REFUSED_CHANNEL = "app:handover-refused";
+
 /* ------------------------------------------------------------------ */
 /* Payload shapes                                                      */
 /* ------------------------------------------------------------------ */

@@ -13,7 +13,20 @@ import {
 } from "@anthill/workflow";
 import type { Workflow } from "@anthill/workflow-schema";
 
+import { ExchangeStore } from "@anthill/exchange-store";
 import {
+  ExchangeInbox,
+  SerialDrain,
+  WindowOperations,
+  WorkflowDelivery,
+  workflowIdFromLink,
+  writeWorkingCopy,
+  type OpenOutcome,
+  type OpenPermission,
+} from "@anthill/exchange-host";
+
+import {
+  HANDOVER_REFUSED_CHANNEL,
   IPC_CONTRACT,
   IpcChannel,
   PROMPT_DRAFT_STAGE_CHANNEL,
@@ -103,7 +116,7 @@ export type BridgeOptions = {
    * `broadcast` only for push channels, which every client should see.
    */
   onMessage(
-    handler: (message: unknown, reply: (message: unknown) => void) => void,
+    handler: (message: unknown, reply: (message: unknown) => void, tab?: number) => void,
   ): void;
   /**
    * Print a line to the author's console (defaults to `console.log`). The
@@ -111,6 +124,16 @@ export type BridgeOptions = {
    * run on the author's behalf.
    */
   notify?: (message: string) => void;
+  /**
+   * Send one message to one tab (the server's `sendTo`), by the id its
+   * messages arrive with. A handover goes to one tab, so one tab answers for
+   * it. Without it every handover is broadcast, for a caller with no tabs.
+   */
+  sendTo?(tab: number, message: unknown): boolean;
+  /** Be told when a tab goes away (the server's `onClientClosed`). */
+  onTabClosed?(listener: (tab: number) => void): void;
+  /** How often the exchange inbox is read. Two seconds, as in the desktop; tests shorten it. */
+  exchangePollMs?: number;
 };
 
 export type Bridge = {
@@ -255,10 +278,10 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
 
   // The channel -> handler map. Each handler takes the structured-clone args
   // the renderer sent and returns the structured-clone result.
-  const handlers: Record<string, (args: unknown[]) => Promise<unknown>> = {};
+  const handlers: Record<string, (args: unknown[], tab?: number) => Promise<unknown>> = {};
   const register = (
     channel: string,
-    handler: (args: unknown[]) => Promise<unknown>,
+    handler: (args: unknown[], tab?: number) => Promise<unknown>,
   ): void => {
     handlers[channel] = handler;
     registered.push(channel);
@@ -295,20 +318,166 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   });
 
   /*
-    Nothing hands a workflow to the CLI shell.
+    Handovers (ANT-228). A harness hands a workflow to this Anthill by writing
+    into `<data dir>/exchange`, exactly as it does for the desktop, and the web
+    shell reads that inbox with the desktop's own code (`@anthill/exchange-host`).
+    What differs is only how a workflow reaches the screen: pushed over `/api`
+    to the tabs that are connected, instead of sent to a window, and collected
+    by a tab that connects later with `workflowPendingOpen`.
 
-    The exchange is read by the desktop's main process, and an `anthill://`
-    link is delivered by an operating system to an application it registered —
-    neither reaches a page served over HTTP. The channel is answered all the
-    same, because the renderer is one bundle in two shells and a method only
-    one of them offers is the shape of bug `web-bridge-launch.test.ts` exists
-    for. `undefined` is the honest answer: nothing is waiting, and nothing ever
-    will be here.
+    A tab opened at `/workflow/<id>` names the workflow it was opened for when
+    it collects, which is this shell's `anthill://workflow/<id>`: the same id
+    check, the same store lookup, the same delivery.
   */
-  register(IpcChannel.workflowPendingOpen, async () => undefined);
-  register(IpcChannel.workflowOpened, async () => undefined);
-  // Desktop owns exchange handover. The web shell must refuse approval rather
-  // than claim a decision it has nowhere to persist.
+  const exchange = new ExchangeStore(paths.userData);
+  const windowOperations = new WindowOperations();
+  const workflowDelivery = new WorkflowDelivery();
+  const pendingLinks = new Set<string>();
+  let closed = false;
+
+  /*
+    Which tab a handover goes to. A tab is ready once its page has asked for
+    what is pending, as the desktop's window is once its renderer has — a tab
+    that has connected but not mounted would drop the push. Handovers go to
+    the tab that became ready last, and only to it: one tab answers for a
+    handover, and a tab the user is not looking at keeps what it has open.
+
+    `workflowDelivery.currentPath` is "what the handover tab is showing". It
+    describes one tab, so it is forgotten whenever that stops being the same
+    tab: another one becomes ready, the tab reloads (a new connection), or it
+    closes. Otherwise a reloaded tab would be told a workflow is already shown.
+  */
+  const readyTabs: number[] = [];
+  /** The tab the current delivery was sent to, and whether it went away mid-delivery. */
+  let deliveringTo: number | undefined;
+  let abandoned = false;
+  const handoverTab = (): number | undefined => (closed ? undefined : readyTabs.at(-1));
+  const tabChanged = (before: number | undefined): void => {
+    if (handoverTab() !== before) workflowDelivery.currentPath = undefined;
+  };
+  const tabReady = (tab: number): void => {
+    const before = handoverTab();
+    const at = readyTabs.indexOf(tab);
+    if (at >= 0) readyTabs.splice(at, 1);
+    readyTabs.push(tab);
+    // A page asking again has remounted, so what it shows is not known.
+    if (before === tab) workflowDelivery.currentPath = undefined;
+    tabChanged(before);
+  };
+  options.onTabClosed?.((tab) => {
+    const before = handoverTab();
+    const at = readyTabs.indexOf(tab);
+    if (at >= 0) readyTabs.splice(at, 1);
+    tabChanged(before);
+    if (deliveringTo === tab) {
+      // Nobody is left to answer it. Neither shown nor refused: it goes back
+      // to wait for the next tab, as a request that found no tab does.
+      abandoned = true;
+      workflowDelivery.reset();
+      // A link that was waiting behind it goes back to the queue, and a tab
+      // still open has already asked, so nothing else would send it on.
+      void linkDrain.run();
+    }
+  });
+
+  // The desktop's box, said in the tabs, and on the terminal the shell was
+  // started from, where it is still there once the tabs are gone.
+  const refuseHandover = async (message: string): Promise<void> => {
+    notify(`Anthill could not carry out a handover: ${message}`);
+    if (!closed) push(HANDOVER_REFUSED_CHANNEL, message);
+  };
+
+  const mayShowWorkflow = async (): Promise<OpenPermission> => (handoverTab() === undefined ? "no_window" : "yes");
+
+  const handOverToPage = (path: string, deliveryId: number): boolean => {
+    const tab = handoverTab();
+    if (tab === undefined) return false;
+    const message = { channel: OPEN_WORKFLOW_CHANNEL, payload: { path, deliveryId } };
+    if (options.sendTo) {
+      if (!options.sendTo(tab, message)) return false;
+    } else {
+      options.broadcast(message);
+    }
+    deliveringTo = tab;
+    return true;
+  };
+
+  async function showWorkflow(path: string): Promise<OpenOutcome> {
+    const result = await openWorkflowAt(path);
+    if (!result.ok) return { kind: "refused", error: "error" in result ? result.error : "It could not be opened." };
+    abandoned = false;
+    const delivery = await workflowDelivery.deliver(path, (id) => handOverToPage(path, id));
+    deliveringTo = undefined;
+    if (delivery === "declined") return { kind: "declined" };
+    if (delivery === "shown") return { kind: "shown" };
+    if (delivery === "parked" || abandoned) return { kind: "parked" };
+    return { kind: "unconfirmed", error: "The tab did not confirm opening the workflow. The handover remains pending; reopen it from its link." };
+  }
+
+  const linkDrain = new SerialDrain(() => drainLinks());
+  async function drainLinks(): Promise<void> {
+    if (handoverTab() === undefined) return;
+    for (const url of [...pendingLinks]) {
+      pendingLinks.delete(url);
+      const prepared = await windowOperations
+        .run(async (): Promise<string | undefined> => {
+          const id = workflowIdFromLink(url)!;
+          const stored = await exchange.readWorkflow(id);
+          if (!stored?.head || stored.problems.length) {
+            await refuseHandover(`Workflow ${id} is missing or unreadable in this Anthill data directory (${paths.userData}).`);
+            return undefined;
+          }
+          const path = exchange.workingCopyPath(id);
+          if (await mayShowWorkflow() === "no_window") { pendingLinks.add(url); return undefined; }
+          await writeWorkingCopy(path, stored.head.workflow);
+          return path;
+        })
+        .catch(async (error) => { await refuseHandover(String(error)); return undefined; });
+      if (!prepared) continue;
+      const result = await showWorkflow(prepared).catch((error): OpenOutcome => ({ kind: "refused", error: String(error) }));
+      if (result.kind === "parked") pendingLinks.add(url);
+      if (result.kind === "refused" || result.kind === "unconfirmed") await refuseHandover(result.error);
+    }
+  }
+
+  const inbox = new ExchangeInbox(exchange, {
+    serialize: (work) => windowOperations.run(work),
+    mayOpen: mayShowWorkflow,
+    open: showWorkflow,
+    refuse: refuseHandover,
+    // Following bound runs is ANT-229; until then a bind request waits.
+    register: async () => false,
+  }, options.exchangePollMs);
+  // At once, so a handover stored while the shell was closed is waiting for
+  // the first tab rather than for the next one after it.
+  inbox.start();
+
+  /** Calls that arrive without a tab (the in-process `api`) count as one tab of their own. */
+  const IN_PROCESS_TAB = 0;
+  register(IpcChannel.workflowPendingOpen, async (args, tab = IN_PROCESS_TAB): Promise<string | undefined> => {
+    const routed = args[0];
+    if (typeof routed === "string" && routed) {
+      const url = `anthill://workflow/${encodeURIComponent(routed)}`;
+      if (workflowIdFromLink(url)) pendingLinks.add(url);
+      else await refuseHandover(`${JSON.stringify(routed)} is not a workflow id. Nothing was opened.`);
+    }
+    tabReady(tab);
+    void linkDrain.run();
+    return undefined;
+  });
+  register(IpcChannel.workflowOpened, async (args, tab = IN_PROCESS_TAB) => {
+    const [path, id, outcome] = args as [unknown, unknown, "shown" | "declined" | "confirming" | "opening" | undefined];
+    if (typeof path !== "string") return;
+    // An answer about a delivery counts only from the tab it was sent to, and
+    // what a page is showing only from the handover tab: the desktop takes
+    // both from its one window and nothing else.
+    if (typeof id === "number") {
+      if (tab === deliveringTo) workflowDelivery.acknowledge(path, id, outcome);
+    } else if (tab === handoverTab()) {
+      workflowDelivery.acknowledge(path, undefined, outcome);
+    }
+  });
+  // Saving into the exchange is ANT-229.
   register(IpcChannel.exchangeRead, async () => undefined);
   register(IpcChannel.liveWorkflow, async () => ({ ok: false, error: "Bound revisions are available in Anthill desktop." }));
 
@@ -672,7 +841,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   // to the handler map and answer over the unicast `reply` (a response to one
   // tab's request is not a message for the others; push channels use
   // `broadcast`).
-  options.onMessage((message, reply) => {
+  options.onMessage((message, reply, tab) => {
     const call = message as { id?: unknown; channel?: unknown; args?: unknown[] };
     if (
       typeof call !== "object" ||
@@ -690,7 +859,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
         return;
       }
       try {
-        const result = await handler(args);
+        const result = await handler(args, tab);
         reply({ id, channel, result });
       } catch (error) {
         reply({
@@ -741,12 +910,13 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     workflowOpened: (path, id, outcome) => handle(IpcChannel.workflowOpened, path, id, outcome),
     exchangeRead: (path, id) => handle(IpcChannel.exchangeRead, path, id),
     liveWorkflow: (runId) => handle(IpcChannel.liveWorkflow, runId),
-    // No delivery id: this shell's pushes carry one payload, and nothing here
-    // waits to be told a page opened a document. The desktop's acknowledgement
-    // handshake exists for the exchange, which this shell refuses outright, so
-    // a page that answers without an id is answering about nothing.
+    // This shell's pushes carry one payload, so the path and its delivery id
+    // travel together; the page acknowledges with the id, as in the desktop.
     onOpenWorkflow: (listener: (path: string, deliveryId?: number) => void) =>
-      on(OPEN_WORKFLOW_CHANNEL, (path) => listener(path as string)),
+      on(OPEN_WORKFLOW_CHANNEL, (payload) => {
+        const { path, deliveryId } = payload as { path: string; deliveryId?: number };
+        listener(path, deliveryId);
+      }),
     saveWorkflow: (request: SaveWorkflowRequest) =>
       handle(IpcChannel.workflowSave, request),
     onSaveWorkflow: (listener: () => void) =>
@@ -814,6 +984,9 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     on,
     api,
     close: async () => {
+      closed = true;
+      inbox.stop();
+      workflowDelivery.reset();
       draftAbort?.abort();
       draftAbort = undefined;
       live?.stop();

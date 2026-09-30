@@ -1247,6 +1247,41 @@ describe("the Anthill a chat reaches", () => {
     expect(created.structuredContent).toMatchObject({ url: "anthill://workflow/workflow-1" });
   });
 
+  // ANT-232: the commands bind_run returns work where the harness runs them.
+  describe("the progress commands bind_run returns for the web shell", () => {
+    async function bindOnWeb(options: { anthillOnPath: boolean; checkout: string }) {
+      const bin = await mkdtemp(join(tmpdir(), "anthill-mcp-bin-"));
+      roots.push(bin);
+      if (options.anthillOnPath) {
+        await writeFile(join(bin, "anthill"), "#!/bin/sh\n", { mode: 0o755 });
+      }
+      const { handlers } = await throughTargets({ platform: "linux", env: { PATH: bin }, checkout: options.checkout });
+      await handlers.createWorkflowDraft(draftInput());
+      const ready = (await handlers.getReadyRevision({ workflowId: "workflow-1" })).structuredContent as { revision: number; digest: string };
+      const bound = await handlers.bindRun({ workflowId: "workflow-1", revision: ready.revision, digest: ready.digest, idempotencyKey: "bind-1" });
+      return (bound.structuredContent as { reportingCommands: string }).reportingCommands;
+    }
+
+    it("are plain anthill when anthill is on the harness PATH", async () => {
+      const commands = await bindOnWeb({ anthillOnPath: true, checkout: "/src/anthill" });
+      expect(commands).toMatch(/^ {4}anthill run ANT-/m);
+      expect(commands).toMatch(/^ {4}anthill done ANT-/m);
+    });
+
+    it("run this node on the checkout's CLI when anthill is not on the PATH", async () => {
+      const commands = await bindOnWeb({ anthillOnPath: false, checkout: "/src/anthill" });
+      const node = /^[A-Za-z0-9_./:@%+=,-]+$/.test(process.execPath) ? process.execPath : `'${process.execPath}'`;
+      expect(commands).toContain(`    ${node} /src/anthill/apps/cli/out/cli/src/cli.js run ANT-`);
+      expect(commands).toContain(`    ${node} /src/anthill/apps/cli/out/cli/src/cli.js step ANT-`);
+      expect(commands).not.toMatch(/^ {4}anthill /m);
+    });
+
+    it("quote a checkout path with spaces", async () => {
+      const commands = await bindOnWeb({ anthillOnPath: false, checkout: "/Users/some one/anthill" });
+      expect(commands).toContain(`'/Users/some one/anthill/apps/cli/out/cli/src/cli.js' run ANT-`);
+    });
+  });
+
   it("prefers the link a launcher reports, which knows the port of a shell it just started", async () => {
     const home = await mkdtemp(join(tmpdir(), "anthill-mcp-home-"));
     roots.push(home);

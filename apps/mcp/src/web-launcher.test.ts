@@ -151,7 +151,7 @@ describe("the web launcher", () => {
 
     const report = await webLauncher(DATA, "/Users/some one/anthill", w.deps)(URL);
 
-    expect(report.message).toContain(`node "${webShellCli("/Users/some one/anthill")}" --data-dir=${DATA}`);
+    expect(report.message).toContain(`node '${webShellCli("/Users/some one/anthill")}' --data-dir=${DATA}`);
   });
 
   it("waits for the token, which the shell records after it takes its lock, before giving a link", async () => {

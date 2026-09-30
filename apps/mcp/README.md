@@ -163,6 +163,11 @@ anthill step <run-id> <nonce> <step-id>
 anthill done <run-id> <nonce>
 ```
 
+For the web shell, when `anthill` is not on the harness's PATH (a checkout that
+never ran `npm link`), the commands run the checkout's CLI with node instead —
+this server's own, or on Windows the `node` on the PATH when there is one — `node …/apps/cli/out/cli/src/cli.js run …` — and carry
+`--data-dir` when the web shell's data is not in `~/.anthill/cli` (ANT-232).
+
 They are run by the harness as it works. The `anthill` CLI appends a line per
 call to `~/.anthill/cli/harness-reports.jsonl`, which the desktop reads. This
 server reports no progress of its own and infers none from a binding. If a

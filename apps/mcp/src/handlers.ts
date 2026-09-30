@@ -39,7 +39,7 @@ import {
   type EligibilityRefusal,
   type ExchangeWorkflow,
 } from "@anthill/exchange-store";
-import { MARKER_VERSION, cliInstruction, newNonce, newRunId, workflowSteps } from "@anthill/live";
+import { MARKER_VERSION, cliInstruction, newNonce, newRunId, workflowSteps, type CliInvocation } from "@anthill/live";
 import {
   EXCHANGE_PROBLEM_CODES,
   EXCHANGE_VERSION,
@@ -71,7 +71,8 @@ import {
   type WorkflowAnswer,
 } from "./text.js";
 import { openUrl, type LaunchReport, type Launcher } from "./launch.js";
-import type { ResolvedTarget, TargetRequest, TargetSession } from "./target.js";
+import { currentEnvironment, type ResolvedTarget, type TargetRequest, type TargetSession } from "./target.js";
+import { invocationDeps, reportingInvocation } from "./report-command.js";
 import { workflowUrl } from "./url.js";
 
 /**
@@ -131,6 +132,12 @@ export type HandlerDependencies = {
    * must never do.
    */
   launch?: Launcher;
+  /**
+   * How the harness runs the reporting commands for a target (ANT-232):
+   * `anthill`, or this node on the checkout's CLI when `anthill` is not on the
+   * PATH. Injected so a test fixes the PATH; defaults to the real machine.
+   */
+  invocation?: (resolved: ResolvedTarget) => CliInvocation;
 };
 
 /**
@@ -221,6 +228,8 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
   const targets = targetAccess(dependencies);
   const mintRunId = dependencies.mintRunId ?? (() => newRunId());
   const mintNonce = dependencies.mintNonce ?? (() => newNonce());
+  const invocation = dependencies.invocation ??
+    ((resolved: ResolvedTarget) => reportingInvocation(resolved, invocationDeps(dependencies.targets?.environment ?? currentEnvironment())));
 
   /**
    * Ask the machine to bring Anthill up for a workflow this call just acted on.
@@ -778,6 +787,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
           issuedAt: binding.at,
         },
         steps,
+        reach.resolved ? invocation(reach.resolved) : {},
       );
 
       // The one place the app being up is not a convenience: nothing but a

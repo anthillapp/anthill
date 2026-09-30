@@ -4,6 +4,7 @@ import {
   MARKER_VERSION,
   CLI_NAME,
   cliInstruction,
+  typedPath,
   newNonce,
   newRunId,
   parseMarker,
@@ -183,6 +184,37 @@ describe("the CLI instruction", () => {
     const text = cliInstruction(marker);
     expect(text).toContain(`${CLI_NAME} run ${marker.runId} ${marker.nonce}`);
     expect(text).toContain(`${CLI_NAME} step ${marker.runId} ${marker.nonce} <step-id>`);
+  });
+
+  // ANT-232: a CLI that is not on the harness's PATH, and a report file that is not the default.
+  it("uses the command it is given in place of anthill, and a data directory after each subcommand", () => {
+    const text = cliInstruction(marker, [], { command: "/usr/bin/node '/Users/some one/cli.js'", dataDir: "/srv/my data", platform: "linux" });
+    for (const sub of ["run", "step", "done"]) {
+      expect(text).toContain(`/usr/bin/node '/Users/some one/cli.js' ${sub} --data-dir '/srv/my data' ${marker.runId} ${marker.nonce}`);
+    }
+    expect(text).not.toMatch(new RegExp(`^ {4}${CLI_NAME} `, "m"));
+  });
+
+  // The desktop's copied prompts depend on this exact text.
+  it("writes exactly what it always wrote without an invocation", () => {
+    const text = cliInstruction(marker);
+    const lines = text.split("\n").filter((line) => line.startsWith("    "));
+    expect(lines).toEqual([
+      `    anthill run ${marker.runId} ${marker.nonce}`,
+      `    anthill step ${marker.runId} ${marker.nonce} <step-id>`,
+      `    anthill done ${marker.runId} ${marker.nonce}`,
+    ]);
+    expect(text).toBe(cliInstruction(marker, [], {}));
+  });
+
+  it.each([
+    ["linux", "/src/anthill/cli.js", "/src/anthill/cli.js"],
+    ["linux", "/Users/some one/cli.js", "'/Users/some one/cli.js'"],
+    ["darwin", "/tmp/it's $HOME/`x`", "'/tmp/it'\\''s $HOME/`x`'"],
+    ["win32", "C:\\dev\\anthill\\cli.js", '"C:/dev/anthill/cli.js"'],
+    ["win32", "C:\\Program Files\\nodejs\\node.exe", '"C:/Program Files/nodejs/node.exe"'],
+  ] as const)("types a path for %s shells: %s → %s", (platform, path, typed) => {
+    expect(typedPath(path, platform)).toBe(typed);
   });
 
   it("names the done command, so a CLI-reported run can finish", () => {

@@ -25,6 +25,8 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+import { typedPath } from "@anthill/live";
+
 import type { LaunchReport, Launcher } from "./launch.js";
 import {
   DEV_START_WINDOW_MS,
@@ -69,10 +71,8 @@ export function webShellCli(checkout: string): string {
   return join(checkout, "apps", "cli", "out", "cli", "src", "cli.js");
 }
 
-/** A path as a shell user would type it: in double quotes, an inner quote escaped, when it has a space or a quote in it. */
-function typed(path: string): string {
-  return /[\s"]/.test(path) ? `"${path.replace(/"/g, '\\"')}"` : path;
-}
+/** A path as the user's shell needs it typed (`@anthill/live`'s `typedPath`). */
+const typed = (path: string): string => typedPath(path, process.platform);
 
 export function webLauncher(dataDir: string, checkout: string | undefined, dependencies: WebStart): Launcher {
   const { running, health, open, exists, wait, alive, node, now, readMarker, writeMarker, start, logFile } = dependencies;

@@ -283,7 +283,9 @@ Use the exact commands returned by `bind_run`. They are the only progress
 transport; do not write progress into the exchange, invent an MCP reporting
 tool, or treat ordinary tool calls as authoritative workflow progress.
 
-The commands have this shape:
+The commands have this shape. Run them exactly as `bind_run` returned them: for
+the web shell they may start with `node …/cli.js` instead of `anthill`, or carry
+`--data-dir`, when that is what works on this machine.
 
 ```bash
 anthill run <run-id> <nonce>

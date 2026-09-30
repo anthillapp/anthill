@@ -345,6 +345,12 @@ export class TargetSession {
     private readonly onPin: (resolved: ResolvedTarget) => void = () => undefined,
   ) {}
 
+  /** The machine the targets are resolved on: platform, home and environment. */
+  get environment(): TargetEnvironment {
+    const { platform, home, env } = this.context;
+    return { platform, home, env };
+  }
+
   /** The pinned target, if a handover has pinned one. */
   get target(): ResolvedTarget | undefined {
     return this.pinned?.resolved;

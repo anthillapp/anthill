@@ -239,9 +239,39 @@ export function stepOpening(
  * The name of the CLI the harness is told to call.
  *
  * The instruction embeds the run id and nonce, which the marker already
- * carries, and nothing else: no paths, no ports, no tokens.
+ * carries, and nothing else: no ports, no tokens. A path appears only where
+ * `CliInvocation` puts one — a CLI that is not on the harness's PATH.
  */
 export const CLI_NAME = "anthill";
+
+/**
+ * How the harness runs the CLI (ANT-232), when `anthill` alone would not do.
+ *
+ * `command` is typed as a user would type it — already quoted where a path has
+ * a space — and replaces `anthill`: for a from-source install that never ran
+ * `npm link`, `node …/apps/cli/out/cli/src/cli.js`. `dataDir`, when the
+ * Anthill being reported to keeps its report file somewhere other than the
+ * default `~/.anthill/cli`, goes after the subcommand as `--data-dir`.
+ */
+export type CliInvocation = {
+  command?: string;
+  dataDir?: string;
+  /** The platform whose shells will run it, which decides how `dataDir` is quoted. */
+  platform?: NodeJS.Platform;
+};
+
+/**
+ * A path as it has to be typed for the shells a harness runs commands in.
+ *
+ * POSIX: as it is when it is plain, else in single quotes (a `'` written
+ * `'\''`), which no POSIX shell expands. Windows: forward slashes, which node,
+ * cmd, PowerShell and Git Bash all accept where a backslash is lost in Git
+ * Bash, and always in double quotes, which all of them read as one argument.
+ */
+export function typedPath(path: string, platform: NodeJS.Platform): string {
+  if (platform === "win32") return `"${path.replace(/\\/g, "/")}"`;
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(path) ? path : `'${path.replace(/'/g, "'\\''")}'`;
+}
 
 /**
  * The instruction for a prompt that reports through the CLI instead of
@@ -256,7 +286,10 @@ export const CLI_NAME = "anthill";
 export function cliInstruction(
   marker: RunMarker,
   steps: readonly { id: string; name: string }[] = [],
+  invocation: CliInvocation = {},
 ): string {
+  const command = invocation.command ?? CLI_NAME;
+  const at = invocation.dataDir ? ` --data-dir ${typedPath(invocation.dataDir, invocation.platform ?? "linux")}` : "";
   const lines = [
     "## Progress reports",
     "",
@@ -266,16 +299,16 @@ export function cliInstruction(
     "",
     "**Once, before you begin:**",
     "",
-    `    ${CLI_NAME} run ${marker.runId} ${marker.nonce}`,
+    `    ${command} run${at} ${marker.runId} ${marker.nonce}`,
     "",
     "**Immediately before you start each step, and again whenever you come back to",
     "an earlier one:**",
     "",
-    `    ${CLI_NAME} step ${marker.runId} ${marker.nonce} <step-id>`,
+    `    ${command} step${at} ${marker.runId} ${marker.nonce} <step-id>`,
     "",
     "**Once the work is finished:**",
     "",
-    `    ${CLI_NAME} done ${marker.runId} ${marker.nonce}`,
+    `    ${command} done${at} ${marker.runId} ${marker.nonce}`,
   ];
 
   // The ids belong next to the instruction rather than at the end of the

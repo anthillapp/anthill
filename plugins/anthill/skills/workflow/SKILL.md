@@ -356,8 +356,12 @@ anthill step <run-id> <nonce> <step-id>      # entering each step
 anthill done <run-id> <nonce>                # when the work is finished
 ```
 
+Run them exactly as `bind_run` gave them. For the web shell they may start with
+`node …/cli.js` instead of `anthill`, or carry `--data-dir`, when that is what
+works on this machine.
+
 The step ids are the block ids of the bound revision. Report a step when you
-actually start it, not in advance. If the `anthill` command is not on the path,
+actually start it, not in advance. If a command cannot be run,
 say so once and carry on with the work — the reporting is how the user watches,
 not how the work happens.
 

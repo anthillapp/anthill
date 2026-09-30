@@ -8,7 +8,7 @@
  * each one arrives as text.
  */
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MessageMarkup, clampMarkup, parseBlocks } from "./message-markup.js";
@@ -297,5 +297,47 @@ describe("a path an agent wrote", () => {
     const api = paths([]);
     render(<MessageMarkup text="Edited src/main/index.ts and packages/live/src/feed.ts" />);
     expect(api.pathsExist).not.toHaveBeenCalled();
+  });
+});
+
+/*
+  ANT-209, W9 on Codex in the 0.8.5 QA. The closing message's table of
+  modules and tests arrived in the feed and in "What happened" as one
+  paragraph: header, rule and every cell run together with the pipes.
+*/
+describe("a table in an agent's message", () => {
+  const text = [
+    "The workflow is complete.",
+    "",
+    "| Module | Tests added |",
+    "|---|:---:|",
+    "| mod1.py | Positive, zero, and **negative** |",
+    "| mod2.py | Pipes in `a|b` and \\| stay |",
+    "",
+    "Done.",
+  ].join("\n");
+
+  it("is read as a table, not a paragraph", () => {
+    const blocks = parseBlocks(text);
+    expect(blocks.map((block) => block.kind)).toEqual(["paragraph", "table", "paragraph"]);
+    const table = blocks[1] as { header: string[]; rows: string[][] };
+    expect(table.header).toEqual(["Module", "Tests added"]);
+    expect(table.rows).toEqual([
+      ["mod1.py", "Positive, zero, and **negative**"],
+      ["mod2.py", "Pipes in `a|b` and | stay"],
+    ]);
+  });
+
+  it("renders its rows and cells, with their own markup", () => {
+    render(<MessageMarkup text={text} />);
+    const table = screen.getByRole("table");
+    expect(within(table).getAllByRole("row")).toHaveLength(3);
+    expect(within(table).getByRole("columnheader", { name: "Tests added" })).toBeTruthy();
+    expect(within(table).getByText("negative").tagName).toBe("STRONG");
+    expect(screen.queryByText(/\|---/)).toBeNull();
+  });
+
+  it("leaves a line with pipes but no rule under it as text", () => {
+    expect(parseBlocks("| not | a table |\nstill text").map((block) => block.kind)).toEqual(["paragraph"]);
   });
 });

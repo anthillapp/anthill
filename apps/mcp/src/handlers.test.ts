@@ -1232,3 +1232,119 @@ describe("the Anthill a chat reaches", () => {
     expect(targets.target?.target).toBe("app");
   });
 });
+
+/*
+  ANT-223. The skill passes build: "dev" when the user wrote --dev. The first
+  handover decides and pins; a later call that asks for another build is
+  refused with nothing written.
+*/
+describe("a chat that asks for the development build", () => {
+  async function chat(context: Partial<TargetContext> = {}) {
+    const home = await mkdtemp(join(tmpdir(), "anthill-mcp-home-"));
+    roots.push(home);
+    const targets = new TargetSession(
+      { platform: "darwin", home, env: {}, checkout: "/src/anthill", ...context },
+      () => async () => ({ outcome: "running", message: "The development build is running." }),
+    );
+    let minted = 0;
+    const handlers = createHandlers({
+      targets,
+      mintRunId: () => `ANT-RUN${(minted += 1)}`,
+      mintNonce: () => `n${minted}`,
+    });
+    const exchange = (target: "app" | "electron-dev" | "web") =>
+      new ExchangeStore(
+        target === "web"
+          ? join(home, ".anthill", "cli")
+          : join(home, "Library", "Application Support", "@anthill", target === "app" ? "desktop" : "desktop-dev"),
+      );
+    return { handlers, targets, exchange, home };
+  }
+  const text = (result: { content: unknown[] }) => (result.content[0] as { text: string }).text;
+
+  it("goes to the development build's exchange and says so", async () => {
+    const { handlers, targets, exchange } = await chat();
+    const result = await handlers.createWorkflowDraft(draftInput({ build: "dev" }));
+    expect(targets.target?.target).toBe("electron-dev");
+    expect((await exchange("electron-dev").readWorkflow("workflow-1"))?.identity).toBeTruthy();
+    expect(await exchange("app").readWorkflow("workflow-1")).toBeUndefined();
+    expect(text(result)).toContain("This chat's handovers go to Anthill (dev build).");
+    expect(text(result)).toContain("The development build is running.");
+  });
+
+  it("keeps the build for later calls that do not repeat it", async () => {
+    const { handlers, targets } = await chat();
+    await handlers.createWorkflowDraft(draftInput({ build: "dev" }));
+    const opened = await handlers.openWorkflow({ workflowId: "workflow-1" });
+    expect((opened.structuredContent as { outcome: string }).outcome).toBe("open_requested");
+    expect(targets.target?.target).toBe("electron-dev");
+  });
+
+  it("refuses a later --dev once the chat is pinned to the installed app, and writes nothing", async () => {
+    const { handlers, exchange } = await chat();
+    await handlers.createWorkflowDraft(draftInput());
+    const refused = await handlers.createWorkflowDraft(
+      draftInput({ idempotencyKey: "handover-8", build: "dev", workflow: completeWorkflow({ id: "workflow-2" }) }),
+    );
+    expect((refused.structuredContent as { outcome: string }).outcome).toBe("invalid");
+    expect(text(refused)).toContain("takes a new chat");
+    expect(await exchange("app").readWorkflow("workflow-2")).toBeUndefined();
+    expect(await exchange("electron-dev").readWorkflow("workflow-2")).toBeUndefined();
+
+    const bind = await handlers.bindRun({ workflowId: "workflow-1", revision: 1, digest: "d", idempotencyKey: "k", build: "dev" });
+    expect((bind.structuredContent as { outcome: string }).outcome).toBe("invalid");
+    expect((await exchange("app").readWorkflow("workflow-1"))?.bindings).toEqual([]);
+
+    const open = await handlers.openWorkflow({ workflowId: "workflow-1", build: "dev" });
+    expect((open.structuredContent as { outcome: string }).outcome).toBe("invalid");
+    expect(text(open)).toContain("takes a new chat");
+  });
+
+  it("refuses --dev without a checkout, and stores nothing anywhere", async () => {
+    const { handlers, targets, exchange } = await chat({ checkout: undefined });
+    const refused = await handlers.createWorkflowDraft(draftInput({ build: "dev" }));
+    expect((refused.structuredContent as { outcome: string }).outcome).toBe("invalid");
+    expect(text(refused)).toContain("checkout");
+    expect(targets.target).toBeUndefined();
+    expect(await exchange("app").readWorkflow("workflow-1")).toBeUndefined();
+    expect(await exchange("electron-dev").readWorkflow("workflow-1")).toBeUndefined();
+  });
+
+  it("ignores the build on Linux and Windows, where the web shell is the only Anthill", async () => {
+    for (const platform of ["linux", "win32"] as const) {
+      const { handlers, targets, exchange } = await chat({ platform });
+      const result = await handlers.createWorkflowDraft(draftInput({ build: "dev" }));
+      expect((result.structuredContent as { outcome: string }).outcome).toBe("created");
+      expect(targets.target?.target).toBe("web");
+      expect((await exchange("web").readWorkflow("workflow-1"))?.identity).toBeTruthy();
+    }
+  });
+
+  // A later session picking a --dev handover back up reads it before it binds.
+  it("reads a dev-build workflow in a fresh chat when asked with build, without pinning", async () => {
+    const first = await chat();
+    await first.handlers.createWorkflowDraft(draftInput({ build: "dev" }));
+
+    const again = new TargetSession(
+      { platform: "darwin", home: first.home, env: {}, checkout: "/src/anthill" },
+      () => async () => ({ outcome: "running" }),
+    );
+    const handlers = createHandlers({ targets: again });
+    const withoutBuild = await handlers.getWorkflow({ workflowId: "workflow-1" });
+    expect((withoutBuild.structuredContent as { outcome: string }).outcome).toBe("not_found");
+    const withBuild = await handlers.getWorkflow({ workflowId: "workflow-1", build: "dev" });
+    expect((withBuild.structuredContent as { outcome: string }).outcome).toBe("found");
+    const ready = await handlers.getReadyRevision({ workflowId: "workflow-1", build: "dev" });
+    expect((ready.structuredContent as { outcome: string }).outcome).not.toBe("no_such_workflow");
+    expect(again.target).toBeUndefined();
+  });
+
+  it("refuses a build it does not know, with nothing stored", async () => {
+    const { handlers, targets } = await chat();
+    const refused = await handlers.createWorkflowDraft(draftInput({ build: "staging" }));
+    expect((refused.structuredContent as { outcome: string }).outcome).toBe("invalid");
+    expect(targets.target).toBeUndefined();
+    const open = await handlers.openWorkflow({ workflowId: "workflow-1", build: true });
+    expect((open.structuredContent as { outcome: string }).outcome).toBe("invalid");
+  });
+});

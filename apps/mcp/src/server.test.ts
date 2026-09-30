@@ -256,6 +256,14 @@ describe("the built server over stdio", () => {
     ]);
     expect(schema?.properties.source.description).toContain("harness, sessionId and taskText");
     expect(bind?.properties.revision.description).toContain("every bind needs");
+
+    // ANT-223: the handover tools say which build a chat's first handover
+    // asks for, and ask for it in the description rather than the schema.
+    const open = tools.find((tool) => tool.name === "open_workflow")?.inputSchema;
+    for (const tool of [schema, bind, open]) {
+      expect(tool?.properties.build.type).toBeUndefined();
+      expect(tool?.properties.build.description).toContain('"dev"');
+    }
   }, 20_000);
 
   it("answers for a field that never arrived, rather than letting the SDK answer", async () => {

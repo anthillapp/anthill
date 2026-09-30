@@ -124,13 +124,17 @@ describe("a chat's pinned target", () => {
     expect("resolved" in first && first.resolved.target).toBe("electron-dev");
     const second = session.handover({});
     expect("resolved" in second && second.resolved.target).toBe("electron-dev");
-    expect(session.read().resolved.target).toBe("electron-dev");
+    const read = session.read();
+    expect("resolved" in read && read.resolved.target).toBe("electron-dev");
     expect(pinned).toEqual(["electron-dev"]);
   });
 
   it("is not pinned by a read before the first handover", async () => {
     const session = new TargetSession(mac({ dataDir: await dir() }), () => launch);
-    expect(session.read().resolved.target).toBe("app");
+    const read = session.read();
+    expect("resolved" in read && read.resolved.target).toBe("app");
+    const dev = session.read({ build: "dev" });
+    expect("resolved" in dev && dev.resolved.target).toBe("electron-dev");
     expect(session.target).toBeUndefined();
     const first = session.handover({ build: "dev" });
     expect("resolved" in first && first.resolved.target).toBe("electron-dev");

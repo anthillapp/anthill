@@ -303,7 +303,19 @@ export class TargetSession {
   }
 
   handover(request: TargetRequest = {}): Reach | Refusal {
-    if (this.pinned) return this.pinned;
+    if (this.pinned) {
+      // A later call asking for a different build than the one the chat is
+      // pinned to is refused: switching builds takes a new chat, because the
+      // workflows so far live in the pinned one's exchange.
+      if (request.build === "dev" && this.context.platform === "darwin" && this.pinned.resolved.target !== "electron-dev") {
+        return {
+          refused:
+            `This chat's handovers already go to ${this.pinned.resolved.label}, and --dev asks for the development build. ` +
+            "Switching builds takes a new chat: the workflows so far are in this one's exchange.",
+        };
+      }
+      return this.pinned;
+    }
     const resolution = resolveTarget(this.context, request);
     if (!resolution.ok) return { refused: resolution.message };
     this.pinned = this.reach(resolution.resolved);
@@ -311,11 +323,15 @@ export class TargetSession {
     return this.pinned;
   }
 
-  read(): Reach {
+  /**
+   * A look that does not decide. With a build request — a session picking a
+   * `--dev` handover back up reads it before it binds — it looks in that
+   * build's exchange, still without pinning.
+   */
+  read(request: TargetRequest = {}): Reach | Refusal {
     if (this.pinned) return this.pinned;
-    const resolution = resolveTarget(this.context);
-    // Without a build request the rule cannot refuse.
-    if (!resolution.ok) throw new Error(resolution.message);
+    const resolution = resolveTarget(this.context, request);
+    if (!resolution.ok) return { refused: resolution.message };
     return this.reach(resolution.resolved);
   }
 

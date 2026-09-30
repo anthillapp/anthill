@@ -71,7 +71,7 @@ import {
   type WorkflowAnswer,
 } from "./text.js";
 import { openUrl, type LaunchReport, type Launcher } from "./launch.js";
-import type { ResolvedTarget, TargetSession } from "./target.js";
+import type { ResolvedTarget, TargetRequest, TargetSession } from "./target.js";
 import { workflowUrl } from "./url.js";
 
 /**
@@ -165,10 +165,15 @@ export type CreateDraftInput = {
    * including leaving it out — opens it at once, as before.
    */
   open?: unknown;
+  /** `"dev"` for the development build, on the chat's first handover (ANT-223). */
+  build?: unknown;
 };
 
 /** The id the two read-only tools address, unjudged until `readWorkflowId`. */
 export type WorkflowInput = { workflowId?: unknown };
+
+/** What `open_workflow` and the two reads are given: the id, and the build a `--dev` command asks for. */
+export type OpenInput = WorkflowInput & { build?: unknown };
 
 /**
  * What `revise_workflow` is given: which workflow, and what it should say now.
@@ -199,14 +204,16 @@ export type BindRunInput = {
   idempotencyKey?: unknown;
   /** The harness's own session, checked for shape here rather than downstream. */
   sessionId?: unknown;
+  /** `"dev"` for the development build, on the chat's first handover (ANT-223). */
+  build?: unknown;
 };
 
 export type Handlers = {
   createWorkflowDraft(input: CreateDraftInput): Promise<CallToolResult>;
   reviseWorkflow(input: ReviseInput): Promise<CallToolResult>;
-  getWorkflow(input: WorkflowInput): Promise<CallToolResult>;
-  openWorkflow(input: WorkflowInput): Promise<CallToolResult>;
-  getReadyRevision(input: WorkflowInput): Promise<CallToolResult>;
+  getWorkflow(input: OpenInput): Promise<CallToolResult>;
+  openWorkflow(input: OpenInput): Promise<CallToolResult>;
+  getReadyRevision(input: OpenInput): Promise<CallToolResult>;
   bindRun(input: BindRunInput): Promise<CallToolResult>;
 };
 
@@ -284,11 +291,17 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       const oversize = checkSize(submitted);
       if (oversize) return result(draftText, invalidDraft([oversize]));
 
+      const build = readBuild(input.build);
       const read = readSubmission(submitted);
-      if (!read.ok) return result(draftText, invalidDraft(read.problems));
+      if (!read.ok || "problem" in build) {
+        return result(draftText, invalidDraft([...(read.ok ? [] : read.problems), ...("problem" in build ? [build.problem] : [])]));
+      }
 
       const submission = read.submission;
-      const reach = targets.handover();
+      // Resolved before anything is written: a build the chat cannot have is
+      // refused with nothing stored, never stored in the wrong exchange.
+      const reach = targets.handover(build.request);
+      if ("problem" in reach) return result(draftText, invalidDraft([reach.problem], submission.workflow));
       const { store } = reach;
       const created = await store.createWorkflow(submission);
       const problems = created.problems ?? [];
@@ -394,7 +407,8 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         return result(reviseText, { outcome: "invalid", problems: [addressed.problem] });
       }
       const { workflowId } = addressed;
-      const reach = targets.handover();
+      const reach = targets.handover({});
+      if ("problem" in reach) return result(reviseText, { outcome: "invalid", workflowId, problems: [reach.problem] });
       const { store } = reach;
 
       // Read before writing, for two reasons that both matter: a workflow this
@@ -493,7 +507,10 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       const addressed = readWorkflowId(input.workflowId);
       if ("problem" in addressed) return result(callText, invalidCall([addressed.problem]));
       const workflowId = addressed.workflowId;
-      const reach = targets.handover();
+      const build = readBuild(input.build);
+      if ("problem" in build) return result(callText, invalidCall([build.problem]));
+      const reach = targets.handover(build.request);
+      if ("problem" in reach) return result(callText, invalidCall([reach.problem]));
       const { store } = reach;
 
       const stored = await store.readWorkflow(workflowId);
@@ -523,7 +540,11 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       const addressed = readWorkflowId(input.workflowId);
       if ("problem" in addressed) return result(callText, invalidCall([addressed.problem]));
       const workflowId = addressed.workflowId;
-      const { store } = targets.read();
+      const build = readBuild(input.build);
+      if ("problem" in build) return result(callText, invalidCall([build.problem]));
+      const reach = targets.read(build.request);
+      if ("problem" in reach) return result(callText, invalidCall([reach.problem]));
+      const { store } = reach;
 
       const stored = await store.readWorkflow(workflowId);
       if (!stored) return result(workflowText, { outcome: "not_found", workflowId });
@@ -567,7 +588,11 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       const addressed = readWorkflowId(input.workflowId);
       if ("problem" in addressed) return result(callText, invalidCall([addressed.problem]));
       const workflowId = addressed.workflowId;
-      const { store } = targets.read();
+      const build = readBuild(input.build);
+      if ("problem" in build) return result(callText, invalidCall([build.problem]));
+      const reach = targets.read(build.request);
+      if ("problem" in reach) return result(callText, invalidCall([reach.problem]));
+      const { store } = reach;
 
       const eligibility = await store.eligibleRevision(workflowId);
 
@@ -648,6 +673,9 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       // `isSessionId` holding, and a cast would say so without checking.
       const session = isSessionId(given) ? given : undefined;
 
+      const build = readBuild(input.build);
+      if ("problem" in build) problems.push(build.problem);
+
       const exactRevision = typeof revision === "number" && Number.isSafeInteger(revision) && revision >= 1
         ? revision : undefined;
       if (exactRevision === undefined) {
@@ -675,7 +703,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       // Each value again by name rather than `problems.length`, because these
       // are what the calls below are given and a count does not narrow them.
       if (workflowId === undefined || badSession || exactRevision === undefined ||
-        exactDigest === undefined || bindingKey === undefined) {
+        exactDigest === undefined || bindingKey === undefined || "problem" in build) {
         return result(bindText, {
           outcome: "invalid",
           // Named when there is one, because a caller correcting four values
@@ -687,7 +715,10 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         });
       }
       const url = workflowUrl(workflowId);
-      const reach = targets.handover();
+      const reach = targets.handover(build.request);
+      if ("problem" in reach) {
+        return result(bindText, { outcome: "invalid", workflowId, ...problemFields([reach.problem]) });
+      }
       const { store } = reach;
       const bound = await store.bindRequest(workflowId, exactRevision, exactDigest, bindingKey, session,
         () => ({ runId: mintRunId(), nonce: mintNonce() }));
@@ -787,21 +818,43 @@ type Reached = { store: ExchangeStore; launch: Launcher; resolved?: ResolvedTarg
  * refusal here would be a fault; the build request that can be refused is
  * answered where it is read.
  */
-function targetAccess(dependencies: HandlerDependencies): { handover(): Reached; read(): Reached } {
+function targetAccess(dependencies: HandlerDependencies): {
+  handover(request: TargetRequest): Reached | { problem: ExchangeProblem };
+  read(request?: TargetRequest): Reached | { problem: ExchangeProblem };
+} {
   const { targets, store } = dependencies;
+  const answered = (reach: ReturnType<TargetSession["handover"]>): Reached | { problem: ExchangeProblem } =>
+    "refused" in reach
+      ? { problem: { code: EXCHANGE_PROBLEM_CODES.SUBMISSION_FIELD_INVALID, message: reach.refused, field: "build" } }
+      : reach;
   if (targets) {
     return {
-      handover() {
-        const reach = targets.handover();
-        if ("refused" in reach) throw new Error(reach.refused);
-        return reach;
-      },
-      read: () => targets.read(),
+      handover: (request) => answered(targets.handover(request)),
+      read: (request = {}) => answered(targets.read(request)),
     };
   }
   if (!store) throw new Error("createHandlers needs either targets or a store.");
   const fixed: Reached = { store, launch: dependencies.launch ?? openUrl };
   return { handover: () => fixed, read: () => fixed };
+}
+
+/**
+ * The build a handover asks for: `"dev"`, or nothing.
+ *
+ * Judged here for the reason every argument is: a schema that refused it
+ * would answer with `isError` and a zod sentence.
+ */
+function readBuild(value: unknown): { request: TargetRequest } | { problem: ExchangeProblem } {
+  if (value === undefined || value === null) return { request: {} };
+  if (value === "dev") return { request: { build: "dev" } };
+  return {
+    problem: callProblem(
+      value,
+      "build",
+      '"dev", or left out',
+      "It says the user asked for the development build (--dev); leave it out for the installed Anthill.",
+    ),
+  };
 }
 
 /**

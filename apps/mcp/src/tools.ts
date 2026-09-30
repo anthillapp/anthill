@@ -56,6 +56,20 @@ const WORKFLOW_ID = z
     "The workflow's own id: the `id` field of the document that was handed over. Every call needs one, because it is the only thing that says which handover is being asked about.",
   );
 
+/**
+ * Which Anthill a chat's first handover asks for (ANT-223).
+ *
+ * The skill passes it when the user wrote `--dev`; the server never reads the
+ * chat. Described here too, so an agent working from an older skill can still
+ * say what the user asked for.
+ */
+const BUILD = z
+  .unknown()
+  .optional()
+  .describe(
+    '"dev" when the user asked for the development build with --dev (macOS; ignored elsewhere), left out for the installed Anthill: the first handover of a chat decides, and a later call asking for another build is refused.',
+  );
+
 export function registerExchangeTools(server: McpServer, handlers: Handlers): void {
   server.registerTool(
     "create_workflow_draft",
@@ -143,6 +157,7 @@ which one, and nothing is stored.`,
           .describe(
             "The exchange version you speak. Leave it out unless you know you speak a later one than this server, which is refused by number rather than half-understood.",
           ),
+        build: BUILD,
       },
       annotations: {
         readOnlyHint: false,
@@ -210,11 +225,11 @@ it. Writing a revision and then binding it is approving your own work.`,
 
 Launches Anthill if it is closed, brings it to the front if it is open, and asks
 it to show the workflow's head revision. Asking twice for the same revision does
-not open it twice. It takes the workflowId and nothing else.
+not open it twice. It takes the workflowId, and build when it is a chat's first handover.
 
 Returns open_requested, with the app's own outcome in "app" – opened, or a
 message to pass on – or not_found for an id this machine has never stored.`,
-      inputSchema: { workflowId: WORKFLOW_ID },
+      inputSchema: { workflowId: WORKFLOW_ID, build: BUILD },
       annotations: { readOnlyHint: false, openWorldHint: false },
     },
     async (args) => handlers.openWorkflow(args),
@@ -228,10 +243,11 @@ message to pass on – or not_found for an id this machine has never stored.`,
 revision, which runs are bound to it, and the handover mode it was stored
 under.
 
-A status read. It changes nothing and it never waits. It takes the workflowId
-and nothing else, and a call that does not name one answers "invalid" without
-looking anything up.`,
-      inputSchema: { workflowId: WORKFLOW_ID },
+A status read. It changes nothing and it never waits. It takes the workflowId –
+and build: "dev" when picking a --dev handover back up, which reads the
+development build's exchange without deciding the chat's build – and a call that
+does not name a workflow answers "invalid" without looking anything up.`,
+      inputSchema: { workflowId: WORKFLOW_ID, build: BUILD },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async (args) => handlers.getWorkflow(args),
@@ -262,7 +278,7 @@ questions to put to the user come with it.
 
 What should keep you from binding is not this call. It is that you asked the
 user whether to start and they have not answered.`,
-      inputSchema: { workflowId: WORKFLOW_ID },
+      inputSchema: { workflowId: WORKFLOW_ID, build: BUILD },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async (args) => handlers.getReadyRevision(args),
@@ -321,6 +337,7 @@ one, and nothing is bound.`,
           .describe(
             "The harness session that will do the work, when it is not the one that handed the workflow over. Letters, digits, hyphens and underscores, as in the handover. Defaults to the submitting session.",
           ),
+        build: BUILD,
       },
       annotations: {
         readOnlyHint: false,

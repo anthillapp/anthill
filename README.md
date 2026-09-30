@@ -405,6 +405,7 @@ packages/
   workflow/          actions, agents, harness profiles, validation, prompt and file compilation
   workflow-exchange/ the contract a coding harness hands a workflow over on
   exchange-store/    handed-over workflows on disk: identity, revisions, readiness, bindings
+  exchange-host/     the app side of a handover: the inbox, working copies, links (desktop and web shell)
   builder/           canvas, palette, document operations
   live/              run markers, pending-run state, bootstrap prompts, observation events
   ui/                shared UI primitives

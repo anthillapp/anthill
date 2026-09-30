@@ -296,3 +296,28 @@ export function isSessionId(value: unknown): value is string {
     typeof value === "string" && value.length <= SESSION_ID_MAX_LENGTH && SESSION_ID.test(value)
   );
 }
+
+/** What the app knows of one handed-over workflow: its identity, the head revision, and the runs bound to it. */
+export type ExchangeView = {
+  workflowId: string;
+  source: ExchangeSource;
+  /**
+   * Which of the two things the user asked the harness for.
+   *
+   * Read from the handover's identity, which is written once, so it says what
+   * they wanted at the moment they asked and not what the document has become
+   * since. `handoverOpens` turns it into the screen this handover belongs on;
+   * nothing here compares it to a literal, because the two legacy modes have
+   * to fold into `design` in exactly one place.
+   */
+  mode: HandoverMode;
+  /** What is true of the head revision — the one the editor has open. */
+  state: RevisionState;
+  revision: number;
+  digest: string;
+  problems: ExchangeProblem[];
+  bindings: { runId: string; revision: number }[];
+};
+export type BoundWorkflowResult =
+  | { ok: true; workflow: Workflow; revision: number; digest: string }
+  | { ok: false; error: string };

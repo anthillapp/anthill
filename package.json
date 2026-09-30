@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "dev:desktop": "npm run build:deps && npm run dev --workspace=@anthill/desktop",
-    "build:deps": "npm run build --workspace=@anthill/workflow-schema && npm run build --workspace=@anthill/runtimes && npm run build --workspace=@anthill/workflow && npm run build --workspace=@anthill/workflow-exchange && npm run build --workspace=@anthill/exchange-store && npm run build --workspace=@anthill/live && npm run build --workspace=@anthill/ui && npm run build --workspace=@anthill/builder && npm run build --workspace=@anthill/workspace && npm run build --workspace=@anthill/run-store && npm run build --workspace=@anthill/engine",
+    "build:deps": "npm run build --workspace=@anthill/workflow-schema && npm run build --workspace=@anthill/runtimes && npm run build --workspace=@anthill/workflow && npm run build --workspace=@anthill/workflow-exchange && npm run build --workspace=@anthill/exchange-store && npm run build --workspace=@anthill/live && npm run build --workspace=@anthill/exchange-host && npm run build --workspace=@anthill/ui && npm run build --workspace=@anthill/builder && npm run build --workspace=@anthill/workspace && npm run build --workspace=@anthill/run-store && npm run build --workspace=@anthill/engine",
     "build": "npm run build:deps && npm run build --workspaces --if-present",
     "pretest": "npm run build:deps",
     "test": "npm run test --workspaces --if-present",

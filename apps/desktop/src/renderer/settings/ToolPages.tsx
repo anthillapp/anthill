@@ -545,20 +545,30 @@ export function PluginsPage() {
       {status ? (
         <SettingGroup
           title="Server"
-          footer="Both plugins start Anthill's local MCP server, found through this file. A plugin that is installed but cannot find its server fails the moment it is used."
+          footer={
+            // Each plugin carries its own server and starts it, so an empty
+            // settings file is the ordinary case. The file only matters when
+            // it names a checkout's own build, for working on Anthill — and
+            // then a name with nothing behind it stops the plugin.
+            status.server.configured
+              ? "Both plugins start the server this file names instead of their own copy. A plugin that cannot find it fails the moment it is used."
+              : `Each plugin carries its own copy of Anthill's local MCP server and starts it. ${status.server.settingsFile} only matters for pointing the plugins at a checkout's own build.`
+          }
         >
           <div className="plugin-row">
             <SettingRow
               label="MCP server"
               note={
                 <span className="mono">
-                  {status.server.path ?? status.server.settingsFile}
+                  {status.server.configured
+                    ? status.server.path ?? status.server.settingsFile
+                    : "the plugin's own copy"}
                 </span>
               }
             >
-              <StateChip tone={status.server.configured && status.server.exists ? "on" : "quiet"}>
+              <StateChip tone={!status.server.configured || status.server.exists ? "on" : "quiet"}>
                 {!status.server.configured
-                  ? "Not configured"
+                  ? "Built into the plugin"
                   : status.server.exists
                     ? "Found"
                     : "Not found"}

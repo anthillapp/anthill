@@ -9,6 +9,7 @@
   },
   "homepage": "https://github.com/nstr/anthill",
   "repository": "https://github.com/nstr/anthill",
+  "license": "MIT",
   "keywords": [
     "workflow",
     "codex",

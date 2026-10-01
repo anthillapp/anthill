@@ -1,6 +1,7 @@
 {
   "name": "anthill",
   "private": true,
+  "license": "MIT",
   "version": "0.8.5",
   "workspaces": [
     "packages/*",

@@ -3,8 +3,7 @@
   "description": "Hand the work of this session to Anthill as a reviewable workflow, then report progress against the revision the user approved.",
   "version": "0.8.5",
   "author": {
-    "name": "Nick Nesterov",
-    "email": "njrnesterov@gmail.com"
+    "name": "Nick Nesterov"
   },
   "homepage": "https://github.com/nstr/anthill",
   "repository": "https://github.com/nstr/anthill",

@@ -4,7 +4,6 @@
   "description": "Hand work from Codex to Anthill as a local, reviewable workflow and report progress against the bound revision.",
   "author": {
     "name": "Nick Nesterov",
-    "email": "njrnesterov@gmail.com",
     "url": "https://github.com/nstr"
   },
   "homepage": "https://github.com/nstr/anthill",

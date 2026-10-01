@@ -20,3 +20,6 @@ apps/desktop/release/
 # Exploratory QA memory: coverage map, session records, pending bug reports.
 # Local notes about test runs, not source.
 qa-exploration/
+
+# Agent files a handover writes when Anthill is dogfooded on itself.
+.claude/agents/

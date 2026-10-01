@@ -1051,18 +1051,16 @@ export function hasStepEvidence(view: LiveSessionView): boolean {
 }
 
 /**
- * How many steps have finished at least once.
+ * How many steps are finished now: whose current pass is over.
  *
- * A step the agent has come back to is drawn as running again, and it is —
- * but the pass it finished before is still finished. Counting only `done`
- * blocks made "9 of 10 steps finished" fall to 8 the moment the agent
- * returned to one of the nine, which read as progress being undone rather
- * than as a step being visited twice.
+ * A step the agent has come back to is working again, and is not counted
+ * until that pass ends. Counting it on the strength of an earlier pass read
+ * "3 of 3 steps finished" over a rework loop's "Run tests" still drawn as
+ * working on its second pass (ANT-243) — a header claiming the run complete
+ * while the diagram under it said otherwise. The count can fall when the agent
+ * returns to a step; that is the step being reopened, and the step's own
+ * "pass 2" says so. It is the same reading as the ended report's "N done".
  */
 export function finishedSteps(view: LiveSessionView): number {
-  return Object.values(view.blocks).filter(
-    (block) =>
-      block.state === "done" ||
-      ((block.state === "running" || block.state === "needsYou") && block.passes > 1),
-  ).length;
+  return Object.values(view.blocks).filter((block) => block.state === "done").length;
 }

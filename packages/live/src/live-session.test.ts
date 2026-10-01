@@ -229,7 +229,7 @@ describe("folding a session", () => {
     expect(view.detours).toEqual([]);
   });
 
-  it("keeps a finished step counted while the agent is back in it", () => {
+  it("does not count a step the agent is back in until that pass finishes (ANT-243)", () => {
     const before = foldLiveSession(workflow, run(), [step("implement"), worked(), step("test"), worked(), step("fix")]);
     expect(finishedSteps(before)).toBe(2);
     const again = foldLiveSession(workflow, run(), [
@@ -241,8 +241,26 @@ describe("folding a session", () => {
       worked(),
       step("implement"),
     ]);
-    // "implement" finished once already; being back in it does not undo that.
-    expect(finishedSteps(again)).toBe(3);
+    // "implement" is working on its second pass: the count is of what is
+    // finished now, so it waits for that pass — as the step's own badge does.
+    expect(again.blocks.implement).toMatchObject({ state: "running", passes: 2 });
+    expect(finishedSteps(again)).toBe(2);
+    const after = foldLiveSession(workflow, run(), [
+      step("implement"),
+      worked(),
+      step("test"),
+      worked(),
+      step("fix"),
+      worked(),
+      step("implement"),
+      worked(),
+      step("test"),
+    ]);
+    // Its second pass over, "implement" counts again; "test" is now the step
+    // reopened, and waits in its turn.
+    expect(after.blocks.implement).toMatchObject({ state: "done", passes: 2 });
+    expect(after.blocks.test).toMatchObject({ state: "running", passes: 2 });
+    expect(finishedSteps(after)).toBe(2);
   });
 
   it("counts a second visit to a step as another pass", () => {
@@ -1944,5 +1962,110 @@ describe("a session stopped by hand", () => {
       event({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", source: "transcript", channel: "claude-code:transcript", at: T(31) }),
     ]);
     expect(view.blocks.implement.state).toBe("done");
+  });
+});
+
+/*
+  ANT-243, the DEV retest of ANT-218: "Implement, test, fix" run from a copied
+  prompt in Claude Code. The Tester failed the first check, the Developer
+  fixed it, and the agent went back to "Run tests" for a second pass. While
+  that pass was still working the header read "3 of 3 steps finished". The
+  journal below is that run's, in its recorded order, with the token-usage
+  records and the duplicate hook copies of tool calls left out.
+*/
+describe("a rework step back for another pass, as the ANT-218 retest recorded it", () => {
+  const T = (s: number) => new Date(Date.parse("2026-10-01T01:11:00.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const hook = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "hook", channel: "claude-code:hook", ...partial });
+  const main = { kind: "main" as const };
+  const developer = { kind: "subagent" as const, name: "Implement two-bullet safety card" };
+  const tester = { kind: "subagent" as const, name: "Manually check safety card bullets" };
+  /** The Bash call that prints a step's line, and the line, recorded when it returns. */
+  const marker = (blockId: string, id: string, s: number, back: number) => [
+    tx({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: id, at: T(s - back) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: id, at: T(s) }),
+    tx({ kind: "step.marker", title: "Step announced", detail: blockId, blockId, printedBy: id, at: T(s) }),
+  ];
+
+  const journal = [
+    tx({ kind: "prompt.submit", title: "The workflow was pasted in", at: T(4.258) }),
+    hook({ kind: "session.start", title: "Session started", at: T(3.699) }),
+    hook({ kind: "prompt.submit", title: "A prompt was submitted", at: T(4.379) }),
+    // Implement: the Developer, sent off as a subagent.
+    ...marker("implement", "m1", 23.903, 1.7),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolName: "Agent", toolUseId: "dev", agentName: "developer", stepTag: "implement", at: T(28.028) }),
+    tx({ kind: "tool.start", title: "Write", toolName: "Write", toolUseId: "w1", parentToolUseId: "dev", at: T(33.601) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "w1", parentToolUseId: "dev", at: T(33.912) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "dev", at: T(38.449) }),
+    tx({ kind: "message", title: "Message", detail: "Done.", parentToolUseId: "dev", author: developer, at: T(38.151) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "dev", author: developer, at: T(38.151) }),
+    hook({ kind: "subagent.end", title: "A subagent finished", at: T(38.264) }),
+    hook({ kind: "prompt.submit", title: "A prompt was submitted", at: T(38.569) }),
+    tx({ kind: "message", title: "Message", detail: "The Implement step is done.", author: main, stepTag: "implement", at: T(40.717) }),
+    // Run tests, pass 1: the Tester finds two bullets where three are wanted.
+    ...marker("test", "m2", 42.824, 1.5),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolName: "Agent", toolUseId: "qa", agentName: "tester", stepTag: "test", at: T(47.001) }),
+    tx({ kind: "tool.start", title: "Read", toolName: "Read", toolUseId: "r1", parentToolUseId: "qa", at: T(50.204) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "r1", parentToolUseId: "qa", at: T(50.563) }),
+    tx({ kind: "message", title: "Message", detail: "The first-pass check failed.", parentToolUseId: "qa", author: tester, at: T(55.579) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "qa", author: tester, at: T(55.579) }),
+    hook({ kind: "subagent.end", title: "A subagent finished", at: T(55.704) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "qa", at: T(55.891) }),
+    hook({ kind: "prompt.submit", title: "A prompt was submitted", at: T(56.015) }),
+    // Fix failures: the same Developer, resumed with SendMessage.
+    ...marker("fix", "m3", 61.104, 1.1),
+    tx({ kind: "tool.start", title: "SendMessage", toolName: "SendMessage", toolUseId: "s1", at: T(64.828) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "s1", at: T(65.673) }),
+    tx({ kind: "message", title: "Message", detail: "The Developer is adding the third bullet.", author: main, stepTag: "fix", at: T(67.329) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", at: T(67.329) }),
+    tx({ kind: "tool.start", title: "Edit", toolName: "Edit", toolUseId: "e1", parentToolUseId: "dev", at: T(68.76) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "e1", parentToolUseId: "dev", at: T(69.189) }),
+    hook({ kind: "turn.end", title: "The agent finished its turn", at: T(68.41) }),
+    hook({ kind: "subagent.end", title: "A subagent finished", at: T(71.629) }),
+    tx({ kind: "message", title: "Message", detail: "I added a third bullet.", parentToolUseId: "dev", author: developer, stepTag: "fix", at: T(73.859) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "dev", author: developer, at: T(73.859) }),
+    hook({ kind: "prompt.submit", title: "A prompt was submitted", at: T(72.22) }),
+    hook({ kind: "subagent.end", title: "A subagent finished", at: T(73.989) }),
+    tx({ kind: "message", title: "Message", detail: "Fix failures is done.", author: main, stepTag: "test", at: T(74.916) }),
+    // Run tests, pass 2: the Tester, resumed, re-reads the file.
+    ...marker("test", "m4", 76.555, 1.5),
+    hook({ kind: "prompt.submit", title: "A prompt was submitted", at: T(76.693) }),
+    tx({ kind: "tool.start", title: "SendMessage", toolName: "SendMessage", toolUseId: "s2", at: T(80.749) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "s2", at: T(81.652) }),
+    tx({ kind: "message", title: "Message", detail: "The Tester is re-reading the file.", author: main, stepTag: "test", at: T(83.015) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", at: T(83.015) }),
+    tx({ kind: "tool.start", title: "Read", toolName: "Read", toolUseId: "r2", parentToolUseId: "qa", at: T(82.873) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "r2", parentToolUseId: "qa", at: T(83.232) }),
+    hook({ kind: "turn.end", title: "The agent finished its turn", at: T(83.954) }),
+    // 18:12:25 PDT: the moment the header claimed all three steps finished.
+    tx({ kind: "tool.start", title: "SubagentHandback", toolName: "SubagentHandback", toolUseId: "h2", parentToolUseId: "qa", at: T(85.279) }),
+  ];
+  const ending = [
+    hook({ kind: "subagent.end", title: "A subagent finished", at: T(85.921) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "h2", parentToolUseId: "qa", at: T(86.542) }),
+    hook({ kind: "prompt.submit", title: "A prompt was submitted", at: T(86.47) }),
+    tx({ kind: "message", title: "Message", detail: "The pass 2 re-check passed.", parentToolUseId: "qa", author: tester, stepTag: "test", at: T(88.275) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "qa", author: tester, at: T(88.275) }),
+    hook({ kind: "subagent.end", title: "A subagent finished", at: T(88.408) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", at: T(98.384) }),
+    tx({ kind: "session.end", title: "The harness reported the work as finished", author: main, completion: "done", at: T(98.392) }),
+    tx({ kind: "message", title: "Message", detail: "The workflow is done.", author: main, stepTag: "test", at: T(98.392) }),
+    hook({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", at: T(99.937) }),
+  ];
+
+  it("does not count Run tests while its second pass is working", () => {
+    const view = foldLiveSession(workflow, run(), journal);
+    expect(view.blocks.implement).toMatchObject({ state: "done", passes: 1 });
+    expect(view.blocks.fix).toMatchObject({ state: "done", passes: 1 });
+    expect(view.blocks.test).toMatchObject({ state: "running", passes: 2 });
+    expect(finishedSteps(view)).toBe(2);
+  });
+
+  it("counts it once the run reports the work done", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [...journal, ...ending]);
+    expect(view.blocks.test).toMatchObject({ state: "done", passes: 2 });
+    expect(finishedSteps(view)).toBe(3);
   });
 });

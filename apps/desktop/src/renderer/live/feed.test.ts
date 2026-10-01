@@ -533,3 +533,98 @@ describe("Claude Code's own helper stopping after the session's turn", () => {
     expect(agents.map((card) => card.state)).toEqual(["unknown", "unknown"]);
   });
 });
+
+/*
+  ANT-245. The helper's stop also came right after a writer's call, where the
+  timing rule took it for the writer finishing: "Theme Writer — Completed"
+  beside two writers still at work (run ANT-7QB269JF), "Developer (mod3–mod5)
+  — Completed" a quarter of a minute before either developer handed back
+  (run ANT-A5B8869B). Timings are the journals'.
+*/
+describe("Claude Code's helper stopping right after a writer's call", () => {
+  const T = (time: string) => `2026-10-01T${time}Z`;
+  const tx = { channel: "claude-code:transcript", source: "transcript" as const };
+  const hook = { channel: "claude-code:hook", source: "hook" as const };
+
+  it("draws no completed subagent after the Theme Writer's Write (ANT-7QB269JF)", () => {
+    const byTheme = { parentToolUseId: "o7Dmfr", author: { kind: "subagent" as const, name: "Theme Writer: THEMES.md" } };
+    const journal = [
+      event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "general-purpose", detail: "Caption Writer: CAPTIONS.md", toolUseId: "cqzGHo", background: true, at: T("02:35:23.034"), ...tx }),
+      event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "general-purpose", detail: "Theme Writer: THEMES.md", toolUseId: "o7Dmfr", background: true, at: T("02:35:25.965"), ...tx }),
+      event({ kind: "tool.end", title: "Tool finished", toolUseId: "cqzGHo", background: true, at: T("02:35:29.502"), ...tx }),
+      event({ kind: "tool.end", title: "Tool finished", toolUseId: "o7Dmfr", background: true, at: T("02:35:29.504"), ...tx }),
+      event({ kind: "prompt.submit", title: "A prompt was submitted", at: T("02:36:39.840"), ...hook }),
+      event({ kind: "turn.end", title: "The agent finished its turn", at: T("02:36:42.279"), ...tx }),
+      event({ kind: "turn.end", title: "The agent finished its turn", at: T("02:36:43.292"), ...hook }),
+      event({ kind: "tool.start", title: "Write", toolName: "Write", toolUseId: "3TM2RW", detail: "THEMES.md", ...byTheme, at: T("02:36:44.098"), ...tx }),
+      event({ kind: "tool.end", title: "Tool finished", toolUseId: "3TM2RW", ok: true, ...byTheme, at: T("02:36:44.383"), ...tx }),
+      event({ kind: "subagent.end", title: "A subagent finished", at: T("02:36:44.853"), ...hook }),
+    ];
+    const cards = buildFeed(journal, false);
+    expect(cards.filter((card) => card.events.includes("subagent.end"))).toEqual([]);
+    const agents = cards.filter((card) => card.kind === "agent");
+    expect(agents.map((card) => card.state)).toEqual(["working", "working"]);
+  });
+
+  it("draws no completed developer before either hands back (ANT-A5B8869B)", () => {
+    const by = (call: string) => ({ parentToolUseId: call, author: { kind: "subagent" as const } });
+    const journal = [
+      event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "developer-mod1-mod2", toolUseId: "J47Djf", background: true, at: T("02:44:11.977"), ...tx }),
+      event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "developer-mod3-mod5", toolUseId: "hACRY9", background: true, at: T("02:44:15.918"), ...tx }),
+      event({ kind: "tool.end", title: "Tool finished", toolUseId: "hACRY9", background: true, at: T("02:44:16.549"), ...tx }),
+      event({ kind: "tool.end", title: "Tool finished", toolUseId: "J47Djf", background: true, at: T("02:44:16.551"), ...tx }),
+      event({ kind: "turn.end", title: "The agent finished its turn", at: T("02:44:18.881"), ...tx }),
+      event({ kind: "turn.end", title: "The agent finished its turn", at: T("02:44:19.963"), ...hook }),
+      event({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "Uyt7R2", ...by("J47Djf"), at: T("02:44:20.711"), ...tx }),
+      event({ kind: "message", title: "Message", detail: "The standalone sleep was blocked", ...by("hACRY9"), at: T("02:44:20.868"), ...tx }),
+      event({ kind: "tool.end", title: "Tool finished", toolUseId: "Uyt7R2", ...by("J47Djf"), at: T("02:44:21.247"), ...tx }),
+      event({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "vPc3KQ", ...by("hACRY9"), at: T("02:44:21.388"), ...tx }),
+      event({ kind: "tool.end", title: "Tool finished", toolUseId: "vPc3KQ", ...by("hACRY9"), at: T("02:44:21.878"), ...tx }),
+      event({ kind: "subagent.end", title: "A subagent finished", at: T("02:44:22.547"), ...hook }),
+      event({ kind: "message", title: "Message", detail: "The 120-second wait is running", ...by("hACRY9"), at: T("02:44:22.969"), ...tx }),
+    ];
+    const cards = buildFeed(journal, false);
+    expect(cards.filter((card) => card.events.includes("subagent.end"))).toEqual([]);
+    expect(cards.filter((card) => card.kind === "agent").map((card) => card.state)).toEqual(["working", "working"]);
+  });
+});
+
+/* ANT-245: a SubagentStop naming the subagent that stopped, by its agent id. */
+describe("a SubagentStop that names its subagent, in the feed", () => {
+  const T = (s: number) => new Date(Date.parse("2026-10-01T05:00:00.000Z") + s * 1000).toISOString();
+  const tx = { channel: "claude-code:transcript", source: "transcript" as const };
+  const hook = { channel: "claude-code:hook", source: "hook" as const };
+  const byA = { parentToolUseId: "call-a", agentId: "agent-a", author: { kind: "subagent" as const } };
+  const byB = { parentToolUseId: "call-b", agentId: "agent-b", author: { kind: "subagent" as const } };
+  const journal = [
+    event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "writer-a", toolUseId: "call-a", background: true, at: T(0), ...tx }),
+    event({ kind: "tool.end", title: "Tool finished", toolUseId: "call-a", background: true, at: T(0.2), ...tx }),
+    event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "writer-b", toolUseId: "call-b", background: true, at: T(1), ...tx }),
+    event({ kind: "tool.end", title: "Tool finished", toolUseId: "call-b", background: true, at: T(1.2), ...tx }),
+    event({ kind: "message", title: "Message", detail: "Writing.", ...byA, at: T(5) }),
+    event({ kind: "message", title: "Message", detail: "Writing.", ...byB, at: T(30) }),
+  ];
+
+  it("finishes that subagent's card, and draws no other", () => {
+    // A's last message was written without a stop reason: only the hook says
+    // it stopped, and it says which — though B spoke more recently.
+    const cards = buildFeed(
+      [...journal, event({ kind: "subagent.end", title: "A subagent finished", agentId: "agent-a", at: T(30.5), ...hook })],
+      false,
+    );
+    expect(cards.filter((card) => card.kind === "agent").map((card) => [card.agentName, card.state])).toEqual([
+      ["writer-a", "done"],
+      ["writer-b", "working"],
+    ]);
+    expect(cards.filter((card) => card.kind !== "agent" && card.events.includes("subagent.end"))).toEqual([]);
+  });
+
+  it("draws nothing for one naming an agent the session never started", () => {
+    const cards = buildFeed(
+      [...journal, event({ kind: "subagent.end", title: "A subagent finished", agentId: "helper-1", at: T(30.5), ...hook })],
+      false,
+    );
+    expect(cards.filter((card) => card.events.includes("subagent.end"))).toEqual([]);
+    expect(cards.filter((card) => card.kind === "agent").map((card) => card.state)).toEqual(["working", "working"]);
+  });
+});

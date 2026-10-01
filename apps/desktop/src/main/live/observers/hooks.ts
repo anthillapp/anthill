@@ -349,6 +349,10 @@ export class HookLogObserver {
         ...(toolName ? { toolName } : {}),
         ...(str(data.tool_use_id) ? { toolUseId: str(data.tool_use_id) as string } : {}),
         ...(typeof data.duration_ms === "number" ? { durationMs: data.duration_ms } : {}),
+        // Which subagent stopped, in Claude Code's own id for it: the one its
+        // transcript's rows carry. Without it the helper Claude Code runs after
+        // each turn read as a subagent finishing (ANT-245).
+        ...(name === "SubagentStop" && str(data.agent_id) ? { agentId: str(data.agent_id) as string } : {}),
       };
 
       if (kind === "tool.start" || kind === "tool.end") {

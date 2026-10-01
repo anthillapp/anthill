@@ -41,6 +41,22 @@ describe("reducing a hook payload", () => {
       .toEqual({ hook_event_name: "SessionEnd", reason: "logout" });
   });
 
+  it("keeps which subagent a SubagentStop names, and not its words or transcript (ANT-245)", () => {
+    expect(minimalHookPayload({
+      hook_event_name: "SubagentStop",
+      stop_hook_active: false,
+      agent_id: "a83008eea67a734a4",
+      agent_type: "general-purpose",
+      agent_transcript_path: "/Users/someone/.claude/projects/p/s/subagents/agent-a83008eea67a734a4.jsonl",
+      last_assistant_message: "I wrote THEMES.md with 300 themes.",
+    })).toEqual({
+      hook_event_name: "SubagentStop",
+      agent_id: "a83008eea67a734a4",
+      agent_type: "general-purpose",
+      last_assistant_message: "",
+    });
+  });
+
   it("does not fall back to raw Bash commands when no description is supplied", () => {
     expect(minimalHookPayload({ tool_name: "Bash", tool_input: { command: "echo personal-data > output.txt" } }))
       .toEqual({ tool_name: "Bash" });

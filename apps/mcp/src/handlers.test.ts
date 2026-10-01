@@ -1227,6 +1227,28 @@ describe("the Anthill a chat reaches", () => {
     expect(text).toContain("This chat's handovers go to Anthill (dev build).");
   });
 
+  // A chat's first handover can be refused, most often because a workflow id
+  // is already taken in the exchange it went to. The refusal is still the
+  // chat's first result, and which Anthill holds that id is what the user
+  // needs to know (found re-running ANT-217: STORE_WORKFLOW_ID_TAKEN).
+  it("names the target when the chat's first handover is refused", async () => {
+    const { handlers, home } = await throughTargets();
+    await handlers.createWorkflowDraft(draftInput({ open: false, build: "dev" }));
+
+    const next = new TargetSession(
+      { platform: "darwin", home, env: {}, checkout: "/src/anthill" },
+      () => async () => ({ outcome: "opened" }),
+    );
+    const refused = await createHandlers({ targets: next }).createWorkflowDraft(
+      draftInput({ open: false, build: "dev", idempotencyKey: "handover-8", workflow: completeWorkflow({ name: "Other" }) }),
+    );
+
+    const answer = refused.structuredContent as { outcome: string; target?: { id: string; label: string } };
+    expect(answer.outcome).toBe("invalid");
+    expect(answer.target).toEqual({ id: "electron-dev", label: "Anthill (dev build)" });
+    expect((refused.content[0] as { text: string }).text).toContain("This chat's handovers go to Anthill (dev build).");
+  });
+
   // ANT-238: before the web shell runs there is no port or token to link to,
   // and anthill:// opens nothing on Linux and Windows: no link at all.
   it("gives a web chat no anthill:// link while the web shell is not running", async () => {

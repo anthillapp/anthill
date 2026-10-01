@@ -20,7 +20,7 @@ import type { Workflow } from "@anthill/workflow-schema";
 import { nodesOnCycles, parallelPlan } from "@anthill/workflow";
 
 import { attribute, buildWorkflowIndex, stepForAgent, type BlockMapping, type WorkflowIndex } from "./attribution.js";
-import { projectJournal } from "./channels.js";
+import { inRecordedOrder, projectJournal } from "./channels.js";
 import { completionOf, isAnthillTool, type ObservationEvent } from "./observation-event.js";
 import type { PendingRun } from "./pending-run.js";
 
@@ -181,38 +181,101 @@ function isDelegateRecord(event: ObservationEvent): boolean {
 }
 
 /**
- * Which of the hooks' SubagentStop records are Claude Code's own helper, not
- * a subagent the session started.
+ * Whose end one of the hooks' SubagentStop records is.
  *
- * After the session's turn ends, and after a Stop, Claude Code runs a helper
- * of its own under the session's id (ANT-218), and its end fires SubagentStop
- * a second or two later — naming no subagent, while the session's background
- * writers are still listed as running. Read as one of them finishing, each
- * foreground turn ending drew a "Completed" subagent card, and the first one
- * settled a writer that went on for minutes (ANT-242). A subagent's own stop
- * comes a moment after it last wrote; the helper's comes after the session
- * yielded with no subagent heard from since.
+ * - `helper`: no subagent the session started. Claude Code's own helper,
+ *   which it runs under the session's id after a turn ends and after a Stop.
+ * - `{ call }`: the subagent the call with this id started, named by the
+ *   record itself.
+ * - `unidentified`: a subagent's, but the record does not say which.
  */
-export function helperStops(events: readonly ObservationEvent[]): (event: ObservationEvent) => boolean {
+export type SubagentStopReading = "helper" | "unidentified" | { call: string };
+
+/**
+ * Read each of the hooks' SubagentStop records for whose end it is.
+ *
+ * Claude Code's SubagentStop input names the agent that stopped — `agent_id`,
+ * which is also the id in the subagent's own transcript name and on every row
+ * of it. Anthill's hook used to drop it, so every stop named no subagent, and
+ * whose it was had to be worked out from timing (ANT-242); timing drew the
+ * helper's stop as a writer finishing whenever the writer happened to make a
+ * call a moment before (ANT-245). Now the record says. A stop whose agent is
+ * one of the subagents this session's transcripts were read for is that
+ * subagent's, exactly; one whose agent is none of them is not a subagent the
+ * session started, and settles nothing.
+ *
+ * Records written without an agent id — by an older hook, or for a session
+ * whose delegates' transcripts carry no ids — fall back to timing. After the
+ * session's turn ends, and after a Stop, Claude Code's helper ends a second or
+ * two later; a subagent's own stop comes a moment after its last reply. So a
+ * stop within `HELPER_STOP_MS` of the session yielding is the helper's unless
+ * a subagent was heard from since, and a subagent last heard making a call is
+ * not one that could have stopped: a call's result goes back to the model, and
+ * the reply to it comes first (ANT-245).
+ */
+export function subagentStops(events: readonly ObservationEvent[]): (event: ObservationEvent) => SubagentStopReading | undefined {
   const time = (event: ObservationEvent) => Date.parse(event.at);
-  const yields = events
+  const ordered = inRecordedOrder(events);
+  /** Every agent id a delegate's transcript gave, and the call that started it when it said. */
+  const callOf = new Map<string, string | undefined>();
+  for (const event of ordered) {
+    if (!event.agentId || event.kind === "subagent.end" || event.channel.endsWith(":hook")) continue;
+    if (event.parentToolUseId) callOf.set(event.agentId, event.parentToolUseId);
+    else if (!callOf.has(event.agentId)) callOf.set(event.agentId, undefined);
+  }
+  const yields = ordered
     .filter((event) => (event.kind === "turn.end" || isStopByHand(event)) && !isDelegateRecord(event))
     .map(time)
     .filter((at) => !Number.isNaN(at));
-  const delegates = events
-    .filter(isDelegateRecord)
-    .map(time)
-    .filter((at) => !Number.isNaN(at));
-  return (event) => {
-    if (event.kind !== "subagent.end" || event.toolUseId || isDelegateRecord(event)) return false;
-    if (!event.channel.endsWith(":hook")) return false;
+  /** Each subagent's records, oldest first, as when and whether it was a call. */
+  const heard = new Map<string, { at: number; calling: boolean }[]>();
+  for (const event of ordered) {
+    if (!isDelegateRecord(event)) continue;
     const at = time(event);
-    if (Number.isNaN(at)) return false;
-    const yielded = yields.filter((y) => y <= at && at - y <= HELPER_STOP_MS);
-    if (yielded.length === 0) return false;
-    const since = Math.min(Math.max(...yielded), at - OWN_STOP_MS);
-    return !delegates.some((heard) => heard > since && heard <= at);
+    if (Number.isNaN(at)) continue;
+    const who = event.parentToolUseId ?? "subagent";
+    const list = heard.get(who) ?? [];
+    list.push({ at, calling: event.kind === "tool.start" || event.kind === "tool.end" });
+    heard.set(who, list);
+  }
+  /** Whether any subagent could have stopped in this span: heard from, and not last heard calling. */
+  const couldHaveStopped = (since: number, at: number) => {
+    for (const list of heard.values()) {
+      let last: { at: number; calling: boolean } | undefined;
+      for (const record of list) {
+        if (record.at > at) break;
+        last = record;
+      }
+      if (last && last.at > since && !last.calling) return true;
+    }
+    return false;
   };
+  return (event) => {
+    if (event.kind !== "subagent.end" || event.toolUseId || isDelegateRecord(event)) return undefined;
+    if (!event.channel.endsWith(":hook")) return undefined;
+    if (event.agentId) {
+      const call = callOf.get(event.agentId);
+      if (call) return { call };
+      // An agent no delegate's transcript is from, when theirs carry ids: not
+      // a subagent this session started.
+      if (!callOf.has(event.agentId) && callOf.size > 0) return "helper";
+    }
+    const at = time(event);
+    if (Number.isNaN(at)) return "unidentified";
+    const yielded = yields.filter((y) => y <= at && at - y <= HELPER_STOP_MS);
+    if (yielded.length === 0) return "unidentified";
+    const since = Math.min(Math.max(...yielded), at - OWN_STOP_MS);
+    return couldHaveStopped(since, at) ? "unidentified" : "helper";
+  };
+}
+
+/**
+ * Which of the hooks' SubagentStop records are Claude Code's own helper, not
+ * a subagent the session started (ANT-242, ANT-245). See `subagentStops`.
+ */
+export function helperStops(events: readonly ObservationEvent[]): (event: ObservationEvent) => boolean {
+  const read = subagentStops(events);
+  return (event) => read(event) === "helper";
 }
 
 /** How long after a dispatch the report of a step announced with it may land (ANT-242). */
@@ -376,8 +439,12 @@ export function foldLiveSession(
     record is still owed its hook.
   */
   const lastHeard = new Map<string, number>();
+  /** Subagents whose last record was a call: mid-turn, their reply still to come (ANT-245). */
+  const lastCalling = new Set<string>();
   const endedByHook = new Set<string>();
   let hooksOwed = 0;
+  /** The subagents whose recorded end the owed hooks are for, when a hook names its subagent. */
+  const owedBy = new Set<string>();
   /** How recently a subagent must have been heard from for a stop to be its. */
   const STOP_PAIRING_MS = 10_000;
   const spans: BlockSpanView[] = [];
@@ -636,7 +703,7 @@ export function foldLiveSession(
    */
   const cutOffFor = new Set<string>();
   const cutOffWithSession = stoppedWithSession(events);
-  const isHelperStop = helperStops(events);
+  const stopOf = subagentStops(events);
   const STOPPED_NOTE = "A subagent working on this step was stopped by hand before it handed back.";
   const STOPPED_HERE_NOTE = "The session was stopped by hand on this step.";
 
@@ -763,8 +830,21 @@ export function foldLiveSession(
     // Agent calls only once the last is made, and the subagents are already
     // at work by then (ANT-164).
     // Claude Code's own helper stopping after the session's turn is nobody's
-    // end (ANT-242).
-    if (event.kind === "subagent.end" && !event.parentToolUseId && event.channel.endsWith(":hook") && !isHelperStop(event)) {
+    // end (ANT-242). A stop that names its subagent is that one's (ANT-245).
+    const stop = event.kind === "subagent.end" && !event.parentToolUseId && event.channel.endsWith(":hook")
+      ? stopOf(event)
+      : undefined;
+    if (stop && typeof stop === "object") {
+      const d = delegations.get(stop.call);
+      if (d && !d.delegateEnded) {
+        endedByHook.add(stop.call);
+        d.delegateEnded = true;
+        release(d.blockId, event.at);
+      } else if (d && owedBy.delete(stop.call) && hooksOwed > 0) {
+        // The hook its transcript's end was already counted for.
+        hooksOwed -= 1;
+      }
+    } else if (stop === "unidentified") {
       if (hooksOwed > 0) {
         hooksOwed -= 1;
       } else {
@@ -773,6 +853,8 @@ export function foldLiveSession(
         for (const [call, heard] of lastHeard) {
           const d = delegations.get(call);
           if (!d || d.delegateEnded || Number.isNaN(at) || heard > at || at - heard > STOP_PAIRING_MS) continue;
+          // Last heard making a call: its reply comes before it can stop.
+          if (lastCalling.has(call)) continue;
           if (best === undefined || heard > (lastHeard.get(best) ?? 0)) best = call;
         }
         const d = best ? delegations.get(best) : undefined;
@@ -788,10 +870,15 @@ export function foldLiveSession(
     if (via && event.parentToolUseId) {
       const at = Date.parse(event.at);
       if (!Number.isNaN(at)) lastHeard.set(event.parentToolUseId, at);
+      if (event.kind === "tool.start" || event.kind === "tool.end") lastCalling.add(event.parentToolUseId);
+      else lastCalling.delete(event.parentToolUseId);
     }
     if (via || event.parentToolUseId || event.author?.kind === "subagent") {
       if (via && event.kind === "turn.end") {
-        if (!via.delegateEnded && !endedByHook.has(event.parentToolUseId ?? "")) hooksOwed += 1;
+        if (!via.delegateEnded && !endedByHook.has(event.parentToolUseId ?? "")) {
+          hooksOwed += 1;
+          owedBy.add(event.parentToolUseId ?? "");
+        }
         via.delegateEnded = true;
         release(via.blockId, event.at);
       }

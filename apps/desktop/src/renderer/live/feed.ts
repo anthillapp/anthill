@@ -17,7 +17,7 @@
  * screen.
  */
 
-import { helperStops, stoppedWithSession, type AttributedEvent, type MappingConfidence, type ObservationEvent } from "@anthill/live";
+import { stoppedWithSession, subagentStops, type AttributedEvent, type MappingConfidence, type ObservationEvent } from "@anthill/live";
 
 /**
  * How many cards the feed draws.
@@ -144,8 +144,8 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
   let lastDelegateEnd: { card: FeedCard; at: number } | undefined;
   /** A subagent's stop that is the session's own reaching it (ANT-241). */
   const cutOff = stoppedWithSession(events);
-  /** Claude Code's own helper stopping after the session's turn (ANT-242). */
-  const isHelperStop = helperStops(events);
+  /** Whose end each SubagentStop is: a subagent's, or Claude Code's own helper's (ANT-242, ANT-245). */
+  const stopOf = subagentStops(events);
 
   /** Another channel's record of this card's action, folded in rather than drawn twice. */
   const fold = (card: FeedCard, event: AttributedEvent) => {
@@ -229,6 +229,21 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
       }
     }
 
+    // A SubagentStop that names its subagent: that subagent's card, which it
+    // finishes if nothing else had (ANT-245).
+    const stop = event.kind === "subagent.end" ? stopOf(event) : undefined;
+    const stopped = stop && typeof stop === "object" ? dispatched.get(stop.call) : undefined;
+    if (stop && typeof stop === "object" && stopped) {
+      if (stopped.background && open.get(stop.call) === stopped) {
+        stopped.state = "done";
+        stopped.durationMs = Date.parse(event.at) - Date.parse(stopped.at);
+        open.delete(stop.call);
+      }
+      lastDelegateEnd = { card: stopped, at: Date.parse(event.at) };
+      fold(stopped, event);
+      continue;
+    }
+
     // The hooks' "a subagent finished", which names no call: the subagent
     // whose turn ended a moment ago. Folded into its card rather than drawn
     // as a second, finished one beside it (ANT-173).
@@ -241,7 +256,7 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
     // session's turn: no subagent the session started finished, and drawing
     // it as a completed one beside writers still at work said one had
     // (ANT-242).
-    if (isHelperStop(event)) continue;
+    if (stop === "helper") continue;
 
     // The same call opened twice — the transcript's dispatch and the hooks'
     // PreToolUse for it. One card, not two; and the second used to take the

@@ -111,7 +111,10 @@ export function minimalHookPayload(data: unknown): Record<string, unknown> {
   const toolName = typeof data.tool_name === "string" ? data.tool_name : undefined;
 
   const out: Record<string, unknown> = {};
-  for (const key of ["session_id", "hook_event_name", "tool_name", "tool_use_id"] as const) {
+  // `agent_id` and `agent_type` name the subagent a SubagentStop is for, so a
+  // stop can be tied to the subagent that stopped — or known to be Claude
+  // Code's own helper, which no Agent call started (ANT-245).
+  for (const key of ["session_id", "hook_event_name", "tool_name", "tool_use_id", "agent_id", "agent_type"] as const) {
     const value = data[key];
     // Identifiers, not prose: kept whole, and not searched for secrets.
     if (typeof value === "string") out[key] = value.slice(0, MAX_VALUE);

@@ -127,7 +127,7 @@ describe("what a message cannot carry out", () => {
   });
 
   it("folds the home directory so a path stops naming the account", () => {
-    const said = messageExcerpt("I wrote the report to /Users/nstr/dev/apps/report.md just now.", marker);
+    const said = messageExcerpt("I wrote the report to /Users/alex/dev/apps/report.md just now.", marker);
     expect(said).toBe("I wrote the report to ~/dev/apps/report.md just now.");
   });
 

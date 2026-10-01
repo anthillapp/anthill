@@ -1,0 +1,11 @@
+# Reviewed 2026-09-30: none of these is a secret.
+# PostHog's project token is public client configuration; the rest are
+# well-known example values in tests (AWS docs key, jwt.io token, RFC 6455
+# nonce, a made-up sk-proj key) that check secrets are stripped.
+850aa763189f6d1c06a3d092c211c2b183c5b2cc:apps/desktop/src/main/analytics.ts:generic-api-key:11
+1e186e10d3c777bd278bdbea40f974759a8c0f55:apps/desktop/src/main/live/hook-payload.test.ts:generic-api-key:68
+1e186e10d3c777bd278bdbea40f974759a8c0f55:apps/desktop/src/main/live/hook-payload.test.ts:generic-api-key:121
+1e186e10d3c777bd278bdbea40f974759a8c0f55:apps/desktop/src/main/live/hook-payload.test.ts:generic-api-key:122
+63788c2b48c2418af14d3eacc0044d9266f194bc:apps/cli/src/server.test.ts:generic-api-key:23
+ddffae59391b8294412ca2eb85183ed0d26dd0b2:packages/live/src/excerpt.test.ts:jwt:114
+82f45d64b292fc00e7879cf18d039b3368db78cb:packages/live/src/excerpt.test.ts:jwt:102

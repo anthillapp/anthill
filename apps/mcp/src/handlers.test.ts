@@ -17,7 +17,7 @@
 import { ExchangeStore, type InboxDrop } from "@anthill/exchange-store";
 import { revisionDigest, WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-exchange";
 import type { Workflow } from "@anthill/workflow-schema";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -32,6 +32,7 @@ import {
   type BindRunInput,
 } from "./handlers.js";
 import type { Launcher } from "./launch.js";
+import { TargetSession, type TargetContext } from "./target.js";
 
 const roots: string[] = [];
 
@@ -1183,5 +1184,285 @@ describe("storing now and opening later", () => {
     const { handlers, opened } = await openTools();
     await handlers.createWorkflowDraft(draftInput());
     expect(opened).toHaveLength(1);
+  });
+});
+
+/*
+  ANT-222. A chat's handovers go to one Anthill, pinned at the first handover,
+  and every result says which.
+*/
+describe("the Anthill a chat reaches", () => {
+  async function throughTargets(context: Partial<TargetContext> = {}) {
+    const home = await mkdtemp(join(tmpdir(), "anthill-mcp-home-"));
+    roots.push(home);
+    const opened: string[] = [];
+    const targets = new TargetSession(
+      { platform: "darwin", home, env: {}, checkout: "/src/anthill", ...context },
+      (resolved) => async (url) => {
+        opened.push(`${resolved.target} ${url}`);
+        return { outcome: "opened" };
+      },
+    );
+    return { handlers: createHandlers({ targets }), targets, home, opened };
+  }
+
+  it("names the target in the handover's result", async () => {
+    const { handlers } = await throughTargets();
+    const result = await handlers.createWorkflowDraft(draftInput());
+    const answer = result.structuredContent as { app?: { target?: { id: string; label: string } } };
+    expect(answer.app?.target).toEqual({ id: "app", label: "Anthill (installed app)" });
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("This chat's handovers go to Anthill (installed app).");
+  });
+
+  // ANT-236: design and watch both hand over with open: false first, and that
+  // first result is the one that has to say which Anthill the chat is on.
+  it("names the target when the handover is stored without opening", async () => {
+    const { handlers, opened } = await throughTargets();
+    const result = await handlers.createWorkflowDraft(draftInput({ open: false, build: "dev" }));
+    expect(opened).toEqual([]);
+    const answer = result.structuredContent as { target?: { id: string; label: string } };
+    expect(answer.target).toEqual({ id: "electron-dev", label: "Anthill (dev build)" });
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("This chat's handovers go to Anthill (dev build).");
+  });
+
+  // ANT-238: before the web shell runs there is no port or token to link to,
+  // and anthill:// opens nothing on Linux and Windows: no link at all.
+  it("gives a web chat no anthill:// link while the web shell is not running", async () => {
+    const { handlers } = await throughTargets({ platform: "linux" });
+    const created = await handlers.createWorkflowDraft(draftInput({ open: false }));
+    expect((created.structuredContent as { url?: string }).url).toBeUndefined();
+    const text = (created.content[0] as { text: string }).text;
+    expect(text).not.toContain("anthill://");
+    expect(text).toContain("This chat's handovers go to Anthill (web).");
+  });
+
+  // ANT-231: there is no anthill:// handler on Linux and Windows, so a web
+  // chat's results carry the web shell's own link, with the port and token
+  // its lock records, on the handovers and the reads alike.
+  it("gives a web chat's results the web shell's http:// link", async () => {
+    const { handlers, home } = await throughTargets({ platform: "linux" });
+    const dir = join(home, ".anthill", "cli");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "instance.lock"), JSON.stringify({ pid: process.pid, port: 4180, host: "127.0.0.1", startedAt: "", token: "t0k" }));
+    const link = "http://127.0.0.1:4180/workflow/workflow-1?token=t0k";
+
+    const created = await handlers.createWorkflowDraft(draftInput());
+    expect(created.structuredContent).toMatchObject({ url: link });
+    expect((created.content[0] as { text: string }).text).toContain(link);
+    expect((await handlers.getWorkflow({ workflowId: "workflow-1" })).structuredContent).toMatchObject({ url: link });
+    expect((await handlers.openWorkflow({ workflowId: "workflow-1" })).structuredContent).toMatchObject({ url: link });
+    const ready = (await handlers.getReadyRevision({ workflowId: "workflow-1" })).structuredContent as { url: string; revision: number; digest: string };
+    expect(ready.url).toBe(link);
+    const bound = await handlers.bindRun({ workflowId: "workflow-1", revision: ready.revision, digest: ready.digest, idempotencyKey: "bind-1" });
+    expect(bound.structuredContent).toMatchObject({ outcome: "bound", url: link });
+  });
+
+  it("gives no http:// link a page could not use, for a shell that has not recorded its token", async () => {
+    const { handlers, home } = await throughTargets({ platform: "linux" });
+    const dir = join(home, ".anthill", "cli");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "instance.lock"), JSON.stringify({ pid: process.pid, port: 4180, host: "127.0.0.1", startedAt: "" }));
+
+    const created = await handlers.createWorkflowDraft(draftInput());
+
+    // Nor an anthill:// one, which opens nothing where the web shell is the
+    // only Anthill (ANT-238).
+    expect((created.structuredContent as { url?: string }).url).toBeUndefined();
+    expect((created.content[0] as { text: string }).text).not.toContain("anthill://");
+  });
+
+  // ANT-232: the commands bind_run returns work where the harness runs them.
+  describe("the progress commands bind_run returns for the web shell", () => {
+    async function bindOnWeb(options: { anthillOnPath: boolean; checkout: string }) {
+      const bin = await mkdtemp(join(tmpdir(), "anthill-mcp-bin-"));
+      roots.push(bin);
+      if (options.anthillOnPath) {
+        await writeFile(join(bin, "anthill"), "#!/bin/sh\n", { mode: 0o755 });
+      }
+      const { handlers } = await throughTargets({ platform: "linux", env: { PATH: bin }, checkout: options.checkout });
+      await handlers.createWorkflowDraft(draftInput());
+      const ready = (await handlers.getReadyRevision({ workflowId: "workflow-1" })).structuredContent as { revision: number; digest: string };
+      const bound = await handlers.bindRun({ workflowId: "workflow-1", revision: ready.revision, digest: ready.digest, idempotencyKey: "bind-1" });
+      return (bound.structuredContent as { reportingCommands: string }).reportingCommands;
+    }
+
+    it("are plain anthill when anthill is on the harness PATH", async () => {
+      const commands = await bindOnWeb({ anthillOnPath: true, checkout: "/src/anthill" });
+      expect(commands).toMatch(/^ {4}anthill run ANT-/m);
+      expect(commands).toMatch(/^ {4}anthill done ANT-/m);
+    });
+
+    it("run this node on the checkout's CLI when anthill is not on the PATH", async () => {
+      const commands = await bindOnWeb({ anthillOnPath: false, checkout: "/src/anthill" });
+      const node = /^[A-Za-z0-9_./:@%+=,-]+$/.test(process.execPath) ? process.execPath : `'${process.execPath}'`;
+      expect(commands).toContain(`    ${node} /src/anthill/apps/cli/out/cli/src/cli.js run ANT-`);
+      expect(commands).toContain(`    ${node} /src/anthill/apps/cli/out/cli/src/cli.js step ANT-`);
+      expect(commands).not.toMatch(/^ {4}anthill /m);
+    });
+
+    it("quote a checkout path with spaces", async () => {
+      const commands = await bindOnWeb({ anthillOnPath: false, checkout: "/Users/some one/anthill" });
+      expect(commands).toContain(`'/Users/some one/anthill/apps/cli/out/cli/src/cli.js' run ANT-`);
+    });
+  });
+
+  it("prefers the link a launcher reports, which knows the port of a shell it just started", async () => {
+    const home = await mkdtemp(join(tmpdir(), "anthill-mcp-home-"));
+    roots.push(home);
+    const targets = new TargetSession(
+      { platform: "linux", home, env: {}, checkout: "/src/anthill" },
+      () => async () => ({ outcome: "started", link: "http://127.0.0.1:4199/workflow/workflow-1?token=new", message: "Started the web shell." }),
+    );
+    const created = await createHandlers({ targets }).createWorkflowDraft(draftInput());
+    expect(created.structuredContent).toMatchObject({ url: "http://127.0.0.1:4199/workflow/workflow-1?token=new" });
+  });
+
+  it("writes into the pinned target's own exchange", async () => {
+    const { handlers, home } = await throughTargets({ setting: "web" });
+    await handlers.createWorkflowDraft(draftInput());
+    const web = new ExchangeStore(join(home, ".anthill", "cli"));
+    expect((await web.readWorkflow("workflow-1"))?.identity).toBeTruthy();
+    const app = new ExchangeStore(join(home, "Library", "Application Support", "@anthill", "desktop"));
+    expect(await app.readWorkflow("workflow-1")).toBeUndefined();
+  });
+
+  it("is not decided by a read before the first handover", async () => {
+    const { handlers, targets } = await throughTargets();
+    await handlers.getWorkflow({ workflowId: "workflow-1" });
+    expect(targets.target).toBeUndefined();
+    await handlers.createWorkflowDraft(draftInput());
+    expect(targets.target?.target).toBe("app");
+  });
+});
+
+/*
+  ANT-223. The skill passes build: "dev" when the user wrote --dev. The first
+  handover decides and pins; a later call that asks for another build is
+  refused with nothing written.
+*/
+describe("a chat that asks for the development build", () => {
+  async function chat(context: Partial<TargetContext> = {}) {
+    const home = await mkdtemp(join(tmpdir(), "anthill-mcp-home-"));
+    roots.push(home);
+    const targets = new TargetSession(
+      { platform: "darwin", home, env: {}, checkout: "/src/anthill", ...context },
+      () => async () => ({ outcome: "running", message: "The development build is running." }),
+    );
+    let minted = 0;
+    const handlers = createHandlers({
+      targets,
+      mintRunId: () => `ANT-RUN${(minted += 1)}`,
+      mintNonce: () => `n${minted}`,
+    });
+    const exchange = (target: "app" | "electron-dev" | "web") =>
+      new ExchangeStore(
+        target === "web"
+          ? join(home, ".anthill", "cli")
+          : join(home, "Library", "Application Support", "@anthill", target === "app" ? "desktop" : "desktop-dev"),
+      );
+    return { handlers, targets, exchange, home };
+  }
+  const text = (result: { content: unknown[] }) => (result.content[0] as { text: string }).text;
+
+  it("goes to the development build's exchange and says so", async () => {
+    const { handlers, targets, exchange } = await chat();
+    const result = await handlers.createWorkflowDraft(draftInput({ build: "dev" }));
+    expect(targets.target?.target).toBe("electron-dev");
+    expect((await exchange("electron-dev").readWorkflow("workflow-1"))?.identity).toBeTruthy();
+    expect(await exchange("app").readWorkflow("workflow-1")).toBeUndefined();
+    expect(text(result)).toContain("This chat's handovers go to Anthill (dev build).");
+    expect(text(result)).toContain("The development build is running.");
+  });
+
+  it("keeps the build for later calls that do not repeat it", async () => {
+    const { handlers, targets } = await chat();
+    await handlers.createWorkflowDraft(draftInput({ build: "dev" }));
+    const opened = await handlers.openWorkflow({ workflowId: "workflow-1" });
+    expect((opened.structuredContent as { outcome: string }).outcome).toBe("open_requested");
+    expect(targets.target?.target).toBe("electron-dev");
+  });
+
+  it("refuses a later --dev once the chat is pinned to the installed app, and writes nothing", async () => {
+    const { handlers, exchange } = await chat();
+    await handlers.createWorkflowDraft(draftInput());
+    const refused = await handlers.createWorkflowDraft(
+      draftInput({ idempotencyKey: "handover-8", build: "dev", workflow: completeWorkflow({ id: "workflow-2" }) }),
+    );
+    expect((refused.structuredContent as { outcome: string }).outcome).toBe("invalid");
+    expect(text(refused)).toContain("takes a new chat");
+    expect(await exchange("app").readWorkflow("workflow-2")).toBeUndefined();
+    expect(await exchange("electron-dev").readWorkflow("workflow-2")).toBeUndefined();
+
+    const bind = await handlers.bindRun({ workflowId: "workflow-1", revision: 1, digest: "d", idempotencyKey: "k", build: "dev" });
+    expect((bind.structuredContent as { outcome: string }).outcome).toBe("invalid");
+    expect((await exchange("app").readWorkflow("workflow-1"))?.bindings).toEqual([]);
+
+    const open = await handlers.openWorkflow({ workflowId: "workflow-1", build: "dev" });
+    expect((open.structuredContent as { outcome: string }).outcome).toBe("invalid");
+    expect(text(open)).toContain("takes a new chat");
+  });
+
+  it("refuses --dev without a checkout, and stores nothing anywhere", async () => {
+    const { handlers, targets, exchange } = await chat({ checkout: undefined });
+    const refused = await handlers.createWorkflowDraft(draftInput({ build: "dev" }));
+    expect((refused.structuredContent as { outcome: string }).outcome).toBe("invalid");
+    expect(text(refused)).toContain("checkout");
+    expect(targets.target).toBeUndefined();
+    expect(await exchange("app").readWorkflow("workflow-1")).toBeUndefined();
+    expect(await exchange("electron-dev").readWorkflow("workflow-1")).toBeUndefined();
+  });
+
+  // ANT-237: the call names its workflow; the refusal is about the build, and
+  // must not send the agent looking for another workflow id.
+  it("refuses --dev without a checkout on the calls that name a workflow, without saying they name none", async () => {
+    const { handlers } = await chat({ checkout: undefined });
+    for (const refused of [
+      await handlers.openWorkflow({ workflowId: "workflow-1", build: "dev" }),
+      await handlers.getReadyRevision({ workflowId: "workflow-1", build: "dev" }),
+    ]) {
+      expect((refused.structuredContent as { outcome: string }).outcome).toBe("invalid");
+      expect(text(refused)).toContain("checkout");
+      expect(text(refused)).not.toContain("names no workflow");
+    }
+  });
+
+  it("ignores the build on Linux and Windows, where the web shell is the only Anthill", async () => {
+    for (const platform of ["linux", "win32"] as const) {
+      const { handlers, targets, exchange } = await chat({ platform });
+      const result = await handlers.createWorkflowDraft(draftInput({ build: "dev" }));
+      expect((result.structuredContent as { outcome: string }).outcome).toBe("created");
+      expect(targets.target?.target).toBe("web");
+      expect((await exchange("web").readWorkflow("workflow-1"))?.identity).toBeTruthy();
+    }
+  });
+
+  // A later session picking a --dev handover back up reads it before it binds.
+  it("reads a dev-build workflow in a fresh chat when asked with build, without pinning", async () => {
+    const first = await chat();
+    await first.handlers.createWorkflowDraft(draftInput({ build: "dev" }));
+
+    const again = new TargetSession(
+      { platform: "darwin", home: first.home, env: {}, checkout: "/src/anthill" },
+      () => async () => ({ outcome: "running" }),
+    );
+    const handlers = createHandlers({ targets: again });
+    const withoutBuild = await handlers.getWorkflow({ workflowId: "workflow-1" });
+    expect((withoutBuild.structuredContent as { outcome: string }).outcome).toBe("not_found");
+    const withBuild = await handlers.getWorkflow({ workflowId: "workflow-1", build: "dev" });
+    expect((withBuild.structuredContent as { outcome: string }).outcome).toBe("found");
+    const ready = await handlers.getReadyRevision({ workflowId: "workflow-1", build: "dev" });
+    expect((ready.structuredContent as { outcome: string }).outcome).not.toBe("no_such_workflow");
+    expect(again.target).toBeUndefined();
+  });
+
+  it("refuses a build it does not know, with nothing stored", async () => {
+    const { handlers, targets } = await chat();
+    const refused = await handlers.createWorkflowDraft(draftInput({ build: "staging" }));
+    expect((refused.structuredContent as { outcome: string }).outcome).toBe("invalid");
+    expect(targets.target).toBeUndefined();
+    const open = await handlers.openWorkflow({ workflowId: "workflow-1", build: true });
+    expect((open.structuredContent as { outcome: string }).outcome).toBe("invalid");
   });
 });

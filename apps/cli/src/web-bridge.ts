@@ -1,11 +1,13 @@
 import { externalLink } from "../../desktop/src/shared/links.js";
 import type { InterpreterId } from "@anthill/workflow";
+import { routedWorkflowId } from "./routes.js";
 import {
   IPC_CONTRACT,
   IpcChannel,
   LIVE_EVENTS_CHANNEL,
   LIVE_SNAPSHOT_CHANNEL,
   OPEN_SETTINGS_CHANNEL,
+  HANDOVER_REFUSED_CHANNEL,
   OPEN_WORKFLOW_CHANNEL,
   SAVE_WORKFLOW_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
@@ -88,6 +90,15 @@ export function installWebBridge(): Promise<AnthillApi> {
         (token ? `?token=${encodeURIComponent(token)}` : ""),
     );
 
+    /**
+     * Whether this page has handed over the workflow its URL names (ANT-228).
+     *
+     * A tab at `/workflow/<id>` is this shell's `anthill://workflow/<id>`. The id
+     * goes with the first collection only: the page asks again when a screen
+     * remounts, and a link is followed once. A reload is a new page, and follows it
+     * again, as reopening a link would.
+     */
+    let routeHandedOver = false;
     const pending = new Map<number, Pending>();
     const pushHandlers = new Map<string, Set<(payload: unknown) => void>>();
     let nextId = 1;
@@ -173,14 +184,21 @@ export function installWebBridge(): Promise<AnthillApi> {
       capabilities: () => invoke(IpcChannel.appCapabilities),
       relaunch: () => invoke(IpcChannel.appRelaunch),
       openWorkflow: (path?: string) => invoke(IpcChannel.workflowOpen, path),
-      pendingWorkflowOpen: () => invoke(IpcChannel.workflowPendingOpen),
-      workflowOpened: (path) => invoke(IpcChannel.workflowOpened, path),
+      pendingWorkflowOpen: () => {
+        const routed = routeHandedOver ? undefined : routedWorkflowId(window.location.pathname);
+        routeHandedOver = true;
+        return invoke(IpcChannel.workflowPendingOpen, ...(routed ? [routed] : []));
+      },
+      workflowOpened: (path, deliveryId, outcome) => invoke(IpcChannel.workflowOpened, path, deliveryId, outcome),
       exchangeRead: (path, id) => invoke(IpcChannel.exchangeRead, path, id),
       liveWorkflow: (runId) => invoke(IpcChannel.liveWorkflow, runId),
-      // One payload per push, and no delivery id to carry: see the note beside
-      // the same method in the Electron-side bridge.
+      // One payload per push: the path and the delivery id the page
+      // acknowledges with travel together.
       onOpenWorkflow: (listener: (path: string, deliveryId?: number) => void) =>
-        onChannel(OPEN_WORKFLOW_CHANNEL, (payload) => listener(payload as string)),
+        onChannel(OPEN_WORKFLOW_CHANNEL, (payload) => {
+          const { path, deliveryId } = payload as { path: string; deliveryId?: number };
+          listener(path, deliveryId);
+        }),
       saveWorkflow: (request: SaveWorkflowRequest) =>
         invoke(IpcChannel.workflowSave, request),
       onSaveWorkflow: (listener: () => void) =>
@@ -256,6 +274,13 @@ export function installWebBridge(): Promise<AnthillApi> {
       liveSetupDisable: (harness: MarkerCli) =>
         invoke(IpcChannel.liveSetupDisable, harness),
     } as AnthillApi;
+
+    // The desktop's "could not carry out a handover" box: a tab has no native
+    // one, so the sentence the bridge pushes is shown the plainest way a page
+    // can. It is rare, and it is about something the user just asked for.
+    onChannel(HANDOVER_REFUSED_CHANNEL, (message) => {
+      window.alert(`Anthill could not carry out a handover\n\n${String(message)}`);
+    });
 
     // `installWebBridge` resolves once the socket is open and `window.anthill`
     // is installed, so a renderer that awaits it can start calling immediately.

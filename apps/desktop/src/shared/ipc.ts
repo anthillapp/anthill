@@ -14,7 +14,7 @@ import type { ExternalLink } from "./links.js";
 import type { Workflow, WorkflowRun, NodeRun } from "@anthill/workflow-schema";
 import type { AgentModels, InterpreterId, ModelPreferences } from "@anthill/workflow";
 import type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun } from "@anthill/live";
-import type { ExchangeSource, ExchangeProblem, HandoverMode, RevisionState } from "@anthill/workflow-exchange";
+import type { BoundWorkflowResult, ExchangeView } from "@anthill/workflow-exchange";
 
 export type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun };
 
@@ -224,6 +224,15 @@ export const EDIT_HISTORY_CHANNEL = "app:edit-history";
  */
 export const OPEN_WORKFLOW_CHANNEL = "app:open-workflow";
 
+/**
+ * A handover that could not be carried out, said to the page (ANT-228).
+ *
+ * The web shell's only. The desktop says the same thing in a native box, and
+ * a browser tab has no process of its own to put one up, so the web shell
+ * pushes the sentence and its page shows it. The payload is the message.
+ */
+export const HANDOVER_REFUSED_CHANNEL = "app:handover-refused";
+
 /* ------------------------------------------------------------------ */
 /* Payload shapes                                                      */
 /* ------------------------------------------------------------------ */
@@ -352,29 +361,12 @@ export type SaveWorkflowRequest = {
   quiet?: boolean;
 };
 
-export type ExchangeView = {
-  workflowId: string;
-  source: ExchangeSource;
-  /**
-   * Which of the two things the user asked the harness for.
-   *
-   * Read from the handover's identity, which is written once, so it says what
-   * they wanted at the moment they asked and not what the document has become
-   * since. `handoverOpens` turns it into the screen this handover belongs on;
-   * nothing here compares it to a literal, because the two legacy modes have
-   * to fold into `design` in exactly one place.
-   */
-  mode: HandoverMode;
-  /** What is true of the head revision — the one the editor has open. */
-  state: RevisionState;
-  revision: number;
-  digest: string;
-  problems: ExchangeProblem[];
-  bindings: { runId: string; revision: number }[];
-};
-export type BoundWorkflowResult =
-  | { ok: true; workflow: Workflow; revision: number; digest: string }
-  | { ok: false; error: string };
+/**
+ * What the app knows of one handed-over workflow, and what a bound run is
+ * working from. Defined beside the exchange contract, where the app side of
+ * the protocol (`@anthill/exchange-host`) can use them without the desktop.
+ */
+export type { BoundWorkflowResult, ExchangeView } from "@anthill/workflow-exchange";
 
 /**
  * How a save ended, in the three ways an author can be told apart.

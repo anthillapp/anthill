@@ -72,6 +72,11 @@ export type DraftAnswer = {
    * window that is not coming (ANT-123).
    */
   app?: LaunchReport;
+  /**
+   * The Anthill this chat is pinned to, when nothing was brought up to say so
+   * (`open: false`): the first result of a chat names it either way (ANT-236).
+   */
+  target?: LaunchReport["target"];
 
   problems?: ExchangeProblem[];
   /** The `ask` of every problem that has one, in the order they came back. */
@@ -254,7 +259,7 @@ export function openText(answer: OpenAnswer): string {
   if (answer.outcome === "not_found") return join([unknownWorkflowText(answer.workflowId)]);
   const parts = [
     answer.displayRequested
-      ? `Anthill was asked to open revision ${answer.revision} of ${answer.workflowId}. The desktop has not acknowledged showing it.`
+      ? `Anthill was asked to open revision ${answer.revision} of ${answer.workflowId}. Anthill has not acknowledged showing it.`
       : `No new display request was queued for revision ${answer.revision} of ${answer.workflowId}; one is already waiting.`,
     ...appText(answer.app),
   ];
@@ -273,8 +278,17 @@ export function openText(answer: OpenAnswer): string {
  * the model is the only one in a position to tell them.
  */
 function appText(report: LaunchReport | undefined): string[] {
-  if (!report || report.outcome === "opened") return [];
-  return report.message ? [report.message] : [];
+  if (!report) return [];
+  // Which Anthill, always: a chat pinned to the wrong build is seen here, at
+  // the first handover, rather than when nothing appears.
+  const named = targetText(report.target);
+  if (report.outcome === "opened") return named;
+  return [...named, ...(report.message ? [report.message] : [])];
+}
+
+/** Which Anthill the chat's handovers go to, where a result knows it. */
+function targetText(target: LaunchReport["target"]): string[] {
+  return target ? [`This chat's handovers go to ${target.label}.`] : [];
 }
 
 export function draftText(answer: DraftAnswer): string {
@@ -293,7 +307,7 @@ export function draftText(answer: DraftAnswer): string {
   const shown = answer.openDeferred
     ? ". It has not been opened: call open_workflow with this workflow id when it is time to show it."
     : answer.displayRequested
-      ? ". A display request is queued; the desktop has not acknowledged opening it."
+      ? ". A display request is queued; Anthill has not acknowledged opening it."
       : ". No display request was queued. Desktop display is not confirmed.";
 
   const parts = [`${stored}${shown}`];
@@ -307,7 +321,7 @@ export function draftText(answer: DraftAnswer): string {
     "Ask the user whether to start. When they say so, call get_ready_revision, then bind_run.",
   );
 
-  parts.push(...appText(answer.app));
+  parts.push(...(answer.app ? appText(answer.app) : targetText(answer.target)));
 
   if (answer.problems && answer.problems.length > 0) {
     parts.push("Also worth knowing:", numbered(answer.problems.map(sentence)));
@@ -344,7 +358,7 @@ export function reviseText(answer: ReviseAnswer): string {
 
   parts.push(
     answer.displayRequested
-      ? "A display request is queued; the desktop has not acknowledged opening it. The user will be asked before it replaces anything they have not saved."
+      ? "A display request is queued; Anthill has not acknowledged opening it. The user will be asked before it replaces anything they have not saved."
       : "No display request was queued, so the user is still looking at whatever they had open.",
   );
 
@@ -512,8 +526,12 @@ export function bindText(answer: BindAnswer): string {
 }
 
 export function callText(answer: CallAnswer): string {
+  // Only a missing or blank workflowId means the call names no workflow. A
+  // refused build names one, and saying otherwise sends the agent looking for
+  // another id instead of dropping --dev (ANT-237).
+  const unnamed = answer.problems.every((problem) => problem.field === "workflowId");
   return join([
-    "This call names no workflow to act on. Nothing was looked up and nothing was written:",
+    `${unnamed ? "This call names no workflow to act on." : "This call was refused."} Nothing was looked up and nothing was written:`,
     numbered(answer.problems.map(sentence)),
     "Correct the call and try again. Nothing here is a question for the user.",
   ]);

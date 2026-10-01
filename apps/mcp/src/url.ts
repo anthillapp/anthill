@@ -30,3 +30,14 @@ export const WORKFLOW_URL_SCHEME = "anthill";
 export function workflowUrl(workflowId: string): string {
   return `${WORKFLOW_URL_SCHEME}://workflow/${encodeURIComponent(workflowId)}`;
 }
+
+/** The workflow id an `anthill://workflow/<id>` link names, or `undefined`. */
+export function workflowIdFromUrl(url: string): string | undefined {
+  const match = new RegExp(`^${WORKFLOW_URL_SCHEME}://workflow/([^/?#]+)$`).exec(url);
+  if (!match) return undefined;
+  try {
+    return decodeURIComponent(match[1]!);
+  } catch {
+    return undefined;
+  }
+}

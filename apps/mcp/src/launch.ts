@@ -63,12 +63,31 @@ export type LaunchOutcome =
   /** No opener this server is willing to use on this platform. */
   | "unsupported"
   /** The user started this server with launching turned off. */
-  | "disabled";
+  | "disabled"
+  /** The Anthill this chat reaches is already running, and picks the handover up itself. */
+  | "running"
+  /** The Anthill this chat reaches is not running, and nothing was started. */
+  | "not_running"
+  /** The Anthill this chat reaches was not running, and this handover started it. */
+  | "started"
+  /** An earlier handover started it moments ago, and it is still coming up. */
+  | "starting";
 
 export type LaunchReport = {
   outcome: LaunchOutcome;
   /** What to tell the user, on every outcome that is not `opened`. */
   message?: string;
+  /**
+   * Which Anthill the handover went to, named in every result so a chat on
+   * the wrong build is seen at once (architecture doc, §5.6).
+   */
+  target?: { id: "app" | "electron-dev" | "web"; label: string };
+  /**
+   * The link that opens the workflow in the Anthill this handover reached,
+   * where it is not `anthill://…`: the web shell's `http://…/workflow/<id>`
+   * (ANT-231). The result's `url` is this when it is present.
+   */
+  link?: string;
 };
 
 /** Asks the machine to open one `anthill://` link. Injected, so tests do not open anything. */

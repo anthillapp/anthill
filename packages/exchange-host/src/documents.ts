@@ -4,7 +4,7 @@ import type { Workflow } from "@anthill/workflow-schema";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import type { ExchangeView, BoundWorkflowResult } from "../../shared/ipc.js";
+import type { BoundWorkflowResult, ExchangeView } from "@anthill/workflow-exchange";
 import type { PendingRun } from "@anthill/live";
 import { captureSavedRevision } from "./working-copy.js";
 

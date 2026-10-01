@@ -9,6 +9,7 @@ import {
 import { normalize, resolve, sep } from "node:path";
 import type { Socket } from "node:net";
 import type { Paths } from "./paths.js";
+import { WORKFLOW_ROUTE } from "./routes.js";
 
 /**
  * The CLI's web interface: a `node:http` server bound to 127.0.0.1 that
@@ -45,9 +46,10 @@ export type CliServer = {
   /** The port actually bound (the requested port, or the one chosen when 0). */
   port: number;
   /**
-   * The per-process token a client must present to open /api. The CLI prints
-   * it in the URL it tells the author to open; the server holds it and never
-   * serves it in a page, so a page on another origin cannot obtain it.
+   * The per-process token a client must present to open /api. The CLI puts it
+   * in the URL it opens or prints, and in its owner-only instance.lock for the
+   * MCP server's links (ANT-231); the server never serves it in a page, so a
+   * page on another origin cannot obtain it.
    */
   token: string;
   /** Broadcast one JSON-serialisable message to every connected client. */
@@ -60,8 +62,17 @@ export type CliServer = {
    * request handler here and answers requests with `reply`.
    */
   onMessage(
-    handler: (message: unknown, reply: (message: unknown) => void) => void,
+    handler: (message: unknown, reply: (message: unknown) => void, tab: number) => void,
   ): void;
+  /** How many tabs have `/api` open right now. */
+  clientCount(): number;
+  /**
+   * Send one message to one tab, by the id its messages arrive with. `false`
+   * when that tab is gone, so the caller knows nothing was delivered.
+   */
+  sendTo(tab: number, message: unknown): boolean;
+  /** Be told when a tab's `/api` connection ends, by its id. */
+  onClientClosed(listener: (tab: number) => void): void;
   close(): Promise<void>;
 };
 
@@ -147,6 +158,8 @@ const WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 
 type WsClient = {
+  /** Which tab this is, to the bridge: the id its messages arrive with. */
+  id: number;
   socket: Socket;
   /** Bytes received but not yet a complete frame. */
   pending: Buffer;
@@ -228,11 +241,15 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
   let messageHandler: ((
     message: unknown,
     reply: (message: unknown) => void,
+    tab: number,
   ) => void) | null = null;
+  const closedListeners: ((tab: number) => void)[] = [];
+  const clientCount = (): number => [...clients].filter((client) => !client.closed).length;
+  let nextClientId = 1;
   let closePromise: Promise<void> | null = null;
-  // The token is generated per process and held only here; it is never written
-  // into a served page. The CLI prints it in the URL it tells the author to
-  // open, and the browser carries it back in the /api handshake.
+  // The token is generated per process and never written into a served page.
+  // The CLI puts it in the URL it opens or prints and in its owner-only lock,
+  // and the browser carries it back in the /api handshake.
   const token = randomBytes(32).toString("hex");
   // The port the kernel actually bound (set in the `listen` callback below);
   // the Origin check needs it, and it is not known until then for `--port 0`.
@@ -309,7 +326,12 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
     }
 
     if (url.pathname === "/health") {
-      sendJson(res, 200, { ok: true, name: "anthill-cli" });
+      // What the MCP server's web launcher asks before it opens a tab
+      // (ANT-230, ANT-231): whether this is Anthill, where it listens, and
+      // whether a tab is already connected to show a handover in. Served on
+      // the address the server is bound to, which is loopback unless --host
+      // says otherwise.
+      sendJson(res, 200, { ok: true, name: "anthill-cli", port: boundPort, clients: clientCount() });
       return;
     }
 
@@ -317,11 +339,13 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
       sendError(res, 405, "method not allowed");
       return;
     }
-    await serveStatic(res, root, url.pathname, req.method === "HEAD");
+    const pathname = WORKFLOW_ROUTE.test(url.pathname) ? "/" : url.pathname;
+    await serveStatic(res, root, pathname, req.method === "HEAD");
   }
 
   function attachWebSocket(socket: Socket): void {
     const client: WsClient = {
+      id: nextClientId++,
       socket,
       pending: Buffer.alloc(0),
       fragment: null,
@@ -343,6 +367,7 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
     if (client.closed) return;
     client.closed = true;
     clients.delete(client);
+    for (const listener of closedListeners) listener(client.id);
   }
 
   /** Fail the connection with a close frame (RFC6455 §7.4). */
@@ -497,11 +522,11 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
       } catch {
         // Not JSON: the raw string is the message.
       }
-      messageHandler(value, reply);
+      messageHandler(value, reply, client.id);
     } else {
       // Binary frames are not part of the app's protocol, but forward them
       // rather than dropping them silently.
-      messageHandler(data, reply);
+      messageHandler(data, reply, client.id);
     }
   }
 
@@ -524,9 +549,32 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
   }
 
   function onMessage(
-    handler: (message: unknown, reply: (message: unknown) => void) => void,
+    handler: (message: unknown, reply: (message: unknown) => void, tab: number) => void,
   ): void {
     messageHandler = handler;
+  }
+
+  function sendTo(tab: number, message: unknown): boolean {
+    const client = [...clients].find((candidate) => candidate.id === tab && !candidate.closed);
+    if (!client) return false;
+    let frame: Buffer;
+    try {
+      frame = encodeFrame(0x1, Buffer.from(JSON.stringify(message), "utf8"));
+    } catch {
+      // Not serialisable: nothing to send, and nothing wrong with the tab.
+      return false;
+    }
+    try {
+      client.socket.write(frame);
+      return true;
+    } catch {
+      detach(client);
+      return false;
+    }
+  }
+
+  function onClientClosed(listener: (tab: number) => void): void {
+    closedListeners.push(listener);
   }
 
   function close(): Promise<void> {
@@ -561,7 +609,7 @@ export function startServer(options: ServerOptions): Promise<CliServer> {
       const bound =
         address !== null && typeof address === "object" ? address.port : port;
       boundPort = bound;
-      resolveStart({ server, port: bound, token, broadcast, onMessage, close });
+      resolveStart({ server, port: bound, token, broadcast, onMessage, clientCount, sendTo, onClientClosed, close });
     });
   });
 }

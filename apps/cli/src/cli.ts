@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
-import { open, readFile, rm } from "node:fs/promises";
+import { open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -264,7 +264,23 @@ export async function runReportCommand(
   return 0;
 }
 
-/** The single-instance lock, in the data directory. */
+/**
+ * The single-instance lock, in the data directory.
+ *
+ * Its contents are a contract with the MCP server (apps/mcp/src/target.ts,
+ * `webShellRunning`), which reads it to find a running web shell:
+ * `{ pid, port, host, startedAt, token? }` as JSON. `port` is the one
+ * `--port` asked for — never assume 4173 — and, since 0 is refused, the one
+ * the server binds or fails on. The lock is written just before the server
+ * listens, so a reader treats the shell as running only while `pid` is alive,
+ * and a `/health` that does not answer yet as starting, not as an error
+ * (ANT-230).
+ *
+ * `token` is added once the server listens: the per-process token a page needs
+ * to open `/api`, so the MCP server can hand the user a link that works
+ * (`/workflow/<id>?token=…`, ANT-231). It is the same token the shell prints
+ * on its own terminal, so the file is the user's alone (mode 0600).
+ */
 const LOCK_FILE = "instance.lock";
 /** A lock older than this is stale even if its pid is still alive (pid reuse). */
 const LOCK_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -280,6 +296,7 @@ type LockRecord = {
   port: number;
   host: string;
   startedAt: string;
+  token?: string;
 };
 
 function isProcessAlive(pid: number): boolean {
@@ -320,6 +337,7 @@ async function readLock(lockPath: string): Promise<LockRecord | undefined> {
       port: record.port,
       host: record.host,
       startedAt: typeof record.startedAt === "string" ? record.startedAt : "",
+      ...(typeof record.token === "string" ? { token: record.token } : {}),
     };
   } catch {
     // Unreadable: treat as stale and take the lock over.
@@ -332,7 +350,7 @@ async function tryCreateFresh(
   record: LockRecord,
 ): Promise<boolean> {
   try {
-    const handle = await open(lockPath, "wx");
+    const handle = await open(lockPath, "wx", 0o600);
     try {
       await handle.writeFile(JSON.stringify(record, null, 2));
     } finally {
@@ -433,6 +451,27 @@ export async function acquireInstanceLock(
   );
 }
 
+/**
+ * Add the listening server's token to the lock this process holds.
+ *
+ * Written beside the lock and renamed over it, so a reader sees the old record
+ * or the new one and never half of either; and only while the lock is still
+ * this process's, so it never writes over another instance's.
+ */
+export async function recordListening(paths: Paths, token: string): Promise<void> {
+  const lockPath = join(paths.userData, LOCK_FILE);
+  const record = await readLock(lockPath);
+  if (!record || record.pid !== process.pid) return;
+  const partial = `${lockPath}.${process.pid}.tmp`;
+  try {
+    await writeFile(partial, JSON.stringify({ ...record, token }, null, 2), { mode: 0o600 });
+    await rename(partial, lockPath);
+  } finally {
+    // The partial holds the token; it does not outlive a failed rename.
+    await rm(partial, { force: true });
+  }
+}
+
 function releaseLock(lockPath: string): () => Promise<void> {
   return async () => {
     try {
@@ -449,38 +488,77 @@ function releaseLock(lockPath: string): () => Promise<void> {
   };
 }
 
-/** The "open a URL" programs, in the order to try them on Linux. */
-const BROWSER_OPENERS = ["xdg-open", "wslview", "sensible-browser"] as const;
+/** One way to ask the platform to open a URL: a program and its arguments, never a shell string. */
+export type BrowserOpener = { command: string; args: string[] };
+
+/**
+ * The "open a URL" programs for a platform, in the order to try them.
+ *
+ * - macOS: `/usr/bin/open`, by absolute path so a PATH cannot substitute it.
+ * - Windows: `rundll32 url.dll,FileProtocolHandler <url>`, the URL one
+ *   argument through `spawn`, so it never meets `cmd /c start`'s quoting,
+ *   where `&` in a query string ends the command (ANT-230). Windows is
+ *   experimental.
+ * - Linux: there is no single API, so `xdg-open` and the usual fallbacks.
+ */
+export function browserOpeners(platform: NodeJS.Platform, url: string): BrowserOpener[] {
+  if (platform === "darwin") return [{ command: "/usr/bin/open", args: [url] }];
+  if (platform === "win32") {
+    // By absolute path, as `open` is. It exits 0 whether or not anything
+    // opened, so a headless Windows machine is not detected.
+    const rundll32 = `${process.env.SystemRoot ?? "C:\\Windows"}\\System32\\rundll32.exe`;
+    return [{ command: rundll32, args: ["url.dll,FileProtocolHandler", url] }];
+  }
+  return ["xdg-open", "wslview", "sensible-browser"].map((command) => ({ command, args: [url] }));
+}
 /** How long to give each opener before trying the next. */
 const OPENER_TIMEOUT_MS = 3000;
+
+/** What `openBrowser` needs from the machine; injected so the tests run none of it. */
+export type OpenerDeps = {
+  platform: NodeJS.Platform;
+  spawn: (command: string, args: string[], options: { stdio: "ignore"; windowsHide: true }) => ChildProcessLike;
+  log: (line: string) => void;
+};
+type ChildProcessLike = { on(event: "error", listener: () => void): unknown; on(event: "exit", listener: (code: number | null) => void): unknown };
 
 /**
  * Best-effort open of the author's default browser.
  *
- * Linux has no single "open a URL" API, so this tries `xdg-open` (and the
- * usual fallbacks) without ever blocking the server: if nothing can be
- * opened, the URL is printed and the run continues.
+ * Never blocks the server. If nothing can be opened — a headless machine —
+ * the URL is printed and the answer is `false`, so a caller can say so. An
+ * opener still running after a few seconds counts as opened: `xdg-open` can
+ * stay in the foreground as long as the browser does, and trying the next
+ * one would open a second tab.
  */
-export function openBrowser(url: string): void {
-  void (async () => {
-    for (const opener of BROWSER_OPENERS) {
-      if (await tryOpen(opener, url)) return;
-    }
-    console.log(`Open this in a browser: ${url}`);
-  })();
+export async function openBrowser(
+  url: string,
+  deps: OpenerDeps = { platform: process.platform, spawn: (command, args, options) => spawn(command, args, options), log: (line) => console.log(line) },
+): Promise<boolean> {
+  for (const opener of browserOpeners(deps.platform, url)) {
+    if (await tryOpen(opener, deps)) return true;
+  }
+  deps.log(`Open this in a browser: ${url}`);
+  return false;
 }
 
-function tryOpen(opener: string, url: string): Promise<boolean> {
+function tryOpen(opener: BrowserOpener, deps: OpenerDeps): Promise<boolean> {
   return new Promise((resolve) => {
-    const child = spawn(opener, [url], { stdio: "ignore" });
     let settled = false;
-    const timer = setTimeout(() => finish(false), OPENER_TIMEOUT_MS);
     const finish = (ok: boolean): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       resolve(ok);
     };
+    const timer = setTimeout(() => finish(true), OPENER_TIMEOUT_MS);
+    let child: ChildProcessLike;
+    try {
+      child = deps.spawn(opener.command, opener.args, { stdio: "ignore", windowsHide: true });
+    } catch {
+      finish(false);
+      return;
+    }
     // ENOENT (not there) or EACCES (not executable): try the next opener.
     child.on("error", () => finish(false));
     child.on("exit", (code) => finish(code === 0));
@@ -553,6 +631,8 @@ export async function main(): Promise<void> {
     paths,
     rendererDir,
   });
+  // So the MCP server can open a tab that can talk to this one (ANT-231).
+  await recordListening(paths, server.token).catch(() => undefined);
 
   // The bridge: maps every `IpcChannel` onto the reused service modules and
   // broadcasts the push channels over the WebSocket. It installs its request
@@ -562,6 +642,8 @@ export async function main(): Promise<void> {
     workspace: options.workspace,
     broadcast: server.broadcast,
     onMessage: server.onMessage,
+    sendTo: server.sendTo,
+    onTabClosed: server.onClientClosed,
     diagnostics,
   });
   if ((await bridge.api.settingsRead()).analyticsEnabled) {
@@ -570,7 +652,7 @@ export async function main(): Promise<void> {
 
   const url = `http://${options.host}:${server.port}/?token=${server.token}`;
   if (options.openBrowser) {
-    openBrowser(url);
+    void openBrowser(url);
   } else {
     console.log(`Open this in a browser: ${url}`);
   }

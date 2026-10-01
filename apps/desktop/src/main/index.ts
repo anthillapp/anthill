@@ -61,10 +61,21 @@ import {
   type SavedRecord,
 } from "./save-destination.js";
 import { dataDirectoryRefusal, desktopUserDataPath, desktopDataDirectory } from "./user-data.js";
-import { ExchangeInbox, type OpenOutcome, type OpenPermission } from "./exchange/inbox.js";
-import { writeWorkingCopy } from "./exchange/working-copy.js";
-import { exchangeDestination, saveExchangeCopy, readExchangeView, boundWorkflow } from "./exchange/documents.js";
-import { workflowIdFromLink, linksFromArgv, SerialDrain, WindowOperations, WorkflowDelivery } from "./exchange/deep-link.js";
+import {
+  ExchangeInbox,
+  SerialDrain,
+  WindowOperations,
+  WorkflowDelivery,
+  boundWorkflow,
+  exchangeDestination,
+  linksFromArgv,
+  readExchangeView,
+  saveExchangeCopy,
+  workflowIdFromLink,
+  writeWorkingCopy,
+  type OpenOutcome,
+  type OpenPermission,
+} from "@anthill/exchange-host";
 import { REPORT_LOG } from "./live/observers/cli-report.js";
 import { LiveSessionService, type LiveSessionSnapshot } from "./live/service.js";
 import type { NoticeKind } from "./live/step-notices.js";

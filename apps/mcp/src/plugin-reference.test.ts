@@ -41,3 +41,55 @@ describe.each([
     expect(text).toContain(`"models": { "${harness}": { "id": "__default__" } }`);
   });
 });
+
+/*
+  ANT-224. The skill is what turns --dev in the command into build: "dev" on
+  the first handover; the server never reads the chat. Both skills say when the
+  word is the flag and when it is part of the task, with the same examples.
+*/
+describe.each([
+  { plugin: "Claude Code", path: "plugins/anthill/skills/workflow/SKILL.md" },
+  { plugin: "Codex", path: "plugins/anthill-cli/skills/anthill/SKILL.md" },
+])("the $plugin skill", ({ path }) => {
+  const text = () => readFileSync(join(ROOT, path), "utf8");
+
+  it("turns --dev into build: \"dev\" on every call the command makes", () => {
+    expect(text()).toContain("## Which Anthill: `--dev`");
+    expect(text()).toContain('pass `build: "dev"` on **every** call');
+    expect(text()).toContain("`get_workflow` or `get_ready_revision` when\npicking a `--dev` handover back up");
+  });
+
+  it("covers the four cases: with and without --dev, a task about dev, and a pinned chat", () => {
+    expect(text()).toContain("| `design Add retry to checkout` | Add retry to checkout | left out |");
+    expect(text()).toContain('| `design --dev Add retry to checkout` | Add retry to checkout | `"dev"` |');
+    expect(text()).toContain("| `design dev server for staging` | dev server for staging | left out |");
+    expect(text()).toMatch(/`"dev"`, refused: tell them it takes a new (chat|task)/);
+  });
+
+  it("never lets a bare dev be the flag", () => {
+    expect(text()).toContain("A bare\n`dev` is never the flag");
+  });
+});
+
+/*
+  A run's graph shows only the steps the agent reports. A block worked on while
+  another waited on a background review was never reported, and the canvas drew
+  it as skipped ("moved on on its own") although it was done. Both skills say
+  every block gets its own report, parallel work included.
+*/
+describe.each([
+  { plugin: "Claude Code", path: "plugins/anthill/skills/workflow/SKILL.md" },
+  { plugin: "Codex", path: "plugins/anthill-cli/skills/anthill/SKILL.md" },
+])("the $plugin skill's progress reports", ({ path }) => {
+  const text = () => readFileSync(join(ROOT, path), "utf8").replace(/\s+/g, " ");
+
+  it("gives every block it works on its own step, parallel work included", () => {
+    expect(text()).toMatch(/every block you work on gets its own/i);
+    expect(text()).toMatch(/background/);
+    expect(text()).toMatch(/subagent not (yet )?back|subagent not back yet/);
+  });
+
+  it("checks for a missed block before moving on, rather than jumping past it", () => {
+    expect(text()).toMatch(/report(s|ing)? (it|a missed one) (now, )?before (the next|moving on)/);
+  });
+});

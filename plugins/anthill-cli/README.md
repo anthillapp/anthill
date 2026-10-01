@@ -60,18 +60,56 @@ The plugin can also locate the server through `ANTHILL_MCP_SERVER` (the absolute
 file is preferred for a desktop app launched from Finder or the Dock because it
 does not inherit shell-profile environment variables.
 
-To use a development data directory instead of the installed Anthill app's
-default, add `--data-dir` and an absolute path to the `args` in `.mcp.json` while
-testing. A mismatched directory is quiet: the MCP server stores the handover,
-but a desktop watching another directory cannot see it.
+### Which Anthill it talks to
+
+A task's first handover decides, and every later call in that task goes to the
+same Anthill; switching takes a new task. The first result says which one it is.
+
+| Where | You type | Handovers go to |
+| --- | --- | --- |
+| macOS | `$anthill design …` | the installed app (`@anthill/desktop`), which is opened for you |
+| macOS | `$anthill design --dev …` | the development build of this checkout (`@anthill/desktop-dev`); `npm run dev:desktop` is started if it is not running |
+| Linux, Windows | either | the web shell from source (`~/.anthill/cli`) |
+
+`--dev` counts only as its own word directly after the mode; a bare `dev`, or
+`--dev` anywhere else, is part of the task. It needs the server to be built in
+an Anthill checkout, which is where `npm run dev:desktop` is run from.
+
+For scripted QA, where a run has nobody to type `--dev`, set the default for
+every task instead:
+
+```bash
+npm run plugin:target                   # what it is now, and what is running
+npm run plugin:target -- electron-dev   # builds the server, then serves the dev build
+npm run plugin:target -- web            # builds the server and the CLI, serves the web shell
+npm run plugin:target -- app            # back to the default: the installed app, or --dev
+```
+
+It writes `"target"` into `~/.anthill/plugin.json` and touches nothing else there
+(`--no-build` skips the build). The Claude Code plugin's server reads the same
+file, so both switch together, from the next Codex session on. A task's `--dev`
+still outranks it, and on Linux and Windows every task reaches the web shell
+whatever it says.
+
+Any other data directory can be named with `--data-dir` and an absolute path in
+the `args` in `.mcp.json`; it overrides only the directory. A mismatched
+directory is quiet: the MCP server stores the handover, but an Anthill watching
+another directory cannot see it.
 
 ## Use
 
 ```text
 $anthill design Add retry-once to checkout; let me edit the workflow first
 $anthill watch Fix the importer and show the work in Anthill while you do it
+$anthill design --dev Add retry-once to checkout, in the development build
 $anthill Describe this task as a workflow
 ```
+
+On macOS, `--dev` directly after the mode sends the task to the development
+build of an Anthill checkout (`npm run dev:desktop`), which Anthill starts if it
+is not running; without it, the installed app. The first result says which one
+the task reaches, and switching takes a new task. On Linux and Windows every
+task reaches the web shell from source, with or without `--dev`.
 
 `design` asks for missing scope, constraints, success criteria, and fixed
 decisions, then stops after opening the draft. `watch` binds immediately and

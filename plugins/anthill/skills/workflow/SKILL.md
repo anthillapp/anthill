@@ -3,7 +3,7 @@ name: workflow
 description: Use when the user wants the work of this session laid out as a workflow in Anthill — "show this in Anthill", "plan this out in Anthill", "/anthill:workflow design …" — or wants to watch this session do a job as a diagram, "/anthill:workflow watch …". Covers handing a task over as a graph, asking the questions that make it complete, binding a run to the graph the user settled on, and reporting progress against it. Not for work that is not going to be done in this session.
 version: 0.8.5
 user-invocable: true
-argument-hint: "[design|create · display|watch] [task]"
+argument-hint: "[design|create · display|watch] [--dev] [task]"
 ---
 
 Anthill is a desktop app that draws the work of a coding session as a diagram and
@@ -38,6 +38,54 @@ unclear, **ask** — the difference is whether the user gets to write the plan.
 Nothing else is a command. Checking that Anthill is reachable is the first thing
 this skill does anyway, and picking up an existing handover is a section near the
 bottom; neither needs a word of its own in front of the user.
+
+## Which Anthill: `--dev`
+
+On macOS a chat reaches one of two Anthills: the installed app, or the
+development build of an Anthill checkout. Which one is the user's to say, in
+the command itself:
+
+* `/anthill:workflow design <task>` (or `watch <task>`) — the installed app.
+* `/anthill:workflow design --dev <task>` (or `watch --dev <task>`) — the development
+  build. Anthill starts it if it is not running.
+
+The same words work when the plugin is tagged rather than typed:
+`@anthill design --dev …`.
+
+A machine set up for scripted QA (`npm run plugin:target`) can send a chat
+without `--dev` somewhere other than the installed app. The first result names
+the Anthill the chat reached; tell the user that one, not this list.
+
+**`--dev` is the flag only as its own word directly after the mode** —
+`design`, `watch`, or their aliases. Everything after it is the task. A bare
+`dev` is never the flag: `design dev server for staging` is a task about a dev
+server, for the installed app. `--dev` anywhere else in the text is part of the
+task too. When in doubt, it is part of the task.
+
+When the user's command carries `--dev`, pass `build: "dev"` on **every** call
+to Anthill that takes it for that command — `create_workflow_draft`,
+`open_workflow`, `bind_run`, and `get_workflow` or `get_ready_revision` when
+picking a `--dev` handover back up. Without `--dev`, leave `build` out. The
+chat's first handover pins its Anthill, and every later call goes to the same
+one; a later `--dev` in a chat pinned to the installed app is refused, and a
+read with `build` looks without deciding anything.
+
+The first result says which Anthill the chat reaches: "This chat's handovers go
+to Anthill (dev build)." or "… to Anthill (installed app)." Tell the user in one
+line, with whatever the result says about it running or starting. If it is not
+the one they meant, say that switching takes a new chat: a later call asking for
+another build is refused, because the workflows so far live in this Anthill's
+exchange. Do not try to work around the refusal.
+
+On Linux and Windows there is only one Anthill, the web shell from source, and
+every chat reaches it, with `--dev` or without. There is nothing to say about it.
+
+| The user wrote | The task | `build` |
+| --- | --- | --- |
+| `design Add retry to checkout` | Add retry to checkout | left out |
+| `design --dev Add retry to checkout` | Add retry to checkout | `"dev"` |
+| `design dev server for staging` | dev server for staging | left out |
+| `design --dev …` in a chat that already handed over to the installed app | the rest | `"dev"`, refused: tell them it takes a new chat |
 
 ## Before anything else
 
@@ -141,7 +189,8 @@ plausible guess does more damage than an admitted gap.
 
 4. **Submit it** with `create_workflow_draft`, carrying `idempotencyKey`, `mode`,
    `source` (`harness: "claude-code"`, the session id you established, and
-   `taskText`), and `workflow`.
+   `taskText`), and `workflow` — and `build: "dev"` if the user wrote `--dev`
+   (see "Which Anthill: `--dev`").
 
    `mode` is the command the user ran: **`"design"`** or **`"watch"`**. It is
    what tells Anthill which screen to open — the canvas or the Live Session —
@@ -173,7 +222,9 @@ plausible guess does more damage than an admitted gap.
      `reference/workflow-format.md`, Agents).
    * `invalid` — nothing was stored, and the problems say what to change.
 
-   The result carries an `anthill://workflow/<id>` link. Give it to the user —
+   The result's `url` is the link to the workflow: `anthill://workflow/<id>`
+   for the desktop app, `http://…/workflow/<id>` for the web shell (Linux,
+   Windows, or macOS set up with `plugin:target -- web`). Give it to the user as it is —
    it opens or focuses the workflow. **Keep the workflow id**; every later call
    needs it, and a new session cannot guess it.
 
@@ -183,7 +234,8 @@ plausible guess does more damage than an admitted gap.
    the user is looking at:
 
    * `opened` — the link was taken. The app is starting or already in front.
-   * anything else — `no_handler`, `failed`, `unsupported`, `disabled` — carries
+   * anything else — `running`, `started`, `starting`, `not_running`,
+     `no_handler`, `failed`, `unsupported`, `disabled` — carries
      a message saying why. Pass it on; the handover is stored either way, and
      the link still opens it by hand.
 
@@ -304,10 +356,30 @@ anthill step <run-id> <nonce> <step-id>      # entering each step
 anthill done <run-id> <nonce>                # when the work is finished
 ```
 
+Run them exactly as `bind_run` gave them. For the web shell they may start with
+`node …/cli.js` instead of `anthill`, or carry `--data-dir`, when that is what
+works on this machine.
+
 The step ids are the block ids of the bound revision. Report a step when you
-actually start it, not in advance. If the `anthill` command is not on the path,
+actually start it, not in advance. If a command cannot be run,
 say so once and carry on with the work — the reporting is how the user watches,
 not how the work happens.
+
+**Every block you work on gets its own `step`, when you enter it.** Anthill
+knows only what you report. A block you worked on without reporting it is drawn
+as never reached, and the jump past it as the work having moved on by itself —
+which tells the user a step was skipped when it was done.
+
+* **Work in parallel is still entering a block.** Starting the next block while
+  another is still open — a review running in the background, a subagent not
+  back yet — is entering it. Report it then, not when the other one finishes.
+* **Coming back is entering again.** Returning to a block you left, even for a
+  moment (answering that background review, say), report it again.
+* **Check before you move on.** Before reporting the next block, make sure each
+  block you worked on since your last report has had its own. If one was
+  missed, report it now, before the next, rather than jump past it.
+* **Only blocks you worked on.** A block the work made unnecessary is not
+  reported; say in the chat why it was not needed.
 
 This is the whole of what `watch` shows. A watched session that never reports a
 step is a Live Session page with a graph nobody is moving through, which is the
@@ -316,7 +388,8 @@ one way this command can disappoint somebody who asked for nothing else.
 ## Picking a handover back up
 
 A new session knows nothing. Ask the user for the workflow id, or take it from
-the `anthill://` link if they have it, and read it with `get_workflow`. **Never
+the link if they have it (`anthill://workflow/<id>`, or the web shell's
+`http://…/workflow/<id>`), and read it with `get_workflow`. **Never
 guess from recency**: opening somebody else's workflow because it was the most
 recent is worse than asking. Picking up an agreed scope is not a new draft, and
 does not need the clarification questions again.

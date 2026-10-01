@@ -60,9 +60,39 @@ answers "no".
 
 ### Which Anthill it talks to
 
-By default, the installed desktop app's own data directory — right if you use
-the app you downloaded. A development build keeps its data somewhere else, so
-point the server at it explicitly by adding arguments in `.mcp.json`:
+A chat's first handover decides, and every later call in that chat goes to the
+same Anthill; switching takes a new chat. The first result says which one it is.
+
+| Where | You type | Handovers go to |
+| --- | --- | --- |
+| macOS | `/anthill:workflow design …` | the installed app (`@anthill/desktop`), which is opened for you |
+| macOS | `/anthill:workflow design --dev …` | the development build of this checkout (`@anthill/desktop-dev`); `npm run dev:desktop` is started if it is not running |
+| Linux, Windows | either | the web shell from source (`~/.anthill/cli`) |
+
+`--dev` counts only as its own word directly after the mode; a bare `dev`, or
+`--dev` anywhere else, is part of the task. It needs the server to be built in
+an Anthill checkout, which is where `npm run dev:desktop` is run from.
+
+**For scripted QA**, where a run has nobody to type `--dev`, set the default
+for every chat instead:
+
+```bash
+npm run plugin:target                   # what it is now, and what is running
+npm run plugin:target -- electron-dev   # builds the server, then serves the dev build
+npm run plugin:target -- web            # builds the server and the CLI, serves the web shell
+npm run plugin:target -- app            # back to the default: the installed app, or --dev
+```
+
+It writes `"target"` into `~/.anthill/plugin.json` and touches nothing else there
+(`--no-build` skips the build). The server reads the same file, and so does the
+Codex plugin's, so both switch together, from the next harness session on. A
+chat's `--dev` still outranks it, and on Linux and Windows every chat reaches the
+web shell whatever it says. The skill text still comes from the installed
+plugin copy; a change to the skill itself needs
+`claude plugin update anthill@anthill`.
+
+Any other data directory can be named outright by adding arguments in
+`.mcp.json`; it overrides only the directory:
 
 ```json
 { "args": ["${CLAUDE_PLUGIN_ROOT}/bin/anthill-mcp", "--data-dir", "/abs/path"] }
@@ -88,7 +118,14 @@ to them and works the same under each.
 ```
 /anthill:workflow design Add retry-once to the checkout flow, let me read it first
 /anthill:workflow watch  Rework the importer — show me the work as it happens
+/anthill:workflow design --dev Add retry-once to the checkout flow, in the dev build
 ```
+
+On macOS, `--dev` directly after the command sends the chat to the development
+build of an Anthill checkout (`npm run dev:desktop`), which Anthill starts if it
+is not running; without it, the installed app. The first result says which one
+the chat reaches, and switching takes a new chat. On Linux and Windows every chat
+reaches the web shell from source, with or without `--dev`.
 
 Two commands, and the difference is whose workflow it is.
 

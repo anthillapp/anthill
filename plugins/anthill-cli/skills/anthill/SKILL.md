@@ -40,6 +40,54 @@ is present, use `design`; it preserves the user's chance to edit before work.
 The mode changes the handover UX, not Anthill's authority. It never causes
 Anthill to execute anything.
 
+## Which Anthill: `--dev`
+
+On macOS a Codex task reaches one of two Anthills: the installed app, or the
+development build of an Anthill checkout. Which one is the user's to say, in
+the command itself:
+
+* `$anthill design <task>` (or `watch <task>`) — the installed app.
+* `$anthill design --dev <task>` (or `watch --dev <task>`) — the development
+  build. Anthill starts it if it is not running.
+
+The same words work when the plugin is tagged rather than typed:
+`@anthill design --dev …`.
+
+A machine set up for scripted QA (`npm run plugin:target`) can send a task
+without `--dev` somewhere other than the installed app. The first result names
+the Anthill the task reached; tell the user that one, not this list.
+
+**`--dev` is the flag only as its own word directly after the mode** —
+`design`, `watch`, or their aliases. Everything after it is the task. A bare
+`dev` is never the flag: `design dev server for staging` is a task about a dev
+server, for the installed app. `--dev` anywhere else in the text is part of the
+task too. When in doubt, it is part of the task.
+
+When the user's command carries `--dev`, pass `build: "dev"` on **every** call
+to Anthill that takes it for that command — `create_workflow_draft`,
+`open_workflow`, `bind_run`, and `get_workflow` or `get_ready_revision` when
+picking a `--dev` handover back up. Without `--dev`, leave `build` out. The
+task's first handover pins its Anthill, and every later call goes to the same
+one; a later `--dev` in a task pinned to the installed app is refused, and a
+read with `build` looks without deciding anything.
+
+The first result says which Anthill the task reaches: "This chat's handovers go
+to Anthill (dev build)." or "… to Anthill (installed app)." Tell the user in one
+line, with whatever the result says about it running or starting. If it is not
+the one they meant, say that switching takes a new task: a later call asking for
+another build is refused, because the workflows so far live in this Anthill's
+exchange. Do not try to work around the refusal.
+
+On Linux and Windows there is only one Anthill, the web shell from source, and
+every task reaches it, with `--dev` or without. There is nothing to say about it.
+
+| The user wrote | The task | `build` |
+| --- | --- | --- |
+| `design Add retry to checkout` | Add retry to checkout | left out |
+| `design --dev Add retry to checkout` | Add retry to checkout | `"dev"` |
+| `design dev server for staging` | dev server for staging | left out |
+| `design --dev …` in a task that already handed over to the installed app | the rest | `"dev"`, refused: tell them it takes a new task |
+
 ## Detailed progress: settle it before Anthill opens
 
 Anthill always shows basic progress from Codex's own session records. Anthill's
@@ -164,7 +212,9 @@ Call `create_workflow_draft` with `open: false` and:
 - the verified `source.sessionId`;
 - `source.taskText` containing the user's original request verbatim and, for
   `design`, their clarification answers clearly separated from it;
-- the complete `workflow` document.
+- the complete `workflow` document;
+- `build: "dev"` if the user wrote `--dev` (see "Which Anthill: `--dev`"),
+  and no `build` otherwise.
 
 Keep the same key and payload after a lost response. A new key means an
 intentional new handover. Never change the workflow id to bypass a refusal.
@@ -183,9 +233,11 @@ Handle the returned outcome literally:
 Once the workflow is stored, settle detailed progress (the section above), then
 call `open_workflow` with the workflow id. That brings Anthill up for it: a
 closed app is launched, a running one comes to the front. Its `app` field says
-what happened — `opened`, or one of `no_handler`, `failed`, `unsupported`,
-`disabled` with a message to pass on. Give the user the `anthill://workflow/<id>`
-link. A queued request still does not prove that the desktop app opened the
+what happened — `opened`, or one of `running`, `started`, `starting`,
+`not_running`, `no_handler`, `failed`, `unsupported`, `disabled` with a message
+to pass on. Give the user the result's `url` as it is:
+`anthill://workflow/<id>` for the desktop app, `http://…/workflow/<id>` for the
+web shell (Linux, Windows, or macOS set up with `plugin:target -- web`). A queued request still does not prove that the desktop app opened the
 workflow, so say it was handed over and Anthill asked to show it.
 
 ## Design mode: stop for the user
@@ -231,7 +283,9 @@ Use the exact commands returned by `bind_run`. They are the only progress
 transport; do not write progress into the exchange, invent an MCP reporting
 tool, or treat ordinary tool calls as authoritative workflow progress.
 
-The commands have this shape:
+The commands have this shape. Run them exactly as `bind_run` returned them: for
+the web shell they may start with `node …/cli.js` instead of `anthill`, or carry
+`--data-dir`, when that is what works on this machine.
 
 ```bash
 anthill run <run-id> <nonce>
@@ -240,7 +294,15 @@ anthill done <run-id> <nonce>
 ```
 
 Run `anthill run` once immediately before work. Run `anthill step` only when
-actually entering that block. Run `anthill done` only after the bound workflow's
+actually entering that block — and every block you work on gets its own, when you
+enter it. Anthill knows only what you report: a block worked on without a report
+is drawn as never reached, and the jump past it as the work moving on by itself.
+Starting a block while another is still open (a background review, a subagent
+not back yet) is entering it, so report it then; returning to a block you left
+is entering it again. Before reporting the next block, check that each block
+you worked on since the last report had its own, and report a missed one before
+moving on rather than jump past it. Report only blocks you worked on; say in the
+chat why one was not needed. Run `anthill done` only after the bound workflow's
 done criteria and final action are complete. These commands write Anthill's
 local progress journal outside the project workspace. If Codex reports
 `EPERM`/`EACCES` for that journal, request the narrow local permission the host
@@ -255,7 +317,8 @@ correlation data. Preserve them exactly and do not print private reasoning.
 ## Resume and recovery
 
 A new Codex task has no reliable knowledge of an earlier handover. Require the
-workflow id or an `anthill://` link, then call `get_workflow`. Never choose by
+workflow id or a link to it (`anthill://workflow/<id>`, or the web shell's
+`http://…/workflow/<id>`), then call `get_workflow`. Never choose by
 recency. If this task will perform work handed over by a different task, pass
 this task's verified `CODEX_SESSION_ID` to `bind_run`.
 

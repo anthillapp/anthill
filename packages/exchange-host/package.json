@@ -1,0 +1,25 @@
+{
+  "name": "@anthill/exchange-host",
+  "version": "0.8.5",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "dependencies": {
+    "@anthill/exchange-store": "*",
+    "@anthill/live": "*",
+    "@anthill/workflow-exchange": "*",
+    "@anthill/workflow-schema": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.4",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "pretest": "npm run build",
+    "test": "vitest run"
+  }
+}

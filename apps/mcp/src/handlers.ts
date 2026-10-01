@@ -328,6 +328,9 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
           ...invalidDraft(problems, submission.workflow),
           outcome: created.outcome === "refused" ? "incomplete" : "invalid",
           workflowId: created.workflowId,
+          // The chat is pinned all the same, and a taken id is taken in this
+          // Anthill's exchange: the refusal says which one.
+          ...(reach.resolved ? { target: { id: reach.resolved.target, label: reach.resolved.label } } : {}),
         });
       }
 

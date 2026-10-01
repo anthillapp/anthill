@@ -297,6 +297,7 @@ export function draftText(answer: DraftAnswer): string {
     "This handover was not stored or displayed. No work may start from it.",
     ...detail(answer.questions, answer.problems),
     "Clarify these requirements with the user, correct the workflow, and submit it again using the same intended workflow id and request key.",
+    ...targetText(answer.target),
   ]);
 
   const where = answer.workflowId ?? "the workflow";
@@ -634,6 +635,7 @@ function refusedDraftText(answer: DraftAnswer): string {
     parts.push("Correct the call and submit again.");
   }
 
+  parts.push(...targetText(answer.target));
   if (answer.url) parts.push(answer.url);
   return join(parts);
 }

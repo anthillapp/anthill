@@ -9313,6 +9313,7 @@ button.presence-chip {
 .session-report.is-completed { --report-tone: #bab6b6; }
 .session-report.is-failed { --report-tone: var(--accent); }
 .session-report.is-lost { --report-tone: #d8a21a; }
+.session-report.is-stopped { --report-tone: #bab6b6; }
 .session-report.is-open { border-radius: 12px 12px 0 0; }
 .session-report-line {
   display: flex;

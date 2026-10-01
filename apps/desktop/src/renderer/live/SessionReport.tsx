@@ -193,7 +193,9 @@ export function SessionReport({ workflow, run, view, end, usage, endedAt, onPick
               ? "Finished is not the same as succeeded – check the result before accepting it."
               : end === "failed"
                 ? "The session recorded an error – the failed step's events say what the record holds about it."
-                : "Anthill stopped being able to read the session. It may have carried on working where Anthill cannot see."}
+                : end === "stopped"
+                  ? "You stopped the session by hand. It goes on only when you type to it again."
+                  : "Anthill stopped being able to read the session. It may have carried on working where Anthill cannot see."}
           </p>
         </div>
       ) : null}

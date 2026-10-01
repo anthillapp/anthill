@@ -17,7 +17,7 @@
  * screen.
  */
 
-import type { AttributedEvent, MappingConfidence, ObservationEvent } from "@anthill/live";
+import { stoppedWithSession, type AttributedEvent, type MappingConfidence, type ObservationEvent } from "@anthill/live";
 
 /**
  * How many cards the feed draws.
@@ -142,6 +142,8 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
   const dispatched = new Map<string, FeedCard>();
   /** The subagent whose own turn ended last, and when: what a SubagentStop names. */
   let lastDelegateEnd: { card: FeedCard; at: number } | undefined;
+  /** A subagent's stop that is the session's own reaching it (ANT-241). */
+  const cutOff = stoppedWithSession(events);
 
   /** Another channel's record of this card's action, folded in rather than drawn twice. */
   const fold = (card: FeedCard, event: AttributedEvent) => {
@@ -208,12 +210,15 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
       by user]", which the observer records as a stop on the call that
       started it. Stopped is not finished — the card is failed, and the hooks'
       SubagentStop right after it is the same stop, not a completion (ANT-190).
+      Unless the session was stopped with it: cut off, its outcome unknown
+      rather than a failure (ANT-241).
     */
     if (event.kind === "notification" && event.parentToolUseId && event.title === STOPPED_BY_HAND) {
       const card = dispatched.get(event.parentToolUseId);
       if (card) {
-        card.state = "failed";
-        card.detail = "Stopped by hand before it handed back";
+        const withSession = cutOff(event);
+        card.state = withSession ? "unknown" : "failed";
+        card.detail = withSession ? "Stopped with the session before it handed back" : "Stopped by hand before it handed back";
         card.durationMs = Date.parse(event.at) - Date.parse(card.at);
         open.delete(event.parentToolUseId);
         lastDelegateEnd = { card, at: Date.parse(event.at) };

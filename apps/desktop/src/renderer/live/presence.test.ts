@@ -174,3 +174,29 @@ describe("a run the author stopped observing", () => {
     expect(presenceLabel(stopped(), presenceKey(stopped()))).toBe("Not observing");
   });
 });
+
+/*
+  ANT-241. A session the person stopped by hand is closed as observation_lost,
+  and the chip read "Observation lost", "it may still be running" — about a
+  session they had just stopped themselves.
+*/
+describe("a session the person stopped by hand", () => {
+  const stopped = (): PendingRun => ({
+    ...run("observation_lost", new Date(BASE).toISOString()),
+    detectedSessionId: "sess-1",
+    stoppedByHandAt: new Date(BASE).toISOString(),
+  });
+
+  it("says it was stopped, not that it was lost", () => {
+    const key = presenceKey(stopped(), BASE + 20_000);
+    expect(key).toBe("stopped_by_hand");
+    expect(presenceLabel(stopped(), key)).toBe("Stopped by hand");
+    expect(presenceStyle(key).note).not.toContain("may still be running");
+    expect(presenceMoves(key)).toBe(false);
+    expect(needsPlaque(key)).toBe(true);
+  });
+
+  it("is still 'not observing' once the author stops observing it too", () => {
+    expect(presenceKey({ ...stopped(), observationStoppedAt: new Date(BASE + 1_000).toISOString() })).toBe("stopped");
+  });
+});

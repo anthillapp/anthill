@@ -145,6 +145,35 @@ export type LiveSessionView = {
 /** The title the observers give Claude Code's "[Request interrupted by user]". */
 const STOPPED_BY_HAND = "Stopped by hand";
 
+/** How close to the session's own stop a subagent's must be to be that stop (ANT-241). */
+export const STOP_CASCADE_MS = 5_000;
+
+/**
+ * Which subagent stops are the session's own stop reaching them.
+ *
+ * Codex writes `turn_aborted` into each subagent's file as well as the
+ * session's, so one press of Stop reads as the session stopped by hand and
+ * every subagent it had out stopped by hand too, a moment either side. Those
+ * are not somebody stopping a subagent while the session went on (ANT-190):
+ * the subagent was cut off with the session, and what it got through is not
+ * in the record (ANT-241). The answer is a predicate over a subagent's stop.
+ */
+export function stoppedWithSession(events: readonly ObservationEvent[]): (event: ObservationEvent) => boolean {
+  const stops = events
+    .filter((event) => isStopByHand(event) && !event.parentToolUseId && event.author?.kind !== "subagent")
+    .map((event) => Date.parse(event.at))
+    .filter((at) => !Number.isNaN(at));
+  return (event) => {
+    if (!isStopByHand(event) || !(event.parentToolUseId || event.author?.kind === "subagent")) return false;
+    const at = Date.parse(event.at);
+    return stops.some((stop) => Math.abs(stop - at) <= STOP_CASCADE_MS);
+  };
+}
+
+function isStopByHand(event: ObservationEvent): boolean {
+  return event.kind === "notification" && event.title === STOPPED_BY_HAND;
+}
+
 function yieldsToYou(event: ObservationEvent): boolean {
   return event.kind === "notification" || event.kind === "turn.end";
 }
@@ -487,6 +516,13 @@ export function foldLiveSession(
    * back: they end failed, not done (ANT-190).
    */
   const stoppedFor = new Set<string>();
+  /**
+   * Steps a subagent working for them was cut off from by the session's own
+   * stop, before it handed back: unknown, like one still out when the session
+   * ended (ANT-241).
+   */
+  const cutOffFor = new Set<string>();
+  const cutOffWithSession = stoppedWithSession(events);
   const STOPPED_NOTE = "A subagent working on this step was stopped by hand before it handed back.";
   const STOPPED_HERE_NOTE = "The session was stopped by hand on this step.";
 
@@ -505,6 +541,7 @@ export function foldLiveSession(
   const release = (id: string, at: string) => {
     if (id !== announced && isOpen(id) && !outstanding(id)) {
       if (stoppedFor.has(id)) finish(id, at, "failed", STOPPED_NOTE);
+      else if (cutOffFor.has(id)) finish(id, at, "unknown", CUT_OFF_NOTE);
       else finish(id, at);
     }
   };
@@ -642,10 +679,12 @@ export function foldLiveSession(
         release(via.blockId, event.at);
       }
       // Stopped by the person: over, and not finished (ANT-190).
+      // Unless it is the session's own stop reaching it: cut off, not
+      // stopped on its own (ANT-241).
       if (via && event.kind === "notification" && event.title === STOPPED_BY_HAND) {
         via.delegateEnded = true;
         via.returned = true;
-        stoppedFor.add(via.blockId);
+        (cutOffWithSession(event) ? cutOffFor : stoppedFor).add(via.blockId);
         release(via.blockId, event.at);
       }
       continue;
@@ -746,6 +785,8 @@ export function foldLiveSession(
           delegateEnded: false,
         });
         delegatedFrom.set(event.toolUseId, target);
+        // A new subagent for the step: the one cut off before is not its story.
+        cutOffFor.delete(target);
         // A step announced in a batch, now started: a fan-out, not a move away.
         pendingClose.delete(target);
         // A step left a moment before its subagent was started was not
@@ -937,7 +978,7 @@ export function foldLiveSession(
       // at is as close as the record gets to when this step stopped.
       if (lastSeenAt) {
         if (stoppedFor.has(announced)) finish(announced, lastSeenAt, "failed", STOPPED_NOTE);
-        else if (outstanding(announced)) finish(announced, lastSeenAt, "unknown", CUT_OFF_NOTE);
+        else if (outstanding(announced) || cutOffFor.has(announced)) finish(announced, lastSeenAt, "unknown", CUT_OFF_NOTE);
         else if (stoppedAndEnded) finish(announced, lastSeenAt, "failed", STOPPED_HERE_NOTE);
         else if (failedIn.get(announced)?.size) {
           finish(announced, lastSeenAt, "unknown", UNFINISHED_NOTE([...(failedIn.get(announced) ?? [])][0]));
@@ -948,7 +989,7 @@ export function foldLiveSession(
     } else if (open && run.state === "observation_lost" && sessionStopped) {
       const at = lastSeenAt ?? run.createdAt;
       if (stoppedFor.has(announced)) finish(announced, at, "failed", STOPPED_NOTE);
-      else if (outstanding(announced)) finish(announced, at, "unknown", CUT_OFF_NOTE);
+      else if (outstanding(announced) || cutOffFor.has(announced)) finish(announced, at, "unknown", CUT_OFF_NOTE);
       else finish(announced, at, "failed", STOPPED_HERE_NOTE);
     } else if (open && (run.state === "observation_lost" || run.state === "ambiguous_match")) {
       finish(announced, lastSeenAt ?? run.createdAt, "unknown", "Anthill stopped being able to read this session.");
@@ -964,7 +1005,7 @@ export function foldLiveSession(
     const at = lastSeenAt ?? run.createdAt;
     if (run.state === "completed") {
       if (stoppedFor.has(id)) finish(id, at, "failed", STOPPED_NOTE);
-      else if (outstanding(id)) finish(id, at, "unknown", CUT_OFF_NOTE);
+      else if (outstanding(id) || cutOffFor.has(id)) finish(id, at, "unknown", CUT_OFF_NOTE);
       else finish(id, at);
     }
     else if (run.state === "failed") finish(id, at, "failed", run.statusMessage);

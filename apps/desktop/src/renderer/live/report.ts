@@ -32,7 +32,7 @@ import type {
 } from "@anthill/live";
 import { agentProfiles, agentConfig } from "@anthill/workflow";
 
-export type EndState = "completed" | "failed" | "lost";
+export type EndState = "completed" | "failed" | "lost" | "stopped";
 
 /**
  * Whether the run has ended, and how.
@@ -44,6 +44,9 @@ export type EndState = "completed" | "failed" | "lost";
 export function endStateOf(run: PendingRun): EndState | undefined {
   if (run.state === "completed") return "completed";
   if (run.state === "failed") return "failed";
+  // The person pressed Stop: closed, and known to be (ANT-241). Not the author
+  // stopping observation, which is still a session nobody can see (ANT-191).
+  if (run.state === "observation_lost" && run.stoppedByHandAt && !run.observationStoppedAt) return "stopped";
   if (run.state === "observation_lost") return "lost";
   return undefined;
 }
@@ -52,6 +55,7 @@ export const END_TITLE: Record<EndState, string> = {
   completed: "Session finished",
   failed: "Ended with an error",
   lost: "Lost contact with the session",
+  stopped: "Stopped by hand",
 };
 
 /** Where a block ended up, as the report groups them. */
@@ -107,6 +111,7 @@ export function outcomes(workflow: Workflow, view: LiveSessionView): Map<Outcome
 /** Where the verdict comes from, in words. Never more than the record supports. */
 export function verdictSource(end: EndState, events: readonly AttributedEvent[]): string {
   if (end === "lost") return "the last record Anthill could read";
+  if (end === "stopped") return "the session's record of your stop";
   if (end === "failed") {
     return events.some((event) => event.kind === "error")
       ? "the session's error record"

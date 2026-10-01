@@ -946,6 +946,102 @@ describe("a bound Codex run that ends its turn at an Approval Gate", () => {
   });
 });
 
+/*
+  ANT-241. Stop pressed in Codex on a run bound through the exchange, while
+  two tester subagents worked for two steps. Codex wrote turn_aborted in the
+  session's file and then in each subagent's. The page read "Lost contact
+  with the session", "it may still be running", and drew both steps Failed.
+*/
+describe("a bound Codex run stopped by hand with its subagents out", () => {
+  const START = "2026-08-29T10:00:00.000Z";
+  const at = (ms: number) => new Date(Date.parse(START) + ms).toISOString();
+  const SESSION = "019a0f4d-1575-7d33-8875-c0a6a6f4bd7f";
+  const binding = {
+    ...observeRequest,
+    selectedCli: "codex" as const,
+    boundAt: START,
+    exchange: { revision: 1, digest: "abcd1234", sessionId: SESSION },
+    steps: [
+      { id: "document", name: "Document" },
+      { id: "test12", name: "Test mod1 and mod2" },
+      { id: "test34", name: "Test mod3 and mod4" },
+      { id: "verify", name: "Review" },
+    ],
+  };
+  const workflow: Workflow = {
+    id: "workflow-1",
+    name: "Document and test",
+    version: "1",
+    target: "codex",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "document", type: "agent", name: "Document", config: { actionKind: "agent-step", task: "Document" } },
+      { id: "test12", type: "agent", name: "Test mod1 and mod2", config: { actionKind: "agent-step", task: "Test" } },
+      { id: "test34", type: "agent", name: "Test mod3 and mod4", config: { actionKind: "agent-step", task: "Test" } },
+      { id: "verify", type: "agent", name: "Review", config: { actionKind: "agent-step", task: "Review" } },
+      { id: "end", type: "end", name: "End", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "document" },
+      { id: "e2", source: "document", target: "test12" },
+      { id: "e3", source: "document", target: "test34" },
+      { id: "e4", source: "test12", target: "verify" },
+      { id: "e5", source: "test34", target: "verify" },
+      { id: "e6", source: "verify", target: "end" },
+    ],
+  };
+  const rows = (items: unknown[]) => items.map((item) => JSON.stringify(item)).join("\n") + "\n";
+  const spawn = (call: string, name: string, ms: number) => [
+    { timestamp: at(ms), type: "response_item", payload: { type: "function_call", name: "spawn_agent", call_id: call, arguments: JSON.stringify({ task_name: name }) } },
+    { timestamp: at(ms + 300), type: "response_item", payload: { type: "function_call_output", call_id: call, output: JSON.stringify({ task_name: `/root/${name}` }) } },
+  ];
+  const subagent = (id: string, name: string, ms: number) => [
+    { timestamp: at(ms), type: "session_meta", payload: { session_id: SESSION, id, thread_source: "subagent", agent_path: `/root/${name}`, source: { subagent: { thread_spawn: { parent_thread_id: SESSION, agent_path: `/root/${name}` } } } } },
+    { timestamp: at(ms + 1_000), type: "response_item", payload: { type: "function_call", name: "exec_command", call_id: `call-${id}` } },
+    { timestamp: at(13_900 + (id === "sub-b" ? 300 : 0)), type: "event_msg", payload: { type: "turn_aborted", reason: "interrupted" } },
+  ];
+
+  it("reads as stopped by hand, and its steps as unknown, never failed", async () => {
+    const h = await harness(START);
+    const day = join(h.claudeRoot, "..", "codex", "2026", "08", "29");
+    await mkdir(day, { recursive: true });
+    await writeFile(join(day, `rollout-2026-08-29T10-00-00-${SESSION}.jsonl`), rows([
+      { timestamp: at(500), type: "session_meta", payload: { id: SESSION, session_id: SESSION } },
+      { timestamp: at(600), type: "event_msg", payload: { type: "task_started" } },
+      { timestamp: at(700), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "watch: document, then test" }] } },
+      { timestamp: at(2_000), type: "response_item", payload: { type: "function_call", name: "apply_patch", call_id: "call-doc" } },
+      { timestamp: at(2_200), type: "response_item", payload: { type: "function_call_output", call_id: "call-doc", output: "Done." } },
+      ...spawn("call-a", "tester_mod1_mod2", 4_000),
+      ...spawn("call-b", "tester_mod3_mod4", 11_000),
+      { timestamp: at(13_600), type: "event_msg", payload: { type: "turn_aborted", reason: "interrupted" } },
+    ]), "utf8");
+    await writeFile(join(day, "rollout-2026-08-29T10-00-05-sub-a.jsonl"), rows(subagent("sub-a", "tester_mod1_mod2", 5_000)), "utf8");
+    await writeFile(join(day, "rollout-2026-08-29T10-00-12-sub-b.jsonl"), rows(subagent("sub-b", "tester_mod3_mod4", 12_000)), "utf8");
+    await reportLine(h.reportLogPath, { version: 1, kind: "run", runId: RUN_ID, nonce: NONCE, at: at(1_000) });
+    await reportLine(h.reportLogPath, { version: 1, kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "document", at: at(1_500) });
+    await reportLine(h.reportLogPath, { version: 1, kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "test12", at: at(3_000) });
+    await reportLine(h.reportLogPath, { version: 1, kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "test34", at: at(10_000) });
+
+    h.setNow(at(20_000));
+    await h.service.registerBinding(binding);
+    await h.service.poll();
+
+    const run = only(h.service.snapshot());
+    expect(run.state).toBe("observation_lost");
+    expect(run.stoppedByHandAt).toBe(at(13_600));
+    const events = await h.service.events(RUN_ID);
+    expect(events.filter((event) => event.title === "Stopped by hand")).toHaveLength(3);
+
+    const view = foldLiveSession(workflow, run, events);
+    expect(view.blocks.document.state).toBe("done");
+    expect(view.blocks.test12.state).toBe("unknown");
+    expect(view.blocks.test34.state).toBe("unknown");
+    expect(view.blocks.test12.note).toContain("never handed back");
+    expect(view.blocks.verify.state).toBe("queued");
+    h.service.stop();
+  });
+});
+
 describe("cancelling observation", () => {
   /*
     ANT-191. Stopping observation used to delete the run and its record, so

@@ -557,7 +557,9 @@ function LiveSessionContent({
         <span className="live-page-boundary">
           {end === "lost"
             ? "Anthill lost contact with the session"
-            : end
+            : end === "stopped"
+              ? "You stopped the session – Anthill never ran it"
+              : end
               ? "Observation ended – Anthill never ran this session"
               : watching
                 ? "Anthill is observing, not running"

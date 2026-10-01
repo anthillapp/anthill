@@ -84,6 +84,9 @@ const CHIP: Record<LiveSessionState, { label: string; tone: string; pulse: boole
 /** A run the author stopped observing: not lost, and not finished either (ANT-191). */
 const STOPPED_CHIP = { label: "Not observing", tone: "waiting", pulse: false };
 
+/** A session the person stopped themselves: not lost (ANT-241). */
+const STOPPED_BY_HAND_CHIP = { label: "Stopped by hand", tone: "waiting", pulse: false };
+
 /**
  * A copied prompt no session ever carried. Nothing started, so nothing failed,
  * and a red "Session failed" said otherwise (ANT-212).
@@ -824,9 +827,11 @@ function RecentRow({
   const chip = row.run
     ? row.run.observationStoppedAt && row.run.state === "observation_lost"
       ? STOPPED_CHIP
-      : row.run.state === "failed" && !row.run.detectedSessionId
-        ? UNCLAIMED_CHIP
-        : CHIP[row.run.state]
+      : row.run.stoppedByHandAt && row.run.state === "observation_lost"
+        ? STOPPED_BY_HAND_CHIP
+        : row.run.state === "failed" && !row.run.detectedSessionId
+          ? UNCLAIMED_CHIP
+          : CHIP[row.run.state]
     : undefined;
   // Only when nothing is live: one row never shows both.
   const before = past(row);

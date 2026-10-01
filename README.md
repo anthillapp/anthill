@@ -108,3 +108,5 @@ unless you turn them off. Nothing else leaves your machine. Details are in
 [Buy me a coffee](https://buymeacoffee.com/anthill) ·
 [Report an issue](https://github.com/nstr/anthill/issues) ·
 [Build from source and contribute](CONTRIBUTING.md)
+
+MIT licensed. See [LICENSE](LICENSE).

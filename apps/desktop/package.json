@@ -2,6 +2,7 @@
   "name": "@anthill/desktop",
   "version": "0.8.5",
   "private": true,
+  "license": "MIT",
   "description": "Anthill desktop shell (Electron): visual workflow authoring, and passive observation of the sessions that do the work.",
   "main": "out/main/index.js",
   "scripts": {

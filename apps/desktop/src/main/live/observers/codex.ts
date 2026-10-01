@@ -38,8 +38,10 @@ import {
   isThisRun,
   type LiveSessionObserver,
   type ObservationEventDraft,
+  type ObservationContext,
   type ObserverCapabilities,
   type PollResult,
+  type ReportedProgress,
 } from "./types.js";
 import { newCursor, readNewLines, type TailCursor } from "./tail.js";
 
@@ -80,7 +82,7 @@ type FileState = {
    * text, or the output of a command the session ran. The same announcement
    * seen in both places is one announcement, not a second pass (ANT-147).
    */
-  lastStep?: { blockId: string; from: "reply" | "command" };
+  lastStep?: { blockId: string; from: "reply" | "command"; at: string };
   /**
    * The session's opening record, held until the file turns out to be this
    * run's. It is read in the first poll that sees the file, and the marker
@@ -163,7 +165,7 @@ export class CodexObserver implements LiveSessionObserver {
     this.spawned.delete(runId);
   }
 
-  async poll(run: PendingRun, now: string): Promise<PollResult> {
+  async poll(run: PendingRun, now: string, context?: ObservationContext): Promise<PollResult> {
     const files = await this.candidates(run);
     /*
       No sessions folder yet. That is a CLI that has not run a session on this
@@ -195,7 +197,14 @@ export class CodexObserver implements LiveSessionObserver {
       const chunk = await readNewLines(path, state.cursor);
       if (!chunk.grew) continue;
       grew.add(path);
-      scan(chunk.lines, state, now, { runId: run.anthillRunId, nonce: run.correlationNonce, gates }, events, spawns);
+      scan(
+        chunk.lines,
+        state,
+        now,
+        { runId: run.anthillRunId, nonce: run.correlationNonce, gates, reported: context?.reported },
+        events,
+        spawns,
+      );
     }
 
     // A subagent's work, tied to the call that started it — known by now even
@@ -512,7 +521,7 @@ function announceSteps(
 ): void {
   for (const blockId of parseStepMarkers(text, marker)) {
     if (state.lastStep?.blockId === blockId && state.lastStep.from !== from) continue;
-    state.lastStep = { blockId, from };
+    state.lastStep = { blockId, from, at: base.at };
     events.push({ ...base, kind: "step.marker", title: "Step announced", detail: blockId, blockId });
   }
 }
@@ -541,6 +550,34 @@ function announceDone(
 }
 
 /**
+ * The step the session was on at a moment: the last one announced, in its own
+ * record or through the CLI, at or before then.
+ *
+ * `anthill step` prints only "Step … reported.", which names no run, so a
+ * session reporting through the CLI never announces a step in this record —
+ * and its turn ending at an Approval Gate read as the session finishing
+ * (ANT-240).
+ */
+function stepAsOf(state: FileState, reported: ReportedProgress | undefined, at: string): string | undefined {
+  const moment = Date.parse(at);
+  let step = state.lastStep?.blockId;
+  let when = state.lastStep ? Date.parse(state.lastStep.at) : Number.NEGATIVE_INFINITY;
+  for (const report of reported?.steps ?? []) {
+    const told = Date.parse(report.at);
+    if (told <= moment && told >= when) {
+      step = report.blockId;
+      when = told;
+    }
+  }
+  return step;
+}
+
+/** Whether `anthill done` had been reported by then. */
+function reportedDoneBy(reported: ReportedProgress | undefined, at: string): boolean {
+  return reported?.doneAt !== undefined && Date.parse(reported.doneAt) <= Date.parse(at);
+}
+
+/**
  * Read only what matters: the session id, the user's message, any step the
  * agent announced, tool calls, the turn-completion record, and errors.
  */
@@ -548,8 +585,11 @@ function scan(
   lines: string[],
   state: FileState,
   now: string,
-  /** And the run's Approval Gates, by step id (ANT-210). */
-  marker: { runId: string; nonce: string; gates?: ReadonlySet<string> },
+  /**
+   * And the run's Approval Gates, by step id (ANT-210), and what the harness
+   * reported through the CLI, which this record never shows (ANT-240).
+   */
+  marker: { runId: string; nonce: string; gates?: ReadonlySet<string>; reported?: ReportedProgress },
   events: ObservationEventDraft[],
   spawns: Map<string, string> = new Map(),
 ): void {
@@ -787,12 +827,14 @@ function scan(
       if (payload.type === "task_started" && !state.delegate) state.awaitingAt = undefined;
       // A turn that ended on an Approval Gate, with no done line: the gate's
       // question put to a person, not the session finishing (ANT-210).
+      // The step and the done line may each have been said in this record or
+      // reported through the CLI, which a bound run always does (ANT-240).
+      const endedAt = payload.type === "task_complete" && !state.delegate ? stepAsOf(state, marker.reported, at) : undefined;
       if (
-        payload.type === "task_complete" &&
-        !state.delegate &&
+        endedAt &&
+        marker.gates?.has(endedAt) &&
         !state.doneReported &&
-        state.lastStep &&
-        marker.gates?.has(state.lastStep.blockId)
+        !reportedDoneBy(marker.reported, at)
       ) {
         state.awaitingAt = at;
         events.push({

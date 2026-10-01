@@ -463,3 +463,33 @@ describe("a subagent stopped by hand, in the feed", () => {
     expect(cards.some((card) => card.state === "done" && card.kind === "agent")).toBe(false);
   });
 });
+
+/*
+  ANT-241. Codex writes turn_aborted into every subagent's file when the
+  session is stopped, so each one reads "Stopped by hand" a moment after the
+  session does. That is the session's stop reaching it, not somebody stopping
+  the subagent: its card is not a failure, and what it got through is unknown.
+*/
+describe("subagents stopped along with the session, in the feed", () => {
+  const T = (s: number) => new Date(Date.parse("2026-10-01T00:26:40.000Z") + s * 1000).toISOString();
+  const rollout = { channel: "codex:rollout", source: "rollout" as const };
+
+  it("leaves their cards unknown, not failed", () => {
+    const cards = buildFeed(
+      [
+        event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "tester_mod1_mod2", toolUseId: "call-a", background: true, at: T(4), ...rollout }),
+        event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "tester_mod3_mod4", toolUseId: "call-b", background: true, at: T(11), ...rollout }),
+        event({ kind: "notification", title: "Stopped by hand", at: T(13.6), ...rollout }),
+        event({ kind: "notification", title: "Stopped by hand", parentToolUseId: "call-a", author: { kind: "subagent", name: "tester_mod1_mod2" }, at: T(13.9), ...rollout }),
+        event({ kind: "notification", title: "Stopped by hand", parentToolUseId: "call-b", author: { kind: "subagent", name: "tester_mod3_mod4" }, at: T(14.2), ...rollout }),
+      ],
+      true,
+    );
+    const agents = cards.filter((card) => card.kind === "agent");
+    expect(agents).toHaveLength(2);
+    for (const card of agents) {
+      expect(card.state).toBe("unknown");
+      expect(card.detail).toBe("Stopped with the session before it handed back");
+    }
+  });
+});

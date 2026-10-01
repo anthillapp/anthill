@@ -108,6 +108,16 @@ export type PendingRun = {
    * A stopped run is never picked back up by itself.
    */
   observationStoppedAt?: string;
+  /**
+   * When the person stopped the session by hand, while that is still the
+   * last word on it (ANT-241).
+   *
+   * A stop closes the run as `observation_lost`, the state a session that may
+   * come back is kept in (ANT-122). That state alone reads as Anthill having
+   * lost sight of the session — "it may still be running" — when the person
+   * pressed Stop themselves. Gone as soon as the run leaves that state.
+   */
+  stoppedByHandAt?: string;
 };
 
 /* ------------------------------------------------------------------ */
@@ -320,6 +330,16 @@ function windowFrom(run: PendingRun, at: string): string {
  * state the run is in.
  */
 export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
+  const next = foldEvidence(run, evidence);
+  // Stopped by hand only for as long as the stop is what closed it (ANT-241).
+  if (next.stoppedByHandAt && next.state !== "observation_lost") {
+    const { stoppedByHandAt: _gone, ...rest } = next;
+    return rest;
+  }
+  return next;
+}
+
+function foldEvidence(run: PendingRun, evidence: Evidence): PendingRun {
   const pinned = boundSessionId(run);
   if (pinned && "sessionId" in evidence && evidence.sessionId !== pinned) return run;
   // A recorded failure is the tool's own word and stands. "Completed" is
@@ -546,6 +566,7 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
         state: "observation_lost",
         lastObservedAt: evidence.at,
         evidenceChannel: evidence.channel,
+        stoppedByHandAt: evidence.at,
         statusMessage:
           evidence.detail ?? "You stopped this session. Anthill is no longer reading it; nothing was sent to the session.",
       };
@@ -821,7 +842,7 @@ export function statusLabel(run: PendingRun): string {
     case "failed":
       return run.detectedSessionId ? "Session failed" : "No session detected";
     case "observation_lost":
-      return "Observation lost";
+      return run.stoppedByHandAt ? "Stopped by hand" : "Observation lost";
     case "ambiguous_match":
       return "Ambiguous session";
     case "idle":

@@ -68,7 +68,13 @@ export type PresenceKey =
   | "failed"
   /** The window ran out and no local session ever carried the marker. */
   | "not_found"
-  | "stopped";
+  | "stopped"
+  /**
+   * The person stopped the session themselves: closed, and known to be, not
+   * lost sight of (ANT-241). The chat may still be open, and the session
+   * goes on only when they type again.
+   */
+  | "stopped_by_hand";
 
 const PRESENCE: Record<PresenceKey, PresenceStyle> = {
   receiving: {
@@ -135,6 +141,14 @@ const PRESENCE: Record<PresenceKey, PresenceStyle> = {
     perimeter: "still",
     dot: "solid",
   },
+  stopped_by_hand: {
+    label: "Stopped by hand",
+    note: "you stopped the session – it goes on when you type to it again",
+    tone: "#bab6b6",
+    noteInk: "#605d5d",
+    perimeter: "still",
+    dot: "hollow",
+  },
   stopped: {
     label: "Not observing",
     note: "your session continues unchanged",
@@ -164,6 +178,8 @@ const FROM_STATE: Record<LiveSessionState, PresenceKey> = {
 export function presenceKey(run: PendingRun, now: number = Date.now()): PresenceKey {
   // The author stopped observing it: say that, not that Anthill lost it (ANT-191).
   if (run.observationStoppedAt && run.state === "observation_lost") return "stopped";
+  // The person pressed Stop: not lost, and not a session that may still be running (ANT-241).
+  if (run.stoppedByHandAt && run.state === "observation_lost") return "stopped_by_hand";
   const key = FROM_STATE[run.state];
   // `failed` covers two different things, and only one of them is a failure.
   // A run whose window ran out without ever matching a session did not have a

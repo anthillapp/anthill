@@ -1884,6 +1884,47 @@ describe("a session stopped by hand", () => {
     expect(delegated.blocks.test.note).toContain("never handed back");
   });
 
+  /*
+    ANT-241. Codex writes turn_aborted into each subagent's own file as well
+    as the session's, so one press of Stop reads as the session stopped and
+    every subagent stopped by hand too. That is the session's stop reaching
+    them, not somebody stopping a subagent (ANT-190): their steps were drawn
+    Failed, when what they got through is simply not in the record.
+  */
+  describe("with its subagents stopped along with it", () => {
+    const theirs = (call: string, s: number) =>
+      tx({ kind: "notification", title: "Stopped by hand", parentToolUseId: call, author: { kind: "subagent", name: "Tester" }, at: T(s) });
+
+    it("leaves their steps unknown, never failed, whichever is read first", () => {
+      for (const stops of [
+        [stopped, theirs("call-a", 6.3), theirs("call-b", 6.6)],
+        [theirs("call-a", 5.7), stopped, theirs("call-b", 6.4)],
+        [theirs("call-a", 5.7), theirs("call-b", 5.9), stopped],
+      ]) {
+        for (const state of ["observation_lost", "completed"] as const) {
+          const view = foldLiveSession(workflow, run({ state }), [...delegatedBoth, ...stops]);
+          expect(view.blocks.implement.state).toBe("unknown");
+          expect(view.blocks.test.state).toBe("unknown");
+          expect(view.blocks.implement.note).toContain("never handed back");
+          expect(view.blocks.test.note).toContain("never handed back");
+        }
+      }
+    });
+
+    it("is not presented as a question while the session is still open", () => {
+      const view = foldLiveSession(workflow, run(), [...delegatedBoth, stopped, theirs("call-a", 6.3), theirs("call-b", 6.6)]);
+      expect(view.blocks.test.state).toBe("needsYou");
+      expect(view.blocks.test.waitReason).not.toBe("asked");
+      expect(view.blocks.implement.state).toBe("unknown");
+    });
+
+    it("still fails a step whose subagent was stopped on its own, long before", () => {
+      const view = foldLiveSession(workflow, run({ state: "observation_lost" }), [...delegatedBoth.slice(0, -1), theirs("call-a", 4.5), tx({ kind: "tool.start", title: "Read", toolUseId: "own", at: T(20) }), tx({ kind: "notification", title: "Stopped by hand", at: T(30) })]);
+      expect(view.blocks.implement.state).toBe("failed");
+      expect(view.blocks.test.state).toBe("unknown");
+    });
+  });
+
   it("still reads as lost when nobody stopped it", () => {
     const view = foldLiveSession(workflow, run({ state: "observation_lost" }), [
       tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),

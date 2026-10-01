@@ -18,11 +18,14 @@ import {
 } from "@anthill/workflow";
 
 import {
+  ENTRY_LEAD,
+  LABEL_CLEARANCE,
   entryPoint,
   labelHalfSize,
   labelSpot,
   loopBelow,
   passesUnder,
+  pointsAlong,
   portFromAnchor,
   portPoint,
   portSideToward,
@@ -271,6 +274,57 @@ function onLane(
 /** How far in from a detour's corners its label keeps. */
 const DETOUR_LABEL_INSET = 24;
 
+function rectAt(point: Point, halfW: number, halfH: number): Rect {
+  return { left: point.x - halfW, top: point.y - halfH, w: halfW * 2, h: halfH * 2 };
+}
+
+function overlaps(a: Rect, b: Rect): boolean {
+  return a.left < b.left + b.w && b.left < a.left + a.w && a.top < b.top + b.h && b.top < a.top + a.h;
+}
+
+/** How near the closest of `points` comes to `point`. */
+function nearest(point: Point, points: readonly Point[]): number {
+  let best = Infinity;
+  for (const other of points) best = Math.min(best, Math.hypot(other.x - point.x, other.y - point.y));
+  return best;
+}
+
+/**
+ * A spot for a short finger's label on the finger itself, as near the hub as
+ * is clear of the blocks, of `taken`, and of every other line.
+ *
+ * The bend handle is kept clear when the finger has room for that. A finger
+ * between a switcher and an End just past it often has not, and then the label
+ * sits on the handle's spot: the handle is drawn over labels, so it can still
+ * be grabbed, and a label on its own line is never read as another's.
+ */
+function onFinger(
+  own: readonly Point[],
+  others: readonly Point[],
+  halfW: number,
+  halfH: number,
+  blocks: readonly Rect[],
+  taken: readonly Rect[],
+  handle: Rect,
+): Point | undefined {
+  const clear = (point: Point, avoid: readonly Rect[]) => {
+    const box = rectAt(point, halfW, halfH);
+    return (
+      !blocks.some((block) =>
+        overlaps(box, {
+          left: block.left - LABEL_CLEARANCE,
+          top: block.top - LABEL_CLEARANCE,
+          w: block.w + LABEL_CLEARANCE * 2,
+          h: block.h + LABEL_CLEARANCE * 2,
+        }),
+      ) &&
+      !avoid.some((rect) => overlaps(box, rect)) &&
+      !others.some((other) => Math.abs(other.x - point.x) < halfW && Math.abs(other.y - point.y) < halfH)
+    );
+  };
+  return own.find((point) => clear(point, [...taken, handle])) ?? own.find((point) => clear(point, taken));
+}
+
 export function buildCanvasModel(workflow: Workflow): CanvasModel {
   const rects = new Map<string, Rect>();
   for (const node of workflow.nodes) rects.set(node.id, blockRect(node));
@@ -473,6 +527,32 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
       const inLine = Boolean(finger) && !output.bend && landing.side === "left" && Math.abs(landing.y - port.y) < 4;
       let geometry = inLine ? straight(port, landing) : route(port, landing, options);
       /*
+        A finger to a block just past the hub, a little above or below it,
+        landed on that block's bottom or top. A curve lines up for those from
+        further out than the hub is, so it swung past the hub's height the
+        wrong way before turning back: W29's last switcher, an End either side
+        of its hub, drew two fingers that crossed, and each label then sat by
+        the other line (ANT-239). Ahead of the hub and that close, the way in
+        is the block's near side, and the fingers fan out. Only for a finger
+        drawn as a curve: one sent round blocks arrives the way its lane does.
+      */
+      if (
+        finger &&
+        !output.anchor &&
+        !output.bend &&
+        !geometry.lane &&
+        (landing.side === "top" || landing.side === "bottom") &&
+        targetRect.left > port.x &&
+        Math.abs(landing.y - port.y) < ENTRY_LEAD
+      ) {
+        const side = entryPoint(targetRect, port, { u: 0, v: (port.y - targetRect.top) / targetRect.h });
+        const beside = route(port, side, options);
+        if (!beside.lane) {
+          landing = side;
+          geometry = beside;
+        }
+      }
+      /*
         Two lines sent round the same blocks took the same lane: every detour
         runs at the nearest clear height, so a switcher's fingers to two ends
         past the row ran one on top of the other, and nothing said which hub
@@ -570,14 +650,6 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
     the other side of its line if its own side takes it across a lane.
   */
   if (lanes.length > 0) {
-    const rectAt = (point: Point, halfW: number, halfH: number): Rect => ({
-      left: point.x - halfW,
-      top: point.y - halfH,
-      w: halfW * 2,
-      h: halfH * 2,
-    });
-    const overlaps = (a: Rect, b: Rect) =>
-      a.left < b.left + b.w && b.left < a.left + a.w && a.top < b.top + b.h && b.top < a.top + a.h;
     const across = (label: Point, from: Point, halfH: number, own?: CurveGeometry["lane"]) =>
       lanes.some(
         (lane) =>
@@ -617,6 +689,40 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
         connected[index] = { ...path, label };
       }
       settled.push(rectAt(label, halfW, halfH));
+    });
+  }
+
+  /*
+    A short finger's label went where the room was, and in a corner that can
+    be by another line. W29's last switcher has an End just past its hub on
+    either side, under the lane of the first review's "Approved": its own
+    "Approved" was put on that lane (ANT-239). Once every line is drawn, a
+    finger's label that another line runs through, or that is nearer another
+    line than its own, goes on its own finger instead.
+  */
+  if (switchers.length > 0) {
+    const lines = connected.map((path) => pointsAlong(path.geometry.path));
+    const hubs = switchers.map((shape) => ({
+      left: shape.port.x,
+      top: shape.port.y - SWITCH_HUB_RADIUS,
+      w: SWITCH_STEM + SWITCH_HUB_RADIUS,
+      h: SWITCH_HUB_RADIUS * 2,
+    }));
+    connected.forEach((path, index) => {
+      if (!path.switcher || path.geometry.lane) return;
+      const { halfW, halfH, handle } = placing[index];
+      const own = lines[index];
+      const others = lines.filter((_, other) => other !== index).flat();
+      const through = others.some(
+        (point) => Math.abs(point.x - path.label.x) < halfW && Math.abs(point.y - path.label.y) < halfH,
+      );
+      if (!through && nearest(path.label, own) <= nearest(path.label, others)) return;
+      const taken = [
+        ...hubs,
+        ...connected.flatMap((other, at) => (at === index ? [] : [rectAt(other.label, placing[at].halfW, placing[at].halfH)])),
+      ];
+      const label = onFinger(own, others, halfW, halfH, blocks, taken, handle);
+      if (label) connected[index] = { ...path, label };
     });
   }
 

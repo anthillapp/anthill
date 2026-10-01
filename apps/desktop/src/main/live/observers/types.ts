@@ -55,6 +55,24 @@ export type ObservationContext = {
    * from a stale one (ANT-119). Absent when there is no hook channel to ask.
    */
   hooksWaiting?: boolean;
+  /**
+   * What the harness has reported through the CLI for this run so far.
+   *
+   * `anthill step` prints nothing that names the run, so a session that
+   * reports that way — every run bound through the exchange, and a copied
+   * prompt told to use the CLI — leaves no trace in its own record of which
+   * step it is on. A transcript reader that has to judge a turn by the step
+   * it ended on needs to be told (ANT-240).
+   */
+  reported?: ReportedProgress;
+};
+
+/** The steps a harness reported through the CLI, and when it said it was done. */
+export type ReportedProgress = {
+  /** Every step report, in the order the CLI recorded them. */
+  steps: { blockId: string; at: string }[];
+  /** The first `anthill done`, if there has been one. */
+  doneAt?: string;
 };
 
 export type PollResult = {

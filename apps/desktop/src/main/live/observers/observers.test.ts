@@ -582,6 +582,49 @@ describe("the Codex observer", () => {
       const { evidence } = await new CodexObserver(dir).poll(run(), new Date().toISOString());
       expect(evidence).toContainEqual(expect.objectContaining({ kind: "completed" }));
     });
+
+    /*
+      ANT-240. A run bound through the exchange reports its steps with
+      `anthill step`, which prints nothing naming the run: the gate is known
+      only from what the CLI was told, and the record just ends a turn.
+    */
+    describe("when the steps were reported through the CLI", () => {
+      const quiet = [
+        asked[0],
+        { timestamp: at(3), type: "response_item", payload: { type: "function_call", name: "exec_command", call_id: "call-1" } },
+        { timestamp: at(3.5), type: "response_item", payload: { type: "function_call_output", call_id: "call-1", output: "Step decide reported." } },
+        said("Which way do we go?", 5),
+        { timestamp: at(5.1), type: "event_msg", payload: { type: "task_complete" } },
+      ];
+      const bound = () => ({ ...run(), exchange: { revision: 1, digest: "abcd", sessionId: "sess-cx" } });
+      const reported = (steps: [string, number][], done?: number) => ({
+        steps: steps.map(([blockId, s]) => ({ blockId, at: at(s) })),
+        ...(done !== undefined ? { doneAt: at(done) } : {}),
+      });
+      const look = async (progress: ReturnType<typeof reported>) => {
+        const dir = await root();
+        await writeCodex(dir, "sess-cx", lines(quiet));
+        return new CodexObserver(dir).poll(bound(), new Date().toISOString(), { hooksWatching: false, reported: progress });
+      };
+
+      it("is waiting for an answer at a gate", async () => {
+        const { evidence, events } = await look(reported([["implement", 2], ["decide", 4]]));
+        expect(evidence).not.toContainEqual(expect.objectContaining({ kind: "completed" }));
+        expect(evidence).toContainEqual(expect.objectContaining({ kind: "awaiting", sessionId: "sess-cx" }));
+        expect(events).toContainEqual(expect.objectContaining({ kind: "notification", title: "Waiting for your answer" }));
+      });
+
+      it("finishes on an ordinary step, or once the work was reported done", async () => {
+        expect((await look(reported([["implement", 2]]))).evidence).toContainEqual(expect.objectContaining({ kind: "completed" }));
+        expect((await look(reported([["implement", 2], ["decide", 4]], 4.5))).evidence)
+          .toContainEqual(expect.objectContaining({ kind: "completed" }));
+      });
+
+      it("judges the turn by the step it ended on, not one reported after", async () => {
+        const { evidence } = await look(reported([["implement", 2], ["decide", 9]]));
+        expect(evidence).toContainEqual(expect.objectContaining({ kind: "completed" }));
+      });
+    });
   });
 
   /*

@@ -44,6 +44,25 @@ async function reportFile(rows: unknown[]): Promise<string> {
 const at = (iso: string) => iso;
 
 describe("the cli report observer", () => {
+  // ANT-240: the transcript readers ask what was reported, to judge a turn.
+  it("keeps what each run reported, for the readers that cannot see it", async () => {
+    const path = await reportFile([
+      { kind: "run", runId: RUN_ID, nonce: NONCE, at: at("2026-08-29T10:00:01.000Z") },
+      { kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "gate", at: at("2026-08-29T10:00:02.000Z") },
+      { kind: "step", runId: RUN_ID, nonce: "wrong", stepId: "other", at: at("2026-08-29T10:00:03.000Z") },
+      { kind: "done", runId: RUN_ID, nonce: NONCE, at: at("2026-08-29T10:00:04.000Z") },
+    ]);
+    const observer = new CliReportObserver(path);
+    expect(observer.reported(RUN_ID)).toEqual({ steps: [] });
+    await observer.poll(pending(), new Date().toISOString());
+    expect(observer.reported(RUN_ID)).toEqual({
+      steps: [{ blockId: "gate", at: "2026-08-29T10:00:02.000Z" }],
+      doneAt: "2026-08-29T10:00:04.000Z",
+    });
+    observer.forget(RUN_ID);
+    expect(observer.reported(RUN_ID)).toEqual({ steps: [] });
+  });
+
   it("reads a run report as activity, with no event", async () => {
     const path = await reportFile([
       { kind: "run", runId: RUN_ID, nonce: NONCE, at: at("2026-08-29T10:00:01.000Z") },

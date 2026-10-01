@@ -996,6 +996,31 @@ describe("an ended session's report", () => {
     expect(within(report()).getByText("Last message received · may be out of date")).toBeTruthy();
   });
 
+  /*
+    ANT-241. A stop by hand closes the run as observation_lost, and the page
+    said "Lost contact with the session", "it may still be running", about a
+    session the person had just stopped.
+  */
+  it("says a session the person stopped was stopped, not lost", async () => {
+    await show(
+      [
+        marker("implement", at(1)),
+        said("Working on it.", at(2)),
+        event({ kind: "notification", title: "Stopped by hand", at: at(3) }),
+      ],
+      run({ state: "observation_lost", lastObservedAt: at(3), stoppedByHandAt: at(3) }),
+    );
+    expect(report().className).toContain("is-stopped");
+    expect(report().textContent).toContain("Stopped by hand");
+    expect(report().textContent).not.toContain("Lost contact");
+    expect(document.body.textContent).not.toContain("may still be running");
+    expect(document.body.textContent).not.toContain("lost contact");
+    expect(screen.queryByText("progress unknown", { selector: ".canvas-chip" })).toBeNull();
+    openReport();
+    expect(within(report()).queryByText(/may be out of date/)).toBeNull();
+    expect(report().textContent).not.toContain("stopped being able to read");
+  });
+
   it("reads 'no tokens recorded' and 'no token data' for a session without usage, never zero", async () => {
     await show([marker("implement", at(1)), marker("test", at(2))], run({ state: "completed", lastObservedAt: at(3) }));
     expect(screen.getByRole("button", { name: /By block and agent/ }).textContent).toContain("no tokens recorded");

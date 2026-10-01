@@ -12,7 +12,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { TIMING, createPendingRun, isWatching, type PendingRun } from "@anthill/live";
+import { TIMING, createPendingRun, foldLiveSession, isWatching, type PendingRun } from "@anthill/live";
+import type { Workflow } from "@anthill/workflow-schema";
 
 import { LiveSessionService, RECOVERY_POLL_MS, withSessionFrom, type LiveSessionSnapshot } from "./service.js";
 import { PendingRunStore } from "./store.js";
@@ -775,6 +776,269 @@ describe("the harness's own report", () => {
       expect(only(h.service.snapshot()).state).toBe("detected_live");
     }
     expect(only(h.service.snapshot()).lastObservedAt).toBe(at(12 * 60_000));
+  });
+});
+
+/*
+  ANT-240. A Codex run bound through the exchange reports its steps with
+  `anthill step`, whose output names no marker, so the rollout alone never
+  says which step the session is on. Codex announced the Approval Gate that
+  way, asked, and ended its turn with task_complete, as after every turn —
+  and the run settled as "Session finished", the gate Done, the branches Not
+  reached, while the chat waited for an answer. The copied prompt's answer
+  (ANT-210) applies: a turn that ends on a gate is a question put to a person.
+*/
+describe("a bound Codex run that ends its turn at an Approval Gate", () => {
+  const START = "2026-08-29T10:00:00.000Z";
+  const at = (ms: number) => new Date(Date.parse(START) + ms).toISOString();
+  const SESSION = "019a0f4d-c3d2-73a3-b453-7a455fa23765";
+  const binding = {
+    ...observeRequest,
+    selectedCli: "codex" as const,
+    boundAt: START,
+    exchange: { revision: 1, digest: "abcd1234", sessionId: SESSION },
+    steps: [
+      { id: "draft-note", name: "Draft the note" },
+      { id: "approval-gate", name: "Approval Gate", gate: true as const },
+      { id: "publish-note", name: "Publish approved note" },
+      { id: "decline-note", name: "Honor decline" },
+    ],
+  };
+  /** A command the agent ran, as Codex Desktop records it: the call, its output. */
+  const command = (cmd: string, stdout: string, ms: number, call: string) => [
+    { timestamp: at(ms), type: "response_item", payload: { type: "custom_tool_call", name: "exec", call_id: call, input: `text(await tools.exec_command({cmd:${JSON.stringify(cmd)}}));` } },
+    { timestamp: at(ms + 300), type: "event_msg", payload: { type: "item_completed", item: { type: "CommandExecution", command: ["/bin/zsh", "-lc", cmd], stdout } } },
+    { timestamp: at(ms + 400), type: "response_item", payload: { type: "custom_tool_call_output", call_id: call, output: [{ type: "input_text", text: `Output:\n${stdout}` }] } },
+  ];
+  const said = (text: string, ms: number) => ({
+    timestamp: at(ms), type: "response_item",
+    payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] },
+  });
+  const asked = [
+    { timestamp: at(500), type: "session_meta", payload: { id: SESSION, session_id: SESSION } },
+    { timestamp: at(600), type: "event_msg", payload: { type: "task_started" } },
+    { timestamp: at(700), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "watch: draft a note, then ask me" }] } },
+    ...command(`anthill run ${RUN_ID} ${NONCE}`, "Run reported.\n", 2_000, "call-1"),
+    ...command(`anthill step ${RUN_ID} ${NONCE} draft-note`, "Step draft-note reported.\n", 3_000, "call-2"),
+    ...command(`anthill step ${RUN_ID} ${NONCE} approval-gate`, "Step approval-gate reported.\n", 8_000, "call-3"),
+    said("Paused at the Approval Gate. Do you approve publishing this draft?", 12_000),
+    { timestamp: at(13_000), type: "event_msg", payload: { type: "task_complete" } },
+  ];
+  const reports = [
+    { version: 1, kind: "run", runId: RUN_ID, nonce: NONCE, at: at(2_100) },
+    { version: 1, kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "draft-note", at: at(3_100) },
+    { version: 1, kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "approval-gate", at: at(8_100) },
+  ];
+  const rows = (items: unknown[]) => items.map((item) => JSON.stringify(item)).join("\n") + "\n";
+  const workflow: Workflow = {
+    id: "workflow-1",
+    name: "Release note",
+    version: "1",
+    target: "codex",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "draft-note", type: "agent", name: "Draft the note", config: { actionKind: "agent-step", task: "Draft" } },
+      { id: "approval-gate", type: "approval", name: "Approval Gate", config: {} },
+      { id: "publish-note", type: "agent", name: "Publish approved note", config: { actionKind: "agent-step", task: "Publish" } },
+      { id: "decline-note", type: "agent", name: "Honor decline", config: { actionKind: "agent-step", task: "Decline" } },
+      { id: "end", type: "end", name: "End", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "draft-note" },
+      { id: "e2", source: "draft-note", target: "approval-gate" },
+      { id: "e3", source: "approval-gate", target: "publish-note" },
+      { id: "e4", source: "approval-gate", target: "decline-note" },
+      { id: "e5", source: "publish-note", target: "end" },
+      { id: "e6", source: "decline-note", target: "end" },
+    ],
+  };
+
+  async function setUp(h: Harness) {
+    const day = join(h.claudeRoot, "..", "codex", "2026", "08", "29");
+    await mkdir(day, { recursive: true });
+    const rollout = join(day, `rollout-2026-08-29T10-00-00-${SESSION}.jsonl`);
+    await mkdir(dirname(h.reportLogPath), { recursive: true });
+    return {
+      rollout: (items: unknown[]) => appendFile(rollout, rows(items), "utf8"),
+      report: (items: unknown[]) => appendFile(h.reportLogPath, rows(items), "utf8"),
+    };
+  }
+
+  async function expectWaiting(h: Harness) {
+    const run = only(h.service.snapshot());
+    expect(run.state).toBe("detected_live");
+    expect(run.statusMessage).toContain("waiting for your answer");
+    const events = await h.service.events(RUN_ID);
+    expect(events).toContainEqual(expect.objectContaining({ kind: "notification", title: "Waiting for your answer" }));
+    expect(events.filter((event) => event.kind === "turn.end" && event.channel === "codex:rollout")).toEqual([]);
+    expect(h.settled).toEqual([]);
+    // What the page draws: the gate waits on you, the branches wait their turn.
+    const view = foldLiveSession(workflow, run, events);
+    expect(view.blocks["draft-note"].state).toBe("done");
+    expect(view.blocks["approval-gate"].state).toBe("needsYou");
+    expect(view.blocks["publish-note"].state).toBe("queued");
+    expect(view.blocks["decline-note"].state).toBe("queued");
+  }
+
+  it("waits for the answer when the gate was reported before the turn ended", async () => {
+    const h = await harness(START);
+    const files = await setUp(h);
+    await h.service.registerBinding(binding);
+    await files.report(reports);
+    await files.rollout(asked.slice(0, -2));
+    h.setNow(at(9_000));
+    await h.service.poll();
+
+    await files.rollout(asked.slice(-2));
+    h.setNow(at(15_000));
+    await h.service.poll();
+    await expectWaiting(h);
+    h.service.stop();
+  });
+
+  it("waits for the answer when the whole record is read at once", async () => {
+    const h = await harness(START);
+    const files = await setUp(h);
+    await files.report(reports);
+    await files.rollout(asked);
+    h.setNow(at(15_000));
+    await h.service.registerBinding(binding);
+    await expectWaiting(h);
+    h.service.stop();
+  });
+
+  it("finishes once the answer is given and the work is reported done", async () => {
+    const h = await harness(START);
+    const files = await setUp(h);
+    await h.service.registerBinding(binding);
+    await files.report(reports);
+    await files.rollout(asked);
+    h.setNow(at(15_000));
+    await h.service.poll();
+    await expectWaiting(h);
+
+    await files.rollout([
+      { timestamp: at(60_000), type: "event_msg", payload: { type: "task_started" } },
+      { timestamp: at(60_100), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "approved" }] } },
+      ...command(`anthill step ${RUN_ID} ${NONCE} publish-note`, "Step publish-note reported.\n", 62_000, "call-4"),
+      ...command(`anthill done ${RUN_ID} ${NONCE}`, "Done reported.\n", 65_000, "call-5"),
+      { timestamp: at(66_000), type: "event_msg", payload: { type: "task_complete" } },
+    ]);
+    await files.report([
+      { version: 1, kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "publish-note", at: at(62_100) },
+      { version: 1, kind: "done", runId: RUN_ID, nonce: NONCE, at: at(65_100) },
+    ]);
+    h.setNow(at(67_000));
+    await h.service.poll();
+    expect(only(h.service.snapshot()).state).toBe("completed");
+    h.service.stop();
+  });
+
+  it("still finishes a turn that ends on an ordinary step", async () => {
+    const h = await harness(START);
+    const files = await setUp(h);
+    await files.report(reports.slice(0, 2));
+    await files.rollout([...asked.slice(0, -5), ...asked.slice(-2)]);
+    h.setNow(at(15_000));
+    await h.service.registerBinding(binding);
+    expect(only(h.service.snapshot()).state).toBe("completed");
+    h.service.stop();
+  });
+});
+
+/*
+  ANT-241. Stop pressed in Codex on a run bound through the exchange, while
+  two tester subagents worked for two steps. Codex wrote turn_aborted in the
+  session's file and then in each subagent's. The page read "Lost contact
+  with the session", "it may still be running", and drew both steps Failed.
+*/
+describe("a bound Codex run stopped by hand with its subagents out", () => {
+  const START = "2026-08-29T10:00:00.000Z";
+  const at = (ms: number) => new Date(Date.parse(START) + ms).toISOString();
+  const SESSION = "019a0f4d-1575-7d33-8875-c0a6a6f4bd7f";
+  const binding = {
+    ...observeRequest,
+    selectedCli: "codex" as const,
+    boundAt: START,
+    exchange: { revision: 1, digest: "abcd1234", sessionId: SESSION },
+    steps: [
+      { id: "document", name: "Document" },
+      { id: "test12", name: "Test mod1 and mod2" },
+      { id: "test34", name: "Test mod3 and mod4" },
+      { id: "verify", name: "Review" },
+    ],
+  };
+  const workflow: Workflow = {
+    id: "workflow-1",
+    name: "Document and test",
+    version: "1",
+    target: "codex",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "document", type: "agent", name: "Document", config: { actionKind: "agent-step", task: "Document" } },
+      { id: "test12", type: "agent", name: "Test mod1 and mod2", config: { actionKind: "agent-step", task: "Test" } },
+      { id: "test34", type: "agent", name: "Test mod3 and mod4", config: { actionKind: "agent-step", task: "Test" } },
+      { id: "verify", type: "agent", name: "Review", config: { actionKind: "agent-step", task: "Review" } },
+      { id: "end", type: "end", name: "End", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "document" },
+      { id: "e2", source: "document", target: "test12" },
+      { id: "e3", source: "document", target: "test34" },
+      { id: "e4", source: "test12", target: "verify" },
+      { id: "e5", source: "test34", target: "verify" },
+      { id: "e6", source: "verify", target: "end" },
+    ],
+  };
+  const rows = (items: unknown[]) => items.map((item) => JSON.stringify(item)).join("\n") + "\n";
+  const spawn = (call: string, name: string, ms: number) => [
+    { timestamp: at(ms), type: "response_item", payload: { type: "function_call", name: "spawn_agent", call_id: call, arguments: JSON.stringify({ task_name: name }) } },
+    { timestamp: at(ms + 300), type: "response_item", payload: { type: "function_call_output", call_id: call, output: JSON.stringify({ task_name: `/root/${name}` }) } },
+  ];
+  const subagent = (id: string, name: string, ms: number) => [
+    { timestamp: at(ms), type: "session_meta", payload: { session_id: SESSION, id, thread_source: "subagent", agent_path: `/root/${name}`, source: { subagent: { thread_spawn: { parent_thread_id: SESSION, agent_path: `/root/${name}` } } } } },
+    { timestamp: at(ms + 1_000), type: "response_item", payload: { type: "function_call", name: "exec_command", call_id: `call-${id}` } },
+    { timestamp: at(13_900 + (id === "sub-b" ? 300 : 0)), type: "event_msg", payload: { type: "turn_aborted", reason: "interrupted" } },
+  ];
+
+  it("reads as stopped by hand, and its steps as unknown, never failed", async () => {
+    const h = await harness(START);
+    const day = join(h.claudeRoot, "..", "codex", "2026", "08", "29");
+    await mkdir(day, { recursive: true });
+    await writeFile(join(day, `rollout-2026-08-29T10-00-00-${SESSION}.jsonl`), rows([
+      { timestamp: at(500), type: "session_meta", payload: { id: SESSION, session_id: SESSION } },
+      { timestamp: at(600), type: "event_msg", payload: { type: "task_started" } },
+      { timestamp: at(700), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "watch: document, then test" }] } },
+      { timestamp: at(2_000), type: "response_item", payload: { type: "function_call", name: "apply_patch", call_id: "call-doc" } },
+      { timestamp: at(2_200), type: "response_item", payload: { type: "function_call_output", call_id: "call-doc", output: "Done." } },
+      ...spawn("call-a", "tester_mod1_mod2", 4_000),
+      ...spawn("call-b", "tester_mod3_mod4", 11_000),
+      { timestamp: at(13_600), type: "event_msg", payload: { type: "turn_aborted", reason: "interrupted" } },
+    ]), "utf8");
+    await writeFile(join(day, "rollout-2026-08-29T10-00-05-sub-a.jsonl"), rows(subagent("sub-a", "tester_mod1_mod2", 5_000)), "utf8");
+    await writeFile(join(day, "rollout-2026-08-29T10-00-12-sub-b.jsonl"), rows(subagent("sub-b", "tester_mod3_mod4", 12_000)), "utf8");
+    await reportLine(h.reportLogPath, { version: 1, kind: "run", runId: RUN_ID, nonce: NONCE, at: at(1_000) });
+    await reportLine(h.reportLogPath, { version: 1, kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "document", at: at(1_500) });
+    await reportLine(h.reportLogPath, { version: 1, kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "test12", at: at(3_000) });
+    await reportLine(h.reportLogPath, { version: 1, kind: "step", runId: RUN_ID, nonce: NONCE, stepId: "test34", at: at(10_000) });
+
+    h.setNow(at(20_000));
+    await h.service.registerBinding(binding);
+    await h.service.poll();
+
+    const run = only(h.service.snapshot());
+    expect(run.state).toBe("observation_lost");
+    expect(run.stoppedByHandAt).toBe(at(13_600));
+    const events = await h.service.events(RUN_ID);
+    expect(events.filter((event) => event.title === "Stopped by hand")).toHaveLength(3);
+
+    const view = foldLiveSession(workflow, run, events);
+    expect(view.blocks.document.state).toBe("done");
+    expect(view.blocks.test12.state).toBe("unknown");
+    expect(view.blocks.test34.state).toBe("unknown");
+    expect(view.blocks.test12.note).toContain("never handed back");
+    expect(view.blocks.verify.state).toBe("queued");
+    h.service.stop();
   });
 });
 

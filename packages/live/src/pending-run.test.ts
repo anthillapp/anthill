@@ -856,3 +856,35 @@ describe("work still in flight", () => {
     expect(applyEvidence(failed, working(10 * 60_000)).state).toBe("failed");
   });
 });
+
+/*
+  ANT-241. A stop by hand closes the run as observation_lost, the state a
+  session that may come back is kept in — and every page then read it as
+  Anthill having lost contact, "it may still be running", when the person had
+  pressed Stop themselves. The run says so.
+*/
+describe("a run the person stopped by hand", () => {
+  const stop = (at: number): Evidence => ({ kind: "interrupted", sessionId: "sess-1", channel: "codex:rollout", at: later(at) });
+  const stoppedRun = () => applyEvidence(applyEvidence(run(), strongMatch), stop(60_000));
+
+  it("says it was stopped, not lost", () => {
+    const stopped = stoppedRun();
+    expect(stopped.state).toBe("observation_lost");
+    expect(stopped.stoppedByHandAt).toBe(later(60_000));
+    expect(statusLabel(stopped)).toBe("Stopped by hand");
+  });
+
+  it("is no longer stopped once the session goes on", () => {
+    const resumed = applyEvidence(stoppedRun(), { kind: "activity", sessionId: "sess-1", channel: "codex:rollout", at: later(120_000) });
+    expect(resumed.state).toBe("detected_live");
+    expect(resumed.stoppedByHandAt).toBeUndefined();
+    expect(statusLabel(resumed)).toBe("Live session");
+  });
+
+  it("is still lost, not stopped, when it merely went quiet", () => {
+    const lost = applyEvidence(applyEvidence(run(), strongMatch), { kind: "quiet", at: later(10 * 60_000) });
+    expect(lost.state).toBe("observation_lost");
+    expect(lost.stoppedByHandAt).toBeUndefined();
+    expect(statusLabel(lost)).toBe("Observation lost");
+  });
+});

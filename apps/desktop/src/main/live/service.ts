@@ -58,6 +58,7 @@ import type {
   LiveSessionObserver,
   ObservationEventDraft,
   ObserverCapabilities,
+  PollResult,
 } from "./observers/types.js";
 import { ObservationJournal } from "./journal.js";
 import { PendingRunStore } from "./store.js";
@@ -493,12 +494,26 @@ export class LiveSessionService {
   ): Promise<{ evidence: Evidence[]; drafts: ObservationEventDraft[] }> {
     const observer = this.observers[run.selectedCli];
 
+    // Reports are read first, though they are added last: a session that
+    // reports through the CLI names its steps nowhere in its own record, and
+    // the transcript reader judges a turn by the step it ended on — an
+    // Approval Gate's question is not the session finishing (ANT-240). Read
+    // after, a record read whole at once would end its turn before the gate
+    // it was asked at had been heard of.
+    let reported: PollResult = { evidence: [], events: [] };
+    try {
+      reported = await this.reports.poll(run, now);
+    } catch {
+      // The CLI was never run, or the file is unreadable. Neither is an error.
+    }
+
     let evidence: Evidence[] = [];
     let drafts: ObservationEventDraft[] = [];
     try {
       const result = await observer.poll(run, now, {
         hooksWatching: this.hooks.watching(run.anthillRunId),
         hooksWaiting: this.hooks.waiting(run.anthillRunId, now),
+        reported: this.reports.reported(run.anthillRunId),
       });
       evidence = result.evidence;
       drafts = result.events;
@@ -530,16 +545,11 @@ export class LiveSessionService {
       // No hooks installed, or the log is unreadable. Neither is an error.
     }
 
-    // Reports are read the same way: a file the CLI writes on the harness's
-    // behalf, matched on the marker's two halves. Not gated on a session
-    // match — a report can arrive before the session file does.
-    try {
-      const reported = await this.reports.poll(run, now);
-      evidence = [...evidence, ...reported.evidence];
-      drafts = [...drafts, ...reported.events];
-    } catch {
-      // The CLI was never run, or the file is unreadable. Neither is an error.
-    }
+    // Reports, read above: a file the CLI writes on the harness's behalf,
+    // matched on the marker's two halves. Not gated on a session match — a
+    // report can arrive before the session file does.
+    evidence = [...evidence, ...reported.evidence];
+    drafts = [...drafts, ...reported.events];
 
     // A plugin binds an explicit session, unlike discovery from a pasted
     // marker. A copied marker in a second transcript must not move that binding.

@@ -1,0 +1,295 @@
+{
+  "id": "inventory-max-quantity-01a0f4d2",
+  "name": "Inventory max_quantity with independent review",
+  "version": "0.1.0",
+  "target": "codex",
+  "brief": {
+    "goal": "Add max_quantity to inventory.py with unit tests and a short README Usage section, using separate developer, tester and independent reviewer subagents.",
+    "context": "Work only in /private/tmp/anthill-qa-ant221-w29. inventory.py currently defines total_quantity(rows) as sum(q for _, q in rows). README.md contains the inventory heading and Inventory helpers. No test configuration was found; this directory is not a Git repository. The user confirmed this scope and delegated implementation details to Codex.",
+    "assumptions": [
+      "The user confirmed that a first test failure, as well as a first review rejection, consumes the single allowed retry.",
+      "Implementation details are delegated to Codex."
+    ],
+    "verification": "Tester runs python3 -m unittest discover -v from the project directory. Reviewer examines the implementation, meaningful test coverage, the README examples, and the tester's exit code and result independently.",
+    "doneCriteria": [
+      "max_quantity accepts (name, quantity) rows and returns the largest quantity, or 0 for empty input.",
+      "total_quantity behavior is preserved.",
+      "Standard-library unit tests cover ordinary rows, empty input, negative quantities, and iterable input, plus preservation of total_quantity.",
+      "README.md has a short Usage section with correct examples.",
+      "Approved is reached only after tests pass and the independent reviewer approves.",
+      "Only one developer retry is allowed across initial test failure or initial review rejection; test failure or review rejection after retry ends at Needs attention.",
+      "The final response reports the outcome and tests and finishes with a small Markdown table of changed files."
+    ],
+    "constraints": [
+      "Use three distinct Codex subagents: Developer, Tester and Reviewer; inherit the current session model.",
+      "Developer owns code, tests and README changes. Tester runs tests and reports evidence. Reviewer independently reviews without implementing changes.",
+      "Preserve total_quantity and keep changes confined to inventory.py, test_inventory.py and README.md.",
+      "Use Python standard-library unittest; add no dependencies.",
+      "Unroll the retry into distinct blocks so there is at most one additional implementation, test and review pass."
+    ],
+    "prohibitedActions": [
+      "Do not make unrelated changes, install dependencies, publish, or create commits.",
+      "Do not allow a second developer retry.",
+      "Do not start implementation until the user approves the displayed design."
+    ],
+    "finalAction": "Enter the appropriate End block, Approved or Needs attention, and give a concise result including test evidence and unresolved issues, ending with the requested changed-files table.",
+    "report": [
+      "Terminal outcome",
+      "Tests run and result",
+      "Reviewer decision and unresolved issues",
+      "Small Markdown table of files changed"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "name": "Start",
+      "config": {}
+    },
+    {
+      "id": "developer",
+      "type": "agent",
+      "name": "Implement max_quantity, tests and Usage",
+      "config": {
+        "actionKind": "implement",
+        "agentId": "developer-agent",
+        "task": "As the Developer subagent, read inventory.py and README.md. Add max_quantity(rows), returning the largest quantity or 0 for empty input. Preserve negative maxima and support iterable rows. Preserve total_quantity. Add test_inventory.py using unittest with meaningful ordinary, empty, negative and iterable cases and total_quantity regression checks. Add a short Usage section showing both helpers. Hand changed files and rationale to Tester.",
+        "expectedOutput": "Changes in inventory.py, test_inventory.py and README.md, plus a concise implementation handoff.",
+        "successCriteria": [
+          "Agreed function semantics implemented.",
+          "Meaningful standard-library tests and accurate Usage examples added.",
+          "Existing helper preserved and no unrelated files changed."
+        ]
+      }
+    },
+    {
+      "id": "tester",
+      "type": "agent",
+      "name": "Run tests",
+      "config": {
+        "actionKind": "run-tests",
+        "agentId": "tester-agent",
+        "task": "As the distinct Tester subagent, run python3 -m unittest discover -v in the project directory. Do not edit files. Report command, exit code, test counts and any failures. Set tester.result to passed only if the command succeeds and tests are discovered; otherwise failed.",
+        "expectedOutput": "Test evidence and result passed or failed.",
+        "successCriteria": [
+          "Tests are actually executed.",
+          "Failures and exit code reported accurately."
+        ]
+      }
+    },
+    {
+      "id": "reviewer",
+      "type": "agent",
+      "name": "Independent review and decision",
+      "config": {
+        "actionKind": "code-review",
+        "agentId": "reviewer-agent",
+        "task": "As the independent Reviewer subagent, inspect inventory.py, test_inventory.py, README.md and Tester evidence against every done criterion. Do not edit files. Return reviewer.decision approved or changes_requested with concrete findings. Approval requires passing tests, correct empty/negative/iterable behavior, meaningful coverage and correct Usage documentation.",
+        "expectedOutput": "Explicit approved or changes_requested decision with evidence and actionable findings.",
+        "successCriteria": [
+          "Reviewer is distinct from Developer and Tester.",
+          "Every product criterion checked independently.",
+          "Decision is supported by observed code and test evidence."
+        ]
+      }
+    },
+    {
+      "id": "prepare-retry",
+      "type": "agent",
+      "name": "Prepare the single developer retry",
+      "config": {
+        "actionKind": "prepare-handoff",
+        "agentId": "developer-agent",
+        "task": "As the Developer subagent, receive the first Tester failure or Reviewer changes_requested report. Record that the one allowed retry is now consumed. Summarize the specific failing tests or review findings and proposed corrections, then enter the developer retry block. No further retry is permitted.",
+        "expectedOutput": "A concrete correction checklist based on the failure or review report; retry budget consumed.",
+        "successCriteria": [
+          "Retry occurs only after an initial test failure or review rejection.",
+          "Only one retry is allocated."
+        ]
+      }
+    },
+    {
+      "id": "developer-retry",
+      "type": "agent",
+      "name": "Developer fixes once",
+      "config": {
+        "actionKind": "implement",
+        "agentId": "developer-agent",
+        "task": "As the same Developer subagent, correct the initial Tester failures or Reviewer findings once, within the agreed three files. Preserve required semantics, total_quantity and dependency limits. Hand revised files and addressed findings to Tester.",
+        "expectedOutput": "One revised implementation and an addressed-findings handoff.",
+        "successCriteria": [
+          "Reported defects addressed within scope.",
+          "No second retry is scheduled."
+        ]
+      }
+    },
+    {
+      "id": "tester-retry",
+      "type": "agent",
+      "name": "Run tests after retry",
+      "config": {
+        "actionKind": "run-tests",
+        "agentId": "tester-agent",
+        "task": "As the Tester subagent, rerun python3 -m unittest discover -v against the revised files, without edits. Return tester.result passed or failed with command, exit code, counts and failure evidence. A failing command or no discovered tests must end at Needs attention.",
+        "expectedOutput": "Actual retry test results and passed or failed.",
+        "successCriteria": [
+          "Revised files actually tested.",
+          "Failure routes to Needs attention without another fix."
+        ]
+      }
+    },
+    {
+      "id": "reviewer-retry",
+      "type": "agent",
+      "name": "Independent final review",
+      "config": {
+        "actionKind": "code-review",
+        "agentId": "reviewer-agent",
+        "task": "As the same independent Reviewer subagent, review the revised code, test coverage, README and passing retry test evidence. Verify initial findings were addressed and all criteria hold. Return reviewer.decision approved or changes_requested with reasons. A second rejection ends at Needs attention; do not request another developer pass.",
+        "expectedOutput": "Final approved or changes_requested decision with evidence.",
+        "successCriteria": [
+          "Revised implementation independently assessed.",
+          "Approval requires all criteria and passing tests.",
+          "Second rejection stops the workflow."
+        ]
+      }
+    },
+    {
+      "id": "approved",
+      "type": "end",
+      "name": "Approved",
+      "config": {}
+    },
+    {
+      "id": "needs-attention",
+      "type": "end",
+      "name": "Needs attention",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "start-developer",
+      "source": "start",
+      "target": "developer"
+    },
+    {
+      "id": "developer-tester",
+      "source": "developer",
+      "target": "tester"
+    },
+    {
+      "id": "tests-pass",
+      "source": "tester",
+      "target": "reviewer",
+      "condition": "tester.result == \"passed\"",
+      "label": "Tests passed",
+      "kind": "switch"
+    },
+    {
+      "id": "tests-first-failure",
+      "source": "tester",
+      "target": "prepare-retry",
+      "label": "Test failure: use one retry",
+      "kind": "switch"
+    },
+    {
+      "id": "review-approved",
+      "source": "reviewer",
+      "target": "approved",
+      "condition": "reviewer.decision == \"approved\"",
+      "label": "Approved",
+      "kind": "switch"
+    },
+    {
+      "id": "review-changes",
+      "source": "reviewer",
+      "target": "prepare-retry",
+      "label": "Changes requested",
+      "kind": "switch"
+    },
+    {
+      "id": "one-rework",
+      "source": "prepare-retry",
+      "target": "developer-retry",
+      "label": "Back to Developer once",
+      "kind": "rework"
+    },
+    {
+      "id": "retry-developer-tester",
+      "source": "developer-retry",
+      "target": "tester-retry"
+    },
+    {
+      "id": "retry-tests-pass",
+      "source": "tester-retry",
+      "target": "reviewer-retry",
+      "condition": "tester.result == \"passed\"",
+      "label": "Retry tests passed",
+      "kind": "switch"
+    },
+    {
+      "id": "retry-tests-fail",
+      "source": "tester-retry",
+      "target": "needs-attention",
+      "label": "Test failure after retry",
+      "kind": "switch"
+    },
+    {
+      "id": "retry-review-approved",
+      "source": "reviewer-retry",
+      "target": "approved",
+      "condition": "reviewer.decision == \"approved\"",
+      "label": "Approved",
+      "kind": "switch"
+    },
+    {
+      "id": "retry-review-rejected",
+      "source": "reviewer-retry",
+      "target": "needs-attention",
+      "label": "Second rejection",
+      "kind": "switch"
+    }
+  ],
+  "metadata": {
+    "workflow": {
+      "formatVersion": 5,
+      "agents": [
+        {
+          "id": "developer-agent",
+          "name": "Developer",
+          "role": "Implements the inventory helper, tests and documentation and handles one correction pass.",
+          "description": "Run as a dedicated Developer Codex subagent in /private/tmp/anthill-qa-ant221-w29. Read the existing inventory helper and README, then implement max_quantity, unittest coverage and the short Usage section without altering total_quantity. Hand concrete changed-file details to the Tester. If the first tests fail or the first review requests changes, prepare a correction checklist and implement exactly one retry; do not perform a second correction pass or approve your own change.",
+          "models": {
+            "codex": {
+              "id": "__default__"
+            }
+          }
+        },
+        {
+          "id": "tester-agent",
+          "name": "Tester",
+          "role": "Runs tests on each implementation and reports reproducible results without editing files.",
+          "description": "Run as a dedicated Tester Codex subagent separate from the Developer and Reviewer. Execute python3 -m unittest discover -v from the project directory after initial implementation and, if needed, once after the retry. Return passed or failed plus the command, exit code, test count and relevant output. Do not modify implementation, tests or documentation. An initial failure can consume the one developer retry; a failure after retry must stop at Needs attention.",
+          "models": {
+            "codex": {
+              "id": "__default__"
+            }
+          }
+        },
+        {
+          "id": "reviewer-agent",
+          "name": "Reviewer",
+          "role": "Independently reviews tested changes and issues an approval or changes-requested decision.",
+          "description": "Run as a dedicated independent Reviewer Codex subagent distinct from the Developer and Tester. After passing tests, inspect inventory.py, test_inventory.py and README.md against all agreed product criteria and the test evidence. Return approved or changes_requested with concrete evidence and actionable findings, without editing files. Reassess the revised files after passing retry tests if necessary. Approval ends at Approved; an initial rejection uses the one developer retry and a second rejection ends at Needs attention.",
+          "models": {
+            "codex": {
+              "id": "__default__"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

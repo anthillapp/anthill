@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Workflow } from "@anthill/workflow-schema";
 import { WORKFLOW_TEMPLATES, addOutput } from "@anthill/workflow";
@@ -689,3 +690,94 @@ describe("a handover with two ends reached through switchers", () => {
     expect(crosses).toBe(false);
   });
 });
+
+/*
+  ANT-239, re-testing ANT-213 on W29: the same handover shape, but the last
+  switcher's ends sit just past its hub, one a little above it and one a
+  little below. Its fingers landed on the upper End's bottom and the lower
+  End's top, each swung the wrong way first and they crossed, and each label
+  sat by the other line: "Second rejection" on the drop of "Test failure after
+  retry", "Approved" under the lower End.
+*/
+describe("a switcher whose fingers both end just past its hub", () => {
+  const handover = withDisplayLayout(
+    JSON.parse(readFileSync("src/__fixtures__/w29-two-ends.workflow.json", "utf8")) as Workflow,
+  );
+  const model = buildCanvasModel(handover);
+  const finger = (id: string) => model.connected.find((path) => path.output.id === id)!;
+  const hub = model.switchers.find((shape) => shape.nodeId === "reviewer-retry")!.hub;
+
+  it("fans out without crossing: up to the upper End, down to the lower", () => {
+    // The fixture's shape: Approved above the hub, Needs attention below it.
+    expect(model.rects.get("approved")!.top).toBeLessThan(hub.y);
+    expect(model.rects.get("needs-attention")!.top + model.rects.get("needs-attention")!.h).toBeGreaterThan(hub.y);
+
+    const up = pathPoints(finger("retry-review-approved").geometry.path);
+    const down = pathPoints(finger("retry-review-rejected").geometry.path);
+    expect(Math.max(...up.map((point) => point.y))).toBeLessThanOrEqual(hub.y + 0.5);
+    expect(Math.min(...down.map((point) => point.y))).toBeGreaterThanOrEqual(hub.y - 0.5);
+  });
+
+  it("puts each finger's label by its own finger, near the hub", () => {
+    for (const id of ["retry-review-approved", "retry-review-rejected"]) {
+      const own = finger(id);
+      const mine = distanceTo(own.label, pathPoints(own.geometry.path));
+      for (const other of model.connected) {
+        if (other === own) continue;
+        expect(mine, `${id} vs ${other.output.id}`).toBeLessThan(distanceTo(own.label, pathPoints(other.geometry.path)));
+      }
+      expect(Math.hypot(own.label.x - hub.x, own.label.y - hub.y), id).toBeLessThan(120);
+    }
+  });
+
+  it("keeps those labels off every other line", () => {
+    for (const id of ["retry-review-approved", "retry-review-rejected"]) {
+      const own = finger(id);
+      const { halfW, halfH } = labelHalfSize(own.output.label ?? " ");
+      for (const other of model.connected) {
+        if (other === own) continue;
+        const through = pathPoints(other.geometry.path).some(
+          (point) => Math.abs(point.x - own.label.x) < halfW && Math.abs(point.y - own.label.y) < halfH,
+        );
+        expect(through, `${id} sits on ${other.output.id}`).toBe(false);
+      }
+    }
+  });
+});
+
+/** Points along a drawn path — its M, L, Q and C commands — close enough to measure against. */
+function pathPoints(path: string): { x: number; y: number }[] {
+  const points: { x: number; y: number }[] = [];
+  const commands = path.match(/[MLQC][^MLQC]*/g) ?? [];
+  let at = { x: 0, y: 0 };
+  for (const command of commands) {
+    const numbers = (command.slice(1).match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+    const pairs: { x: number; y: number }[] = [];
+    for (let index = 0; index + 1 < numbers.length; index += 2) pairs.push({ x: numbers[index], y: numbers[index + 1] });
+    const end = pairs[pairs.length - 1];
+    for (let step = 0; step <= 32; step += 1) {
+      const t = step / 32;
+      const m = 1 - t;
+      if (command[0] === "M") break;
+      if (command[0] === "L") points.push({ x: at.x + (end.x - at.x) * t, y: at.y + (end.y - at.y) * t });
+      if (command[0] === "Q") {
+        const [c] = pairs;
+        points.push({ x: m * m * at.x + 2 * m * t * c.x + t * t * end.x, y: m * m * at.y + 2 * m * t * c.y + t * t * end.y });
+      }
+      if (command[0] === "C") {
+        const [c1, c2] = pairs;
+        points.push({
+          x: m * m * m * at.x + 3 * m * m * t * c1.x + 3 * m * t * t * c2.x + t * t * t * end.x,
+          y: m * m * m * at.y + 3 * m * m * t * c1.y + 3 * m * t * t * c2.y + t * t * t * end.y,
+        });
+      }
+    }
+    if (command[0] === "M") points.push(end);
+    at = end;
+  }
+  return points;
+}
+
+function distanceTo(point: { x: number; y: number }, points: readonly { x: number; y: number }[]): number {
+  return Math.min(...points.map((other) => Math.hypot(other.x - point.x, other.y - point.y)));
+}

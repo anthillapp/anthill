@@ -72,11 +72,14 @@ export const PORT_OFFSET = 8;
 /** Length of the straight run out of each block on a stepped line. */
 export const ELBOW_STUB = 26;
 
+/** How far out from a block's top or bottom a curve lines up to arrive along it. */
+export const ENTRY_LEAD = 64;
+
 /** How far a label may be pushed off the line before giving up. */
 const LABEL_OFFSETS = [0, 18, 30, 44, 60, 78, 98, 120];
 
 /** Clearance kept between a label and any block. */
-const LABEL_CLEARANCE = 7;
+export const LABEL_CLEARANCE = 7;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -263,9 +266,9 @@ function curveControls(from: PortPoint, b: EntryPoint, bend?: Bend | null): { c1
 
   let c2: Point =
     b.side === "top"
-      ? { x: b.x, y: b.y - 64 }
+      ? { x: b.x, y: b.y - ENTRY_LEAD }
       : b.side === "bottom"
-        ? { x: b.x, y: b.y + 64 }
+        ? { x: b.x, y: b.y + ENTRY_LEAD }
         : b.side === "right"
           ? { x: b.x + Math.max(48, dx), y: b.y }
           : { x: b.x - dx, y: b.y };
@@ -745,6 +748,51 @@ export function route(
  */
 export function passesUnder(a: LooseFrom, b: EntryPoint, geometry: CurveGeometry, blocks: readonly Rect[]): boolean {
   return crossed(samplesAlong(geometry), blocks, departure(a), b).length > 0;
+}
+
+/**
+ * Points along a drawn path, from its start, a few pixels apart.
+ *
+ * Reads every command the router writes — M, L, Q and C — so a detour's
+ * rounded corners are followed rather than read as one cubic, which is what
+ * `samplesAlong` makes of them. For a caller that has to know where a line
+ * actually runs on screen, such as whether a label sits on it.
+ */
+export function pointsAlong(path: string): Point[] {
+  const points: Point[] = [];
+  let at: Point | undefined;
+  for (const command of path.match(/[MLQC][^MLQC]*/g) ?? []) {
+    const numbers = (command.match(/-?\d+(?:\.\d+)?(?:e-?\d+)?/g) ?? []).map(Number);
+    const pairs: Point[] = [];
+    for (let index = 0; index + 1 < numbers.length; index += 2) pairs.push({ x: numbers[index], y: numbers[index + 1] });
+    const end = pairs[pairs.length - 1];
+    if (!end) continue;
+    if (command[0] === "M" || !at) {
+      points.push(end);
+      at = end;
+      continue;
+    }
+    const start: Point = at;
+    const steps = Math.max(1, Math.ceil(Math.hypot(end.x - start.x, end.y - start.y) / 4));
+    for (let step = 1; step <= steps; step += 1) {
+      const t = step / steps;
+      const m = 1 - t;
+      if (command[0] === "Q") {
+        const [c] = pairs;
+        points.push({ x: m * m * start.x + 2 * m * t * c.x + t * t * end.x, y: m * m * start.y + 2 * m * t * c.y + t * t * end.y });
+      } else if (command[0] === "C") {
+        const [c1, c2] = pairs;
+        points.push({
+          x: m * m * m * start.x + 3 * m * m * t * c1.x + 3 * m * t * t * c2.x + t * t * t * end.x,
+          y: m * m * m * start.y + 3 * m * m * t * c1.y + 3 * m * t * t * c2.y + t * t * t * end.y,
+        });
+      } else {
+        points.push({ x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t });
+      }
+    }
+    at = end;
+  }
+  return points;
 }
 
 /**

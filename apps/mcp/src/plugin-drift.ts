@@ -39,7 +39,7 @@ function compare(a: string, b: string): number {
 /** How to refresh an installed copy, per harness. */
 const UPDATE: Record<PluginHost, string> = {
   "claude-code": "run `claude plugin update anthill@anthill`, then start a new session",
-  codex: "reinstall the Anthill plugin in Codex from this checkout's marketplace, then start a new task",
+  codex: "reinstall the Anthill plugin in Codex (`codex plugin marketplace upgrade anthill-local`, then `codex plugin add anthill-cli@anthill-local`), then start a new task",
 };
 
 /**

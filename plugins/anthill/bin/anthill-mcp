@@ -11,16 +11,18 @@
  * above it. A path that works only under one of the two is worse than no path,
  * because it works for whoever wrote it.
  *
- * So the server is located absolutely, and until Anthill ships it inside the
- * installed app there is nothing to locate it by except a path somebody gives
- * us.
+ * So the plugin carries its own copy of the server, in server/anthill-mcp.mjs
+ * beside this script (scripts/build-plugin-server.mjs writes it), and a server
+ * anywhere else is located absolutely, by a path somebody gives us.
  *
- * Three places are looked at, in this order, and each is something a person
- * chose rather than something guessed:
+ * Four places are looked at, in this order. The first three are something a
+ * person chose, for running a checkout's own build; the last is what every
+ * plugin installed from a marketplace or a directory runs:
  *
  *   ANTHILL_MCP_SERVER   the built server.js itself
  *   ANTHILL_REPO         a checkout; the server is at apps/mcp/dist/server.js
  *   ~/.anthill/plugin.json   {"server": "/abs/path/to/server.js"}
+ *   server/anthill-mcp.mjs   the copy inside this plugin
  *
  * A stdio MCP server may write nothing to stdout but the protocol, so a failure
  * is reported on stderr and the process exits non-zero. The host then shows the
@@ -33,6 +35,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+/** This plugin's own folder: bin/ is one level below it. */
+const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+
+/** The copy of the server this plugin carries. */
+const BUNDLED = join(PLUGIN_ROOT, "server", "anthill-mcp.mjs");
 
 /** The one file that is the server, wherever it was found. */
 function fromEnvironment() {
@@ -59,9 +67,15 @@ function fromSettings() {
   }
 }
 
+function fromPlugin() {
+  return existsSync(BUNDLED) ? { path: BUNDLED, source: "this plugin" } : undefined;
+}
+
 function locate() {
-  const found = fromEnvironment() ?? fromSettings();
-  if (!found) return { problem: "Nothing says where the Anthill MCP server is." };
+  const found = fromEnvironment() ?? fromSettings() ?? fromPlugin();
+  if (!found) {
+    return { problem: `Nothing says where the Anthill MCP server is, and this plugin's own copy (${BUNDLED}) is missing. Reinstall the plugin.` };
+  }
   if ("problem" in found) return found;
   if (!isAbsolute(found.path)) {
     return { problem: `${found.source} gives a relative path (${found.path}); it has to be absolute, because this process starts in whatever directory the host happened to be in.` };
@@ -95,7 +109,7 @@ if ("problem" in located) {
  * nothing to report.
  */
 function installedPlugin() {
-  const root = dirname(dirname(fileURLToPath(import.meta.url)));
+  const root = PLUGIN_ROOT;
   for (const [dir, host] of [[".claude-plugin", "claude-code"], [".codex-plugin", "codex"]]) {
     try {
       const manifest = JSON.parse(readFileSync(join(root, dir, "plugin.json"), "utf8"));

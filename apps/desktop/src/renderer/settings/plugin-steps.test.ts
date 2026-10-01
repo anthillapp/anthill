@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { PluginHarnessStatus } from "../../shared/ipc.js";
-import { CHECKOUT_PLACEHOLDER, pluginSteps, pluginVerdict, serverSteps } from "./plugin-steps.js";
+import { GITHUB_SOURCE, pluginSteps, pluginVerdict, serverSteps } from "./plugin-steps.js";
 
 const claude = (over: Partial<PluginHarnessStatus> = {}): PluginHarnessStatus => ({
   harness: "claude-code",
@@ -64,10 +64,22 @@ describe("the steps", () => {
     ]);
   });
 
-  it("say plainly where a path has to be filled in", () => {
-    const steps = pluginSteps(claude({ installed: false, checkout: undefined }));
-    expect(steps[0].command).toBe(`claude plugin marketplace add ${CHECKOUT_PLACEHOLDER}`);
-    expect(steps[0].says).toContain("Replace the path");
+  it("install from GitHub when there is no checkout, as everyone but Anthill's authors does", () => {
+    expect(commands(claude({ installed: false, checkout: undefined, marketplace: undefined }))).toEqual([
+      `claude plugin marketplace add ${GITHUB_SOURCE}`,
+      "claude plugin install anthill@anthill",
+    ]);
+    expect(commands(codex({ installed: false, checkout: undefined, marketplace: undefined }))).toEqual([
+      `codex plugin marketplace add ${GITHUB_SOURCE}`,
+      "codex plugin add anthill-cli@anthill-local",
+    ]);
+  });
+
+  it("update Codex from GitHub by fetching the marketplace first", () => {
+    expect(commands(codex({ installedVersion: "0.7.6", checkout: undefined }))).toEqual([
+      "codex plugin marketplace upgrade anthill-local",
+      "codex plugin add anthill-cli@anthill-local",
+    ]);
   });
 
   it("quote a checkout path that needs it", () => {
@@ -100,8 +112,13 @@ describe("the server the plugin launches", () => {
     expect(serverSteps({ configured: true, settingsFile: file, path: "/x/server.js", exists: true }, "/x")).toEqual([]);
   });
 
-  it("builds and names it when nothing is configured", () => {
-    const steps = serverSteps({ configured: false, settingsFile: file }, "/Users/me/anthill");
+  it("needs nothing when nothing is configured, because the plugin starts the server it carries", () => {
+    expect(serverSteps({ configured: false, settingsFile: file }, "/Users/me/anthill")).toEqual([]);
+    expect(serverSteps({ configured: false, settingsFile: file }, undefined)).toEqual([]);
+  });
+
+  it("builds and names it when the file cannot be read", () => {
+    const steps = serverSteps({ configured: false, settingsFile: file, problem: "not JSON" }, "/Users/me/anthill");
     expect(steps.map((step) => step.command)).toEqual([
       "cd /Users/me/anthill && npm run build:deps && npm run build --workspace=@anthill/mcp",
       `mkdir -p ~/.anthill && printf '%s\\n' '{"server": "/Users/me/anthill/apps/mcp/dist/server.js"}' > ~/.anthill/plugin.json`,

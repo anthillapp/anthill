@@ -19,43 +19,63 @@ Verified against **Claude Code 2.1.261** (desktop app 2.2553.1) and **Anthill
 
 ## Installing
 
-Nothing here is published. The plugin is installed from this checkout, and it
-needs the MCP server built from the same checkout.
+You need [Anthill](https://github.com/nstr/anthill) itself, and Node.js on your
+`PATH` (the plugin's server is a Node program).
 
 ```bash
-# 1. Build the server the plugin talks to.
-npm run build:deps && npm run build --workspace=@anthill/mcp
-
-# 2. Tell the plugin where that server is. Pick one of the three below.
-mkdir -p ~/.anthill
-printf '{"server": "%s/apps/mcp/dist/server.js"}\n' "$PWD" > ~/.anthill/plugin.json
-
-# 3. Register this checkout as a marketplace and install from it.
-claude plugin marketplace add "$PWD"
+claude plugin marketplace add nstr/anthill
 claude plugin install anthill@anthill --scope user
 ```
 
 Then start a new session: a plugin is read when a session starts.
 
-### Where the server is
+The plugin carries its own copy of Anthill's MCP server, in
+`server/anthill-mcp.mjs`, so there is nothing else to build or configure.
 
-The plugin is a directory of text; the server is a built file elsewhere. Three
-places are looked at, in order, and each is something you chose:
+### What it runs
+
+* **`bin/anthill-mcp`**, started by Claude Code as the MCP server. It finds the
+  server (below) and runs it with Node on your machine, over stdio.
+* **The server** reads and writes handed-over workflows in Anthill's own data
+  folder on this machine, and opens Anthill with an `anthill://` link so the
+  workflow appears there. With `--dev` (below) it may start the development
+  build of a checkout (`npm run dev:desktop`); on Linux it may start the web
+  shell (`anthill`) on `127.0.0.1`.
+* **Nothing is sent off this machine.** The server's one network request is
+  to the web shell's `/health` on this machine, to see whether it is running.
+  No telemetry, no error reports, no downloads.
+
+### Running a checkout's own server
+
+For working on Anthill itself, point the plugin at the server built in your
+checkout instead of the copy it carries:
+
+```bash
+npm run build:deps && npm run build --workspace=@anthill/mcp
+mkdir -p ~/.anthill
+printf '{"server": "%s/apps/mcp/dist/server.js"}\n' "$PWD" > ~/.anthill/plugin.json
+claude plugin marketplace add "$PWD"
+claude plugin install anthill@anthill --scope user
+```
+
+Four places are looked at, in order. The first three are something you chose;
+the last is the copy inside the plugin, used when none of them is set:
 
 | | |
 | --- | --- |
 | `ANTHILL_MCP_SERVER` | the built `server.js` itself |
 | `ANTHILL_REPO` | a checkout; the server is at `apps/mcp/dist/server.js` |
 | `~/.anthill/plugin.json` | `{"server": "/abs/path/to/server.js"}` |
+| `server/anthill-mcp.mjs` | the server this plugin carries |
 
 Prefer the file. An environment variable set in your shell profile does not
 reach an app launched from the Dock, which is exactly when you will not think
 of it.
 
 A relative path is refused: this process starts in whatever directory the host
-was in. If nothing is set, or the path has no file at the end of it, the server
-exits with a message naming all three and the host shows it as failed — which is
-the honest outcome, because a server that cannot be found is not a server that
+was in. If a path you set has no file at the end of it, the server exits with a
+message naming all of them and the host shows it as failed — which is the
+honest outcome, because a server that cannot be found is not a server that
 answers "no".
 
 ### Which Anthill it talks to

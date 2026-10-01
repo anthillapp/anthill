@@ -36,9 +36,24 @@ signed in.
 
 The plugin lets your coding session hand its workflow to Anthill, so you don't
 have to copy and paste a prompt. It is optional, but it is the recommended way.
+It needs Node.js on your `PATH`.
 
-- **Claude Code:** [install the plugin](plugins/anthill/README.md)
-- **Codex:** [install the plugin](plugins/anthill-cli/README.md)
+**Claude Code:**
+
+```bash
+claude plugin marketplace add nstr/anthill
+claude plugin install anthill@anthill
+```
+
+**Codex:**
+
+```bash
+codex plugin marketplace add nstr/anthill
+codex plugin add anthill-cli@anthill-local
+```
+
+Then start a new session. More in the [Claude Code](plugins/anthill/README.md)
+and [Codex](plugins/anthill-cli/README.md) plugin guides.
 
 Pi has no plugin. Copy the prompt from Anthill and paste it into Pi.
 

@@ -87,6 +87,37 @@ describe("the reporting command", () => {
   });
 });
 
+describe("the reporting command from a server bundled into a plugin", () => {
+  // A plugin installed from GitHub or a directory carries its own reporter, and
+  // the person may have only the installed app: no `anthill` on any PATH.
+  const REPORTER = "/home/someone/.claude/plugins/anthill/server/anthill-report.mjs";
+
+  it.each(["app", "electron-dev"] as const)("is this node on the plugin's reporter for %s, with no anthill on the PATH", (id) => {
+    expect(reportingInvocation(target({ target: id }), machine([], { reporter: REPORTER })))
+      .toEqual({ command: `${NODE} ${REPORTER}` });
+  });
+
+  it("is still plain anthill when anthill is on the PATH", () => {
+    expect(reportingInvocation(target({ target: "app" }), machine(["/usr/bin/anthill"], { reporter: REPORTER }))).toEqual({});
+  });
+
+  it("is the reporter for the web shell when there is no checkout, keeping its data directory", () => {
+    expect(reportingInvocation(target({ checkout: undefined, dataDir: "/srv/anthill" }), machine([], { reporter: REPORTER })))
+      .toEqual({ command: `${NODE} ${REPORTER}`, dataDir: "/srv/anthill", platform: "linux" });
+  });
+
+  it("prefers a checkout's own CLI for the web shell", () => {
+    expect(reportingInvocation(target(), machine([], { reporter: REPORTER })))
+      .toEqual({ command: `${NODE} ${webShellCli("/src/anthill")}` });
+  });
+
+  it("quotes a reporter path with a space in it", () => {
+    const spaced = "/Users/some one/.claude/plugins/anthill/server/anthill-report.mjs";
+    expect(reportingInvocation(target({ target: "app" }), machine([], { reporter: spaced })).command)
+      .toBe(`${NODE} '${spaced}'`);
+  });
+});
+
 describe("looking anthill up on the PATH", () => {
   it("finds it in any PATH directory, and nothing that is not there", () => {
     expect(onPath("anthill", machine(["/home/someone/.npm/bin/anthill"]))).toBe("/home/someone/.npm/bin/anthill");

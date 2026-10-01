@@ -24,6 +24,9 @@ export type PluginStep = {
 /** Where a checkout's path goes in a command when none is known. */
 export const CHECKOUT_PLACEHOLDER = "/path/to/anthill";
 
+/** Anthill's repository, which both tools accept as a marketplace source. */
+export const GITHUB_SOURCE = "nstr/anthill";
+
 export function pluginVerdict(status: PluginHarnessStatus): PluginVerdict {
   if (!status.toolFound) return "no-tool";
   if (!status.installed) return "missing";
@@ -42,7 +45,9 @@ function shellPath(path: string): string {
 /** The steps that move a tool from where it is to a working plugin. */
 export function pluginSteps(status: PluginHarnessStatus): PluginStep[] {
   const verdict = pluginVerdict(status);
-  const checkout = shellPath(status.checkout ?? CHECKOUT_PLACEHOLDER);
+  // A checkout on this disk is offered as the source, for working on Anthill;
+  // otherwise the repository on GitHub, which is what everyone else installs.
+  const source = status.checkout ? shellPath(status.checkout) : GITHUB_SOURCE;
   const claude = status.harness === "claude-code";
   const marketplace = status.marketplace ?? (claude ? "anthill" : "anthill-local");
   const id = `${status.plugin}@${marketplace}`;
@@ -64,10 +69,10 @@ export function pluginSteps(status: PluginHarnessStatus): PluginStep[] {
         {
           says: status.checkout
             ? `Offer this Anthill checkout to ${status.label} as a plugin marketplace.`
-            : `Offer your Anthill checkout to ${status.label} as a plugin marketplace. Replace the path with where it is on this machine.`,
+            : `Add Anthill's plugin marketplace to ${status.label}, from GitHub.`,
           command: claude
-            ? `claude plugin marketplace add ${checkout}`
-            : `codex plugin marketplace add ${checkout}`,
+            ? `claude plugin marketplace add ${source}`
+            : `codex plugin marketplace add ${source}`,
         },
         {
           says: `Install the ${status.plugin} plugin from it.`,
@@ -90,10 +95,15 @@ export function pluginSteps(status: PluginHarnessStatus): PluginStep[] {
       return [
         ...(claude
           ? [
-              { says: "Have Claude Code read the checkout again.", command: `claude plugin marketplace update ${marketplace}` },
+              { says: "Have Claude Code read the marketplace again.", command: `claude plugin marketplace update ${marketplace}` },
               { says: `Update the plugin to ${status.availableVersion}.`, command: `claude plugin update ${id}` },
             ]
-          : [{ says: `Install it again from the checkout, which now offers ${status.availableVersion}.`, command: `${tool} plugin add ${id}` }]),
+          : [
+              ...(status.checkout
+                ? []
+                : [{ says: "Have Codex fetch the marketplace again.", command: `codex plugin marketplace upgrade ${marketplace}` }]),
+              { says: `Install it again from the marketplace, which now offers ${status.availableVersion}.`, command: `${tool} plugin add ${id}` },
+            ]),
         restart,
       ];
 
@@ -105,11 +115,14 @@ export function pluginSteps(status: PluginHarnessStatus): PluginStep[] {
 /**
  * What to do about the server the plugin launches, if anything.
  *
- * Both plugins are launchers: they start Anthill's MCP server, which is found
- * through `~/.anthill/plugin.json`. The installed app does not ship that server
- * yet, so it comes from a checkout — built there, and named here.
+ * Both plugins are launchers. Each carries its own copy of Anthill's MCP
+ * server and starts it, unless `~/.anthill/plugin.json` names another — a
+ * checkout's own build, for working on Anthill. So there is something to do
+ * only when the file names a server that is not there, or cannot be read:
+ * the launcher then refuses to start rather than guess.
  */
 export function serverSteps(server: PluginServerStatus, checkout: string | undefined): PluginStep[] {
+  if (!server.configured && !server.problem) return [];
   if (server.configured && server.exists) return [];
   const root = checkout ?? CHECKOUT_PLACEHOLDER;
   const path = `${root}/apps/mcp/dist/server.js`;

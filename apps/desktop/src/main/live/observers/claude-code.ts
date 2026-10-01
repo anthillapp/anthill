@@ -695,6 +695,9 @@ function scan(
       ...(state.sessionId ? { sessionId: state.sessionId } : {}),
       // Everything a delegate writes carries the call that started it.
       ...(state.delegateVia ? { parentToolUseId: state.delegateVia } : {}),
+      // And the delegate's own id, which its SubagentStop hook names: how that
+      // stop is told from the helper Claude Code runs after each turn (ANT-245).
+      ...(state.delegate && str(row.agentId) ? { agentId: str(row.agentId) as string } : {}),
     };
 
     if (row.type === "user") {

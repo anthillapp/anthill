@@ -2521,6 +2521,21 @@ describe("a session's delegates", () => {
     expect(message).toMatchObject({ stepTag: "implement", detail: "Editing calc.py." });
   });
 
+  it("carries the delegate's own agent id, which its SubagentStop names (ANT-245)", async () => {
+    const { events } = await followed(
+      [
+        { ...said("Writing the file.", 10_000), agentId: "a83008eea67a734a4" },
+        { ...said("Done.", 12_000, "end_turn"), agentId: "a83008eea67a734a4" },
+      ],
+      META,
+    );
+    const fromDelegate = events.filter((event) => event.author?.kind === "subagent");
+    expect(fromDelegate.length).toBeGreaterThan(0);
+    for (const event of fromDelegate) {
+      expect(event).toMatchObject({ agentId: "a83008eea67a734a4", parentToolUseId: "toolu_01DGF" });
+    }
+  });
+
   it("signs the delegate's words with what it was for", async () => {
     // The feed said "Subagent" and nothing else, on a run with two of them
     // (ANT-54). The description is the label that tells them apart.

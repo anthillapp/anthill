@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import type { Workflow } from "@anthill/workflow-schema";
 
 import { attribute, buildWorkflowIndex, stepForAgent } from "./attribution.js";
-import { finishedSteps, foldLiveSession, hasStepEvidence, helperStops } from "./live-session.js";
+import { finishedSteps, foldLiveSession, hasStepEvidence, helperStops, subagentStops } from "./live-session.js";
 import type { ObservationEvent } from "./observation-event.js";
 import { createPendingRun, type PendingRun } from "./pending-run.js";
 
@@ -2235,5 +2235,478 @@ describe("the agent a dispatch's description names", () => {
 
   it("is never read into an agent type", () => {
     expect(stepForAgent(byName, "test-runner-general")).toBeUndefined();
+  });
+});
+
+/*
+  ANT-245. Two real journals from the 0.8.5 QA on the ANT-242 build, replayed
+  as recorded (usage records' token counts and long details cut down, call ids
+  shortened). Claude Code's SubagentStop named no subagent then — Anthill's
+  hook dropped the agent id — and its helper's stop came a moment after a
+  background writer had made a call, so the timing rule took it for that
+  writer finishing.
+*/
+describe("helper stops after a subagent's call, replayed from real journals", () => {
+  /** A journal row: its seq, the channel it came through, its kind and its time of day. */
+  const replay = (day: string, runId: string) =>
+    (seq: number, via: "tx" | "hook" | "report", kind: ObservationEvent["kind"], time: string, rest: Partial<ObservationEvent> & { title: string }): ObservationEvent => ({
+      runId,
+      seq,
+      at: `${day}T${time}Z`,
+      recordedAt: `${day}T${time}Z`,
+      cli: "claude-code",
+      ...(via === "tx"
+        ? { source: "transcript" as const, channel: "claude-code:transcript" }
+        : via === "hook"
+          ? { source: "hook" as const, channel: "claude-code:hook" }
+          : { source: "anthill" as const, channel: "anthill:report" }),
+      sessionId: "sess-1",
+      kind,
+      ...rest,
+    });
+
+  /*
+    ANT-217's scenario, run ANT-7QB269JF: a Caption Writer and a Theme Writer
+    sent off in the background, through two short turns and a longer one, then
+    the session stopped with both still writing. At 02:36:44.853 the helper's
+    stop came 0.5 s after the Theme Writer's THEMES.md Write and was drawn
+    "Theme Writer — Completed"; after the Stop the themes step read Failed and
+    the captions step Unknown.
+  */
+  describe("two writers, three turn endings and a Stop (ANT-7QB269JF)", () => {
+    const museum: Workflow = {
+      ...workflow,
+      nodes: [
+        { id: "start", type: "start", name: "Start", config: {} },
+        { id: "write-captions", type: "agent", name: "Write CAPTIONS.md", config: { actionKind: "agent-step", task: "a", agentId: "caption-writer" } },
+        { id: "write-themes", type: "agent", name: "Write THEMES.md", config: { actionKind: "agent-step", task: "b", agentId: "theme-writer" } },
+        { id: "review", type: "agent", name: "Review both files", config: { actionKind: "verify", task: "c", agentId: "reviewer" } },
+        { id: "finalize", type: "agent", name: "Write SUMMARY.md", config: { actionKind: "agent-step", task: "d", agentId: "finalizer" } },
+        { id: "end", type: "end", name: "Done", config: {} },
+      ],
+      edges: [
+        { id: "e1", source: "start", target: "write-captions" },
+        { id: "e2", source: "start", target: "write-themes" },
+        { id: "e3", source: "write-captions", target: "review" },
+        { id: "e4", source: "write-themes", target: "review" },
+        { id: "e5", source: "review", target: "finalize" },
+        { id: "e6", source: "finalize", target: "end" },
+      ],
+      metadata: {
+        workflow: {
+          formatVersion: 5,
+          agents: [
+            { id: "caption-writer", name: "Caption Writer" },
+            { id: "theme-writer", name: "Theme Writer" },
+            { id: "reviewer", name: "Reviewer" },
+            { id: "finalizer", name: "Finalizer" },
+          ],
+        },
+      },
+    };
+    const r = replay("2026-10-01", "ANT-7QB269JF");
+    const journal = [
+      r(1, "tx", "tool.end", "02:35:16.853", {"title": "Tool finished", "toolUseId": "iqdret", "ok": true}),
+      r(2, "hook", "tool.end", "02:35:16.831", {"title": "mcp__plugin_anthill_exchange__bind_run", "toolName": "mcp__plugin_anthill_exchange__bind_run", "toolUseId": "iqdret", "ok": true}),
+      r(3, "hook", "tool.start", "02:35:19.101", {"title": "Bash", "toolName": "Bash", "toolUseId": "LC2nSN", "detail": "Report run start and both writer steps t"}),
+      r(4, "tx", "usage", "02:35:17.981", {"title": "Token usage recorded"}),
+      r(5, "tx", "tool.start", "02:35:18.985", {"title": "Bash", "toolName": "Bash", "toolUseId": "LC2nSN", "detail": "Report run start and both writer steps t"}),
+      r(6, "tx", "subagent.start", "02:35:23.034", {"title": "Delegated to a subagent", "toolName": "Agent", "toolUseId": "cqzGHo", "agentName": "general-purpose", "detail": "Caption Writer: CAPTIONS.md", "background": true}),
+      r(7, "tx", "subagent.start", "02:35:25.965", {"title": "Delegated to a subagent", "toolName": "Agent", "toolUseId": "o7Dmfr", "agentName": "general-purpose", "detail": "Theme Writer: THEMES.md", "background": true}),
+      r(8, "tx", "tool.end", "02:35:29.066", {"title": "Tool finished", "toolUseId": "LC2nSN", "ok": true}),
+      r(9, "hook", "tool.end", "02:35:29.045", {"title": "Bash", "toolName": "Bash", "toolUseId": "LC2nSN", "detail": "Report run start and both writer steps t", "ok": true}),
+      r(10, "report", "step.marker", "02:35:28.604", {"title": "Step announced", "detail": "write-captions", "blockId": "write-captions"}),
+      r(11, "report", "step.marker", "02:35:28.930", {"title": "Step announced", "detail": "write-themes", "blockId": "write-themes"}),
+      r(12, "tx", "tool.end", "02:35:29.502", {"title": "Tool finished", "toolUseId": "cqzGHo", "background": true, "ok": true}),
+      r(13, "tx", "tool.end", "02:35:29.504", {"title": "Tool finished", "toolUseId": "o7Dmfr", "background": true, "ok": true}),
+      r(14, "hook", "tool.start", "02:35:29.177", {"title": "Agent", "toolName": "Agent", "toolUseId": "cqzGHo", "detail": "Caption Writer: CAPTIONS.md"}),
+      r(15, "hook", "tool.start", "02:35:29.178", {"title": "Agent", "toolName": "Agent", "toolUseId": "o7Dmfr", "detail": "Theme Writer: THEMES.md"}),
+      r(16, "hook", "tool.end", "02:35:29.410", {"title": "Agent", "toolName": "Agent", "toolUseId": "cqzGHo", "detail": "Caption Writer: CAPTIONS.md", "ok": true}),
+      r(17, "hook", "tool.end", "02:35:29.427", {"title": "Agent", "toolName": "Agent", "toolUseId": "o7Dmfr", "detail": "Theme Writer: THEMES.md", "ok": true}),
+      r(18, "tx", "usage", "02:35:31.953", {"title": "Token usage recorded"}),
+      r(19, "tx", "turn.end", "02:35:31.953", {"title": "The agent finished its turn", "toolUseId": "msg_011Cfajjrx9ojQQXvN4ja1bH"}),
+      r(20, "tx", "message", "02:35:31.956", {"title": "Message", "detail": "The Caption Writer and Theme Writer are ", "author": {"kind": "main"}}),
+      r(21, "tx", "turn.end", "02:35:31.956", {"title": "The agent finished its turn", "toolUseId": "msg_011Cfajjrx9ojQQXvN4ja1bH"}),
+      r(22, "tx", "usage", "02:35:31.077", {"title": "Token usage recorded", "parentToolUseId": "cqzGHo"}),
+      r(23, "hook", "turn.end", "02:35:33.048", {"title": "The agent finished its turn"}),
+      r(24, "hook", "subagent.end", "02:35:34.666", {"title": "A subagent finished"}),
+      r(25, "hook", "prompt.submit", "02:36:07.510", {"title": "A prompt was submitted"}),
+      r(26, "tx", "usage", "02:36:11.197", {"title": "Token usage recorded", "parentToolUseId": "o7Dmfr"}),
+      r(27, "tx", "usage", "02:36:10.759", {"title": "Token usage recorded"}),
+      r(28, "tx", "turn.end", "02:36:10.759", {"title": "The agent finished its turn", "toolUseId": "msg_011CfajngonaG7h7XuQNMzP5"}),
+      r(29, "tx", "message", "02:36:15.266", {"title": "Message", "detail": "The review starts only after both writer", "author": {"kind": "main"}}),
+      r(30, "tx", "turn.end", "02:36:15.266", {"title": "The agent finished its turn", "toolUseId": "msg_011CfajngonaG7h7XuQNMzP5"}),
+      r(31, "hook", "turn.end", "02:36:16.557", {"title": "The agent finished its turn"}),
+      r(32, "hook", "subagent.end", "02:36:18.274", {"title": "A subagent finished"}),
+      r(33, "hook", "prompt.submit", "02:36:39.840", {"title": "A prompt was submitted"}),
+      r(34, "tx", "usage", "02:36:41.101", {"title": "Token usage recorded"}),
+      r(35, "tx", "turn.end", "02:36:41.101", {"title": "The agent finished its turn", "toolUseId": "msg_011Cfajq4b2vxpuW5zMNo3XM"}),
+      r(36, "tx", "message", "02:36:42.279", {"title": "Message", "detail": "I'll wait. Both writers are still runnin", "author": {"kind": "main"}}),
+      r(37, "tx", "turn.end", "02:36:42.279", {"title": "The agent finished its turn", "toolUseId": "msg_011Cfajq4b2vxpuW5zMNo3XM"}),
+      r(38, "tx", "tool.start", "02:36:44.098", {"title": "Write", "toolName": "Write", "toolUseId": "3TM2RW", "parentToolUseId": "o7Dmfr", "detail": "anthill-qa-cc3-217/THEMES.md"}),
+      r(39, "tx", "tool.end", "02:36:44.383", {"title": "Tool finished", "toolUseId": "3TM2RW", "parentToolUseId": "o7Dmfr", "ok": true}),
+      r(40, "hook", "turn.end", "02:36:43.292", {"title": "The agent finished its turn"}),
+      r(41, "hook", "tool.start", "02:36:44.208", {"title": "Write", "toolName": "Write", "toolUseId": "3TM2RW", "detail": "anthill-qa-cc3-217/THEMES.md"}),
+      r(42, "hook", "tool.end", "02:36:44.350", {"title": "Write", "toolName": "Write", "toolUseId": "3TM2RW", "detail": "anthill-qa-cc3-217/THEMES.md", "ok": true}),
+      r(43, "hook", "subagent.end", "02:36:44.853", {"title": "A subagent finished"}),
+      r(44, "tx", "tool.start", "02:36:55.496", {"title": "Write", "toolName": "Write", "toolUseId": "zuyzpR", "parentToolUseId": "cqzGHo", "detail": "anthill-qa-cc3-217/CAPTIONS.md"}),
+      r(45, "tx", "tool.end", "02:36:55.767", {"title": "Tool finished", "toolUseId": "zuyzpR", "parentToolUseId": "cqzGHo", "ok": true}),
+      r(46, "hook", "tool.start", "02:36:55.601", {"title": "Write", "toolName": "Write", "toolUseId": "zuyzpR", "detail": "anthill-qa-cc3-217/CAPTIONS.md"}),
+      r(47, "hook", "tool.end", "02:36:55.736", {"title": "Write", "toolName": "Write", "toolUseId": "zuyzpR", "detail": "anthill-qa-cc3-217/CAPTIONS.md", "ok": true}),
+      r(48, "hook", "prompt.submit", "02:37:02.719", {"title": "A prompt was submitted"}),
+      r(49, "tx", "notification", "02:37:09.086", {"title": "Stopped by hand"}),
+      r(50, "hook", "subagent.end", "02:37:10.678", {"title": "A subagent finished"}),
+    ];
+    const before = (seq: number) => journal.filter((item) => item.seq < seq);
+
+    it("reads every SubagentStop as Claude Code's helper", () => {
+      const isHelper = helperStops(journal);
+      expect(journal.filter((item) => item.kind === "subagent.end").map((item) => [item.seq, isHelper(item)])).toEqual([
+        [24, true],
+        [32, true],
+        [43, true],
+        [50, true],
+      ]);
+    });
+
+    it("keeps both writers running until the Stop", () => {
+      const view = foldLiveSession(museum, run(), before(49));
+      expect(view.blocks["write-captions"].state).toBe("running");
+      expect(view.blocks["write-themes"].state).toBe("running");
+      expect(finishedSteps(view)).toBe(0);
+    });
+
+    it("reads both writers Unknown once the Stop cut them off", () => {
+      const view = foldLiveSession(museum, run({ state: "observation_lost" }), journal);
+      expect(view.blocks["write-captions"]).toMatchObject({ state: "unknown" });
+      expect(view.blocks["write-themes"]).toMatchObject({ state: "unknown" });
+      expect(view.blocks["write-themes"].note).toBe(view.blocks["write-captions"].note);
+      expect(finishedSteps(view)).toBe(0);
+    });
+  });
+
+  /*
+    ANT-190's scenario, run ANT-A5B8869B: two Developers sent off in the
+    background. At 02:44:22.547 the helper's stop came while both were between
+    a call and its reply, and was drawn "Developer (mod3–mod5) — Completed"
+    a quarter of a minute before either handed back.
+  */
+  describe("two developers, before either hands back (ANT-A5B8869B)", () => {
+    const mods: Workflow = {
+      ...workflow,
+      nodes: [
+        { id: "start", type: "start", name: "Start", config: {} },
+        { id: "n1", type: "agent", name: "Hand out module assignments", config: { actionKind: "agent-step", task: "a", agentId: "agent-3" } },
+        { id: "n2", type: "agent", name: "Document and test mod1–mod2", config: { actionKind: "agent-step", task: "b", agentId: "agent-1" } },
+        { id: "n3", type: "agent", name: "Document and test mod3–mod5", config: { actionKind: "agent-step", task: "c", agentId: "agent-2" } },
+        { id: "n4", type: "agent", name: "Run unittest discover", config: { actionKind: "verify", task: "d", agentId: "agent-3" } },
+        { id: "n5", type: "agent", name: "Write the closing summary", config: { actionKind: "agent-step", task: "e", agentId: "agent-3" } },
+        { id: "end", type: "end", name: "Done", config: {} },
+      ],
+      edges: [
+        { id: "e1", source: "start", target: "n1" },
+        { id: "e2", source: "n1", target: "n2" },
+        { id: "e3", source: "n1", target: "n3" },
+        { id: "e4", source: "n2", target: "n4" },
+        { id: "e5", source: "n3", target: "n4" },
+        { id: "e6", source: "n4", target: "n5" },
+        { id: "e7", source: "n5", target: "end" },
+      ],
+      metadata: {
+        workflow: {
+          formatVersion: 5,
+          agents: [
+            { id: "agent-1", name: "Developer (mod1–mod2)" },
+            { id: "agent-2", name: "Developer (mod3–mod5)" },
+            { id: "agent-3", name: "Tester" },
+          ],
+        },
+      },
+    };
+    const r = replay("2026-10-01", "ANT-A5B8869B");
+    const journal = [
+      r(1, "tx", "prompt.submit", "02:43:19.515", {"title": "The workflow was pasted in"}),
+      r(2, "hook", "session.start", "02:43:18.911", {"title": "Session started"}),
+      r(3, "hook", "prompt.submit", "02:43:19.614", {"title": "A prompt was submitted"}),
+      r(4, "hook", "tool.start", "02:43:29.608", {"title": "Bash", "toolName": "Bash", "toolUseId": "B7AF7K", "detail": "List project folder and show module and "}),
+      r(5, "tx", "usage", "02:43:27.916", {"title": "Token usage recorded"}),
+      r(6, "tx", "message", "02:43:28.466", {"title": "Message", "detail": "I'll treat the pasted workflow as your r", "author": {"kind": "main"}, "stepTag": "n1"}),
+      r(7, "tx", "tool.start", "02:43:29.493", {"title": "Bash", "toolName": "Bash", "toolUseId": "B7AF7K", "detail": "List project folder and show module and "}),
+      r(8, "tx", "tool.end", "02:43:30.927", {"title": "Tool finished", "toolUseId": "B7AF7K", "ok": true}),
+      r(9, "hook", "tool.end", "02:43:30.875", {"title": "Bash", "toolName": "Bash", "toolUseId": "B7AF7K", "detail": "List project folder and show module and ", "ok": true}),
+      r(10, "tx", "usage", "02:43:32.945", {"title": "Token usage recorded"}),
+      r(11, "tx", "message", "02:43:32.947", {"title": "Message", "detail": "Agent files already exist from an earlie", "author": {"kind": "main"}}),
+      r(12, "tx", "tool.start", "02:43:49.117", {"title": "Bash", "toolName": "Bash", "toolUseId": "8WnPhw", "detail": "Write the three agent definition files a"}),
+      r(13, "hook", "tool.start", "02:43:49.233", {"title": "Bash", "toolName": "Bash", "toolUseId": "8WnPhw", "detail": "Write the three agent definition files a"}),
+      r(14, "hook", "tool.end", "02:43:49.627", {"title": "Bash", "toolName": "Bash", "toolUseId": "8WnPhw", "detail": "Write the three agent definition files a", "ok": true}),
+      r(15, "tx", "tool.end", "02:43:49.654", {"title": "Tool finished", "toolUseId": "8WnPhw", "ok": true}),
+      r(16, "tx", "step.marker", "02:43:49.654", {"title": "Step announced", "detail": "n1", "blockId": "n1"}),
+      r(17, "hook", "tool.start", "02:43:53.229", {"title": "Agent", "toolName": "Agent", "toolUseId": "YXKTYm", "detail": "Hand out module assignments"}),
+      r(18, "tx", "usage", "02:43:53.119", {"title": "Token usage recorded"}),
+      r(19, "tx", "subagent.start", "02:43:53.119", {"title": "Delegated to a subagent", "toolName": "Agent", "toolUseId": "YXKTYm", "agentName": "tester", "detail": "Hand out module assignments", "stepTag": "n1"}),
+      r(20, "tx", "usage", "02:43:55.185", {"title": "Token usage recorded", "parentToolUseId": "YXKTYm"}),
+      r(21, "tx", "tool.start", "02:43:55.185", {"title": "Bash", "toolName": "Bash", "toolUseId": "H6fBxT", "parentToolUseId": "YXKTYm", "detail": "List folder contents"}),
+      r(22, "hook", "tool.start", "02:43:55.334", {"title": "Bash", "toolName": "Bash", "toolUseId": "H6fBxT", "detail": "List folder contents"}),
+      r(23, "tx", "tool.end", "02:43:56.247", {"title": "Tool finished", "toolUseId": "H6fBxT", "parentToolUseId": "YXKTYm", "ok": true}),
+      r(24, "hook", "tool.end", "02:43:56.217", {"title": "Bash", "toolName": "Bash", "toolUseId": "H6fBxT", "detail": "List folder contents", "ok": true}),
+      r(25, "tx", "usage", "02:44:00.475", {"title": "Token usage recorded", "parentToolUseId": "YXKTYm"}),
+      r(26, "tx", "tool.start", "02:44:00.475", {"title": "SubagentHandback", "toolName": "SubagentHandback", "toolUseId": "L1S4Hh", "parentToolUseId": "YXKTYm"}),
+      r(27, "tx", "tool.end", "02:44:01.082", {"title": "Tool finished", "toolUseId": "L1S4Hh", "parentToolUseId": "YXKTYm", "ok": true}),
+      r(28, "hook", "tool.start", "02:44:00.583", {"title": "SubagentHandback", "toolName": "SubagentHandback", "toolUseId": "L1S4Hh"}),
+      r(29, "hook", "tool.end", "02:44:01.054", {"title": "SubagentHandback", "toolName": "SubagentHandback", "toolUseId": "L1S4Hh", "ok": true}),
+      r(30, "tx", "tool.end", "02:44:02.020", {"title": "Tool finished", "toolUseId": "YXKTYm", "ok": true}),
+      r(31, "tx", "usage", "02:44:01.725", {"title": "Token usage recorded", "parentToolUseId": "YXKTYm"}),
+      r(32, "tx", "message", "02:44:01.725", {"title": "Message", "parentToolUseId": "YXKTYm", "detail": "I delivered the report to my caller.", "author": {"kind": "subagent", "name": "Hand out module assignments"}}),
+      r(33, "tx", "turn.end", "02:44:01.725", {"title": "The agent finished its turn", "toolUseId": "msg_011CfakPZppS6zAwMgwn8AyR", "parentToolUseId": "YXKTYm", "author": {"kind": "subagent", "name": "Hand out module assignments"}}),
+      r(34, "hook", "subagent.end", "02:44:01.864", {"title": "A subagent finished"}),
+      r(35, "hook", "tool.end", "02:44:02.000", {"title": "Agent", "toolName": "Agent", "toolUseId": "YXKTYm", "detail": "Hand out module assignments", "ok": true}),
+      r(36, "hook", "prompt.submit", "02:44:02.121", {"title": "A prompt was submitted"}),
+      r(37, "tx", "usage", "02:44:04.696", {"title": "Token usage recorded"}),
+      r(38, "tx", "message", "02:44:04.697", {"title": "Message", "detail": "Step n1 succeeded: all five modules are ", "author": {"kind": "main"}}),
+      r(39, "tx", "tool.start", "02:44:05.664", {"title": "Bash", "toolName": "Bash", "toolUseId": "VossBi", "detail": "Mark the start of steps n2 and n3"}),
+      r(40, "tx", "tool.end", "02:44:06.212", {"title": "Tool finished", "toolUseId": "VossBi", "ok": true}),
+      r(41, "tx", "step.marker", "02:44:06.212", {"title": "Step announced", "detail": "n2", "blockId": "n2"}),
+      r(42, "tx", "step.marker", "02:44:06.212", {"title": "Step announced", "detail": "n3", "blockId": "n3"}),
+      r(43, "hook", "tool.start", "02:44:05.776", {"title": "Bash", "toolName": "Bash", "toolUseId": "VossBi", "detail": "Mark the start of steps n2 and n3"}),
+      r(44, "hook", "tool.end", "02:44:06.174", {"title": "Bash", "toolName": "Bash", "toolUseId": "VossBi", "detail": "Mark the start of steps n2 and n3", "ok": true}),
+      r(45, "hook", "tool.start", "02:44:12.085", {"title": "Agent", "toolName": "Agent", "toolUseId": "J47Djf", "detail": "Document and test mod1–mod2"}),
+      r(46, "tx", "usage", "02:44:11.977", {"title": "Token usage recorded"}),
+      r(47, "tx", "subagent.start", "02:44:11.977", {"title": "Delegated to a subagent", "toolName": "Agent", "toolUseId": "J47Djf", "agentName": "developer-mod1-mod2", "detail": "Document and test mod1–mod2", "background": true, "stepTag": "n2"}),
+      r(48, "tx", "subagent.start", "02:44:15.918", {"title": "Delegated to a subagent", "toolName": "Agent", "toolUseId": "hACRY9", "agentName": "developer-mod3-mod5", "detail": "Document and test mod3–mod5", "background": true, "stepTag": "n3"}),
+      r(49, "tx", "tool.end", "02:44:16.549", {"title": "Tool finished", "toolUseId": "hACRY9", "background": true, "ok": true}),
+      r(50, "tx", "tool.end", "02:44:16.551", {"title": "Tool finished", "toolUseId": "J47Djf", "background": true, "ok": true}),
+      r(51, "tx", "usage", "02:44:17.560", {"title": "Token usage recorded", "parentToolUseId": "hACRY9"}),
+      r(52, "hook", "tool.start", "02:44:16.019", {"title": "Agent", "toolName": "Agent", "toolUseId": "hACRY9", "detail": "Document and test mod3–mod5"}),
+      r(53, "hook", "tool.end", "02:44:16.459", {"title": "Agent", "toolName": "Agent", "toolUseId": "J47Djf", "detail": "Document and test mod1–mod2", "ok": true}),
+      r(54, "hook", "tool.end", "02:44:16.470", {"title": "Agent", "toolName": "Agent", "toolUseId": "hACRY9", "detail": "Document and test mod3–mod5", "ok": true}),
+      r(55, "tx", "usage", "02:44:18.881", {"title": "Token usage recorded"}),
+      r(56, "tx", "message", "02:44:18.881", {"title": "Message", "detail": "Both developers are now running in the b", "author": {"kind": "main"}, "stepTag": "n2"}),
+      r(57, "tx", "turn.end", "02:44:18.881", {"title": "The agent finished its turn", "toolUseId": "msg_011CfakQiwn351RuRCo89FjC"}),
+      r(58, "tx", "message", "02:44:18.017", {"title": "Message", "parentToolUseId": "hACRY9", "detail": "Starting with the required wait.", "author": {"kind": "subagent", "name": "Document and test mod3–mod5"}, "stepTag": "n3"}),
+      r(59, "tx", "tool.start", "02:44:18.138", {"title": "Bash", "toolName": "Bash", "toolUseId": "htbqB9", "parentToolUseId": "hACRY9", "detail": "Wait 120 seconds before starting"}),
+      r(60, "tx", "tool.end", "02:44:18.140", {"title": "Tool finished", "toolUseId": "htbqB9", "parentToolUseId": "hACRY9", "ok": false}),
+      r(61, "tx", "usage", "02:44:17.878", {"title": "Token usage recorded", "parentToolUseId": "J47Djf"}),
+      r(62, "tx", "tool.start", "02:44:17.878", {"title": "Bash", "toolName": "Bash", "toolUseId": "tJxu6e", "parentToolUseId": "J47Djf", "detail": "Wait 120 seconds as instructed"}),
+      r(63, "tx", "tool.end", "02:44:17.880", {"title": "Tool finished", "toolUseId": "tJxu6e", "parentToolUseId": "J47Djf", "ok": false}),
+      r(64, "tx", "usage", "02:44:20.868", {"title": "Token usage recorded", "parentToolUseId": "hACRY9"}),
+      r(65, "tx", "message", "02:44:20.868", {"title": "Message", "parentToolUseId": "hACRY9", "detail": "The standalone sleep was blocked, so I'l", "author": {"kind": "subagent", "name": "Document and test mod3–mod5"}}),
+      r(66, "tx", "tool.start", "02:44:21.388", {"title": "Bash", "toolName": "Bash", "toolUseId": "vPc3KQ", "parentToolUseId": "hACRY9", "detail": "Wait 120 seconds in background"}),
+      r(67, "tx", "usage", "02:44:20.160", {"title": "Token usage recorded", "parentToolUseId": "J47Djf"}),
+      r(68, "tx", "tool.start", "02:44:20.711", {"title": "Bash", "toolName": "Bash", "toolUseId": "Uyt7R2", "parentToolUseId": "J47Djf", "detail": "Wait 120 seconds in background"}),
+      r(69, "tx", "tool.end", "02:44:21.247", {"title": "Tool finished", "toolUseId": "Uyt7R2", "parentToolUseId": "J47Djf", "ok": true}),
+      r(70, "hook", "turn.end", "02:44:19.963", {"title": "The agent finished its turn"}),
+      r(71, "hook", "tool.start", "02:44:20.826", {"title": "Bash", "toolName": "Bash", "toolUseId": "Uyt7R2", "detail": "Wait 120 seconds in background"}),
+      r(72, "hook", "tool.end", "02:44:21.212", {"title": "Bash", "toolName": "Bash", "toolUseId": "Uyt7R2", "detail": "Wait 120 seconds in background", "ok": true}),
+      r(73, "hook", "tool.start", "02:44:21.507", {"title": "Bash", "toolName": "Bash", "toolUseId": "vPc3KQ", "detail": "Wait 120 seconds in background"}),
+      r(74, "tx", "tool.end", "02:44:21.878", {"title": "Tool finished", "toolUseId": "vPc3KQ", "parentToolUseId": "hACRY9", "ok": true}),
+      r(75, "tx", "usage", "02:44:22.969", {"title": "Token usage recorded", "parentToolUseId": "hACRY9"}),
+      r(76, "tx", "message", "02:44:22.969", {"title": "Message", "parentToolUseId": "hACRY9", "detail": "The 120-second wait is running in the ba", "author": {"kind": "subagent", "name": "Document and test mod3–mod5"}}),
+      r(77, "tx", "tool.start", "02:44:23.278", {"title": "Monitor", "toolName": "Monitor", "toolUseId": "Eqehw9", "parentToolUseId": "hACRY9", "detail": "select:Monitor"}),
+      r(78, "tx", "tool.end", "02:44:23.280", {"title": "Tool finished", "toolUseId": "Eqehw9", "parentToolUseId": "hACRY9", "ok": false}),
+      r(79, "tx", "usage", "02:44:22.585", {"title": "Token usage recorded", "parentToolUseId": "J47Djf"}),
+      r(80, "hook", "tool.end", "02:44:21.842", {"title": "Bash", "toolName": "Bash", "toolUseId": "vPc3KQ", "detail": "Wait 120 seconds in background", "ok": true}),
+      r(81, "hook", "subagent.end", "02:44:22.547", {"title": "A subagent finished"}),
+      r(82, "tx", "usage", "02:44:25.101", {"title": "Token usage recorded", "parentToolUseId": "hACRY9"}),
+      r(83, "tx", "tool.start", "02:44:25.344", {"title": "ToolSearch", "toolName": "ToolSearch", "toolUseId": "kGcZF5", "parentToolUseId": "hACRY9", "detail": "select:Monitor"}),
+      r(84, "tx", "tool.end", "02:44:25.614", {"title": "Tool finished", "toolUseId": "kGcZF5", "parentToolUseId": "hACRY9", "ok": true}),
+      r(85, "tx", "tool.start", "02:44:23.688", {"title": "Monitor", "toolName": "Monitor", "toolUseId": "2JU4Au", "parentToolUseId": "J47Djf", "detail": "Wait for 120s sleep to finish"}),
+      r(86, "tx", "tool.end", "02:44:24.426", {"title": "Tool finished", "toolUseId": "2JU4Au", "parentToolUseId": "J47Djf", "ok": true}),
+      r(87, "hook", "tool.start", "02:44:23.814", {"title": "Monitor", "toolName": "Monitor", "toolUseId": "2JU4Au", "detail": "Wait for 120s sleep to finish"}),
+      r(88, "hook", "tool.end", "02:44:24.391", {"title": "Monitor", "toolName": "Monitor", "toolUseId": "2JU4Au", "detail": "Wait for 120s sleep to finish", "ok": true}),
+      r(89, "hook", "tool.start", "02:44:25.455", {"title": "ToolSearch", "toolName": "ToolSearch", "toolUseId": "kGcZF5", "detail": "select:Monitor"}),
+      r(90, "hook", "tool.end", "02:44:25.586", {"title": "ToolSearch", "toolName": "ToolSearch", "toolUseId": "kGcZF5", "detail": "select:Monitor", "ok": true}),
+      r(91, "tx", "usage", "02:44:25.807", {"title": "Token usage recorded", "parentToolUseId": "J47Djf"}),
+      r(92, "tx", "tool.start", "02:44:25.807", {"title": "Bash", "toolName": "Bash", "toolUseId": "wQCx6z", "parentToolUseId": "J47Djf", "detail": "Look at folder and modules"}),
+      r(93, "tx", "tool.end", "02:44:26.356", {"title": "Tool finished", "toolUseId": "wQCx6z", "parentToolUseId": "J47Djf", "ok": true}),
+      r(94, "tx", "usage", "02:44:27.468", {"title": "Token usage recorded", "parentToolUseId": "J47Djf"}),
+      r(95, "tx", "tool.start", "02:44:27.468", {"title": "Bash", "toolName": "Bash", "toolUseId": "9fcdfo", "parentToolUseId": "J47Djf", "detail": "Read existing tests"}),
+      r(96, "hook", "tool.start", "02:44:25.914", {"title": "Bash", "toolName": "Bash", "toolUseId": "wQCx6z", "detail": "Look at folder and modules"}),
+      r(97, "hook", "tool.end", "02:44:26.319", {"title": "Bash", "toolName": "Bash", "toolUseId": "wQCx6z", "detail": "Look at folder and modules", "ok": true}),
+      r(98, "hook", "tool.start", "02:44:27.585", {"title": "Bash", "toolName": "Bash", "toolUseId": "9fcdfo", "detail": "Read existing tests"}),
+      r(99, "tx", "usage", "02:44:27.679", {"title": "Token usage recorded", "parentToolUseId": "hACRY9"}),
+      r(100, "tx", "tool.start", "02:44:27.679", {"title": "Monitor", "toolName": "Monitor", "toolUseId": "y6P8Wk", "parentToolUseId": "hACRY9", "detail": "wait for 120s sleep to finish"}),
+      r(101, "tx", "tool.end", "02:44:28.494", {"title": "Tool finished", "toolUseId": "y6P8Wk", "parentToolUseId": "hACRY9", "ok": true}),
+      r(102, "tx", "tool.end", "02:44:28.527", {"title": "Tool finished", "toolUseId": "9fcdfo", "parentToolUseId": "J47Djf", "ok": true}),
+      r(103, "hook", "tool.start", "02:44:27.786", {"title": "Monitor", "toolName": "Monitor", "toolUseId": "y6P8Wk", "detail": "wait for 120s sleep to finish"}),
+      r(104, "hook", "tool.end", "02:44:28.368", {"title": "Monitor", "toolName": "Monitor", "toolUseId": "y6P8Wk", "detail": "wait for 120s sleep to finish", "ok": true}),
+      r(105, "hook", "tool.end", "02:44:28.420", {"title": "Bash", "toolName": "Bash", "toolUseId": "9fcdfo", "detail": "Read existing tests", "ok": true}),
+      r(106, "tx", "usage", "02:44:30.071", {"title": "Token usage recorded", "parentToolUseId": "hACRY9"}),
+      r(107, "tx", "tool.start", "02:44:30.071", {"title": "Bash", "toolName": "Bash", "toolUseId": "r6ynSJ", "parentToolUseId": "hACRY9", "detail": "Inspect folder and module sources"}),
+      r(108, "tx", "tool.end", "02:44:30.659", {"title": "Tool finished", "toolUseId": "r6ynSJ", "parentToolUseId": "hACRY9", "ok": true}),
+      r(109, "tx", "usage", "02:44:29.938", {"title": "Token usage recorded", "parentToolUseId": "J47Djf"}),
+      r(110, "tx", "tool.start", "02:44:30.401", {"title": "Bash", "toolName": "Bash", "toolUseId": "Zrfp42", "parentToolUseId": "J47Djf", "detail": "Run mod1 and mod2 tests"}),
+      r(111, "tx", "tool.end", "02:44:31.063", {"title": "Tool finished", "toolUseId": "Zrfp42", "parentToolUseId": "J47Djf", "ok": true}),
+      r(112, "hook", "tool.start", "02:44:30.175", {"title": "Bash", "toolName": "Bash", "toolUseId": "r6ynSJ", "detail": "Inspect folder and module sources"}),
+      r(113, "hook", "tool.start", "02:44:30.508", {"title": "Bash", "toolName": "Bash", "toolUseId": "Zrfp42", "detail": "Run mod1 and mod2 tests"}),
+      r(114, "hook", "tool.end", "02:44:30.630", {"title": "Bash", "toolName": "Bash", "toolUseId": "r6ynSJ", "detail": "Inspect folder and module sources", "ok": true}),
+      r(115, "hook", "tool.end", "02:44:31.022", {"title": "Bash", "toolName": "Bash", "toolUseId": "Zrfp42", "detail": "Run mod1 and mod2 tests", "ok": true}),
+      r(116, "tx", "usage", "02:44:31.980", {"title": "Token usage recorded", "parentToolUseId": "hACRY9"}),
+      r(117, "tx", "tool.start", "02:44:31.980", {"title": "Bash", "toolName": "Bash", "toolUseId": "a7sUAg", "parentToolUseId": "hACRY9", "detail": "Read existing tests"}),
+      r(118, "tx", "tool.end", "02:44:32.567", {"title": "Tool finished", "toolUseId": "a7sUAg", "parentToolUseId": "hACRY9", "ok": true}),
+      r(119, "hook", "tool.start", "02:44:32.086", {"title": "Bash", "toolName": "Bash", "toolUseId": "a7sUAg", "detail": "Read existing tests"}),
+      r(120, "hook", "tool.end", "02:44:32.534", {"title": "Bash", "toolName": "Bash", "toolUseId": "a7sUAg", "detail": "Read existing tests", "ok": true}),
+      r(121, "tx", "usage", "02:44:34.069", {"title": "Token usage recorded", "parentToolUseId": "hACRY9"}),
+      r(122, "tx", "tool.start", "02:44:34.379", {"title": "Bash", "toolName": "Bash", "toolUseId": "MKLqtx", "parentToolUseId": "hACRY9", "detail": "Run the three test files"}),
+      r(123, "tx", "tool.end", "02:44:34.986", {"title": "Tool finished", "toolUseId": "MKLqtx", "parentToolUseId": "hACRY9", "ok": true}),
+      r(124, "tx", "usage", "02:44:34.709", {"title": "Token usage recorded", "parentToolUseId": "J47Djf"}),
+      r(125, "tx", "tool.start", "02:44:34.709", {"title": "SubagentHandback", "toolName": "SubagentHandback", "toolUseId": "bxhfeL", "parentToolUseId": "J47Djf"}),
+      r(126, "tx", "tool.end", "02:44:35.308", {"title": "Tool finished", "toolUseId": "bxhfeL", "parentToolUseId": "J47Djf", "ok": true}),
+      r(127, "hook", "tool.start", "02:44:34.501", {"title": "Bash", "toolName": "Bash", "toolUseId": "MKLqtx", "detail": "Run the three test files"}),
+      r(128, "hook", "tool.start", "02:44:34.826", {"title": "SubagentHandback", "toolName": "SubagentHandback", "toolUseId": "bxhfeL"}),
+      r(129, "hook", "tool.end", "02:44:34.952", {"title": "Bash", "toolName": "Bash", "toolUseId": "MKLqtx", "detail": "Run the three test files", "ok": true}),
+      r(130, "hook", "tool.end", "02:44:35.246", {"title": "SubagentHandback", "toolName": "SubagentHandback", "toolUseId": "bxhfeL", "ok": true}),
+      r(131, "hook", "prompt.submit", "02:44:35.328", {"title": "A prompt was submitted"}),
+    ];
+
+    it("reads the stop between their calls as Claude Code's helper, and the Tester's own as its", () => {
+      const isHelper = helperStops(journal);
+      expect(journal.filter((item) => item.kind === "subagent.end").map((item) => [item.seq, isHelper(item)])).toEqual([
+        [34, false],
+        [81, true],
+      ]);
+    });
+
+    it("keeps both developers running until they hand back", () => {
+      const view = foldLiveSession(mods, run(), journal);
+      expect(view.blocks.n1.state).toBe("done");
+      expect(view.blocks.n2.state).toBe("running");
+      expect(view.blocks.n3.state).toBe("running");
+    });
+  });
+});
+
+/*
+  ANT-245. Claude Code's SubagentStop names the agent that stopped, by the id
+  its transcript's rows carry. A stop is the subagent it names, or — naming
+  none the session's transcripts were read for — Claude Code's own helper.
+*/
+describe("a SubagentStop that names its subagent", () => {
+  const T = (s: number) => new Date(Date.parse("2026-10-01T03:00:00.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const hook = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "hook", channel: "claude-code:hook", ...partial });
+  const byA = { parentToolUseId: "call-a", agentId: "agent-a", author: { kind: "subagent" as const } };
+  const byB = { parentToolUseId: "call-b", agentId: "agent-b", author: { kind: "subagent" as const } };
+  const stopOf = (agentId: string | undefined, s: number) =>
+    hook({ kind: "subagent.end", title: "A subagent finished", ...(agentId ? { agentId } : {}), at: T(s) });
+
+  const dispatch = [
+    tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+    tx({ kind: "step.marker", title: "Step test", blockId: "test", at: T(0.1) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "call-a", stepTag: "implement", background: true, at: T(1) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "call-a", background: true, at: T(1.1) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "call-b", stepTag: "test", background: true, at: T(2) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "call-b", background: true, at: T(2.1) }),
+    tx({ kind: "message", title: "Message", detail: "Starting.", ...byA, at: T(3) }),
+    tx({ kind: "message", title: "Message", detail: "Starting.", ...byB, at: T(3.5) }),
+    // The session goes on to a step of its own while both work.
+    tx({ kind: "step.marker", title: "Step fix", blockId: "fix", at: T(4) }),
+    tx({ kind: "tool.start", title: "Read", toolName: "Read", toolUseId: "own", at: T(5) }),
+  ];
+
+  it("settles the subagent it names, however recently another spoke", () => {
+    const events = [
+      ...dispatch,
+      tx({ kind: "message", title: "Message", detail: "Done.", ...byA, at: T(20) }),
+      tx({ kind: "message", title: "Message", detail: "Still going.", ...byB, at: T(20.3) }),
+      stopOf("agent-a", 20.4),
+    ];
+    expect(subagentStops(events)(events[events.length - 1])).toEqual({ call: "call-a" });
+    const view = foldLiveSession(workflow, run(), events);
+    expect(view.blocks.implement.state).toBe("done");
+    expect(view.blocks.test.state).toBe("running");
+  });
+
+  it("settles nothing when it names an agent no subagent's transcript is from", () => {
+    // A subagent that just said something, a moment after the session's turn
+    // ended, used to be enough for timing to give it the helper's stop.
+    const events = [
+      ...dispatch,
+      tx({ kind: "turn.end", title: "The agent finished its turn", at: T(20) }),
+      tx({ kind: "message", title: "Message", detail: "Done.", ...byA, at: T(21) }),
+      stopOf("helper-1", 21.2),
+    ];
+    expect(subagentStops(events)(events[events.length - 1])).toBe("helper");
+    expect(helperStops(events)(events[events.length - 1])).toBe(true);
+    const view = foldLiveSession(workflow, run(), events);
+    expect(view.blocks.implement.state).toBe("running");
+    expect(view.blocks.test.state).toBe("running");
+  });
+
+  it("is absorbed by a subagent whose end its transcript already recorded, and leaves the next unnamed stop to pair", () => {
+    const events = [
+      ...dispatch,
+      tx({ kind: "turn.end", title: "The agent finished its turn", ...byA, at: T(20) }),
+      stopOf("agent-a", 20.1),
+      tx({ kind: "message", title: "Message", detail: "Verdict: PASS", ...byB, at: T(40) }),
+      stopOf(undefined, 40.2),
+    ];
+    const view = foldLiveSession(workflow, run(), events);
+    expect(view.blocks.implement.state).toBe("done");
+    // The unnamed stop after is B's, not one owed to A's recorded end.
+    expect(view.blocks.test.state).toBe("done");
+  });
+
+  it("falls back to timing when no subagent's transcript gave an id", () => {
+    const anonymous = dispatch.map(({ agentId: _id, ...rest }) => rest);
+    const events = [
+      ...anonymous,
+      tx({ kind: "message", title: "Message", detail: "Done.", parentToolUseId: "call-a", author: { kind: "subagent" }, at: T(20) }),
+      stopOf("agent-a", 20.3),
+    ];
+    expect(subagentStops(events)(events[events.length - 1])).toBe("unidentified");
+    expect(foldLiveSession(workflow, run(), events).blocks.implement.state).toBe("done");
+  });
+});
+
+/* ANT-245: the timing fallback, for stops that name no subagent. */
+describe("an unnamed SubagentStop just after a subagent's call", () => {
+  const T = (s: number) => new Date(Date.parse("2026-10-01T04:00:00.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const hook = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "hook", channel: "claude-code:hook", ...partial });
+  const byA = { parentToolUseId: "call-a", author: { kind: "subagent" as const } };
+  const dispatch = [
+    tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "call-a", stepTag: "implement", background: true, at: T(1) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "call-a", background: true, at: T(1.1) }),
+    tx({ kind: "step.marker", title: "Step test", blockId: "test", at: T(2) }),
+    tx({ kind: "tool.start", title: "Read", toolName: "Read", toolUseId: "own", at: T(3) }),
+  ];
+
+  it("is the helper's after the session's turn ends: the subagent's reply to its call comes first", () => {
+    const events = [
+      ...dispatch,
+      tx({ kind: "turn.end", title: "The agent finished its turn", at: T(10) }),
+      tx({ kind: "tool.start", title: "Write", toolName: "Write", toolUseId: "w", ...byA, at: T(11.1) }),
+      tx({ kind: "tool.end", title: "Tool finished", toolUseId: "w", ...byA, at: T(11.4) }),
+      hook({ kind: "subagent.end", title: "A subagent finished", at: T(11.9) }),
+    ];
+    expect(helperStops(events)(events[events.length - 1])).toBe(true);
+    expect(foldLiveSession(workflow, run(), events).blocks.implement.state).toBe("running");
+  });
+
+  it("is not paired with a subagent last heard making a call, away from any turn ending", () => {
+    const events = [
+      ...dispatch,
+      tx({ kind: "tool.start", title: "Write", toolName: "Write", toolUseId: "w", ...byA, at: T(30.1) }),
+      tx({ kind: "tool.end", title: "Tool finished", toolUseId: "w", ...byA, at: T(30.4) }),
+      hook({ kind: "subagent.end", title: "A subagent finished", at: T(30.9) }),
+    ];
+    expect(foldLiveSession(workflow, run(), events).blocks.implement.state).toBe("running");
+  });
+
+  it("is still the subagent's when its reply came after its call", () => {
+    const events = [
+      ...dispatch,
+      tx({ kind: "turn.end", title: "The agent finished its turn", at: T(10) }),
+      tx({ kind: "tool.end", title: "Tool finished", toolUseId: "w", ...byA, at: T(11) }),
+      tx({ kind: "message", title: "Message", detail: "Written.", ...byA, at: T(12.5) }),
+      hook({ kind: "subagent.end", title: "A subagent finished", at: T(12.7) }),
+    ];
+    expect(helperStops(events)(events[events.length - 1])).toBe(false);
+    expect(foldLiveSession(workflow, run(), events).blocks.implement.state).toBe("done");
   });
 });

@@ -108,6 +108,35 @@ describe("the hook log observer", () => {
     });
   });
 
+  it("names the subagent a SubagentStop is for, and nothing more about it (ANT-245)", async () => {
+    // The shape Claude Code 2.1.284 sends: the agent's id and type, its
+    // transcript's path, its last words and what is still running.
+    const path = await log([
+      line({
+        hook_event_name: "SubagentStop",
+        stop_hook_active: false,
+        agent_id: "a83008eea67a734a4",
+        agent_type: "general-purpose",
+        agent_transcript_path: "/Users/someone/.claude/projects/p/sess-1/subagents/agent-a83008eea67a734a4.jsonl",
+        last_assistant_message: "I wrote THEMES.md with 300 themes.",
+        background_tasks: [],
+      }),
+      // Claude Code's helper stopping after the session's turn names no
+      // subagent the session started; it is recorded as it came.
+      line({ hook_event_name: "SubagentStop", agent_id: "helper-1", agent_type: "" }),
+      // And a hook from before the id was kept.
+      line({ hook_event_name: "SubagentStop" }),
+    ]);
+    const { events } = await new HookLogObserver(path).poll(pending(), new Date().toISOString());
+    expect(events.map((event) => [event.kind, event.agentId])).toEqual([
+      ["subagent.end", "a83008eea67a734a4"],
+      ["subagent.end", "helper-1"],
+      ["subagent.end", undefined],
+    ]);
+    expect(JSON.stringify(events)).not.toContain("THEMES.md");
+    expect(JSON.stringify(events)).not.toContain("agent_transcript_path");
+  });
+
   it("takes a step marker out of the last assistant message and keeps nothing else", async () => {
     const path = await log([
       line({

@@ -124,6 +124,15 @@ export type ObservationEvent = {
   /** The agent or subagent the record named. Not inferred. */
   agentName?: string;
   /**
+   * The CLI's own id for the subagent a record is from or about: Claude
+   * Code's `agentId` on every row of a delegate's transcript, and the
+   * `agent_id` its SubagentStop hook names. An identifier, never shown.
+   *
+   * It is what ties a SubagentStop to the subagent that stopped — or says it
+   * is none the session started (ANT-245).
+   */
+  agentId?: string;
+  /**
    * Who wrote it, when the record says who.
    *
    * Separate from `agentName`, which exists for *attribution* — mapping work

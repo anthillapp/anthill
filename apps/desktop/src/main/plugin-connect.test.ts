@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { SpawnFn } from "@anthill/runtimes";
 
 import {
+  GITHUB_SOURCE,
   installPlugin,
   installSource,
   installSteps,
@@ -139,12 +140,24 @@ describe("the tools' own commands", () => {
 });
 
 describe("installing", () => {
-  it("refuses, having changed nothing, when there is nothing to install from", async () => {
+  it("installs from GitHub when there is no checkout, with nothing to build and no server to name", async () => {
     const dir = await home();
     const { calls, spawnFn } = tools();
     const result = await installPlugin("claude-code", { home: dir, spawnFn, interpreters: async () => [] });
-    expect(result).toMatchObject({ ok: false, changed: false });
-    expect(calls).toEqual([]);
+    expect(result).toEqual({ ok: true });
+    expect(calls).toEqual([
+      `claude plugin marketplace add ${GITHUB_SOURCE}`,
+      "claude plugin install anthill@anthill --scope user",
+    ]);
+    // The plugin starts the server it carries; a setting would only get in its way.
+    expect(existsSync(join(dir, ".anthill/plugin.json"))).toBe(false);
+  });
+
+  it("installs Codex's plugin from GitHub the same way", async () => {
+    const dir = await home();
+    const { calls, spawnFn } = tools();
+    expect(await installPlugin("codex", { home: dir, spawnFn, interpreters: async () => [] })).toEqual({ ok: true });
+    expect(calls).toEqual([`codex plugin marketplace add ${GITHUB_SOURCE}`, "codex plugin add anthill-cli@anthill-local"]);
   });
 
   it("refuses up front when the server it would launch is not built", async () => {

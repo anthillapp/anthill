@@ -82,6 +82,22 @@ describe("evidence", () => {
     expect(applyEvidence({ ...bound, selectedCli: "codex" }, strongMatch).state).toBe("pending_after_copy");
   });
 
+  it("names the evidence and calls it strong for a run a plugin bound to its session (ANT-248)", () => {
+    const bound = run({
+      selectedCli: "codex",
+      exchange: { revision: 1, digest: "abc", sessionId: "sess-1" },
+      detectedSessionId: "sess-1",
+    });
+    const live = applyEvidence(bound, { kind: "activity", sessionId: "sess-1", channel: "codex:rollout", at: later(5_000) });
+    expect(live.state).toBe("detected_live");
+    expect(live.evidenceChannel).toBe("codex:rollout");
+    expect(live.confidence).toBe("strong");
+    const done = applyEvidence(live, { kind: "completed", sessionId: "sess-1", channel: "codex:rollout", at: later(9_000) });
+    expect(done.confidence).toBe("strong");
+    // A run that was not bound learns its confidence from a match, not from activity.
+    expect(applyEvidence(run(), { kind: "activity", sessionId: "sess-1", channel: "codex:rollout", at: later(5_000) }).confidence).toBeUndefined();
+  });
+
   it("goes live on a marker found in a record the tool wrote", () => {
     const next = applyEvidence(run(), strongMatch);
     expect(next.state).toBe("detected_live");

@@ -178,4 +178,13 @@ describe("the Plugins page", () => {
     open("Plugins");
     expect(await screen.findByText("Found")).toBeTruthy();
   });
+
+  it("calls an unconfigured server the plugin's own, not a problem", async () => {
+    const api = stub();
+    api.pluginStatus.mockResolvedValue({ ...PLUGINS, server: { configured: false, settingsFile: "/Users/me/.anthill/plugin.json" } });
+    open("Plugins");
+    expect(await screen.findByText("Built into the plugin")).toBeTruthy();
+    expect(screen.queryByText("Not configured")).toBeNull();
+    expect(screen.getByText(/carries its own copy of Anthill's local MCP server/)).toBeTruthy();
+  });
 });

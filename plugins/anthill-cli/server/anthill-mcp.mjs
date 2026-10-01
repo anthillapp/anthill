@@ -37728,6 +37728,9 @@ function draftText(answer) {
   const stored = answer.outcome === "already_exists" ? `This handover has been submitted before. It is already stored as revision ${answer.revision} of ${where}` : `Stored as revision ${answer.revision} of ${where}`;
   const shown = answer.openDeferred ? ". It has not been opened: call open_workflow with this workflow id when it is time to show it." : answer.displayRequested ? ". A display request is queued; Anthill has not acknowledged opening it." : ". No display request was queued. Desktop display is not confirmed.";
   const parts = [`${stored}${shown}`];
+  if (answer.openDeferred && answer.observationCommand) {
+    parts.push(`Check detailed progress with \`${answer.observationCommand}\` (replace \`status\` with \`enable\` or \`skip\` for the other two).`);
+  }
   parts.push(stateText("ready_for_agent"), "Ask the user whether to start. When they say so, call get_ready_revision, then bind_run.");
   parts.push(...answer.app ? appText(answer.app) : targetText(answer.target));
   if (answer.problems && answer.problems.length > 0) {
@@ -38596,8 +38599,9 @@ __name(onPath, "onPath");
 function reportingInvocation(resolved, deps) {
   const onThePath = onPath("anthill", deps) !== void 0;
   const reporter = deps.reporter ? { command: `${nodeFor(deps)} ${typedPath(deps.reporter, deps.platform)}` } : {};
+  const checkoutCli = !deps.reporter && resolved.checkout ? { command: `${nodeFor(deps)} ${typedPath(webShellCli(resolved.checkout), deps.platform)}` } : {};
   if (resolved.target !== "web")
-    return onThePath ? {} : reporter;
+    return onThePath ? {} : deps.reporter ? reporter : checkoutCli;
   const platform = { platform: deps.platform };
   const dataDir = resolve2(resolved.dataDir) === resolve2(targetDataDir("web", deps)) ? {} : { dataDir: resolve2(resolved.dataDir), ...platform };
   if (onThePath)
@@ -38718,6 +38722,9 @@ function createHandlers(dependencies) {
           displayed: false,
           displayRequested: false,
           openDeferred: true,
+          // Asked next, before open_workflow: the same command a report would
+          // use, so it works on a machine with no `anthill` (ANT-249).
+          observationCommand: `${(reach.resolved ? invocation(reach.resolved) : {}).command ?? "anthill"} observation status`,
           ...reach.resolved ? { target: { id: reach.resolved.target, label: reach.resolved.label } } : {},
           ...problems.length > 0 ? { problems, questions: questionsFrom(problems, submission.workflow) } : {}
         });

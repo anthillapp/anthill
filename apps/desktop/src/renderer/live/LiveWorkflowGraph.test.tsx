@@ -1256,3 +1256,121 @@ describe("a switcher in a live session", () => {
     unmount();
   });
 });
+
+/*
+  ANT-252, M1 in the 0.8.6 QA: A and B meet at Run tests, Run tests fails into
+  Fix failures, and Fix failures sends it back. On that second pass only the
+  connection from Fix failures fed Run tests; A and B had finished long before.
+*/
+describe("a join entered again by a rework", () => {
+  const joined: Workflow = {
+    id: "workflow-252",
+    name: "Two services, a real rework",
+    version: "1",
+    target: "codex",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {}, position: { x: 0, y: 180 } },
+      { id: "a", type: "agent", name: "Change service A", config: { actionKind: "implement", task: "A" }, position: { x: 250, y: 60 } },
+      { id: "b", type: "agent", name: "Change service B", config: { actionKind: "implement", task: "B" }, position: { x: 250, y: 300 } },
+      { id: "test", type: "agent", name: "Run tests", config: { actionKind: "run-tests", task: "Test", maxIterations: 3 }, position: { x: 520, y: 180 } },
+      { id: "fix", type: "agent", name: "Fix failures", config: { actionKind: "implement", task: "Fix", maxIterations: 3 }, position: { x: 520, y: 400 } },
+      { id: "end", type: "end", name: "Done", config: {}, position: { x: 780, y: 180 } },
+    ],
+    edges: [
+      { id: "s-a", source: "start", target: "a" },
+      { id: "s-b", source: "start", target: "b" },
+      { id: "a-t", source: "a", target: "test" },
+      { id: "b-t", source: "b", target: "test" },
+      { id: "t-fix", source: "test", target: "fix", kind: "rework", condition: 'tester.decision == "failed"' },
+      { id: "fix-t", source: "fix", target: "test" },
+      { id: "t-end", source: "test", target: "end" },
+    ],
+    metadata: { workflow: { formatVersion: 5 } },
+  };
+  let n = 0;
+  const step = (blockId: string, at: string): ObservationEvent => ({
+    runId: "ANT-1", seq: (n += 1), at, recordedAt: at, cli: "codex", source: "rollout",
+    channel: "codex:rollout", kind: "step.marker", title: blockId, blockId,
+  });
+
+  function tones(events: ObservationEvent[]) {
+    const view = foldLiveSession(joined, run, withWork(events));
+    const { unmount } = render(<LiveWorkflowGraph workflow={joined} view={view} sessionState="detected_live" onSelect={vi.fn()} />);
+    const tone = (id: string) => (document.querySelector(`[data-edge="${id}"]`)?.getAttribute("class") ?? "").replace("live-edge ", "");
+    const result = { a: tone("a-t"), b: tone("b-t"), fix: tone("fix-t") };
+    unmount();
+    return result;
+  }
+
+  it("pulses every branch into the join on its first pass", () => {
+    const first = tones([
+      step("a", "2026-08-29T10:00:01.000Z"),
+      step("b", "2026-08-29T10:00:02.000Z"),
+      step("test", "2026-08-29T10:00:30.000Z"),
+    ]);
+    expect(first.a).toBe("tone-live");
+    expect(first.b).toBe("tone-live");
+  });
+
+  it("pulses only the rework's return on the second pass", () => {
+    const second = tones([
+      step("a", "2026-08-29T10:00:01.000Z"),
+      step("b", "2026-08-29T10:00:02.000Z"),
+      step("test", "2026-08-29T10:00:30.000Z"),
+      step("fix", "2026-08-29T10:01:00.000Z"),
+      step("test", "2026-08-29T10:01:30.000Z"),
+    ]);
+    expect(second.fix).toBe("tone-live");
+    expect(second.a).toBe("tone-seen");
+    expect(second.b).toBe("tone-seen");
+  });
+});
+
+/*
+  ANT-253, M6 in the 0.8.6 QA: the Reviewer's step leads to Done twice — when
+  it agrees, and through a stop connection when the attempts run out. It
+  agreed, and both connections into Done were drawn taken.
+*/
+describe("one step that leads to the same end twice", () => {
+  const twice: Workflow = {
+    ...workflow,
+    edges: [
+      { id: "e1", source: "start", target: "implement" },
+      { id: "agreed", source: "implement", target: "end", label: "all findings verified", condition: 'reviewer.decision == "agreed"' },
+      { id: "limit", source: "implement", target: "end", kind: "stop", label: "attempt limit reached with unresolved disagreement" },
+    ],
+  };
+
+  function drawn(said: string) {
+    const finishedRun = { ...run, state: "completed" as const };
+    const view = foldLiveSession(twice, finishedRun, []);
+    const shown = {
+      ...view,
+      empty: false,
+      blocks: { ...view.blocks, implement: { ...view.blocks.implement, state: "done" as const, passes: 1, enteredAt: "2026-10-01T20:28:00.000Z" } },
+      events: [{
+        runId: "ANT-1", seq: 1, at: "2026-10-01T20:30:01.000Z", recordedAt: "2026-10-01T20:30:01.000Z",
+        cli: "codex" as const, source: "rollout" as const, channel: "codex:rollout",
+        kind: "message" as const, title: "Message", detail: said, author: { kind: "main" as const },
+        mapping: { confidence: "unmapped" as const, how: "" },
+      }],
+    };
+    const { unmount } = render(<LiveWorkflowGraph workflow={twice} view={shown} sessionState="completed" onSelect={vi.fn()} />);
+    const tone = (id: string) => (document.querySelector(`[data-edge="${id}"]`)?.getAttribute("class") ?? "").replace("live-edge ", "");
+    const result = { agreed: tone("agreed"), limit: tone("limit") };
+    unmount();
+    return result;
+  }
+
+  it("draws only the connection the session named as taken", () => {
+    const edges = drawn("Reviewer agreed with every finding. The workflow is complete.");
+    expect(edges.agreed).toContain("tone-seen");
+    expect(edges.limit).toContain("tone-idle");
+  });
+
+  it("singles nothing out when the session names neither", () => {
+    const edges = drawn("The workflow is complete.");
+    expect(edges.agreed).toContain("tone-seen");
+    expect(edges.limit).toContain("tone-seen");
+  });
+});

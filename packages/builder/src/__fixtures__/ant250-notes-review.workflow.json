@@ -1,0 +1,255 @@
+{
+  "id": "workflow-086-m8-notes-review",
+  "name": "m8 notes classification and bounded review",
+  "version": "0.1.0",
+  "target": "codex",
+  "brief": {
+    "goal": "Classify every line of m8/notes.txt and create SUMMARY.md with independently verified counts, preserving notes.txt and limiting the Writer to two passes.",
+    "context": "Confirmed design: Scope is only /tmp/anthill-qa-notes. Analyst classifies every line as ready, TODO, or unrecognized and records original notes.txt for comparison. Writer creates only SUMMARY.md with classifications and counts. Reviewer independently recounts and verifies notes.txt unchanged. First review failure goes to second Writer pass; second failure reaches Stopped after unresolved issues are reported in chat. Passing review reaches Done. Separate first/second pass blocks; switch connections for every branch; no block positions; current session model. User response: Yes, confirmed. Hand it over. Read-only inspection found notes.txt with alpha: ready, beta: TODO, gamma: ready. Execution must independently inspect the actual input when it starts. This is a design handover; do not execute until the user approves the displayed workflow.",
+    "verification": "Analyst captures original notes.txt bytes and digest in memory. On each review, Reviewer reads notes.txt and SUMMARY.md afresh, independently classifies every line, recomputes category totals, checks every source line is represented once, and compares input bytes and digest to the baseline. Reviewer returns passed or failed with concrete line/count/preservation evidence.",
+    "doneCriteria": [
+      "SUMMARY.md lists each source line's classification and ready, TODO, unrecognized and total counts.",
+      "Reviewer independently recomputes every classification and count from notes.txt and agrees with SUMMARY.md.",
+      "Reviewer verifies notes.txt byte-for-byte unchanged from the Analyst's baseline.",
+      "Done is reached only after passing review; after a second failed review, all unresolved issues are reported in chat before Stopped."
+    ],
+    "constraints": [
+      "All task file access is confined to /tmp/anthill-qa-notes.",
+      "Only the Writer may write task files, and only SUMMARY.md in this folder.",
+      "Analyst and Reviewer are read-only; retain input baseline and findings in agent handoffs rather than new files.",
+      "Every physical line receives exactly one classification: ready, TODO, or unrecognized; classify by its status text after the colon, with blank or other statuses unrecognized.",
+      "At most two Writer passes, counting initial creation as pass one and correction as pass two.",
+      "All branching connections use kind switch with an unconditional final fallback. Use separate pass blocks rather than a cycle.",
+      "Omit all block positions.",
+      "Use three distinct agents: Analyst, Writer, Reviewer; inherit the current Codex session model."
+    ],
+    "prohibitedActions": [
+      "Do not change notes.txt, including its bytes or line endings.",
+      "Do not create or modify any task file other than /tmp/anthill-qa-notes/SUMMARY.md.",
+      "Do not access task files outside /tmp/anthill-qa-notes.",
+      "Do not make a third Writer pass.",
+      "Do not declare Done while a count, coverage, or source-preservation issue remains."
+    ],
+    "finalAction": "After a passing review, report SUMMARY.md and verification evidence in chat and reach Done. After the second failed review, report every unresolved issue with evidence in chat and reach Stopped, without claiming success or requesting a third Writer pass.",
+    "report": [
+      "Terminal outcome: Done or Stopped",
+      "SUMMARY.md path and verified counts if review passes",
+      "Writer passes used",
+      "Independent count and source-preservation results",
+      "All unresolved issues and evidence if stopped"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "name": "Start",
+      "config": {}
+    },
+    {
+      "id": "analyst",
+      "type": "agent",
+      "name": "Classify notes and capture baseline",
+      "config": {
+        "agentId": "agent-analyst",
+        "actionKind": "inspect-context",
+        "task": "Read /tmp/anthill-qa-notes/notes.txt without modifying it. Capture its exact original bytes and digest in memory for later comparison. Assign each physical line exactly one classification using the confirmed rule: status after the colon is ready, TODO, or otherwise unrecognized. Retain line numbers, exact text, classifications, and independent category and total counts. Pass the baseline and findings to Writer and Reviewer; create no files.",
+        "expectedOutput": "An in-memory handoff containing original bytes/digest, line-numbered classifications, category counts, and total line count.",
+        "successCriteria": [
+          "Every line is classified exactly once.",
+          "Baseline permits a byte-for-byte preservation check.",
+          "No task files changed."
+        ]
+      }
+    },
+    {
+      "id": "writer-pass-1",
+      "type": "agent",
+      "name": "Write SUMMARY.md — pass 1",
+      "config": {
+        "agentId": "agent-writer",
+        "actionKind": "generate-artifact",
+        "task": "Perform Writer pass one. Use the Analyst's line-numbered handoff to create only /tmp/anthill-qa-notes/SUMMARY.md. Include each line and classification plus ready, TODO, unrecognized, and total counts. Do not edit notes.txt or any other task file. Hand the report to Reviewer and record pass one used.",
+        "expectedOutput": "SUMMARY.md with full line coverage and category/total counts; handoff indicating Writer pass one.",
+        "successCriteria": [
+          "Only SUMMARY.md is written.",
+          "Every source line and all counts appear.",
+          "Initial report counts as pass one."
+        ]
+      }
+    },
+    {
+      "id": "review-pass-1",
+      "type": "agent",
+      "name": "Independently review — pass 1",
+      "config": {
+        "agentId": "agent-reviewer",
+        "actionKind": "criteria-review",
+        "task": "Review after Writer pass one. Read /tmp/anthill-qa-notes/notes.txt and SUMMARY.md independently of the Analyst's classifications or Writer's totals. Recompute each classification and count from the source, check complete once-only line coverage, and compare source bytes/digest with the Analyst baseline. Set reviewer.decision to passed only if every check passes, otherwise failed; provide concrete discrepancies to Writer for its second and final pass. On passed, report verified counts, unchanged-input evidence, and one Writer pass used in chat. Write no files.",
+        "expectedOutput": "reviewer.decision = passed or failed, with independent classifications/counts and byte-preservation evidence; precise feedback on failure.",
+        "successCriteria": [
+          "Counts and coverage are independently recomputed.",
+          "notes.txt preservation is checked.",
+          "Any failed check yields failed and actionable evidence."
+        ]
+      }
+    },
+    {
+      "id": "writer-pass-2",
+      "type": "agent",
+      "name": "Correct SUMMARY.md — pass 2",
+      "config": {
+        "agentId": "agent-writer",
+        "actionKind": "transform-rewrite",
+        "task": "Perform Writer pass two, only after failed review one. Read the Reviewer's specific findings and correct only /tmp/anthill-qa-notes/SUMMARY.md. Address each report issue using the Analyst baseline and review evidence. Do not edit notes.txt to conceal a preservation failure. Record unresolved issues that cannot be fixed in SUMMARY.md, hand back for independent review, and do not request or perform another Writer pass.",
+        "expectedOutput": "Corrected SUMMARY.md and an in-memory response to each review finding, explicitly marking pass two used and any unresolved issue.",
+        "successCriteria": [
+          "Only SUMMARY.md is changed.",
+          "Each review finding is addressed or explicitly unresolved.",
+          "This is the second and last Writer pass."
+        ]
+      }
+    },
+    {
+      "id": "review-pass-2",
+      "type": "agent",
+      "name": "Independently review — pass 2",
+      "config": {
+        "agentId": "agent-reviewer",
+        "actionKind": "criteria-review",
+        "task": "Review after the second Writer pass by reading /tmp/anthill-qa-notes/notes.txt and SUMMARY.md anew. Independently recompute every line classification and all counts; check once-only line coverage and compare source bytes/digest to the original Analyst baseline. Set reviewer.decision to passed only if every check passes, otherwise failed. Return all unresolved findings with line/count/preservation evidence. On passed, report verified counts, unchanged-input evidence, and two Writer passes used in chat. Write no files and never send work for a third Writer pass.",
+        "expectedOutput": "Final reviewer.decision = passed or failed; independent counts, preservation result, and evidence for every unresolved finding.",
+        "successCriteria": [
+          "Review is independently recomputed rather than relying on Writer assurances.",
+          "Every done criterion is checked.",
+          "Second failure cannot trigger another Writer pass."
+        ]
+      }
+    },
+    {
+      "id": "report-unresolved",
+      "type": "agent",
+      "name": "Report unresolved issues",
+      "config": {
+        "agentId": "agent-reviewer",
+        "actionKind": "final-action",
+        "task": "After failed review two, report in chat every unresolved issue with expected versus actual counts, affected line numbers, and any notes.txt baseline mismatch. State that both Writer passes have been used and the outcome is Stopped. Do not write files, request a third pass, or claim success.",
+        "expectedOutput": "A user-visible unresolved-issues report with evidence and explicit Stopped outcome.",
+        "successCriteria": [
+          "All remaining findings are reported.",
+          "Two Writer passes are recorded.",
+          "No success claim or further writing pass."
+        ]
+      }
+    },
+    {
+      "id": "done",
+      "type": "end",
+      "name": "Done",
+      "config": {}
+    },
+    {
+      "id": "stopped",
+      "type": "end",
+      "name": "Stopped",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-start-analyst",
+      "source": "start",
+      "target": "analyst"
+    },
+    {
+      "id": "edge-analyst-writer1",
+      "source": "analyst",
+      "target": "writer-pass-1"
+    },
+    {
+      "id": "edge-writer1-review1",
+      "source": "writer-pass-1",
+      "target": "review-pass-1"
+    },
+    {
+      "id": "edge-review1-done",
+      "source": "review-pass-1",
+      "target": "done",
+      "condition": "reviewer.decision == \"passed\"",
+      "label": "Review passed",
+      "kind": "switch"
+    },
+    {
+      "id": "edge-review1-writer2",
+      "source": "review-pass-1",
+      "target": "writer-pass-2",
+      "label": "Otherwise: return to Writer for final pass",
+      "kind": "switch"
+    },
+    {
+      "id": "edge-writer2-review2",
+      "source": "writer-pass-2",
+      "target": "review-pass-2"
+    },
+    {
+      "id": "edge-review2-done",
+      "source": "review-pass-2",
+      "target": "done",
+      "condition": "reviewer.decision == \"passed\"",
+      "label": "Final review passed",
+      "kind": "switch"
+    },
+    {
+      "id": "edge-review2-unresolved",
+      "source": "review-pass-2",
+      "target": "report-unresolved",
+      "label": "Otherwise: report unresolved issues",
+      "kind": "switch"
+    },
+    {
+      "id": "edge-unresolved-stopped",
+      "source": "report-unresolved",
+      "target": "stopped"
+    }
+  ],
+  "metadata": {
+    "workflow": {
+      "formatVersion": 5,
+      "agents": [
+        {
+          "id": "agent-analyst",
+          "name": "Analyst",
+          "role": "Classifies each source line and records the original input baseline.",
+          "description": "You own the read-only analysis in /tmp/anthill-qa-notes. Read notes.txt, capture exact original bytes and digest in memory, classify each line as ready, TODO, or unrecognized, and hand line-numbered evidence and counts to Writer and Reviewer. You are done when every line is represented once and the preservation baseline is available. Do not write any task files or access task files outside this folder.",
+          "models": {
+            "codex": {
+              "id": "__default__"
+            }
+          }
+        },
+        {
+          "id": "agent-writer",
+          "name": "Writer",
+          "role": "Creates SUMMARY.md and corrects it once when review fails.",
+          "description": "You own only /tmp/anthill-qa-notes/SUMMARY.md. First write the line classifications and counts from the Analyst's handoff, then wait for Reviewer. If the first review fails, address its findings in a second and final pass of SUMMARY.md and return it for review. Count initial creation as pass one. You are not alone in the workspace; accommodate other agents' handoffs and never revert or modify their work. Never edit notes.txt, create other task files, write outside this folder, or make a third pass.",
+          "models": {
+            "codex": {
+              "id": "__default__"
+            }
+          }
+        },
+        {
+          "id": "agent-reviewer",
+          "name": "Reviewer",
+          "role": "Independently verifies counts and unchanged input and reports unresolved issues.",
+          "description": "You own read-only review and terminal reporting in /tmp/anthill-qa-notes. After each Writer pass, read notes.txt and SUMMARY.md afresh and independently recompute every line classification and total; compare notes.txt exact bytes and digest to the original Analyst baseline. Return passed only when all checks agree, otherwise failed with evidence. Send the first failure to Writer for its final pass; after a second failure report every unresolved issue in chat and stop. On passed report the verified counts and preservation evidence. Do not write task files, rely on Writer's assertions, conceal source changes, or request a third pass.",
+          "models": {
+            "codex": {
+              "id": "__default__"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

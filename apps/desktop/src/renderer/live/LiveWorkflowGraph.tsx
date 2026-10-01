@@ -187,22 +187,67 @@ function namedEnd(
     .sort((a, b) => b.at - a.at)[0];
   if (!last) return new Set();
 
-  const said = view.events
-    .filter((event) => event.kind === "message" && event.author?.kind !== "subagent" && Date.parse(event.at) >= last.at)
-    .map((event) => event.detail ?? "")
-    .join("\n");
+  const said = saidSince(view, last.at);
   if (!said) return new Set();
 
   const named = new Set<string>();
   for (const edge of into) {
     if (edge.source !== last.id) continue;
-    const phrases = [
-      ...[...(edge.condition ?? "").matchAll(/"([^"]+)"|'([^']+)'/g)].map((match) => match[1] ?? match[2]),
-      ...(edge.label ? [edge.label] : []),
-    ];
-    if (phrases.some((phrase) => mentions(said, phrase))) named.add(edge.target);
+    if (phrasesOf(edge).some((phrase) => mentions(said, phrase))) named.add(edge.target);
   }
   return named.size === 1 ? named : new Set();
+}
+
+/** What the main session said from a moment on, as one text to search. */
+function saidSince(view: LiveSessionView, at: number): string {
+  return view.events
+    .filter((event) => event.kind === "message" && event.author?.kind !== "subagent" && Date.parse(event.at) >= at)
+    .map((event) => event.detail ?? "")
+    .join("\n");
+}
+
+/** The words a connection is known by: the values its condition names, and its label. */
+function phrasesOf(edge: Workflow["edges"][number]): string[] {
+  return [
+    ...[...(edge.condition ?? "").matchAll(/"([^"]+)"|'([^']+)'/g)].map((match) => match[1] ?? match[2]),
+    ...(edge.label ? [edge.label] : []),
+  ];
+}
+
+/**
+ * Connections into an end that the run did not take, though their step and
+ * their end both did finish.
+ *
+ * One step can lead to the same end twice: a reviewer's "agreed" into Done,
+ * and its "attempt limit reached" stop connection into Done as well. Reaching
+ * Done from that step lit both, and the diagram claimed the run had both
+ * succeeded and given up (ANT-253). Of such a pair, the one the session named
+ * after the step began is the one taken; the others are left untaken. When the
+ * session names none, or more than one, nothing is singled out.
+ */
+function untakenIntoEnds(
+  workflow: Workflow,
+  view: LiveSessionView,
+  boundaryKind: (id: string) => "start" | "end" | undefined,
+  endsReached: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const groups = new Map<string, Workflow["edges"]>();
+  for (const edge of workflow.edges) {
+    if (boundaryKind(edge.target) !== "end" || !endsReached.has(edge.target)) continue;
+    const key = `${edge.source}\u0000${edge.target}`;
+    groups.set(key, [...(groups.get(key) ?? []), edge]);
+  }
+  const untaken = new Set<string>();
+  for (const edges of groups.values()) {
+    if (edges.length < 2) continue;
+    const at = enteredAt(view.blocks[edges[0].source]);
+    if (at === undefined) continue;
+    const said = saidSince(view, at);
+    const named = edges.filter((edge) => phrasesOf(edge).some((phrase) => mentions(said, phrase)));
+    if (named.length !== 1) continue;
+    for (const edge of edges) if (edge !== named[0]) untaken.add(edge.id);
+  }
+  return untaken;
 }
 
 /** Whether a text says a phrase outright: whole words, and not after "not". */
@@ -283,6 +328,31 @@ function carriedControl(
   const left = enteredAt(from);
   const arrived = enteredAt(to);
   return !(left !== undefined && arrived !== undefined && arrived < left);
+}
+
+/**
+ * Whether a source finished a pass that fed the target's current one.
+ *
+ * Every branch of a join pulses as the join starts, since control arrives along
+ * all of them (ANT-166). But a join entered again — Run tests on its second
+ * pass, sent back by Fix failures — was not fed by the branches that finished
+ * before its first pass, and pulsing them said the parallel steps had run again
+ * (ANT-252). A branch counts for the current pass only if one of its passes
+ * began after the target's previous pass did.
+ */
+function deliveredThisPass(view: LiveSessionView, source: string, target: string): boolean {
+  const arrivals = view.spans
+    .filter((span) => span.blockId === target)
+    .map((span) => Date.parse(span.startedAt))
+    .sort((a, b) => a - b);
+  if (arrivals.length < 2) return true;
+  const previous = arrivals[arrivals.length - 2];
+  const current = arrivals[arrivals.length - 1];
+  return view.spans.some((span) => {
+    if (span.blockId !== source || span.endedAt === undefined) return false;
+    const at = Date.parse(span.startedAt);
+    return at > previous && at <= current;
+  });
 }
 
 /** The one colour a trail is drawn in. Nothing else on the diagram uses it. */
@@ -399,7 +469,7 @@ function edgeTone(
   const arriving = to?.state === "running" || to?.state === "needsYou";
   if (!arriving) return "seen";
 
-  if (joins.get(target)?.includes(source)) return "live";
+  if (joins.get(target)?.includes(source) && deliveredThisPass(view, source, target)) return "live";
   const last = delivering.get(target);
   return last === undefined || last === source ? "live" : "seen";
 }
@@ -491,9 +561,13 @@ export function LiveWorkflowGraph({
 
   /** How each connection is drawn, keyed by its id. */
   const toneOf = useMemo(() => {
+    const untaken = untakenIntoEnds(workflow, view, boundaryKind, endsReached);
     const tones = new Map<string, EdgeTone>();
     for (const edge of workflow.edges) {
-      tones.set(edge.id, edgeTone(view, edge.source, edge.target, boundaryKind, delivering, joins, endsReached));
+      tones.set(
+        edge.id,
+        untaken.has(edge.id) ? "idle" : edgeTone(view, edge.source, edge.target, boundaryKind, delivering, joins, endsReached),
+      );
     }
     return tones;
   }, [workflow, view, boundaryKind, delivering, joins, endsReached]);

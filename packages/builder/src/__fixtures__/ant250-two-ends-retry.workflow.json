@@ -1,0 +1,267 @@
+{
+  "id": "workflow-inventory-max-01a0f823",
+  "name": "Fix inventory maximum quantity",
+  "version": "0.1.0",
+  "target": "codex",
+  "brief": {
+    "goal": "Fix max_quantity in inventory.py to return None for an empty list and the largest quantity for nonempty lists, including all-negative quantities.",
+    "context": "Project: /tmp/anthill-qa-two-ends only. inventory.py currently initializes best = 0, returning 0 for empty and all-negative lists. The user confirmed scope, constraints, verification, and routing before this design handover.",
+    "assumptions": [
+      "The one retry is available after either initial test failure or first independent review rejection, as explicitly confirmed by the user.",
+      "Malformed items and missing qty keys are outside this task."
+    ],
+    "verification": "From this folder, run PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v test_inventory.py. Verify empty input -> None, all-negative input -> largest negative qty, and normal lists -> largest qty. Independently review implementation, assertions, command results, and changed-file scope.",
+    "doneCriteria": [
+      "max_quantity([]) returns None.",
+      "Nonempty lists of inventory dictionaries return the greatest qty, including all-negative and normal lists.",
+      "test_inventory.py uses unittest and covers empty, negative, and normal lists; the suite passes.",
+      "An independent reviewer approves the passing implementation before Approved is reached.",
+      "There is at most one retry fix and test run shared between a first test failure and a first review rejection; exhausted or rejected retries reach Needs attention.",
+      "The graph has exactly two End blocks named Approved and Needs attention."
+    ],
+    "constraints": [
+      "Only inventory.py and a new test_inventory.py in this folder may be changed as task files.",
+      "Preserve the max_quantity(items) signature and inventory dictionaries using the qty key.",
+      "Use the Python standard library unittest; add no dependencies.",
+      "Every branching connection uses switch, with explicit conditions and a labeled otherwise fallback.",
+      "Do not specify block positions.",
+      "Use a separate Codex subagent for independent review, inheriting the current session model.",
+      "All remaining implementation and test case choices are delegated to Codex."
+    ],
+    "prohibitedActions": [
+      "Do not change task files outside /tmp/anthill-qa-two-ends.",
+      "Do not edit unrelated files, install dependencies, create projects, commit, publish, or change repository instruction files.",
+      "Do not perform a second retry fix or approve after failed tests or a final review rejection."
+    ],
+    "finalAction": "Report the terminal outcome, files changed, unittest command and results, independent review decision, and any unresolved issues. Approved requires passing tests and independent approval; Needs attention records exhausted retry or final review rejection.",
+    "report": [
+      "Terminal outcome",
+      "Files changed",
+      "Tests run and results",
+      "Independent review verdict",
+      "Unresolved issues"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "name": "Start",
+      "config": {}
+    },
+    {
+      "id": "fix",
+      "type": "agent",
+      "name": "Fix inventory and add unittest coverage",
+      "config": {
+        "actionKind": "implement",
+        "agentId": "developer",
+        "task": "Read inventory.py and fix the zero initialization bug without changing the public signature. Return None on empty input and the actual greatest qty for nonempty input, including all-negative quantities. Add test_inventory.py with unittest assertions for empty, negative, and normal lists. Change only these two files.",
+        "expectedOutput": "Updated inventory.py and test_inventory.py covering the three required list categories.",
+        "successCriteria": [
+          "Empty input returns None.",
+          "All-negative and normal lists return their actual maximum qty.",
+          "Only the two permitted task files are changed."
+        ]
+      }
+    },
+    {
+      "id": "tests",
+      "type": "agent",
+      "name": "Run first tests",
+      "config": {
+        "actionKind": "run-tests",
+        "agentId": "developer",
+        "task": "Run PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v test_inventory.py from the project folder. Record developer.testResult as passed only for a successful exit and all required cases passing, otherwise failed with diagnostics. Route passed to independent review and any other result to the single retry.",
+        "expectedOutput": "Test command, output, exit status, and developer.testResult passed or failed.",
+        "successCriteria": [
+          "Execute the unittest file.",
+          "Record all failures faithfully.",
+          "Choose exactly one switch branch."
+        ]
+      }
+    },
+    {
+      "id": "review",
+      "type": "agent",
+      "name": "Independent review and decision",
+      "config": {
+        "actionKind": "code-review",
+        "agentId": "independent-reviewer",
+        "task": "Use an independent Codex review subagent after first tests pass. Inspect inventory.py, test_inventory.py, the test output, and changed-file scope against all criteria. Do not edit files. Record independent-reviewer.decision as approved or changes_requested with specific findings. Approval reaches Approved; rejection consumes the one retry fix and test run.",
+        "expectedOutput": "Independent review verdict approved or changes_requested, with findings tied to the success criteria.",
+        "successCriteria": [
+          "Review is performed by a separate subagent.",
+          "Review implementation, coverage, test result, and scope.",
+          "A rejection provides concrete issues for the retry."
+        ]
+      }
+    },
+    {
+      "id": "retry-fix",
+      "type": "agent",
+      "name": "One retry fix",
+      "config": {
+        "actionKind": "implement",
+        "agentId": "developer",
+        "task": "Perform the one permitted retry after initial test failure or first independent review rejection. Address the observed test diagnostics or reviewer findings in inventory.py and test_inventory.py only. Do not perform another repair round after this step.",
+        "expectedOutput": "One repair attempt confined to the two permitted files, with its cause documented.",
+        "successCriteria": [
+          "Address the triggering diagnostics or findings.",
+          "Preserve required coverage and scope.",
+          "Consume exactly one retry budget."
+        ]
+      }
+    },
+    {
+      "id": "retry-tests",
+      "type": "agent",
+      "name": "Run tests after retry",
+      "config": {
+        "actionKind": "run-tests",
+        "agentId": "developer",
+        "task": "Run PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v test_inventory.py once after the retry fix. Record developer.testResult passed only for successful exit and all required cases passing; otherwise failed with diagnostics. Passed goes to independent final review; failure or any other result goes to Needs attention without further changes.",
+        "expectedOutput": "Retry test command, output, exit status, and developer.testResult.",
+        "successCriteria": [
+          "Test the retry implementation.",
+          "No further repair is attempted if tests fail.",
+          "Choose exactly one switch branch."
+        ]
+      }
+    },
+    {
+      "id": "final-review",
+      "type": "agent",
+      "name": "Independent final review",
+      "config": {
+        "actionKind": "code-review",
+        "agentId": "independent-reviewer",
+        "task": "Use an independent Codex review subagent after retry tests pass. Independently check current inventory.py, test_inventory.py, passing test evidence, permitted scope, and resolution of any prior findings. Do not edit files. Record independent-reviewer.decision approved or changes_requested. Approved reaches Approved; final rejection, including a second review rejection, reaches Needs attention. No additional fix or review cycle is allowed.",
+        "expectedOutput": "Final independent verdict and any unresolved issues.",
+        "successCriteria": [
+          "Review is independent of the implementer.",
+          "Every required behavior and coverage category is checked.",
+          "A final rejection ends at Needs attention."
+        ]
+      }
+    },
+    {
+      "id": "approved",
+      "type": "end",
+      "name": "Approved",
+      "config": {}
+    },
+    {
+      "id": "needs-attention",
+      "type": "end",
+      "name": "Needs attention",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "start-fix",
+      "source": "start",
+      "target": "fix"
+    },
+    {
+      "id": "fix-tests",
+      "source": "fix",
+      "target": "tests"
+    },
+    {
+      "id": "tests-pass",
+      "source": "tests",
+      "target": "review",
+      "condition": "developer.testResult == \"passed\"",
+      "label": "Tests passed",
+      "kind": "switch"
+    },
+    {
+      "id": "tests-fail",
+      "source": "tests",
+      "target": "retry-fix",
+      "label": "Otherwise: tests failed",
+      "kind": "switch"
+    },
+    {
+      "id": "review-approved",
+      "source": "review",
+      "target": "approved",
+      "condition": "independent-reviewer.decision == \"approved\"",
+      "label": "Approved",
+      "kind": "switch"
+    },
+    {
+      "id": "review-rejected",
+      "source": "review",
+      "target": "retry-fix",
+      "label": "Otherwise: first rejection",
+      "kind": "switch"
+    },
+    {
+      "id": "retry-fix-tests",
+      "source": "retry-fix",
+      "target": "retry-tests"
+    },
+    {
+      "id": "retry-tests-pass",
+      "source": "retry-tests",
+      "target": "final-review",
+      "condition": "developer.testResult == \"passed\"",
+      "label": "Retry tests passed",
+      "kind": "switch"
+    },
+    {
+      "id": "retry-tests-fail",
+      "source": "retry-tests",
+      "target": "needs-attention",
+      "label": "Otherwise: retry tests failed",
+      "kind": "switch"
+    },
+    {
+      "id": "final-approved",
+      "source": "final-review",
+      "target": "approved",
+      "condition": "independent-reviewer.decision == \"approved\"",
+      "label": "Final review approved",
+      "kind": "switch"
+    },
+    {
+      "id": "final-rejected",
+      "source": "final-review",
+      "target": "needs-attention",
+      "label": "Otherwise: final rejection",
+      "kind": "switch"
+    }
+  ],
+  "metadata": {
+    "workflow": {
+      "formatVersion": 5,
+      "agents": [
+        {
+          "id": "developer",
+          "name": "Developer",
+          "role": "Implement and test the inventory fix within the confirmed folder.",
+          "description": "Read inventory.py and replace its zero initialization behavior so max_quantity returns None for empty input and the greatest qty for nonempty lists. Add test_inventory.py with unittest coverage for empty, negative, and normal lists, then run the suite with bytecode writing disabled. Record test results accurately and use at most one retry repair for either a failed first test run or an independent review rejection. Hand implementation, test evidence, and changed-file scope to the reviewer; do not edit outside the two allowed task files or continue repairs after the retry.",
+          "models": {
+            "codex": {
+              "id": "__default__"
+            }
+          }
+        },
+        {
+          "id": "independent-reviewer",
+          "name": "Independent reviewer",
+          "role": "A separate Codex subagent independently reviews passing inventory changes.",
+          "description": "Perform the first review after initial tests pass, or the final review after retry tests pass, using a separate Codex subagent rather than the implementer. Read inventory.py, test_inventory.py, test evidence, and change scope to verify empty input, negative quantities, normal lists, and explicit unittest assertions. Return approved or changes_requested with concrete findings and no file edits. A first rejection allows the single retry, while final rejection terminates at Needs attention; approval is justified only by all criteria holding.",
+          "models": {
+            "codex": {
+              "id": "__default__"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -25,15 +25,17 @@ import type {
   WorkflowEdge,
   WorkflowNode,
 } from "@anthill/workflow-schema";
+import { isSwitcher, outputsOf } from "@anthill/workflow";
 import {
   bendFromPoint,
   entryPoint,
+  labelHalfSize,
   portFromAnchor,
   type Bend,
   type Point,
   type Rect,
 } from "./geometry";
-import { GRID, blockRect, blockSize, snapToGrid } from "./workflow-canvas-model";
+import { GRID, SWITCH_HUB_RADIUS, SWITCH_STEM, blockRect, blockSize, snapToGrid } from "./workflow-canvas-model";
 
 export type LayoutOptions = {
   /** Space between columns. Wide enough for a label to sit on the line. */
@@ -278,11 +280,37 @@ function placeWorkflow(workflow: Workflow, options: LayoutOptions = {}): PlacedW
       });
       y += size.h + settings.rowGap;
     }
-    x += columnWidth + settings.columnGap;
+    x += columnWidth + Math.max(settings.columnGap, switcherRoom(workflow, ids));
   });
 
   return { positions, columns: column };
 }
+
+/**
+ * How wide the gap after a column has to be for its switchers' labels.
+ *
+ * A finger's label belongs on the finger, between the hub and the step it
+ * leads to. With the usual gap a long name — "Final review approved",
+ * "Otherwise: return to Writer for final pass" — is wider than that stretch,
+ * and the label went wherever there was room: above the row, or on another
+ * line's lane (ANT-250). So the gap after a column with a switcher is made as
+ * wide as the stem, the hub and its widest finger label need.
+ */
+function switcherRoom(workflow: Workflow, ids: readonly string[]): number {
+  let widest = 0;
+  for (const id of ids) {
+    const outputs = outputsOf(workflow, id);
+    if (!isSwitcher(outputs)) continue;
+    for (const output of outputs) {
+      if (output.kind !== "switch" || output.target === null) continue;
+      widest = Math.max(widest, labelHalfSize(output.label).halfW * 2);
+    }
+  }
+  return widest === 0 ? 0 : SWITCH_STEM + SWITCH_HUB_RADIUS * 2 + widest + FINGER_LABEL_MARGIN;
+}
+
+/** Room on either side of a finger's label, so it clears the hub and the step's edge. */
+const FINGER_LABEL_MARGIN = 48;
 
 /* ------------------------------------------------------------------ */
 /* Loop-backs                                                          */

@@ -9,6 +9,7 @@
  * | `anthill` on the PATH           | `anthill run/step/done …`                       |
  * | `web`, not on it, a checkout    | `<this node> <checkout>/apps/cli/out/cli/src/cli.js run/step/done …` |
  * | not on it, this server in a plugin | `<this node> <plugin>/server/anthill-report.mjs run/step/done …` |
+ * | not on it, this server in a checkout | `<this node> <checkout>/apps/cli/out/cli/src/cli.js run/step/done …` |
  * | not on it, neither              | `anthill run/step/done …`, all there is to offer |
  *
  * The checkout's CLI is a from-source install that never ran `npm link`, which
@@ -65,7 +66,14 @@ export function onPath(name: string, deps: InvocationDeps): string | undefined {
 export function reportingInvocation(resolved: ResolvedTarget, deps: InvocationDeps): CliInvocation {
   const onThePath = onPath("anthill", deps) !== undefined;
   const reporter = deps.reporter ? { command: `${nodeFor(deps)} ${typedPath(deps.reporter, deps.platform)}` } : {};
-  if (resolved.target !== "web") return onThePath ? {} : reporter;
+  // A server built in a checkout has no reporter beside it, and with no
+  // `anthill` on the PATH plain `anthill run …` cannot run: every report of a
+  // chat sent to the dev build failed with "command not found" (ANT-249). The
+  // checkout's own CLI reports the same way, so it stands in for the reporter.
+  const checkoutCli = !deps.reporter && resolved.checkout
+    ? { command: `${nodeFor(deps)} ${typedPath(webShellCli(resolved.checkout), deps.platform)}` }
+    : {};
+  if (resolved.target !== "web") return onThePath ? {} : deps.reporter ? reporter : checkoutCli;
   const platform = { platform: deps.platform };
   const dataDir = resolve(resolved.dataDir) === resolve(targetDataDir("web", deps))
     ? {}

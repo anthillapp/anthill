@@ -325,6 +325,46 @@ function onFinger(
   return own.find((point) => clear(point, [...taken, handle])) ?? own.find((point) => clear(point, taken));
 }
 
+/**
+ * A spot beside a finger, for a label its finger has no room to hold.
+ *
+ * A finger between a hub and the step in line with it is often shorter than
+ * its label, and one into an End just past the hub may run where every spot
+ * on it touches a block. The label then stayed wherever it was first put —
+ * above the row, nearer another line than its own, or on another line's lane
+ * (ANT-250). Beside its own finger, just above or below it, it still reads as
+ * that finger's: no other line runs through it, no block is under it, and its
+ * own line is the nearest one. The closest such spot wins, nearest the hub
+ * first.
+ */
+function besideFinger(
+  own: readonly Point[],
+  others: readonly Point[],
+  halfW: number,
+  halfH: number,
+  blocks: readonly Rect[],
+  taken: readonly Rect[],
+): Point | undefined {
+  let best: { point: Point; distance: number } | undefined;
+  const lifts = [0, halfH + 4, -(halfH + 4), halfH + 14, -(halfH + 14), halfH + 26, -(halfH + 26)];
+  const shifts = [0, -halfW / 2, halfW / 2, -halfW, halfW];
+  for (const point of own) {
+    for (const dy of lifts) {
+      for (const dx of shifts) {
+        const at = { x: point.x + dx, y: point.y + dy };
+        const box = rectAt(at, halfW, halfH);
+        if (blocks.some((block) => overlaps(box, block))) continue;
+        if (taken.some((rect) => overlaps(box, rect))) continue;
+        if (others.some((other) => Math.abs(other.x - at.x) < halfW && Math.abs(other.y - at.y) < halfH)) continue;
+        const distance = nearest(at, own);
+        if (distance >= nearest(at, others)) continue;
+        if (!best || distance < best.distance - 0.5) best = { point: at, distance };
+      }
+    }
+  }
+  return best?.point;
+}
+
 export function buildCanvasModel(workflow: Workflow): CanvasModel {
   const rects = new Map<string, Rect>();
   for (const node of workflow.nodes) rects.set(node.id, blockRect(node));
@@ -553,6 +593,27 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
         }
       }
       /*
+        A line sent round over the row to a block above its port still landed
+        on that block's bottom, the side facing the port, so its last leg
+        dropped from the lane through the block and its arrow pointed up from
+        underneath: a first review's "passed" to the upper of two stacked Ends
+        (ANT-254). Sent round over the top, the way in is the block's left
+        side, high up; under the bottom, low down.
+      */
+      if (
+        geometry.lane &&
+        !output.anchor &&
+        !output.bend &&
+        (geometry.lane.up ? landing.side === "bottom" : landing.side === "top")
+      ) {
+        const side = entryPoint(targetRect, port, { u: 0, v: geometry.lane.up ? 0.3 : 0.7 });
+        const beside = route(port, side, options);
+        if (!passesUnder(port, side, beside, blocks)) {
+          landing = side;
+          geometry = beside;
+        }
+      }
+      /*
         Two lines sent round the same blocks took the same lane: every detour
         runs at the nearest clear height, so a switcher's fingers to two ends
         past the row ran one on top of the other, and nothing said which hub
@@ -716,13 +777,26 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
       const through = others.some(
         (point) => Math.abs(point.x - path.label.x) < halfW && Math.abs(point.y - path.label.y) < halfH,
       );
-      if (!through && nearest(path.label, own) <= nearest(path.label, others)) return;
+      const toOwn = nearest(path.label, own);
+      // Off its own line by more than its own height is not on it either: the
+      // label reads as floating, or as the label of whatever is nearer (ANT-250).
+      const away = toOwn > halfH + LABEL_CLEARANCE;
+      // On its finger, but out by the step it leads to rather than by the hub
+      // it leaves: read along the row, it names the next connection.
+      const fromHub = (point: Point) => Math.hypot(point.x - own[0].x, point.y - own[0].y);
+      const farOut = own.length > 1 && fromHub(path.label) > Math.hypot(path.label.x - own[own.length - 1].x, path.label.y - own[own.length - 1].y);
+      if (!through && !away && !farOut && toOwn <= nearest(path.label, others)) return;
       const taken = [
         ...hubs,
         ...connected.flatMap((other, at) => (at === index ? [] : [rectAt(other.label, placing[at].halfW, placing[at].halfH)])),
       ];
-      const label = onFinger(own, others, halfW, halfH, blocks, taken, handle);
-      if (label) connected[index] = { ...path, label };
+      const label =
+        onFinger(own, others, halfW, halfH, blocks, taken, handle) ??
+        besideFinger(own, others, halfW, halfH, blocks, taken);
+      // Only ever nearer its own line, or nearer its hub, than where it was.
+      if (label && (through || nearest(label, own) < toOwn || (farOut && fromHub(label) < fromHub(path.label)))) {
+        connected[index] = { ...path, label };
+      }
     });
   }
 

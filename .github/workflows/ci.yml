@@ -1,0 +1,39 @@
+# Typecheck and test every pull request, before it can be merged.
+#
+# The same checks the release workflow runs before it builds, on the same
+# runner (`macos-14`, Apple Silicon), so a change that would break a release is
+# caught on its pull request instead of on its tag. It builds no app and uses
+# no secrets: `pull_request` from a fork gets none, and none are needed.
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same pull request makes the older run moot.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The Electron-ABI copy of better-sqlite3, which the desktop tests load.
+      - run: node apps/desktop/scripts/fetch-electron-sqlite.mjs
+
+      - run: npm run typecheck
+      - run: npm test

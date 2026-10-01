@@ -159,6 +159,17 @@ export type Evidence =
    * has not closed.
    */
   | { kind: "working"; sessionId: string; at: string; since: string; detail?: string }
+  /**
+   * The session ended its turn at an approval and is waiting for the person's
+   * answer.
+   *
+   * Codex records `task_complete` at the end of every turn, the one that asks
+   * a gate's question included, and read as the session finishing it closed
+   * the run while the chat sat open waiting to be answered (ANT-210). Reported
+   * at the moment of the look, like `working`, for as long as nothing has been
+   * said since; it keeps a run being followed live, and never revives one.
+   */
+  | { kind: "awaiting"; sessionId: string; at: string; since: string; detail?: string }
   /** The tool recorded that the work finished. */
   | { kind: "completed"; sessionId: string; channel: string; at: string; detail?: string }
   /**
@@ -243,7 +254,12 @@ export function isVisible(run: PendingRun): boolean {
 }
 
 /** One step of the workflow a run was copied from: the marker's id, and its name. */
-export type RunStep = { id: string; name: string };
+export type RunStep = {
+  id: string;
+  name: string;
+  /** An Approval Gate: a turn that ends on it is waiting for a person (ANT-210). */
+  gate?: true;
+};
 
 export type NewRunInput = {
   anthillRunId: string;
@@ -382,6 +398,16 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
         evidenceChannel: evidence.channel,
         lastObservedAt: evidence.at,
         statusMessage: `${evidence.sessionIds.length} local sessions carry this marker, so Anthill cannot say which one to observe.`,
+      };
+
+    case "awaiting":
+      if (run.state !== "detected_live") return run;
+      if (run.detectedSessionId && run.detectedSessionId !== evidence.sessionId) return run;
+      return {
+        ...run,
+        expiresAt: windowFrom(run, evidence.at),
+        lastObservedAt: evidence.at,
+        statusMessage: evidence.detail ?? "The session is waiting for your answer at an approval.",
       };
 
     case "working": {
@@ -671,6 +697,8 @@ function isNewsSince(evidence: Evidence, run: PendingRun, since: number): boolea
     // the interrupt that closed it, and taking that as a return would reopen
     // the run on the strength of the record that ended it.
     case "interrupted":
+    // Nothing written: the session is still waiting where it was.
+    case "awaiting":
       return false;
     case "ambiguous":
       // Only sessions still speaking are counted as contenders, so this is

@@ -529,6 +529,36 @@ describe("a marker that turns up in more than one session", () => {
  * said it was done kept reviving a run the harness had explicitly reported
  * finished, poll after poll, for as long as the stale record lived.
  */
+/*
+  ANT-210. Codex ends every turn with task_complete, the one that asks an
+  Approval Gate's question too. While nobody has answered, the session is
+  waiting, not finished, and not lost to silence either.
+*/
+describe("a session waiting for an answer at an approval", () => {
+  const live = () => applyEvidence(run(), strongMatch);
+  const awaiting = (at: number) => ({
+    kind: "awaiting" as const, sessionId: "sess-1", at: later(at), since: later(60_000),
+  });
+
+  it("stays live, and says it is waiting", () => {
+    const next = applyEvidence(live(), awaiting(4 * 60_000));
+    expect(next.state).toBe("detected_live");
+    expect(next.statusMessage).toContain("waiting for your answer");
+  });
+
+  it("is not called lost while it waits", () => {
+    const next = applyEvidence(live(), awaiting(9 * 60_000));
+    expect(hasGoneQuiet(next, later(10 * 60_000))).toBe(false);
+  });
+
+  it("never revives a run that already ended", () => {
+    const finished = applyEvidence(live(), {
+      kind: "completed", sessionId: "sess-1", channel: "codex:rollout", at: later(2 * 60_000),
+    });
+    expect(applyEvidence(finished, awaiting(4 * 60_000)).state).toBe("completed");
+  });
+});
+
 describe("a finished run and a claim of work", () => {
   const finished = () =>
     applyEvidence(applyEvidence(run(), strongMatch), {

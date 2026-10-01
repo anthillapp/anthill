@@ -3,6 +3,7 @@ import type { Workflow } from "@anthill/workflow-schema";
 import { WORKFLOW_TEMPLATES, addOutput } from "@anthill/workflow";
 
 import { PORT_OFFSET, labelHalfSize } from "./geometry";
+import { withDisplayLayout } from "./display-layout";
 import type { WorkflowNode } from "@anthill/workflow-schema";
 
 import {
@@ -388,6 +389,14 @@ describe("how large a control pill is", () => {
     }
   });
 
+  // ANT-213: "Approved" was sized a pixel short and wrapped as "Approve / d".
+  it("fits a one-word name on one line with room to spare", () => {
+    const approved = pill("Approved");
+    expect(approved.h).toBe(PILL_SIZE.h);
+    // The pill's chrome is 49px; the name gets what is left.
+    expect(approved.w - 49).toBeGreaterThanOrEqual("Approved".length * 7.6 + 8);
+  });
+
   it("grows wider for a name that does not fit", () => {
     const grown = pill("Ready for the PR");
     expect(grown.w).toBeGreaterThan(PILL_SIZE.w);
@@ -624,5 +633,59 @@ describe("labels where two connections meet at one step", () => {
     const model = buildCanvasModel(join);
     const y = (id: string) => model.connected.find((path) => path.output.id === id)!.label.y;
     expect(y("from-upper")).toBeLessThan(y("from-lower"));
+  });
+});
+
+/*
+  ANT-213, W13 through the Codex plugin in the 0.8.5 QA: a handover with no
+  positions, two End blocks, and the reviewers' switchers leading to both.
+  The fingers to the two ends ran along one line above the row, their labels
+  floated in empty space, and "Approved" wrapped inside its own pill.
+*/
+describe("a handover with two ends reached through switchers", () => {
+  const handover = withDisplayLayout({
+    id: "notes-summary-review",
+    name: "Classify notes and verify summary",
+    version: "1",
+    target: "codex",
+    nodes: [{"id": "start", "type": "start", "name": "Start", "config": {}}, {"id": "analyst", "type": "agent", "name": "Classify notes", "config": {}}, {"id": "writer-pass-1", "type": "agent", "name": "Write SUMMARY.md", "config": {}}, {"id": "review-pass-1", "type": "agent", "name": "Review first summary", "config": {}}, {"id": "writer-pass-2", "type": "agent", "name": "Revise SUMMARY.md once", "config": {}}, {"id": "review-pass-2", "type": "agent", "name": "Review final summary", "config": {}}, {"id": "approved", "type": "end", "name": "Approved", "config": {}}, {"id": "needs-attention", "type": "end", "name": "Needs attention", "config": {}}],
+    edges: [{"id": "e-start-analyst", "source": "start", "target": "analyst"}, {"id": "e-analyst-writer1", "source": "analyst", "target": "writer-pass-1"}, {"id": "e-writer1-review1", "source": "writer-pass-1", "target": "review-pass-1"}, {"id": "e-review1-approved", "source": "review-pass-1", "target": "approved", "condition": "reviewer.decision == \"approved\"", "label": "Approved", "kind": "switch"}, {"id": "e-review1-rework", "source": "review-pass-1", "target": "writer-pass-2", "condition": "reviewer.decision == \"summary_changes_requested\"", "label": "Summary corrections", "kind": "switch"}, {"id": "e-review1-failed", "source": "review-pass-1", "target": "needs-attention", "label": "Input changed or other failure", "kind": "switch"}, {"id": "e-writer2-review2", "source": "writer-pass-2", "target": "review-pass-2"}, {"id": "e-review2-approved", "source": "review-pass-2", "target": "approved", "condition": "reviewer.decision == \"approved\"", "label": "Approved", "kind": "switch"}, {"id": "e-review2-failed", "source": "review-pass-2", "target": "needs-attention", "label": "Still incorrect", "kind": "switch"}],
+  } as Workflow);
+  const model = buildCanvasModel(handover);
+  const finger = (id: string) => model.connected.find((path) => path.output.id === id)!;
+
+  it("runs each finger past the row in a lane of its own", () => {
+    const lanes = model.connected.flatMap((path) => (path.geometry.lane ? [path.geometry.lane] : []));
+    expect(lanes.length).toBeGreaterThan(1);
+    for (const [i, a] of lanes.entries()) {
+      for (const b of lanes.slice(i + 1)) {
+        const overlap = a.left < b.right && b.left < a.right && a.up === b.up;
+        if (overlap) expect(Math.abs(a.y - b.y)).toBeGreaterThanOrEqual(20);
+      }
+    }
+  });
+
+  it("puts a finger's label on its own lane", () => {
+    for (const id of ["e-review1-approved", "e-review1-failed"]) {
+      const path = finger(id);
+      expect(path.geometry.lane, id).toBeDefined();
+      if (!path.geometry.lane) continue;
+      expect(path.label.y, id).toBe(path.geometry.lane.y);
+      expect(path.label.x, id).toBeGreaterThanOrEqual(path.geometry.lane.left);
+      expect(path.label.x, id).toBeLessThanOrEqual(path.geometry.lane.right);
+    }
+  });
+
+  it("keeps a level finger's label off the other fingers' lanes", () => {
+    const short = finger("e-review1-rework");
+    const lanes = model.connected.flatMap((path) => (path.geometry.lane ? [path.geometry.lane] : []));
+    const crosses = lanes.some(
+      (lane) =>
+        lane.left <= short.label.x &&
+        short.label.x <= lane.right &&
+        Math.min(short.label.y, short.geometry.mid.y) < lane.y &&
+        lane.y < Math.max(short.label.y, short.geometry.mid.y),
+    );
+    expect(crosses).toBe(false);
   });
 });

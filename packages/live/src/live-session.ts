@@ -19,9 +19,9 @@
 import type { Workflow } from "@anthill/workflow-schema";
 import { nodesOnCycles, parallelPlan } from "@anthill/workflow";
 
-import { attribute, buildWorkflowIndex, type BlockMapping, type WorkflowIndex } from "./attribution.js";
+import { attribute, buildWorkflowIndex, stepForAgent, type BlockMapping, type WorkflowIndex } from "./attribution.js";
 import { projectJournal } from "./channels.js";
-import { completionOf, type ObservationEvent } from "./observation-event.js";
+import { completionOf, isAnthillTool, type ObservationEvent } from "./observation-event.js";
 import type { PendingRun } from "./pending-run.js";
 
 /** How a block is drawn while a session is being observed. */
@@ -269,6 +269,12 @@ export function foldLiveSession(
   */
   let stoppedHere = false;
   /**
+   * The session's last word was a stop by hand, nothing started since. A run
+   * a stop closes is `observation_lost`, and what it was doing is known: it
+   * was stopped, not lost sight of (ANT-208).
+   */
+  let sessionStopped = false;
+  /**
    * When the session last said the work was over, while nothing has resumed
    * since. An explicit ending settles the step it lands on without the
    * hooks' help, and a generic turn end after it cannot reopen it (ANT-158,
@@ -347,15 +353,33 @@ export function foldLiveSession(
    * A step left with no work done turns out to have been finished after all:
    * closed as of the moment it was left, and the move that left it counted.
    */
+  /** Steps whose last pass was closed with nothing done in it. */
+  const closedEmpty = new Set<string>();
+
+  /*
+    Tool calls that failed in a step's current pass and were not made to work
+    after: by step, the tools whose last call there failed. A step whose Write
+    was refused, and the file never written, was settled Done when the run
+    went quiet — the refusal was on the page in red, and the session never said
+    the work was done (ANT-220).
+  */
+  const failedIn = new Map<string, Set<string>>();
+  const toolNames = new Map<string, string>();
+  const UNFINISHED_NOTE = (tool: string) =>
+    `A ${tool} call in this step failed and was never made to work, and the session ended without saying the work was done.`;
+
   const closePending = (id: string) => {
     const pending = pendingClose.get(id);
     if (!pending) return;
     pendingClose.delete(id);
     finish(id, pending.leftAt);
+    closedEmpty.add(id);
     if (pending.detour) detours.push(pending.detour);
   };
 
   const enter = (id: string, at: string, viaTag: boolean) => {
+    closedEmpty.delete(id);
+    failedIn.delete(id);
     // Back to a step left with nothing done in it: it never ended, so this is
     // the same pass going on, not another (ANT-166 — "A, B" in one command,
     // then "A" again to start on it).
@@ -511,6 +535,11 @@ export function foldLiveSession(
   for (const event of journal) {
     if (event.printedBy) plumbing.add(event.printedBy);
     if (event.kind === "subagent.start" && event.toolUseId) plumbing.add(event.toolUseId);
+    // Calls to Anthill's own tools: the session reading or reporting on the
+    // run, not working in it (ANT-215).
+    if ((event.kind === "tool.start" || event.kind === "tool.end") && event.toolUseId && isAnthillTool(event.toolName)) {
+      plumbing.add(event.toolUseId);
+    }
     if (
       event.kind === "message" &&
       event.parentToolUseId &&
@@ -521,8 +550,48 @@ export function foldLiveSession(
     }
   }
   for (const event of journal) {
+    /*
+      A subagent that had handed back, at work again: the session reused it —
+      Claude Code's SendMessage, Codex's send_message — and what it does now is
+      for the step the session is on, not the one it was first started for.
+      Its Fix-stage edits were filed under Implement, and the step it was
+      reused for never waited on it (ANT-218).
+    */
+    const reused = event.parentToolUseId ? delegations.get(event.parentToolUseId) : undefined;
+    // A tool call, not a message: an agent's closing words and the end of its
+    // turn are one record, stamped alike, and may be read in either order.
+    if (reused && reused.delegateEnded && event.kind === "tool.start") {
+      reused.delegateEnded = false;
+      reused.returned = false;
+      // Its call returned long ago and will not again: reused, it runs on its
+      // own, and the end of its turn is its end.
+      reused.background = true;
+      // Its next ending is a new one, to be paired with its own hook.
+      endedByHook.delete(event.parentToolUseId as string);
+      if (announced && blocks[announced] && reused.blockId !== announced) {
+        reused.blockId = announced;
+        delegatedFrom.set(event.parentToolUseId as string, announced);
+      }
+      // The session's turn ending before the reused agent began was the
+      // session waiting for it, not for a person.
+      const step = blocks[reused.blockId];
+      if (step?.state === "needsYou" && step.waitReason === "yielded" && !finishedAt && !stoppedHere) {
+        const { note: _note, waitReason: _why, ...rest } = step;
+        blocks[reused.blockId] = { ...rest, state: "running" };
+      }
+    }
     const mapping = attribute(event, index, announced, delegatedFrom);
     attributed.push({ ...event, mapping });
+    if (event.kind === "tool.start" && event.toolUseId && event.toolName) toolNames.set(event.toolUseId, event.toolName);
+    if (event.kind === "tool.end" && event.toolUseId && mapping.blockId && event.ok !== undefined) {
+      const tool = event.toolName ?? toolNames.get(event.toolUseId);
+      if (tool && !isAnthillTool(tool)) {
+        const failed = failedIn.get(mapping.blockId) ?? new Set<string>();
+        if (event.ok === false) failed.add(tool);
+        else failed.delete(tool);
+        failedIn.set(mapping.blockId, failed);
+      }
+    }
     // Usage is bookkeeping, not activity; counting it against "events not
     // mapped to a step" would make every quiet turn look like a mystery.
     if (mapping.confidence === "unmapped" && event.kind !== "usage") unmappedCount += 1;
@@ -651,13 +720,25 @@ export function foldLiveSession(
     */
     if (event.kind === "subagent.start" && event.toolUseId) {
       const own = saysItWorksOn.get(event.toolUseId);
+      // The agent it runs, when exactly one step has that agent (ANT-217).
+      const named = stepForAgent(index, event.agentName) ?? stepForAgent(index, event.detail);
       const target =
         event.stepTag && blocks[event.stepTag]
           ? event.stepTag
           : own && blocks[own]
             ? own
-            : announced;
+            : named && blocks[named]
+              ? named
+              : announced;
       if (target && blocks[target]) {
+        // The dispatch card belongs where its subagent's work goes.
+        const card = attributed[attributed.length - 1];
+        if (card?.toolUseId === event.toolUseId && card.mapping.blockId !== target) {
+          card.mapping =
+            target === named && !event.stepTag && !own
+              ? { blockId: target, confidence: "likely", how: "the agent this subagent runs belongs to this step" }
+              : { blockId: target, confidence: "exact", how: "a subagent started for this step" };
+        }
         delegations.set(event.toolUseId, {
           blockId: target,
           background: event.background === true,
@@ -673,7 +754,10 @@ export function foldLiveSession(
         // coming back to it — a new pass, which its line will then confirm
         // (ANT-184).
         if (target !== announced && blocks[target].state === "done" && !finishedAt) {
-          if (!workSinceEntered) reopen(target);
+          // Closed with nothing done in it, when the session went on to other
+          // work: announced with its sibling, then set up for (ANT-217). Its
+          // subagent says it was not over, and this is the same pass.
+          if (!workSinceEntered || closedEmpty.has(target)) reopen(target);
           else {
             const pass = blocks[target].passes + 1;
             blocks[target] = { ...blocks[target], state: "running", enteredAt: event.at, passes: pass };
@@ -722,7 +806,9 @@ export function foldLiveSession(
     // The session stopped by hand: over for now, and not asking anybody
     // anything. Waiting on the person only in that nothing goes on until
     // they type again, so it is never presented as a question (ANT-204).
+    if (resumesWork(event)) sessionStopped = false;
     if (event.kind === "notification" && event.title === STOPPED_BY_HAND) {
+      if (!finishedAt) sessionStopped = true;
       if (!finishedAt && announced && blocks[announced]?.state === "running") {
         stoppedHere = true;
         blocks[announced] = {
@@ -749,7 +835,15 @@ export function foldLiveSession(
         };
         spans.push({ blockId: announced, pass: blocks[announced].passes, startedAt: event.at });
         finishedAt = undefined;
-      } else if (resumesWork(event) && event.kind !== "session.start") {
+      } else if (
+        resumesWork(event) &&
+        event.kind !== "session.start" &&
+        !(event.toolUseId && plumbing.has(event.toolUseId)) &&
+        // A call only the hooks saw, after the ending: Claude Code's own
+        // helper, which fires hooks under the session and is in no
+        // transcript (ANT-218).
+        !(hookOnly && event.kind === "tool.start")
+      ) {
         blocks[announced] = { ...blocks[announced], state: "running", enteredAt: event.at };
         spans.push({ blockId: announced, pass: blocks[announced].passes, startedAt: event.at });
         finishedAt = undefined;
@@ -845,10 +939,17 @@ export function foldLiveSession(
         if (stoppedFor.has(announced)) finish(announced, lastSeenAt, "failed", STOPPED_NOTE);
         else if (outstanding(announced)) finish(announced, lastSeenAt, "unknown", CUT_OFF_NOTE);
         else if (stoppedAndEnded) finish(announced, lastSeenAt, "failed", STOPPED_HERE_NOTE);
-        else finish(announced, lastSeenAt);
+        else if (failedIn.get(announced)?.size) {
+          finish(announced, lastSeenAt, "unknown", UNFINISHED_NOTE([...(failedIn.get(announced) ?? [])][0]));
+        } else finish(announced, lastSeenAt);
       }
     } else if (open && run.state === "failed") {
       finish(announced, lastSeenAt ?? run.lastObservedAt ?? run.createdAt, "failed", run.statusMessage);
+    } else if (open && run.state === "observation_lost" && sessionStopped) {
+      const at = lastSeenAt ?? run.createdAt;
+      if (stoppedFor.has(announced)) finish(announced, at, "failed", STOPPED_NOTE);
+      else if (outstanding(announced)) finish(announced, at, "unknown", CUT_OFF_NOTE);
+      else finish(announced, at, "failed", STOPPED_HERE_NOTE);
     } else if (open && (run.state === "observation_lost" || run.state === "ambiguous_match")) {
       finish(announced, lastSeenAt ?? run.createdAt, "unknown", "Anthill stopped being able to read this session.");
     }
@@ -867,6 +968,10 @@ export function foldLiveSession(
       else finish(id, at);
     }
     else if (run.state === "failed") finish(id, at, "failed", run.statusMessage);
+    else if (run.state === "observation_lost" && sessionStopped) {
+      if (stoppedFor.has(id)) finish(id, at, "failed", STOPPED_NOTE);
+      else finish(id, at, "unknown", CUT_OFF_NOTE);
+    }
     else if (run.state === "observation_lost" || run.state === "ambiguous_match") {
       finish(id, at, "unknown", "Anthill stopped being able to read this session.");
     }

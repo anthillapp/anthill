@@ -38,6 +38,12 @@ export type CurveGeometry = {
   to: EntryPoint;
   /** Which axis a stepped line turns on. Absent for curves. */
   turn?: "x" | "y";
+  /**
+   * Where a detour runs over or under the row: its height and the span it
+   * covers. Present only on a line the router sent round blocks, so a caller
+   * can keep two such lines off the same lane (ANT-213).
+   */
+  lane?: { y: number; left: number; right: number; up: boolean };
 };
 
 /** Unit vector pointing away from a block, per side. */
@@ -571,12 +577,14 @@ function clearOf(
   routing: Routing,
   base: CurveGeometry,
   blocks: readonly Rect[],
+  /** How much further out than the nearest clear lane to run. */
+  lift = 0,
 ): CurveGeometry {
   const from = departure(a);
   const hit = crossed(samplesAlong(base), blocks, from, b);
   if (hit.length === 0) return base;
 
-  const drawn = (points: readonly Point[]): CurveGeometry => ({
+  const drawn = (points: readonly Point[], y: number, up: boolean): CurveGeometry => ({
     path:
       routing === "orthogonal"
         ? points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ")
@@ -585,6 +593,12 @@ function clearOf(
     from,
     to: b,
     ...(routing === "orthogonal" ? { turn: "y" as const } : {}),
+    lane: {
+      y,
+      left: Math.min(...points.map((point) => point.x)),
+      right: Math.max(...points.map((point) => point.x)),
+      up,
+    },
   });
 
   const above = Math.min(...hit.map((block) => block.top));
@@ -606,12 +620,12 @@ function clearOf(
     // land inside the same tall neighbour.
     let edge = up ? above : below;
     for (let attempt = 0; attempt < ROUTE_TRIES; attempt += 1) {
-      const y = up ? edge - ROUTE_CLEARANCE : edge + ROUTE_CLEARANCE;
+      const y = up ? edge - ROUTE_CLEARANCE - lift : edge + ROUTE_CLEARANCE + lift;
       const points = detour(from, b, y);
       const inTheWay = crossed(along(points), blocks, from, b);
-      if (inTheWay.length === 0) return drawn(points);
+      if (inTheWay.length === 0) return drawn(points, y, up);
       if (inTheWay.length < bestCrossings) {
-        best = drawn(points);
+        best = drawn(points, y, up);
         bestCrossings = inTheWay.length;
       }
       // Past what this attempt actually met. A step that would not get further
@@ -699,7 +713,13 @@ function trimArch(
 export function route(
   a: LooseFrom,
   b: EntryPoint,
-  options: { routing?: Routing; bend?: Bend | null; blocks?: readonly Rect[] } = {},
+  options: {
+    routing?: Routing;
+    bend?: Bend | null;
+    blocks?: readonly Rect[];
+    /** Run a detour this much further out than the nearest clear lane (ANT-213). */
+    lift?: number;
+  } = {},
 ): CurveGeometry {
   const base =
     options.routing === "orthogonal"
@@ -714,7 +734,7 @@ export function route(
       : trimArch(a, b, options.bend, base, blocks);
   }
   if (!blocks || blocks.length === 0) return base;
-  return clearOf(a, b, options.routing ?? "curved", base, blocks);
+  return clearOf(a, b, options.routing ?? "curved", base, blocks, options.lift);
 }
 
 /**

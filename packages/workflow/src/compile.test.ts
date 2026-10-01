@@ -112,6 +112,37 @@ function verifyLoop(): Workflow {
 }
 
 describe("compile – agent files", () => {
+  /*
+    ANT-216, the museum note in the 0.8.5 QA. One Finalizer did two exclusive
+    branches — approved: write KEEP.md, never DECLINED.md; declined: the
+    reverse — and its file listed every rule as the agent's, forbidding both.
+  */
+  it("keeps a stage's own constraints with that stage in a multi-stage agent's file", () => {
+    const workflow = reviewLoop();
+    workflow.nodes = workflow.nodes.map((node) => {
+      if (node.id === "dev") {
+        return { ...node, config: { ...node.config, constraints: ["Do not modify WELCOME.md", "Do not write DECLINED.md"] } };
+      }
+      if (node.id === "rev") {
+        return {
+          ...node,
+          config: { ...node.config, agentId: "agent-dev", constraints: ["Do not modify WELCOME.md", "Do not write KEEP.md"] },
+        };
+      }
+      return node;
+    });
+    const developer = compile(workflow).files.find((f) => f.path.endsWith("developer.md"))?.content ?? "";
+    const shared = developer.slice(developer.indexOf("## Constraints for every stage"));
+    expect(shared).toContain("- Do not modify WELCOME.md");
+    expect(shared).not.toContain("KEEP.md");
+    expect(shared).not.toContain("DECLINED.md");
+
+    const implement = developer.slice(developer.indexOf("## Implement"), developer.indexOf("## Review"));
+    expect(implement).toContain("Constraints for this stage only:\n- Do not write DECLINED.md");
+    const review = developer.slice(developer.indexOf("## Review"), developer.indexOf("## Constraints for every stage"));
+    expect(review).toContain("Constraints for this stage only:\n- Do not write KEEP.md");
+  });
+
   it("writes one file per role for Claude Code", () => {
     const { files } = compile(reviewLoop());
     expect(files.map((f) => f.path)).toEqual([

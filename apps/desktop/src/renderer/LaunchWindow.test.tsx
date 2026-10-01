@@ -181,7 +181,9 @@ describe("sessions and everything else", () => {
   });
 
   it("puts a failed run in the workflow list, since nothing is being watched", async () => {
-    await show([workflow({ path: "/a.json", name: "Alpha", workflowId: "workflow-a" })], [run("failed", "workflow-a", true)]);
+    // A session that did start and then failed.
+    const failed = { ...run("failed", "workflow-a", true), detectedSessionId: "sess-a" };
+    await show([workflow({ path: "/a.json", name: "Alpha", workflowId: "workflow-a" })], [failed]);
     expect(document.querySelectorAll(".launch-group-head")).toHaveLength(0);
     expect(screen.getByText("Session failed")).toBeTruthy();
   });
@@ -762,6 +764,20 @@ describe("a workflow whose run is no longer being watched", () => {
     expect(screen.getByText(/^Live/)).toBeTruthy();
     expect(screen.queryByText("Session failed")).toBeNull();
     expect(document.querySelector(".recent-chip.is-past")).toBeNull();
+  });
+
+  // ANT-212: nothing started, so nothing failed.
+  it("says no session appeared, not that one failed, when none ever did", async () => {
+    await show([workflow({ path: "/w/one.json", name: "One", workflowId: "w-1", lastRun: { state: "failed", at: "2026-09-08T14:30:00.000Z", unclaimed: true } })]);
+    expect(screen.getByText("No session appeared")).toBeTruthy();
+    expect(screen.queryByText("Session failed")).toBeNull();
+    expect([...(document.querySelector(".recent-mark") as HTMLElement).classList]).not.toContain("tone-bad");
+  });
+
+  it("says the same of a run that has just run out of waiting", async () => {
+    await show([workflow({ path: "/w/one.json", name: "One", workflowId: "w-1" })], [run("failed", "w-1", true)]);
+    expect(screen.getByText(/No session appeared/)).toBeTruthy();
+    expect(screen.queryByText("Session failed")).toBeNull();
   });
 
   it("is grey again when nothing was ever observed", async () => {

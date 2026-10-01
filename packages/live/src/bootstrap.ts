@@ -21,6 +21,7 @@ import type { Workflow } from "@anthill/workflow-schema";
 import { compile, executableBlocks, type CompileResult } from "@anthill/workflow";
 
 import { cliInstruction, echoInstruction, renderMarker, stepOpening, type RunMarker } from "./marker.js";
+import type { RunStep } from "./pending-run.js";
 
 export type BootstrapResult = CompileResult & {
   /** The prompt to copy: marker, set-up, then the workflow. */
@@ -52,7 +53,7 @@ export type BootstrapOptions = {
  * exactly what the prompt asked for and never a step the session was never
  * told about.
  */
-export function workflowSteps(workflow: Workflow): { id: string; name: string }[] {
+export function workflowSteps(workflow: Workflow): RunStep[] {
   // The order the compiled prompt uses, not the order the blocks were drawn
   // in. These were different lists of the same blocks: the prompt numbered
   // them by a walk from the start block, this numbered them by their position
@@ -60,7 +61,11 @@ export function workflowSteps(workflow: Workflow): { id: string; name: string }[
   // runs. Both carried the id, so a report was never about the wrong block —
   // but "step 1" in the prompt and the first entry in the list the agent was
   // told to report against could be two different steps (ANT-101).
-  return executableBlocks(workflow).map((node) => ({ id: node.id, name: node.name }));
+  return executableBlocks(workflow).map((node) => ({
+    id: node.id,
+    name: node.name,
+    ...(node.type === "approval" ? { gate: true as const } : {}),
+  }));
 }
 
 export function buildBootstrapPrompt(

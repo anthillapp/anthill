@@ -485,6 +485,76 @@ describe("a workflow that can end in more than one place", () => {
   it("still claims the one end a workflow has", () => {
     expect(ends(workflow).some((cls) => cls.includes("state-done"))).toBe(true);
   });
+
+  /*
+    ANT-214, W13 on Codex in the 0.8.5 QA. The reviewer's switcher goes to
+    Approved or to Needs attention; the reviewer approved, the closing message
+    said so, and the finished run coloured neither end nor either finger.
+  */
+  describe("reached through a switcher the session named", () => {
+    const switched: Workflow = {
+      ...workflow,
+      nodes: [
+        ...workflow.nodes.filter((node) => node.type !== "end"),
+        { id: "approved", type: "end", name: "Approved", config: {}, position: { x: 600, y: 60 } },
+        { id: "attention", type: "end", name: "Needs attention", config: {}, position: { x: 600, y: 300 } },
+      ],
+      edges: [
+        ...workflow.edges.filter((edge) => !workflow.nodes.some((node) => node.type === "end" && node.id === edge.target)),
+        { id: "ok", source: "implement", target: "approved", kind: "switch", label: "Approved", condition: 'reviewer.decision == "approved"' },
+        { id: "bad", source: "implement", target: "attention", kind: "switch", label: "Input changed or other failure" },
+      ],
+    };
+
+    function drawn(said: string) {
+      const finishedRun = { ...run, state: "completed" as const };
+      const view = foldLiveSession(switched, finishedRun, []);
+      const shown = {
+        ...view,
+        empty: false,
+        blocks: {
+          ...view.blocks,
+          implement: { ...view.blocks.implement, state: "done" as const, passes: 1, enteredAt: "2026-09-30T04:42:46.000Z" },
+        },
+        events: [
+          {
+            runId: "ANT-1", seq: 1, at: "2026-09-30T04:43:19.000Z", recordedAt: "2026-09-30T04:43:19.000Z",
+            cli: "codex" as const, source: "rollout" as const, channel: "codex:rollout",
+            kind: "message" as const, title: "Message", detail: said, author: { kind: "main" as const },
+            mapping: { confidence: "unmapped" as const, how: "" },
+          },
+        ],
+      };
+      const { unmount } = render(
+        <LiveWorkflowGraph workflow={switched} view={shown} sessionState="completed" onSelect={vi.fn()} />,
+      );
+      const state = (name: string) =>
+        [...document.querySelectorAll(".live-node")]
+          .find((el) => el.querySelector("title")?.textContent?.startsWith(name))
+          ?.getAttribute("class") ?? "";
+      const result = {
+        approved: state("Approved"),
+        attention: state("Needs attention"),
+        switcherTaken: document.querySelector(".live-switcher.is-taken") !== null,
+      };
+      unmount();
+      return result;
+    }
+
+    it("claims the end the closing message names", () => {
+      const ends = drawn("The Reviewer approved the first Writer pass. SUMMARY.md records 2 ready lines.");
+      expect(ends.approved).toContain("state-done");
+      expect(ends.attention).not.toContain("state-done");
+      // And the switcher that took it: stem and hub lit.
+      expect(ends.switcherTaken).toBe(true);
+    });
+
+    it("claims nothing when the message says it was not", () => {
+      const ends = drawn("The summary was not approved, and the run stopped.");
+      expect(ends.approved).not.toContain("state-done");
+      expect(ends.attention).not.toContain("state-done");
+    });
+  });
 });
 
 describe("the Start block before any step is announced", () => {

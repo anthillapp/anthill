@@ -210,3 +210,16 @@ export function completionOf(event: ObservationEvent): ObservationEvent["complet
   if (event.channel === "codex:rollout" && event.kind === "turn.end") return "task_complete";
   return undefined;
 }
+
+/**
+ * Whether a tool is Anthill's own: the exchange server a harness plugin talks
+ * to (`mcp__plugin_anthill_exchange__get_workflow`, `mcp__anthill__…`).
+ *
+ * Calling one is the session reading or reporting on the run, never work in
+ * it. After a plugin-bound run reported itself done, one trailing
+ * `get_workflow` read as the session going on and put the run back to Live for
+ * five minutes, until silence closed it again (ANT-215).
+ */
+export function isAnthillTool(name: string | undefined): boolean {
+  return name !== undefined && /^mcp__(plugin_anthill_[\w-]+|anthill[\w-]*)__/i.test(name);
+}

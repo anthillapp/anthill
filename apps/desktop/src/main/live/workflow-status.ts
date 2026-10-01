@@ -78,6 +78,11 @@ export type WorkflowStatus = {
   stepId?: string;
   /** The author stopped observing it, rather than Anthill losing it (ANT-191). */
   stopped?: boolean;
+  /**
+   * No session ever carried the copied prompt. Nothing started, so nothing
+   * failed: shown as that, not as a failed session (ANT-212).
+   */
+  unclaimed?: boolean;
 };
 
 type Stored = { version: number; workflows: Record<string, WorkflowStatus> };
@@ -123,6 +128,7 @@ function parse(text: string): Record<string, WorkflowStatus> {
       runId,
       ...(stepId ? { stepId } : {}),
       ...(entry.stopped === true ? { stopped: true } : {}),
+      ...(entry.unclaimed === true ? { unclaimed: true } : {}),
     };
   }
   return workflows;
@@ -168,6 +174,7 @@ export class WorkflowStatusStore {
       at,
       runId: run.anthillRunId,
       ...(run.observationStoppedAt ? { stopped: true } : {}),
+      ...(run.state === "failed" && !run.detectedSessionId ? { unclaimed: true } : {}),
     };
     await this.flush();
   }

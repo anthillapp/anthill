@@ -71,6 +71,8 @@ const PILL_CHROME = 16 + 9 + 8 + 16;
  * pixels of padding; one that is short cuts the name (ANT-113).
  */
 const PILL_CHAR = 7.6;
+/** Room for a name the estimate puts a pixel or two short. */
+const PILL_SLACK = 8;
 
 /**
  * The size a control pill needs for its name: wider first, then taller.
@@ -79,10 +81,13 @@ const PILL_CHAR = 7.6;
  * followed. "Ready for the PR" wrapped to three cramped lines inside 108×40.
  */
 function pillSize(name: string): { w: number; h: number } {
-  const wanted = PILL_CHROME + name.trim().length * PILL_CHAR;
+  // A few pixels over the estimate, and rounded up to the grid, never down:
+  // "Approved" came out one pixel short of its own width, and a pill's name
+  // that does not fit breaks mid-word — "Approve / d" (ANT-213).
+  const wanted = PILL_CHROME + name.trim().length * PILL_CHAR + PILL_SLACK;
   if (wanted <= PILL_SIZE.w) return PILL_SIZE;
 
-  const w = Math.min(snapToGrid(Math.ceil(wanted)), PILL_MAX.w);
+  const w = Math.min(Math.ceil(wanted / GRID) * GRID, PILL_MAX.w);
   // A name too long even at full width gets a second line rather than a
   // smaller font — and past two lines it is truncated, which is the renderer's
   // business and not this function's.
@@ -231,7 +236,40 @@ export type CanvasModel = {
  */
 /** How far under its row a loop back along the row runs, and how much deeper for each loop it spans. */
 const LOOP_DEPTH = 30;
+/** How far apart two detours over the same stretch run, and how many lanes out to try. */
+const LANE_GAP = 22;
+const LANE_TRIES = 6;
 const LOOP_STEP = 22;
+
+/**
+ * A spot for a detour's label on its own lane, as near where it leaves as is
+ * clear.
+ *
+ * At the middle of the line, where the bend handle is, a label has to step
+ * off the line to clear it — and over a row, stepping off means climbing
+ * across the lanes of every other detour. The labels of W13's switcher
+ * fingers floated in empty space, nearer the wrong finger than their own
+ * (ANT-213). On the lane itself, the label sits on the line it names.
+ */
+function onLane(
+  lane: NonNullable<CurveGeometry["lane"]>,
+  halfW: number,
+  halfH: number,
+  obstacles: readonly Rect[],
+): Point | undefined {
+  const clear = (x: number) =>
+    !obstacles.some(
+      (rect) =>
+        rect.left < x + halfW && x - halfW < rect.left + rect.w && rect.top < lane.y + halfH && lane.y - halfH < rect.top + rect.h,
+    );
+  for (let x = lane.left + DETOUR_LABEL_INSET + halfW; x + halfW <= lane.right - DETOUR_LABEL_INSET; x += GRID) {
+    if (clear(x)) return { x, y: lane.y };
+  }
+  return undefined;
+}
+
+/** How far in from a detour's corners its label keeps. */
+const DETOUR_LABEL_INSET = 24;
 
 export function buildCanvasModel(workflow: Workflow): CanvasModel {
   const rects = new Map<string, Rect>();
@@ -248,6 +286,18 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
   const placed: Rect[] = [];
   const pending: PendingPath[] = [];
   const switchers: SwitcherShape[] = [];
+  /** How each connection's label was placed: its size, side and handle. Read again once every lane is known. */
+  const placing: { halfW: number; halfH: number; prefer?: "up" | "down"; handle: Rect }[] = [];
+  /** The lanes detours already run in, so the next one keeps off them. */
+  const lanes: NonNullable<CurveGeometry["lane"]>[] = [];
+  const laneTaken = (lane: NonNullable<CurveGeometry["lane"]>) =>
+    lanes.some(
+      (other) =>
+        other.up === lane.up &&
+        Math.abs(other.y - lane.y) < LANE_GAP &&
+        other.left < lane.right &&
+        lane.left < other.right,
+    );
 
   /** A block's exits that leave from a switcher's hub rather than a port of their own. */
   const fingersOf = (outputs: readonly BlockOutput[]): Set<string> =>
@@ -422,6 +472,17 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
       // short gap after the hub a curve kinks backwards.
       const inLine = Boolean(finger) && !output.bend && landing.side === "left" && Math.abs(landing.y - port.y) < 4;
       let geometry = inLine ? straight(port, landing) : route(port, landing, options);
+      /*
+        Two lines sent round the same blocks took the same lane: every detour
+        runs at the nearest clear height, so a switcher's fingers to two ends
+        past the row ran one on top of the other, and nothing said which hub
+        each left (ANT-213). A lane already taken over the same stretch sends
+        the next line one lane further out.
+      */
+      for (let step = 1; step <= LANE_TRIES && geometry.lane && laneTaken(geometry.lane); step += 1) {
+        geometry = route(port, landing, { ...options, lift: step * LANE_GAP });
+      }
+      if (geometry.lane) lanes.push(geometry.lane);
       if (loop && !output.bend) {
         const below = loopBelow(port, landing, loop.depth, output.routing ?? "curved");
         // Unless something sits under the row in the way; then the router's
@@ -479,9 +540,13 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
       const prefer = meets && Math.abs(geometry.from.y - geometry.to.y) > 4
         ? geometry.from.y < geometry.to.y ? "up" : "down"
         : undefined;
-      const label = labelSpot(geometry, halfW, halfH, [...blocks, handleSpot, ...placed], prefer);
+      const obstacles = [...blocks, handleSpot, ...placed];
+      const label =
+        (geometry.lane && !output.bend ? onLane(geometry.lane, halfW, halfH, obstacles) : undefined) ??
+        labelSpot(geometry, halfW, halfH, obstacles, prefer);
       placed.push({ left: label.x - halfW, top: label.y - halfH, w: halfW * 2, h: halfH * 2 });
 
+      placing.push({ halfW, halfH, prefer, handle: handleSpot });
       connected.push({
         nodeId: node.id,
         output,
@@ -492,6 +557,66 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
         port,
         ...(finger ? { switcher: node.id } : {}),
       });
+    });
+  }
+
+  /*
+    A label across another line's lane, or on it, reads as that line's. W13's
+    "Summary corrections" labels a short finger in line with its hub, too short
+    to hold it, and climbed over both lanes above the row (ANT-213). Lanes are
+    only all known once every line is routed, so labels are looked at again,
+    in the order they were placed: one that is clear of every lane, and of the
+    labels already settled, stays where it is; any other is placed again, on
+    the other side of its line if its own side takes it across a lane.
+  */
+  if (lanes.length > 0) {
+    const rectAt = (point: Point, halfW: number, halfH: number): Rect => ({
+      left: point.x - halfW,
+      top: point.y - halfH,
+      w: halfW * 2,
+      h: halfH * 2,
+    });
+    const overlaps = (a: Rect, b: Rect) =>
+      a.left < b.left + b.w && b.left < a.left + a.w && a.top < b.top + b.h && b.top < a.top + a.h;
+    const across = (label: Point, from: Point, halfH: number, own?: CurveGeometry["lane"]) =>
+      lanes.some(
+        (lane) =>
+          lane !== own &&
+          lane.left <= label.x &&
+          label.x <= lane.right &&
+          Math.min(label.y, from.y) - halfH < lane.y &&
+          lane.y < Math.max(label.y, from.y) + halfH,
+      );
+    const onLaneLabel = (path: ConnectedPath) => Boolean(path.geometry.lane) && !path.output.bend;
+    // Labels on their own lane are where they belong; the rest fit round them.
+    const settled: Rect[] = connected.flatMap((path, index) =>
+      onLaneLabel(path) ? [rectAt(path.label, placing[index].halfW, placing[index].halfH)] : [],
+    );
+    connected.forEach((path, index) => {
+      if (onLaneLabel(path)) return;
+      const { halfW, halfH, prefer, handle } = placing[index];
+      const mid = path.geometry.mid;
+      const clearOfSettled = (point: Point) => !settled.some((rect) => overlaps(rect, rectAt(point, halfW, halfH)));
+      let label = path.label;
+      // Only a level line changes sides. One that climbs or falls has its
+      // label on the side it heads, or the labels of a fork read as each
+      // other's (ANT-178); across a lane is the lesser evil there.
+      const { from, to } = path.geometry;
+      const level = Math.abs(to.y - from.y) <= Math.hypot(to.x - from.x, to.y - from.y) * 0.2;
+      if ((level && across(label, mid, halfH)) || !clearOfSettled(label)) {
+        const bands = lanes.map((lane) => ({ left: lane.left, top: lane.y - 2, w: lane.right - lane.left, h: 4 }));
+        const obstacles = [...blocks, handle, ...bands, ...settled];
+        label = labelSpot(path.geometry, halfW, halfH, obstacles, prefer);
+        if (level && across(label, mid, halfH)) {
+          const other = labelSpot(path.geometry, halfW, halfH, obstacles, label.y < mid.y ? "down" : "up");
+          // A little further is worth it: across a lane a label reads as that
+          // line's. Much further is not — then it is lost either way.
+          const near = Math.abs(other.y - mid.y) <= Math.max(Math.abs(label.y - mid.y) * 2, 60);
+          if (near && !across(other, mid, halfH)) label = other;
+        }
+        connected[index] = { ...path, label };
+      }
+      settled.push(rectAt(label, halfW, halfH));
     });
   }
 

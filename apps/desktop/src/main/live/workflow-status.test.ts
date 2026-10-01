@@ -63,6 +63,16 @@ describe("an ending", () => {
     });
   });
 
+  // ANT-212: a copied prompt no session ever carried did not fail.
+  it("says when no session ever carried the copied prompt", async () => {
+    const store = new WorkflowStatusStore(path);
+    await store.remember({ ...RUN, state: "failed", workflowId: "never" });
+    await store.remember({ ...RUN, state: "failed", workflowId: "broke", detectedSessionId: "sess-1" });
+    const later = await new WorkflowStatusStore(path).all();
+    expect(later["never"].unclaimed).toBe(true);
+    expect(later["broke"].unclaimed).toBeUndefined();
+  });
+
   it("is recorded for every way a run can end", async () => {
     const store = new WorkflowStatusStore(path);
     for (const [workflowId, state] of [

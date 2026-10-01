@@ -157,7 +157,64 @@ function reachedEnds(
           (boundaryKind(edge.source) === "start" || view.blocks[edge.source]?.state === "done"),
       ),
   );
-  return new Set(fed.length === 1 ? [fed[0].id] : []);
+  if (fed.length === 1) return new Set([fed[0].id]);
+  return namedEnd(workflow, view, boundaryKind);
+}
+
+/**
+ * The End the session said it reached, when the finished steps lead to more
+ * than one.
+ *
+ * The run's last finished step can still lead to two ends — a reviewer whose
+ * switcher goes to Approved or to Needs attention — and a finished run then
+ * coloured neither, though its closing message said which (ANT-214). So the
+ * exits from that step into an end are read against what the session itself
+ * said after the step began: the value its condition names (`"approved"`) or
+ * its label. Claimed only when exactly one end is named; a mention preceded by
+ * "not" is no claim at all.
+ */
+function namedEnd(
+  workflow: Workflow,
+  view: LiveSessionView,
+  boundaryKind: (id: string) => "start" | "end" | undefined,
+): ReadonlySet<string> {
+  const into = workflow.edges.filter(
+    (edge) => boundaryKind(edge.target) === "end" && view.blocks[edge.source]?.state === "done",
+  );
+  const last = [...new Set(into.map((edge) => edge.source))]
+    .map((id) => ({ id, at: enteredAt(view.blocks[id]) }))
+    .filter((item): item is { id: string; at: number } => item.at !== undefined)
+    .sort((a, b) => b.at - a.at)[0];
+  if (!last) return new Set();
+
+  const said = view.events
+    .filter((event) => event.kind === "message" && event.author?.kind !== "subagent" && Date.parse(event.at) >= last.at)
+    .map((event) => event.detail ?? "")
+    .join("\n");
+  if (!said) return new Set();
+
+  const named = new Set<string>();
+  for (const edge of into) {
+    if (edge.source !== last.id) continue;
+    const phrases = [
+      ...[...(edge.condition ?? "").matchAll(/"([^"]+)"|'([^']+)'/g)].map((match) => match[1] ?? match[2]),
+      ...(edge.label ? [edge.label] : []),
+    ];
+    if (phrases.some((phrase) => mentions(said, phrase))) named.add(edge.target);
+  }
+  return named.size === 1 ? named : new Set();
+}
+
+/** Whether a text says a phrase outright: whole words, and not after "not". */
+function mentions(text: string, phrase: string): boolean {
+  const words = phrase.trim().replace(/[_-]+/g, " ");
+  if (words.length < 3) return false;
+  const pattern = new RegExp(`\\b${words.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "[\\s_-]+")}\\b`, "gi");
+  for (const match of text.matchAll(pattern)) {
+    const before = text.slice(Math.max(0, (match.index ?? 0) - 16), match.index ?? 0);
+    if (!/\b(not|never|no)\s+(\w+\s+)?$/i.test(before)) return true;
+  }
+  return false;
 }
 
 function boundaryState(

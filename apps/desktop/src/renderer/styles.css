@@ -6323,6 +6323,30 @@ button.state-chip {
   gap: 2px;
 }
 
+/* A table the agent wrote: small, ruled, and scrolled sideways inside the
+   card rather than widening it (ANT-209). */
+.msg-markup .msg-table-wrap {
+  margin: 0 0 6px;
+  overflow-x: auto;
+}
+
+.msg-markup .msg-table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.msg-markup .msg-table th,
+.msg-markup .msg-table td {
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.msg-markup .msg-table th {
+  font-weight: 600;
+}
+
 .msg-markup code {
   font-size: 11.5px;
   padding: 0 3px;

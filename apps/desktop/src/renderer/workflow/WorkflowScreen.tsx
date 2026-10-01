@@ -116,6 +116,15 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   const [dirty, setDirty] = useState(false);
   const currentWorkflow = useRef(workflow);
   currentWorkflow.current = workflow;
+  /**
+   * The workflow as it stands in its file: as opened, or as last saved. None
+   * for a draft that was never saved. Stepping the history back to it is
+   * being back to the file, and nothing is unsaved (ANT-207).
+   */
+  const savedAs = useRef<Workflow | null>(null);
+  const matchesSaved = (candidate: Workflow): boolean =>
+    savedAs.current !== null &&
+    (candidate === savedAs.current || JSON.stringify(candidate) === JSON.stringify(savedAs.current));
   const delivered = useRef(start?.kind === "open" ? start : undefined);
   useEffect(() => {
     if (!workflow) return;
@@ -328,9 +337,9 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    * Step the workflow back, or forward again.
    *
    * A step is not an edit: it does not push onto the history it is walking,
-   * and it does not restart the assembly reveal. It does mark the file dirty,
-   * because the workflow on screen now differs from the one on disk — that is
-   * true whichever direction it was reached from.
+   * and it does not restart the assembly reveal. It marks the file dirty
+   * when the workflow on screen now differs from the one on disk, whichever
+   * direction it was reached from — and clean when it is back to it.
    */
   const step = useCallback(
     (direction: "back" | "forward") => {
@@ -346,7 +355,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
       // canvas exactly as it was.
       setHistory(taken.history);
       setWorkflow(taken.state);
-      markDirty(true);
+      markDirty(!matchesSaved(taken.state));
       // What was selected may not exist in the state being restored, and an
       // inspector pointing at a block that is gone is worse than none.
       setSelection(NO_SELECTION);
@@ -407,6 +416,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
       // Opening a file or a template draws at once. Only the accept handler
       // re-raises this, for the one workflow that is new to its reader.
       setAssembling(false);
+      savedAs.current = next;
       markDirty(false);
     },
     [markDirty],
@@ -465,6 +475,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
       if (result.kind === "saved") {
         setPath(result.path);
         // Edits made while the save was awaiting IPC are still unsaved.
+        savedAs.current = workflow;
         if (currentWorkflow.current === workflow) markDirty(false);
         setNotice(null);
         setSaveStatus({ kind: "saved" });
@@ -662,6 +673,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
             // A drafted workflow has never been saved, and closing without saving
             // it would lose it — so it starts dirty rather than pretending to
             // match a file on disk.
+            savedAs.current = null;
             markDirty(true);
           }}
         />

@@ -1567,6 +1567,226 @@ describe("a subagent whose end only the SubagentStop hook records", () => {
   });
 });
 
+/*
+  ANT-215. A plugin-bound run reported itself done through \`anthill done\`,
+  then read its workflow back with the plugin's get_workflow. That call put
+  the last step back to Working, and the run to Live.
+*/
+describe("a run read back through Anthill's own tools after it said it was done", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-30T06:00:28.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+
+  it("stays done", () => {
+    const view = foldLiveSession(workflow, run(), [
+      event({ kind: "step.marker", title: "Step announced implement", blockId: "implement", source: "anthill", channel: "anthill:report", at: T(0) }),
+      tx({ kind: "tool.start", title: "Write", toolName: "Write", toolUseId: "w", at: T(5) }),
+      event({ kind: "step.marker", title: "Step announced test", blockId: "test", source: "anthill", channel: "anthill:report", at: T(20) }),
+      tx({ kind: "tool.start", title: "Read", toolName: "Read", toolUseId: "r", at: T(25) }),
+      event({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", source: "anthill", channel: "anthill:report", at: T(40) }),
+      tx({ kind: "tool.start", title: "mcp__plugin_anthill_exchange__get_workflow", toolName: "mcp__plugin_anthill_exchange__get_workflow", toolUseId: "g", at: T(41) }),
+      tx({ kind: "tool.end", title: "Tool finished", toolName: "mcp__plugin_anthill_exchange__get_workflow", toolUseId: "g", at: T(43) }),
+      tx({ kind: "turn.end", title: "The agent finished its turn", at: T(50) }),
+    ]);
+    expect(view.blocks.test.state).toBe("done");
+    expect(view.activeBlockIds).toEqual([]);
+  });
+});
+
+/*
+  ANT-218, W5/W18 in the 0.8.5 QA. Claude Code reused the Developer and the
+  Tester through SendMessage for the Fix stage and the second check. The
+  Developer's Fix work carried the id of the call that first started it for
+  Implement, and was filed there. After the done line, Claude Code's own
+  helper fired one hook-only Bash call, which put the last step back to
+  Working.
+*/
+describe("subagents reused for a later step", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-30T07:03:40.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const sub = { kind: "subagent" as const };
+  const journal = [
+    step("implement"),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "dev", stepTag: "implement", at: T(1) }),
+    tx({ kind: "tool.start", title: "Write", toolUseId: "w1", parentToolUseId: "dev", author: sub, at: T(6) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "dev", author: sub, at: T(14) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "dev", at: T(14.5) }),
+    step("test"),
+    tx({ kind: "tool.start", title: "Read", toolUseId: "r1", at: T(25) }),
+    step("fix"),
+    tx({ kind: "tool.start", title: "SendMessage", toolName: "SendMessage", toolUseId: "send", at: T(40) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "send", at: T(42) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", at: T(45) }),
+    tx({ kind: "tool.start", title: "Edit", toolUseId: "e1", parentToolUseId: "dev", author: sub, at: T(46) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "dev", author: sub, at: T(54) }),
+  ];
+
+  it("files the reused agent's work under the step it was reused for", () => {
+    const view = foldLiveSession(workflow, run(), journal);
+    const edit = view.events.find((item) => item.toolUseId === "e1");
+    expect(edit?.mapping.blockId).toBe("fix");
+    const write = view.events.find((item) => item.toolUseId === "w1");
+    expect(write?.mapping.blockId).toBe("implement");
+  });
+
+  it("holds that step open while the reused agent works", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), journal.slice(0, 12));
+    expect(view.blocks.fix.state).toBe("unknown");
+    expect(view.blocks.fix.note).toContain("never handed back");
+  });
+
+  it("is not put back to work by a hook-only call after the done line", () => {
+    const view = foldLiveSession(workflow, run(), [
+      ...journal,
+      event({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", source: "transcript", channel: "claude-code:transcript", at: T(60) }),
+      event({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "helper", source: "hook", channel: "claude-code:hook", at: T(64) }),
+    ]);
+    expect(view.blocks.fix.state).toBe("done");
+    expect(view.activeBlockIds).toEqual([]);
+  });
+});
+
+/*
+  ANT-217, a plugin watch run in the 0.8.5 QA. Two parallel writers announced
+  together; the session then wrote the agent files itself, and dispatched both
+  writers in the background with no step tag — only the agent's name as the
+  description. The Caption step was closed "Done · took 287ms" by the session's
+  own setup work, both dispatches went to the Theme step, and the Stop left
+  Captions green with its writer still running.
+*/
+describe("parallel writers dispatched with no step tag", () => {
+  const writers: Workflow = {
+    ...workflow,
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "captions", type: "agent", name: "Write captions", config: { actionKind: "agent-step", task: "a", agentId: "agent-caption" } },
+      { id: "themes", type: "agent", name: "Write themes", config: { actionKind: "agent-step", task: "b", agentId: "agent-theme" } },
+      { id: "review", type: "agent", name: "Review", config: { actionKind: "verify", task: "c", agentId: "agent-review" } },
+      { id: "end", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "captions" },
+      { id: "e2", source: "start", target: "themes" },
+      { id: "e3", source: "captions", target: "review" },
+      { id: "e4", source: "themes", target: "review" },
+      { id: "e5", source: "review", target: "end" },
+    ],
+    metadata: {
+      workflow: {
+        formatVersion: 4,
+        agents: [
+          { id: "agent-caption", name: "Caption Writer" },
+          { id: "agent-theme", name: "Theme Writer" },
+          { id: "agent-review", name: "Reviewer" },
+        ],
+      },
+    },
+  };
+  const T = (s: number) => new Date(Date.parse("2026-09-30T06:48:40.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const report = (blockId: string, s: number) =>
+    event({ kind: "step.marker", title: `Step announced ${blockId}`, blockId, source: "anthill", channel: "anthill:report", at: T(s) });
+  const dispatched = [
+    report("captions", 0),
+    report("themes", 0.3),
+    tx({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "setup", at: T(27) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "setup", at: T(28) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "cap", agentName: "general-purpose", detail: "Caption Writer", background: true, at: T(34) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "thm", agentName: "general-purpose", detail: "Theme Writer", background: true, at: T(38) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "thm", background: true, at: T(39) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "cap", background: true, at: T(39) }),
+    tx({ kind: "tool.start", title: "Read", toolName: "Read", toolUseId: "cap-read", parentToolUseId: "cap", author: { kind: "subagent" }, at: T(41) }),
+  ];
+  const stopped = tx({ kind: "notification", title: "Stopped by hand", at: T(50) });
+
+  it("sends each writer to the step its agent belongs to", () => {
+    const view = foldLiveSession(writers, run(), dispatched);
+    const cards = view.events.filter((item) => item.kind === "subagent.start");
+    expect(cards.map((card) => card.mapping.blockId)).toEqual(["captions", "themes"]);
+    expect(view.events.find((item) => item.toolUseId === "cap-read")?.mapping.blockId).toBe("captions");
+  });
+
+  it("keeps a writer's step open while the writer works, as the same pass", () => {
+    const view = foldLiveSession(writers, run(), dispatched);
+    expect(view.blocks.captions.state).toBe("running");
+    expect(view.blocks.captions.passes).toBe(1);
+    expect(view.blocks.themes.state).toBe("running");
+  });
+
+  it("claims no finish for either writer when the session is stopped", () => {
+    const view = foldLiveSession(writers, run({ state: "observation_lost" }), [...dispatched, stopped]);
+    expect(view.blocks.captions.state).toBe("unknown");
+    expect(view.blocks.themes.state).toBe("unknown");
+    expect(finishedSteps(view)).toBe(0);
+  });
+});
+
+/*
+  ANT-220, W13 through the Claude plugin in the 0.8.5 QA. The Writer's Write
+  of SUMMARY.md was refused by Claude Code; the file was never written, the
+  session was stopped and said the run was not completed, and never reported
+  done. The run went quiet and the Writer step was settled Done.
+*/
+describe("a step whose work failed and the run went quiet", () => {
+  const T = (s: number) => new Date(Date.parse("2026-09-30T07:12:54.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const sub = { kind: "subagent" as const };
+  const refused = [
+    step("implement"),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "writer", stepTag: "implement", at: T(5) }),
+    tx({ kind: "tool.start", title: "Write", toolName: "Write", toolUseId: "w1", parentToolUseId: "writer", author: sub, at: T(12) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "w1", ok: false, parentToolUseId: "writer", author: sub, at: T(12.1) }),
+    tx({ kind: "tool.start", title: "SubagentHandback", toolName: "SubagentHandback", toolUseId: "h1", parentToolUseId: "writer", author: sub, at: T(22) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "h1", ok: true, parentToolUseId: "writer", author: sub, at: T(23) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "writer", author: sub, at: T(25) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "writer", ok: true, at: T(30) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", at: T(60) }),
+    // The hooks carried this run: the Stop hook says only that the turn ended.
+    event({ kind: "turn.end", title: "The agent finished its turn", source: "hook", channel: "claude-code:hook", at: T(60.5) }),
+  ];
+
+  it("is not called done", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), refused);
+    expect(view.blocks.implement.state).toBe("unknown");
+    expect(view.blocks.implement.note).toContain("Write call in this step failed");
+    expect(finishedSteps(view)).toBe(0);
+  });
+
+  it("is done once the same tool was made to work", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      ...refused.slice(0, 4),
+      tx({ kind: "tool.start", title: "Write", toolName: "Write", toolUseId: "w2", parentToolUseId: "writer", author: sub, at: T(14) }),
+      tx({ kind: "tool.end", title: "Tool finished", toolUseId: "w2", ok: true, parentToolUseId: "writer", author: sub, at: T(14.1) }),
+      ...refused.slice(4),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+  });
+
+  it("is done when the session said the work was done", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      ...refused,
+      event({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", source: "transcript", channel: "claude-code:transcript", at: T(61) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+  });
+
+  // The Writer was then reused through SendMessage. Started in the
+  // foreground, its call had already returned, and would never again.
+  it("settles a reused foreground agent when its turn ends", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [
+      ...refused.slice(0, 8),
+      tx({ kind: "tool.start", title: "SubagentHandback", toolName: "SubagentHandback", toolUseId: "h2", parentToolUseId: "writer", author: sub, at: T(48) }),
+      tx({ kind: "tool.end", title: "Tool finished", toolUseId: "h2", ok: true, parentToolUseId: "writer", author: sub, at: T(49) }),
+      tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "writer", author: sub, at: T(51) }),
+      tx({ kind: "turn.end", title: "The agent finished its turn", at: T(60) }),
+    ]);
+    expect(view.blocks.implement.note).not.toContain("never handed back");
+  });
+});
+
 describe("a session that ends with its subagents still out", () => {
   const T = (s: number) => new Date(Date.parse("2026-09-28T03:33:40.000Z") + s * 1000).toISOString();
   const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
@@ -1644,6 +1864,33 @@ describe("a session stopped by hand", () => {
     ]);
     expect(view.blocks.implement.state).toBe("failed");
     expect(view.blocks.implement.note).toContain("stopped by hand");
+  });
+
+  // ANT-208: a stop closes the run as observation_lost, and that is not the
+  // same as Anthill losing sight of it.
+  it("reads as stopped, not lost, once the stop closes the run", () => {
+    const lost = run({ state: "observation_lost" });
+    const own = foldLiveSession(workflow, lost, [
+      tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+      tx({ kind: "tool.start", title: "Edit", toolUseId: "own", at: T(1) }),
+      stopped,
+    ]);
+    expect(own.blocks.implement.state).toBe("failed");
+    expect(own.blocks.implement.note).toContain("stopped by hand");
+
+    const delegated = foldLiveSession(workflow, lost, [...delegatedBoth, stopped]);
+    expect(delegated.blocks.implement.state).toBe("unknown");
+    expect(delegated.blocks.test.state).toBe("unknown");
+    expect(delegated.blocks.test.note).toContain("never handed back");
+  });
+
+  it("still reads as lost when nobody stopped it", () => {
+    const view = foldLiveSession(workflow, run({ state: "observation_lost" }), [
+      tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+      tx({ kind: "tool.start", title: "Edit", toolUseId: "own", at: T(1) }),
+    ]);
+    expect(view.blocks.implement.state).toBe("unknown");
+    expect(view.blocks.implement.note).toContain("stopped being able to read");
   });
 
   it("goes back to working when the person sets it going again", () => {

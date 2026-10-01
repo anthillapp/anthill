@@ -58,10 +58,30 @@ describe("where an answer lands", () => {
     expect(twice.brief.constraints).toEqual(["Keep it in one file."]);
   });
 
-  it("puts a step's answer in that step's task, on its own line", () => {
+  it("puts a step's answer in that step's task, on its own line, with its question", () => {
     const source = draft([ask({ about: { kind: "step", stepId: "implement" } })]);
     const { draft: next } = applyAnswers(source, { q1: "Count per API key." });
-    expect(next.steps[0].task).toBe("Add the limiter.\nCount per API key.");
+    expect(next.steps[0].task).toBe(
+      "Add the limiter.\nWhich endpoints count as public? Answer: Count per API key.",
+    );
+  });
+
+  /*
+    ANT-219, W15 in the 0.8.5 QA. The picked option was written into the
+    Reviewer's task on its own, as an order to reject every summary.
+  */
+  it("keeps the condition a question carries", () => {
+    const source = draft([
+      ask({
+        question: "If the Reviewer still requests changes after the second Reporter attempt, how should the workflow end?",
+        about: { kind: "step", stepId: "implement" },
+        options: ["End and report the result as not approved"],
+      }),
+    ]);
+    const { draft: next } = applyAnswers(source, { q1: "End and report the result as not approved" });
+    const added = next.steps[0].task?.split("\n")[1] ?? "";
+    expect(added.startsWith("If the Reviewer still requests changes after the second Reporter attempt")).toBe(true);
+    expect(added).toContain("Answer: End and report the result as not approved");
   });
 
   it("puts an output's answer with its step, which is where the work is", () => {
@@ -74,7 +94,7 @@ describe("where an answer lands", () => {
 
   it("makes a workflow-level answer part of the shared context", () => {
     const { draft: next } = applyAnswers(draft([ask()]), { q1: "It ships behind a flag." });
-    expect(next.brief.context).toBe("It ships behind a flag.");
+    expect(next.brief.context).toBe("Which endpoints count as public? Answer: It ships behind a flag.");
   });
 
   it("ignores an answer to a step that is not in the draft", () => {

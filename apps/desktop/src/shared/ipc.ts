@@ -498,7 +498,8 @@ export type RecentWorkflow = {
    * a day later, which turned every row grey a day after it was last used
    * (ANT-84).
    */
-  lastRun?: { state: LiveSessionState; at: string; stopped?: boolean };
+  /** `unclaimed`: no session ever carried the copied prompt (ANT-212). */
+  lastRun?: { state: LiveSessionState; at: string; stopped?: boolean; unclaimed?: boolean };
   /**
    * Step id → step name, for the workflows in this list.
    *
@@ -811,9 +812,10 @@ export type LiveObserveRequest = {
    *
    * Sent because the workflow lives in the editor and a run outlives the screen
    * that started it: without these a transition can only be reported as a block
-   * id, which is not something to put in a notification.
+   * id, which is not something to put in a notification. Gates are marked:
+   * a turn that ends on one is waiting for a person (ANT-210).
    */
-  steps?: { id: string; name: string }[];
+  steps?: { id: string; name: string; gate?: true }[];
 };
 
 /* ------------------------------------------------------------------ */

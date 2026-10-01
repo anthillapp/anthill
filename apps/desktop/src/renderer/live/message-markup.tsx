@@ -24,7 +24,7 @@
  * The subset is exactly what the excerpt can contain (see
  * `messageExcerpt` — fenced and indented code are removed at ingestion, so
  * they cannot reach here): headings, paragraphs, ordered and unordered lists,
- * bold, italic, inline code and links.
+ * GitHub-style tables, bold, italic, inline code and links.
  */
 
 import { Fragment, useEffect, useState, type ReactNode } from "react";
@@ -136,11 +136,44 @@ function RevealPath({ path }: { path: string }) {
 type Block =
   | { kind: "heading"; level: 2 | 3; text: string }
   | { kind: "paragraph"; text: string }
-  | { kind: "list"; ordered: boolean; items: string[] };
+  | { kind: "list"; ordered: boolean; items: string[] }
+  | { kind: "table"; header: string[]; rows: string[][] };
 
 const HEADING = /^(#{1,6})\s+(.*)$/;
 const BULLET = /^[-*+]\s+(.*)$/;
 const NUMBERED = /^\d+[.)]\s+(.*)$/;
+/** A table row: a line that begins with a pipe. */
+const TABLE_ROW = /^\|.*\|?$/;
+/** The line under a table's header: `|---|:--:|`. */
+const TABLE_RULE = /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/;
+
+/**
+ * A table row's cells. Pipes inside inline code, and escaped ones, are the
+ * cell's text and not a boundary.
+ */
+export function tableCells(line: string): string[] {
+  const inner = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+  const cells: string[] = [];
+  let cell = "";
+  let inCode = false;
+  for (let i = 0; i < inner.length; i += 1) {
+    const ch = inner[i];
+    if (ch === "\\" && inner[i + 1] === "|") {
+      cell += "|";
+      i += 1;
+    } else if (ch === "`") {
+      inCode = !inCode;
+      cell += ch;
+    } else if (ch === "|" && !inCode) {
+      cells.push(cell.trim());
+      cell = "";
+    } else {
+      cell += ch;
+    }
+  }
+  cells.push(cell.trim());
+  return cells;
+}
 
 /** Group lines into blocks. Blank lines separate; a run of bullets is a list. */
 export function parseBlocks(text: string): Block[] {
@@ -165,10 +198,30 @@ export function parseBlocks(text: string): Block[] {
     flushList();
   };
 
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].trim();
     if (!line) {
       flush();
+      continue;
+    }
+
+    /*
+      A table: a header row, the rule under it, then its rows. Joined into a
+      paragraph it read as one run-on line of pipes — header, rule and every
+      cell together — and it was the most useful part of the report (ANT-209).
+    */
+    if (TABLE_ROW.test(line) && TABLE_RULE.test(lines[i + 1]?.trim() ?? "")) {
+      flush();
+      const header = tableCells(line);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && TABLE_ROW.test(lines[i].trim())) {
+        rows.push(tableCells(lines[i]));
+        i += 1;
+      }
+      i -= 1;
+      blocks.push({ kind: "table", header, rows });
       continue;
     }
 
@@ -310,6 +363,32 @@ export function MessageMarkup({ text }: MessageMarkupProps) {
             <h4 key={key}>{renderInline(block.text, key, revealable)}</h4>
           ) : (
             <h5 key={key}>{renderInline(block.text, key, revealable)}</h5>
+          );
+        }
+        if (block.kind === "table") {
+          return (
+            <div key={key} className="msg-table-wrap">
+              <table className="msg-table">
+                <thead>
+                  <tr>
+                    {block.header.map((cell, c) => (
+                      <th key={`${key}-h${c}`}>{renderInline(cell, `${key}-h${c}`, revealable)}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {block.rows.map((row, r) => (
+                    <tr key={`${key}-r${r}`}>
+                      {block.header.map((_, c) => (
+                        <td key={`${key}-r${r}c${c}`}>
+                          {renderInline(row[c] ?? "", `${key}-r${r}c${c}`, revealable)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           );
         }
         if (block.kind === "list") {

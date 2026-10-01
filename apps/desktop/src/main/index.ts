@@ -1179,7 +1179,15 @@ function registerIpcHandlers(): void {
     return rows.map((row) => {
       const ending = row.workflowId ? endings[row.workflowId] : undefined;
       return ending
-        ? { ...row, lastRun: { state: ending.state, at: ending.at, ...(ending.stopped ? { stopped: true } : {}) } }
+        ? {
+            ...row,
+            lastRun: {
+              state: ending.state,
+              at: ending.at,
+              ...(ending.stopped ? { stopped: true } : {}),
+              ...(ending.unclaimed ? { unclaimed: true } : {}),
+            },
+          }
         : row;
     });
   });

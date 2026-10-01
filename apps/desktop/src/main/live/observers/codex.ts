@@ -60,6 +60,19 @@ type FileState = {
   reportedActivityAt?: string;
   /** Set once `task_complete` has been seen and reported. */
   completedAt?: string;
+  /**
+   * When the person pressed Stop: Codex's `turn_aborted`, the only record of
+   * it. A stop fires nothing else, so without it the step went on "Working"
+   * and the session "Live" for as long as the window stayed open (ANT-208).
+   */
+  interruptedAt?: string;
+  /**
+   * When the session ended its turn at an Approval Gate with nothing done:
+   * the gate's question asked, the answer not given. Codex writes
+   * `task_complete` there as after every turn, and that is not the session
+   * finishing (ANT-210). Cleared by the next turn starting.
+   */
+  awaitingAt?: string;
   reportedComplete: boolean;
   failure?: string;
   /**
@@ -86,6 +99,24 @@ type FileState = {
    * session's work, done through that agent — read, and signed as the agent's.
    */
   delegate?: { path: string; name: string };
+  /** Records read from this file so far. */
+  linesRead?: number;
+  /**
+   * Where a subagent's own record begins. Codex starts a subagent's file with
+   * a copy of the parent thread's history — its session record, its messages,
+   * step tags and all, stamped with the subagent's start — and says where the
+   * copy ends in `subagent_history_start_ordinal`, counted in the `ordinal`
+   * every record carries. Read as the subagent's,
+   * the copied messages re-entered steps long finished ("pass 3" on a gate)
+   * and named the wrong step for the subagent's work (ANT-211).
+   */
+  ownFrom?: number;
+  /**
+   * Inside the copied history of a subagent's file whose record gives no
+   * ordinal: from the parent's session record until the subagent's own
+   * settings are applied.
+   */
+  inheriting?: boolean;
   /** The calls this file made, by call id: which were `spawn_agent`. */
   spawnCalls?: Set<string>;
 };
@@ -134,21 +165,18 @@ export class CodexObserver implements LiveSessionObserver {
 
   async poll(run: PendingRun, now: string): Promise<PollResult> {
     const files = await this.candidates(run);
-    if (files === undefined) {
-      return {
-        events: [],
-        evidence: [
-          {
-            kind: "unobservable",
-            channel: CHANNEL,
-            at: now,
-            detail: "Codex has no local session records on this machine.",
-          },
-        ],
-      };
-    }
+    /*
+      No sessions folder yet. That is a CLI that has not run a session on this
+      machine, and its first one creates the folder: not a CLI Anthill cannot
+      read. Reported as unobservable, it cut the wait for a session to two
+      minutes and then called the copied prompt a failed session, for exactly
+      the person trying the CLI for the first time (ANT-212). Nothing to say
+      yet; the ordinary wait applies.
+    */
+    if (files === undefined) return { events: [], evidence: [] };
 
     const states = this.statesFor(run.anthillRunId);
+    const gates = new Set((run.steps ?? []).filter((step) => step.gate).map((step) => step.id));
     let spawns = this.spawned.get(run.anthillRunId);
     if (!spawns) {
       spawns = new Map();
@@ -167,7 +195,7 @@ export class CodexObserver implements LiveSessionObserver {
       const chunk = await readNewLines(path, state.cursor);
       if (!chunk.grew) continue;
       grew.add(path);
-      scan(chunk.lines, state, now, { runId: run.anthillRunId, nonce: run.correlationNonce }, events, spawns);
+      scan(chunk.lines, state, now, { runId: run.anthillRunId, nonce: run.correlationNonce, gates }, events, spawns);
     }
 
     // A subagent's work, tied to the call that started it — known by now even
@@ -296,6 +324,15 @@ export class CodexObserver implements LiveSessionObserver {
         evidence.push({ kind: "activity", sessionId, at: state.lastActivityAt });
       }
 
+      // A subagent's file carries the session's id, so a binding follows it
+      // too; its ending and its errors are that subagent's, already in the
+      // feed as its own. Read as the session's, every subagent's task_complete
+      // said "Session finished" while the parent worked on (ANT-235).
+      if (state.delegate) {
+        state.reportedActivityAt = state.lastActivityAt;
+        continue;
+      }
+
       if (state.failure) {
         evidence.push({
           kind: "failed",
@@ -305,6 +342,35 @@ export class CodexObserver implements LiveSessionObserver {
           detail: state.failure,
         });
         continue;
+      }
+
+      // Still the last thing the session wrote, so a session somebody carried
+      // on with is not held down by the Stop they pressed earlier — the same
+      // rule as Claude Code's (ANT-122).
+      if (state.interruptedAt && state.interruptedAt === state.lastActivityAt) {
+        evidence.push({
+          kind: "interrupted",
+          sessionId,
+          channel: CHANNEL,
+          at: state.interruptedAt,
+          detail: "You stopped this session. Anthill is no longer reading it; nothing was sent to the session.",
+        });
+      }
+
+      // Waiting for an answer at a gate: still the session, still open. Said on
+      // every look while it holds, and only for as long as a copied prompt is
+      // given to be claimed — past that, silence is silence again (ANT-210).
+      if (
+        state.awaitingAt &&
+        Date.parse(now) - Date.parse(state.awaitingAt) < TIMING.pendingTtlMs
+      ) {
+        evidence.push({
+          kind: "awaiting",
+          sessionId,
+          at: now,
+          since: state.awaitingAt,
+          detail: "Codex asked at the approval and is waiting for your answer.",
+        });
       }
 
       if (state.completedAt && !state.reportedComplete) {
@@ -482,13 +548,18 @@ function scan(
   lines: string[],
   state: FileState,
   now: string,
-  marker: { runId: string; nonce: string },
+  /** And the run's Approval Gates, by step id (ANT-210). */
+  marker: { runId: string; nonce: string; gates?: ReadonlySet<string> },
   events: ObservationEventDraft[],
   spawns: Map<string, string> = new Map(),
 ): void {
   for (const line of lines) {
     // Nothing a sub-thread writes is the session's own doing (ANT-129).
     if (state.subthread) return;
+    // Counted from 0, as Codex counts `ordinal`; a record without one is
+    // placed by how many came before it.
+    const read = state.linesRead ?? 0;
+    state.linesRead = read + 1;
     if (!line.startsWith("{")) continue;
     let row: Record<string, unknown>;
     try {
@@ -496,6 +567,10 @@ function scan(
     } catch {
       continue;
     }
+    const ordinal = typeof row.ordinal === "number" ? row.ordinal : read;
+    // A subagent's copy of the parent's history is the parent's, already read
+    // from the parent's own file (ANT-211).
+    if (state.delegate && state.ownFrom !== undefined && ordinal < state.ownFrom) continue;
 
     const payload = isRecord(row.payload) ? row.payload : undefined;
     if (!payload) continue;
@@ -519,6 +594,12 @@ function scan(
         request, its assistant message is the verdict, and its `task_complete`
         is the verdict's, not the session's.
       */
+      // A second session record in a subagent's file is the parent's, at the
+      // head of the history copied in from it (ANT-211).
+      if (state.delegate) {
+        if (state.ownFrom === undefined) state.inheriting = true;
+        continue;
+      }
       const session = str(payload.session_id);
       const thread = str(payload.id);
       /*
@@ -534,6 +615,8 @@ function scan(
         const path = str(payload.agent_path) ?? str(spawn?.agent_path) ?? thread ?? "subagent";
         const name = path.split("/").filter(Boolean).pop() ?? path;
         state.delegate = { path, name };
+        const from = payload.subagent_history_start_ordinal;
+        if (typeof from === "number" && Number.isInteger(from) && from > ordinal) state.ownFrom = from;
         const id = session ?? str(spawn?.parent_thread_id);
         if (id) state.sessionId = id;
         if (stamped) state.lastActivityAt = stamped;
@@ -557,6 +640,14 @@ function scan(
         ...(str(payload.cli_version) ? { detail: `Codex ${str(payload.cli_version)}` } : {}),
       };
       continue;
+    }
+
+    // Without an ordinal, the copy ends where the subagent's own settings are
+    // applied, just after the role it is given.
+    if (state.inheriting) {
+      const role = payload.type === "message" && payload.role === "developer" && messageText(payload).trimStart().startsWith("<multi_agent_role>");
+      if (payload.type !== "thread_settings_applied" && !role) continue;
+      state.inheriting = false;
     }
 
     if (stamped) state.lastActivityAt = stamped;
@@ -693,12 +784,35 @@ function scan(
           });
         }
       }
-      if (payload.type === "task_complete") {
+      if (payload.type === "task_started" && !state.delegate) state.awaitingAt = undefined;
+      // A turn that ended on an Approval Gate, with no done line: the gate's
+      // question put to a person, not the session finishing (ANT-210).
+      if (
+        payload.type === "task_complete" &&
+        !state.delegate &&
+        !state.doneReported &&
+        state.lastStep &&
+        marker.gates?.has(state.lastStep.blockId)
+      ) {
+        state.awaitingAt = at;
+        events.push({
+          ...base,
+          kind: "notification",
+          title: "Waiting for your answer",
+          detail: "Codex asked at the approval and ended its turn. Nobody has answered yet.",
+        });
+      } else if (payload.type === "task_complete") {
         state.completedAt = at;
         state.reportedComplete = false;
         // Codex's own word that the task is over — typed, so the fold does not
         // have to recognise it by where it came from (ANT-158).
         events.push({ ...base, kind: "turn.end", title: "Codex finished the turn", completion: "task_complete" });
+      }
+      // Stopped by the person. In the session's own file that is the session
+      // stopping; in a subagent's, only that subagent (ANT-208).
+      if (payload.type === "turn_aborted") {
+        if (!state.delegate) state.interruptedAt = at;
+        events.push({ ...base, kind: "notification", title: "Stopped by hand" });
       }
       if (payload.type === "error" || payload.type === "stream_error") {
         const message = str(payload.message) ?? "Codex recorded an error.";

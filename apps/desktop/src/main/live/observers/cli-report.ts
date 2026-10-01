@@ -30,7 +30,7 @@ import { join } from "node:path";
 
 import { isReportFor, parseReportLine, type Evidence, type PendingRun } from "@anthill/live";
 
-import type { ObservationEventDraft, PollResult } from "./types.js";
+import type { ObservationEventDraft, PollResult, ReportedProgress } from "./types.js";
 import { newCursor, readNewLines, type TailCursor } from "./tail.js";
 
 /**
@@ -46,6 +46,8 @@ export class CliReportObserver {
   private readonly path: string;
   /** Bytes already read, per run, so a growing file is never re-parsed whole. */
   private readonly cursors = new Map<string, TailCursor>();
+  /** What each run has reported so far, for the readers that cannot see it (ANT-240). */
+  private readonly progress = new Map<string, ReportedProgress>();
 
   constructor(path: string = REPORT_LOG) {
     this.path = path;
@@ -53,6 +55,20 @@ export class CliReportObserver {
 
   forget(runId: string): void {
     this.cursors.delete(runId);
+    this.progress.delete(runId);
+  }
+
+  /**
+   * The steps this run has reported and whether it said it was done, as far
+   * as the file has been read.
+   *
+   * A transcript that reports through the CLI carries no step marker of its
+   * own, so whatever needs to know which step a turn ended on has to ask here
+   * (ANT-240).
+   */
+  reported(runId: string): ReportedProgress {
+    const progress = this.progress.get(runId);
+    return progress ? { steps: [...progress.steps], ...(progress.doneAt ? { doneAt: progress.doneAt } : {}) } : { steps: [] };
   }
 
   /**
@@ -80,10 +96,16 @@ export class CliReportObserver {
     const marker = { runId: run.anthillRunId, nonce: run.correlationNonce };
     const evidence: Evidence[] = [];
     const events: ObservationEventDraft[] = [];
+    let progress = this.progress.get(run.anthillRunId);
+    if (!progress) {
+      progress = { steps: [] };
+      this.progress.set(run.anthillRunId, progress);
+    }
     for (const line of chunk.lines) {
       const report = parseReportLine(line);
       if (report === undefined || !isReportFor(report, marker)) continue;
       if (report.kind === "done") {
+        progress.doneAt ??= report.at;
         evidence.push({
           kind: "completed",
           sessionId,
@@ -105,6 +127,7 @@ export class CliReportObserver {
       }
       evidence.push({ kind: "activity", sessionId, at: report.at, channel: "anthill:report" });
       if (report.kind === "step") {
+        progress.steps.push({ blockId: report.stepId, at: report.at });
         events.push({
           at: report.at,
           cli: run.selectedCli,

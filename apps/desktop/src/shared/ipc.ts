@@ -616,11 +616,10 @@ export type PluginConnection = {
   cli: { available: boolean; version?: string };
   status: PluginHarnessStatus;
   /**
-   * A local Anthill checkout Anthill can install the plugin from.
-   *
-   * Absent when there is none. The app does not ship the plugin yet (ANT-136),
-   * so without a checkout there is nothing an install button could honestly
-   * run, and the card says so instead of offering one.
+   * Where Anthill installs the plugin from: a local Anthill checkout when
+   * there is one, otherwise the repository on GitHub (`nstr/anthill`).
+   * Optional for older main processes, which left it out without a checkout;
+   * the card then sends the author to Settings ▸ Plugins instead.
    */
   source?: string;
   /**

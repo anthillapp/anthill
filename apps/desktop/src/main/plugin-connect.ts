@@ -9,13 +9,14 @@
  *   the same ones the Plugins page shows. Anthill does not edit either tool's
  *   configuration itself; the tool does, and may ask the author to confirm.
  *   The one file Anthill writes is its own, `~/.anthill/plugin.json`, which
- *   says where the server is.
- * - **Only from somewhere real.** The plugin has to be installed *from*
- *   something. The app does not ship it yet (ANT-136), so the only source is a
- *   local checkout of this repository — one either tool already knows about,
- *   the one the server path points into, or the one a development build runs
- *   from. With none of those there is no install to offer, and the card says
- *   so rather than showing a button that cannot work.
+ *   says where the server is — and only when installing from a checkout.
+ * - **From GitHub, unless there is a checkout.** Both tools take Anthill's
+ *   repository as a marketplace (`nstr/anthill`), and each plugin carries its
+ *   own copy of the server, so that is what an installed app installs from,
+ *   with nothing to build. A local checkout of this repository — one either
+ *   tool already knows about, the one the server path points into, or the one
+ *   a development build runs from — is preferred when there is one, and the
+ *   plugin is then pointed at that checkout's own server.
  * - **Nothing changes on a refusal found up front.** Everything that can be
  *   checked before a command runs is checked first, so "the install didn't
  *   finish, nothing was changed" is true when it is said.
@@ -53,6 +54,11 @@ export const INSTALL_GUIDES: Record<Harness, string> = {
 const PROBE_TIMEOUT_MS = 12_000;
 /** A plugin command that clones nothing should not take longer than this. */
 const COMMAND_TIMEOUT_MS = 90_000;
+/** Adding the marketplace from GitHub clones the repository, which can take longer. */
+const CLONE_TIMEOUT_MS = 300_000;
+
+/** Anthill's repository, which both tools accept as a marketplace source. */
+export const GITHUB_SOURCE = "nstr/anthill";
 
 /** Where the checkout keeps the built server. */
 const SERVER_IN_CHECKOUT = join("apps", "mcp", "dist", "server.js");
@@ -66,7 +72,8 @@ export function isCheckout(dir: string): boolean {
 }
 
 /**
- * The checkout to install from, if there is one.
+ * The checkout to install from, if there is one. Without one, the plugin is
+ * installed from GitHub (`GITHUB_SOURCE`).
  *
  * In order of how deliberately it was chosen: one a tool already installs
  * from, then the one the server path the author wrote points into, then the
@@ -206,7 +213,7 @@ export type ConnectDeps = {
 export async function pluginConnections(deps: ConnectDeps): Promise<PluginConnection[]> {
   const home = deps.home ?? homedir();
   const [status, interpreters] = await Promise.all([pluginStatus(home), deps.interpreters().catch(() => [])]);
-  const source = installSource(status, deps.appRoot);
+  const source = installSource(status, deps.appRoot) ?? GITHUB_SOURCE;
 
   return Promise.all(
     status.harnesses.map(async (harness) => {
@@ -216,7 +223,7 @@ export async function pluginConnections(deps: ConnectDeps): Promise<PluginConnec
         label: harness.label,
         cli: { available: cli?.available ?? false, ...(cli?.version ? { version: cli.version } : {}) },
         status: harness,
-        ...(source ? { source } : {}),
+        source,
       };
       if (!harness.installed || !harness.enabled) return connection;
       const root = await installedRoot(home, harness);
@@ -276,19 +283,15 @@ export async function installPlugin(harness: Harness, deps: ConnectDeps): Promis
   const home = deps.home ?? homedir();
   const status = await pluginStatus(home);
   const current = status.harnesses.find((item) => item.harness === harness)!;
-  const source = installSource(status, deps.appRoot);
-  if (!source) {
-    return {
-      ok: false,
-      changed: false,
-      error: "This build of Anthill does not include the plugin yet, so there is nothing to install it from. Settings ▸ Plugins has the steps.",
-    };
-  }
+  const checkout = installSource(status, deps.appRoot);
+  const source = checkout ?? GITHUB_SOURCE;
 
-  // The server first: if the plugin would install and then fail to start its
-  // server, the install is not worth making.
-  const serverOk = status.server.configured && status.server.exists;
-  const built = join(source, SERVER_IN_CHECKOUT);
+  // From a checkout, the plugin is pointed at the checkout's own server, so
+  // that comes first: if the plugin would install and then fail to start it,
+  // the install is not worth making. From GitHub the plugin starts the server
+  // it carries, and there is nothing to build or name.
+  const serverOk = !checkout || (status.server.configured && status.server.exists);
+  const built = checkout ? join(checkout, SERVER_IN_CHECKOUT) : "";
   if (!serverOk && !existsSync(built)) {
     return {
       ok: false,
@@ -302,7 +305,7 @@ export async function installPlugin(harness: Harness, deps: ConnectDeps): Promis
     const outcome = await runProcess({
       command: step.command,
       args: step.args,
-      timeoutMs: COMMAND_TIMEOUT_MS,
+      timeoutMs: !checkout && step.args.includes("marketplace") ? CLONE_TIMEOUT_MS : COMMAND_TIMEOUT_MS,
       spawnFn: deps.spawnFn,
     });
     if (outcome.spawnError) {

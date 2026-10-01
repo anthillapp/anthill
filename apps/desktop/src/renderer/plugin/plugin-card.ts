@@ -116,7 +116,8 @@ export function pluginCard(connection: PluginConnection | undefined, local: Loca
   }
 
   if (!connection.source) {
-    // Nothing to install from: the app does not ship the plugin yet. A button
+    // Nothing to install from. The main process names a checkout or GitHub
+    // every time now; this is for a main process that left it out. A button
     // that could only fail is not offered.
     return view("available", `${tool} is installed. This build of Anthill can't add the plugin by itself yet – Settings ▸ Plugins has the steps.`, {
       action: { kind: "settings", label: "Show the steps", outlined: true },

@@ -106,4 +106,5 @@ unless you turn them off. Nothing else leaves your machine. Details are in
 [Website](https://getanthill.ai) ·
 [r/AnthillApp](https://www.reddit.com/r/AnthillApp/) ·
 [Buy me a coffee](https://buymeacoffee.com/anthill) ·
+[Report an issue](https://github.com/nstr/anthill/issues) ·
 [Build from source and contribute](CONTRIBUTING.md)

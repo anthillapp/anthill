@@ -403,24 +403,13 @@ packages/
   run-store/         run persistence
 ```
 
-## Documentation and issues
+## Issues
 
-Planning and specs live in Linear, under the Anthill team's
-[documents](https://linear.app/anthill-workspace/team/ANT/documents):
-
-- [The workflow builder](https://linear.app/anthill-workspace/document/the-workflow-builder-c4a416250c41) — how it works
-- [Product Brief](https://linear.app/anthill-workspace/document/product-brief-e6635d9d808b)
-- [Workflow Model](https://linear.app/anthill-workspace/document/workflow-model-20e3ec89564a)
-- [Visual Builder — the canvas](https://linear.app/anthill-workspace/document/visual-builder-the-canvas-e429d736305f)
-- [Live Session Auto-Detection](https://linear.app/anthill-workspace/document/live-session-auto-detection-the-observation-spec-f7d0e5667ebc) — the observation spec
-- [Block Library Research](https://linear.app/anthill-workspace/document/block-library-research-the-approved-spec-66ac6a45830f)
-- [Roadmap](https://linear.app/anthill-workspace/document/roadmap-f761b9ffd48f)
-- [Backlog and Known Gaps](https://linear.app/anthill-workspace/document/backlog-and-known-gaps-d04735ba2e04)
-
-Report bugs and request features as issues in the
-[Anthill team](https://linear.app/anthill-workspace/team/ANT/all). For anything
-about a session Anthill misread, say which CLI and whether hooks were installed —
-those two facts decide almost every observation question.
+Report bugs and request features in
+[GitHub Issues](https://github.com/nstr/anthill/issues). For anything about a
+session Anthill misread, say which CLI and whether hooks were installed — those
+two facts decide almost every observation question. Windows problems have their
+own [form](https://github.com/nstr/anthill/issues/new?template=windows.yml).
 
 Note that `docs/` is git-ignored: it is a scratch directory for generated
 reports, not project documentation.

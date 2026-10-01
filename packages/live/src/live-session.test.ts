@@ -10,8 +10,8 @@
 import { describe, expect, it } from "vitest";
 import type { Workflow } from "@anthill/workflow-schema";
 
-import { attribute, buildWorkflowIndex } from "./attribution.js";
-import { finishedSteps, foldLiveSession, hasStepEvidence } from "./live-session.js";
+import { attribute, buildWorkflowIndex, stepForAgent } from "./attribution.js";
+import { finishedSteps, foldLiveSession, hasStepEvidence, helperStops } from "./live-session.js";
 import type { ObservationEvent } from "./observation-event.js";
 import { createPendingRun, type PendingRun } from "./pending-run.js";
 
@@ -229,7 +229,7 @@ describe("folding a session", () => {
     expect(view.detours).toEqual([]);
   });
 
-  it("keeps a finished step counted while the agent is back in it", () => {
+  it("does not count a step the agent is back in until that pass finishes (ANT-243)", () => {
     const before = foldLiveSession(workflow, run(), [step("implement"), worked(), step("test"), worked(), step("fix")]);
     expect(finishedSteps(before)).toBe(2);
     const again = foldLiveSession(workflow, run(), [
@@ -241,8 +241,26 @@ describe("folding a session", () => {
       worked(),
       step("implement"),
     ]);
-    // "implement" finished once already; being back in it does not undo that.
-    expect(finishedSteps(again)).toBe(3);
+    // "implement" is working on its second pass: the count is of what is
+    // finished now, so it waits for that pass — as the step's own badge does.
+    expect(again.blocks.implement).toMatchObject({ state: "running", passes: 2 });
+    expect(finishedSteps(again)).toBe(2);
+    const after = foldLiveSession(workflow, run(), [
+      step("implement"),
+      worked(),
+      step("test"),
+      worked(),
+      step("fix"),
+      worked(),
+      step("implement"),
+      worked(),
+      step("test"),
+    ]);
+    // Its second pass over, "implement" counts again; "test" is now the step
+    // reopened, and waits in its turn.
+    expect(after.blocks.implement).toMatchObject({ state: "done", passes: 2 });
+    expect(after.blocks.test).toMatchObject({ state: "running", passes: 2 });
+    expect(finishedSteps(after)).toBe(2);
   });
 
   it("counts a second visit to a step as another pass", () => {
@@ -1944,5 +1962,278 @@ describe("a session stopped by hand", () => {
       event({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", source: "transcript", channel: "claude-code:transcript", at: T(31) }),
     ]);
     expect(view.blocks.implement.state).toBe("done");
+  });
+});
+
+/*
+  ANT-243, the DEV retest of ANT-218: "Implement, test, fix" run from a copied
+  prompt in Claude Code. The Tester failed the first check, the Developer
+  fixed it, and the agent went back to "Run tests" for a second pass. While
+  that pass was still working the header read "3 of 3 steps finished". The
+  journal below is that run's, in its recorded order, with the token-usage
+  records and the duplicate hook copies of tool calls left out.
+*/
+describe("a rework step back for another pass, as the ANT-218 retest recorded it", () => {
+  const T = (s: number) => new Date(Date.parse("2026-10-01T01:11:00.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const hook = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "hook", channel: "claude-code:hook", ...partial });
+  const main = { kind: "main" as const };
+  const developer = { kind: "subagent" as const, name: "Implement two-bullet safety card" };
+  const tester = { kind: "subagent" as const, name: "Manually check safety card bullets" };
+  /** The Bash call that prints a step's line, and the line, recorded when it returns. */
+  const marker = (blockId: string, id: string, s: number, back: number) => [
+    tx({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: id, at: T(s - back) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: id, at: T(s) }),
+    tx({ kind: "step.marker", title: "Step announced", detail: blockId, blockId, printedBy: id, at: T(s) }),
+  ];
+
+  const journal = [
+    tx({ kind: "prompt.submit", title: "The workflow was pasted in", at: T(4.258) }),
+    hook({ kind: "session.start", title: "Session started", at: T(3.699) }),
+    hook({ kind: "prompt.submit", title: "A prompt was submitted", at: T(4.379) }),
+    // Implement: the Developer, sent off as a subagent.
+    ...marker("implement", "m1", 23.903, 1.7),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolName: "Agent", toolUseId: "dev", agentName: "developer", stepTag: "implement", at: T(28.028) }),
+    tx({ kind: "tool.start", title: "Write", toolName: "Write", toolUseId: "w1", parentToolUseId: "dev", at: T(33.601) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "w1", parentToolUseId: "dev", at: T(33.912) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "dev", at: T(38.449) }),
+    tx({ kind: "message", title: "Message", detail: "Done.", parentToolUseId: "dev", author: developer, at: T(38.151) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "dev", author: developer, at: T(38.151) }),
+    hook({ kind: "subagent.end", title: "A subagent finished", at: T(38.264) }),
+    hook({ kind: "prompt.submit", title: "A prompt was submitted", at: T(38.569) }),
+    tx({ kind: "message", title: "Message", detail: "The Implement step is done.", author: main, stepTag: "implement", at: T(40.717) }),
+    // Run tests, pass 1: the Tester finds two bullets where three are wanted.
+    ...marker("test", "m2", 42.824, 1.5),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolName: "Agent", toolUseId: "qa", agentName: "tester", stepTag: "test", at: T(47.001) }),
+    tx({ kind: "tool.start", title: "Read", toolName: "Read", toolUseId: "r1", parentToolUseId: "qa", at: T(50.204) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "r1", parentToolUseId: "qa", at: T(50.563) }),
+    tx({ kind: "message", title: "Message", detail: "The first-pass check failed.", parentToolUseId: "qa", author: tester, at: T(55.579) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "qa", author: tester, at: T(55.579) }),
+    hook({ kind: "subagent.end", title: "A subagent finished", at: T(55.704) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "qa", at: T(55.891) }),
+    hook({ kind: "prompt.submit", title: "A prompt was submitted", at: T(56.015) }),
+    // Fix failures: the same Developer, resumed with SendMessage.
+    ...marker("fix", "m3", 61.104, 1.1),
+    tx({ kind: "tool.start", title: "SendMessage", toolName: "SendMessage", toolUseId: "s1", at: T(64.828) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "s1", at: T(65.673) }),
+    tx({ kind: "message", title: "Message", detail: "The Developer is adding the third bullet.", author: main, stepTag: "fix", at: T(67.329) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", at: T(67.329) }),
+    tx({ kind: "tool.start", title: "Edit", toolName: "Edit", toolUseId: "e1", parentToolUseId: "dev", at: T(68.76) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "e1", parentToolUseId: "dev", at: T(69.189) }),
+    hook({ kind: "turn.end", title: "The agent finished its turn", at: T(68.41) }),
+    hook({ kind: "subagent.end", title: "A subagent finished", at: T(71.629) }),
+    tx({ kind: "message", title: "Message", detail: "I added a third bullet.", parentToolUseId: "dev", author: developer, stepTag: "fix", at: T(73.859) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "dev", author: developer, at: T(73.859) }),
+    hook({ kind: "prompt.submit", title: "A prompt was submitted", at: T(72.22) }),
+    hook({ kind: "subagent.end", title: "A subagent finished", at: T(73.989) }),
+    tx({ kind: "message", title: "Message", detail: "Fix failures is done.", author: main, stepTag: "test", at: T(74.916) }),
+    // Run tests, pass 2: the Tester, resumed, re-reads the file.
+    ...marker("test", "m4", 76.555, 1.5),
+    hook({ kind: "prompt.submit", title: "A prompt was submitted", at: T(76.693) }),
+    tx({ kind: "tool.start", title: "SendMessage", toolName: "SendMessage", toolUseId: "s2", at: T(80.749) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "s2", at: T(81.652) }),
+    tx({ kind: "message", title: "Message", detail: "The Tester is re-reading the file.", author: main, stepTag: "test", at: T(83.015) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", at: T(83.015) }),
+    tx({ kind: "tool.start", title: "Read", toolName: "Read", toolUseId: "r2", parentToolUseId: "qa", at: T(82.873) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "r2", parentToolUseId: "qa", at: T(83.232) }),
+    hook({ kind: "turn.end", title: "The agent finished its turn", at: T(83.954) }),
+    // 18:12:25 PDT: the moment the header claimed all three steps finished.
+    tx({ kind: "tool.start", title: "SubagentHandback", toolName: "SubagentHandback", toolUseId: "h2", parentToolUseId: "qa", at: T(85.279) }),
+  ];
+  const ending = [
+    hook({ kind: "subagent.end", title: "A subagent finished", at: T(85.921) }),
+    tx({ kind: "tool.end", title: "Tool finished", ok: true, toolUseId: "h2", parentToolUseId: "qa", at: T(86.542) }),
+    hook({ kind: "prompt.submit", title: "A prompt was submitted", at: T(86.47) }),
+    tx({ kind: "message", title: "Message", detail: "The pass 2 re-check passed.", parentToolUseId: "qa", author: tester, stepTag: "test", at: T(88.275) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: "qa", author: tester, at: T(88.275) }),
+    hook({ kind: "subagent.end", title: "A subagent finished", at: T(88.408) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", at: T(98.384) }),
+    tx({ kind: "session.end", title: "The harness reported the work as finished", author: main, completion: "done", at: T(98.392) }),
+    tx({ kind: "message", title: "Message", detail: "The workflow is done.", author: main, stepTag: "test", at: T(98.392) }),
+    hook({ kind: "session.end", title: "The harness reported the work as finished", completion: "done", at: T(99.937) }),
+  ];
+
+  it("does not count Run tests while its second pass is working", () => {
+    const view = foldLiveSession(workflow, run(), journal);
+    expect(view.blocks.implement).toMatchObject({ state: "done", passes: 1 });
+    expect(view.blocks.fix).toMatchObject({ state: "done", passes: 1 });
+    expect(view.blocks.test).toMatchObject({ state: "running", passes: 2 });
+    expect(finishedSteps(view)).toBe(2);
+  });
+
+  it("counts it once the run reports the work done", () => {
+    const view = foldLiveSession(workflow, run({ state: "completed" }), [...journal, ...ending]);
+    expect(view.blocks.test).toMatchObject({ state: "done", passes: 2 });
+    expect(finishedSteps(view)).toBe(3);
+  });
+});
+
+/*
+  ANT-242, a plugin watch run (ANT-ARRVQBQU) in Claude Code desktop. Two
+  writers sent off in the background, each step reported through `anthill
+  step`. The Theme step's report was made by a command issued before the
+  Theme Writer's Agent call but recorded 0.7 s after it, so the dispatch went
+  to the Caption step and the THEMES.md Write was "Confirmed · Write
+  CAPTIONS.md". The session then ended its turn while both wrote, was prompted
+  twice and stopped; each time Claude Code's own helper fired SubagentStop a
+  moment later, and each was drawn "Theme Writer — Completed". After the Stop
+  the steps read Unknown and Failed. Timings are the journal's.
+*/
+describe("background writers in a plugin-bound run, through turn endings and a Stop", () => {
+  const writers: Workflow = {
+    ...workflow,
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "caption-writer", type: "agent", name: "Write CAPTIONS.md", config: { actionKind: "agent-step", task: "a", agentId: "agent-caption" } },
+      { id: "theme-writer", type: "agent", name: "Write THEMES.md", config: { actionKind: "agent-step", task: "b", agentId: "agent-theme" } },
+      { id: "reviewer", type: "agent", name: "Review both files", config: { actionKind: "verify", task: "c", agentId: "agent-reviewer" } },
+      { id: "end", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "caption-writer" },
+      { id: "e2", source: "start", target: "theme-writer" },
+      { id: "e3", source: "caption-writer", target: "reviewer" },
+      { id: "e4", source: "theme-writer", target: "reviewer" },
+      { id: "e5", source: "reviewer", target: "end" },
+    ],
+    metadata: {
+      workflow: {
+        formatVersion: 5,
+        agents: [
+          { id: "agent-caption", name: "Caption Writer" },
+          { id: "agent-theme", name: "Theme Writer" },
+          { id: "agent-reviewer", name: "Reviewer" },
+        ],
+      },
+    },
+  };
+  const T = (s: number) => new Date(Date.parse("2026-10-01T01:08:00.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const hook = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "hook", channel: "claude-code:hook", ...partial });
+  const report = (blockId: string, s: number) =>
+    event({ kind: "step.marker", title: "Step announced", detail: blockId, blockId, source: "anthill", channel: "anthill:report", at: T(s) });
+  const turnEnd = (s: number) => [
+    tx({ kind: "turn.end", title: "The agent finished its turn", toolUseId: `msg-${s}`, at: T(s) }),
+    hook({ kind: "turn.end", title: "The agent finished its turn", at: T(s + 0.14) }),
+  ];
+  /** Claude Code's own helper, ending after the session's turn. */
+  const helper = (s: number) => hook({ kind: "subagent.end", title: "A subagent finished", at: T(s) });
+  const byTheme = { parentToolUseId: "thm", author: { kind: "subagent" as const, name: "Theme Writer: THEMES.md" } };
+
+  const journal = (themeDescription = "Theme Writer: THEMES.md") => [
+    tx({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "report-cap", detail: "Report run start and caption step", at: T(20.616) }),
+    report("caption-writer", 21.828),
+    hook({ kind: "tool.end", title: "Bash", toolName: "Bash", toolUseId: "report-cap", ok: true, at: T(21.953) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolName: "Agent", toolUseId: "cap", agentName: "general-purpose", detail: "Caption Writer: CAPTIONS.md", background: true, at: T(27.546) }),
+    hook({ kind: "tool.end", title: "Agent", toolName: "Agent", toolUseId: "cap", ok: true, at: T(28.707) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "cap", ok: true, background: true, at: T(28.758) }),
+    tx({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "report-thm", detail: "Report theme writer step", at: T(30.523) }),
+    tx({ kind: "usage", title: "Token usage recorded", parentToolUseId: "cap", tokens: { in: 49516, out: 8 }, at: T(32.08) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolName: "Agent", toolUseId: "thm", agentName: "general-purpose", detail: themeDescription, background: true, at: T(33.857) }),
+    report("theme-writer", 34.555),
+    hook({ kind: "tool.end", title: "Bash", toolName: "Bash", toolUseId: "report-thm", ok: true, at: T(34.69) }),
+    hook({ kind: "tool.start", title: "Agent", toolName: "Agent", toolUseId: "thm", at: T(34.828) }),
+    hook({ kind: "tool.end", title: "Agent", toolName: "Agent", toolUseId: "thm", ok: true, at: T(34.995) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "thm", ok: true, background: true, at: T(35.038) }),
+    ...turnEnd(36.58),
+    helper(38.419),
+    tx({ kind: "usage", title: "Token usage recorded", ...byTheme, tokens: { in: 49498, out: 8 }, at: T(38.795) }),
+    hook({ kind: "prompt.submit", title: "A prompt was submitted", at: T(56.073) }),
+    ...turnEnd(63.469),
+    helper(65.972),
+    tx({ kind: "tool.start", title: "Write", toolName: "Write", toolUseId: "thm-write", detail: "THEMES.md", ...byTheme, at: T(77.756) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "thm-write", ok: true, ...byTheme, at: T(78.083) }),
+    hook({ kind: "prompt.submit", title: "A prompt was submitted", at: T(84.342) }),
+  ];
+  const stop = [tx({ kind: "notification", title: "Stopped by hand", at: T(93.466) }), helper(95.022)];
+
+  it("sends each writer's dispatch, and its work, to its own step", () => {
+    const view = foldLiveSession(writers, run(), journal());
+    const cards = view.events.filter((item) => item.kind === "subagent.start");
+    expect(cards.map((card) => card.mapping.blockId)).toEqual(["caption-writer", "theme-writer"]);
+    expect(view.events.find((item) => item.toolUseId === "thm-write")?.mapping).toMatchObject({
+      blockId: "theme-writer",
+    });
+    expect(view.blocks["theme-writer"].passes).toBe(1);
+  });
+
+  it("goes by the step the session reported as it dispatched, when the description names no agent", () => {
+    const view = foldLiveSession(writers, run(), journal("Write the themes file"));
+    const card = view.events.find((item) => item.kind === "subagent.start" && item.toolUseId === "thm");
+    expect(card?.mapping).toMatchObject({ blockId: "theme-writer", confidence: "likely" });
+    expect(view.events.find((item) => item.toolUseId === "thm-write")?.mapping.blockId).toBe("theme-writer");
+    expect(view.blocks["theme-writer"].passes).toBe(1);
+  });
+
+  it("does not take a step reported by a command issued after the dispatch", () => {
+    const later = journal("Write the themes file").map((item) =>
+      item.toolUseId === "report-thm" && item.kind === "tool.start" ? { ...item, at: T(34) } : item,
+    );
+    const view = foldLiveSession(writers, run(), later);
+    const card = view.events.find((item) => item.kind === "subagent.start" && item.toolUseId === "thm");
+    expect(card?.mapping.blockId).toBe("caption-writer");
+  });
+
+  it("finishes no writer when the session's own turn ends and Claude Code's helper stops", () => {
+    const view = foldLiveSession(writers, run(), journal());
+    expect(view.blocks["caption-writer"].state).toBe("running");
+    expect(view.blocks["theme-writer"].state).toBe("running");
+    expect(finishedSteps(view)).toBe(0);
+  });
+
+  it("reads both writers Unknown when the session is stopped before either hands back", () => {
+    const view = foldLiveSession(writers, run({ state: "observation_lost" }), [...journal(), ...stop]);
+    expect(view.blocks["caption-writer"].state).toBe("unknown");
+    expect(view.blocks["theme-writer"].state).toBe("unknown");
+    expect(finishedSteps(view)).toBe(0);
+  });
+
+  it("tells the helper's stop from a subagent's own", () => {
+    const events = [...journal(), ...stop];
+    const isHelper = helperStops(events);
+    expect(events.filter((item) => item.kind === "subagent.end").map(isHelper)).toEqual([true, true, true]);
+    // A writer's own stop, a moment after it last wrote, is its own however
+    // recently the session's turn ended.
+    const own = [
+      ...turnEnd(10),
+      tx({ kind: "turn.end", title: "The agent finished its turn", ...byTheme, at: T(10.5) }),
+      helper(10.6),
+    ];
+    expect(helperStops(own)(own[3])).toBe(false);
+  });
+});
+
+describe("the agent a dispatch's description names", () => {
+  const named: Workflow = {
+    ...workflow,
+    metadata: {
+      workflow: {
+        formatVersion: 4,
+        agents: [
+          { id: "agent-dev", name: "Developer" },
+          { id: "agent-qa", name: "Test Runner" },
+        ],
+      },
+    },
+    nodes: workflow.nodes.filter((node) => node.id !== "fix"),
+  };
+  const byName = buildWorkflowIndex(named);
+
+  it("is the agent it opens with", () => {
+    expect(stepForAgent(byName, "Test Runner: run the suite", true)).toBe("test");
+    expect(stepForAgent(byName, "Test Runner", true)).toBe("test");
+  });
+
+  it("is not an agent whose name only starts a longer word or comes later", () => {
+    expect(stepForAgent(byName, "Test Runners", true)).toBeUndefined();
+    expect(stepForAgent(byName, "Ask the Test Runner", true)).toBeUndefined();
+  });
+
+  it("is never read into an agent type", () => {
+    expect(stepForAgent(byName, "test-runner-general")).toBeUndefined();
   });
 });

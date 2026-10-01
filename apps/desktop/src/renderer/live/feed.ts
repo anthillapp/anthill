@@ -17,7 +17,7 @@
  * screen.
  */
 
-import { stoppedWithSession, type AttributedEvent, type MappingConfidence, type ObservationEvent } from "@anthill/live";
+import { helperStops, stoppedWithSession, type AttributedEvent, type MappingConfidence, type ObservationEvent } from "@anthill/live";
 
 /**
  * How many cards the feed draws.
@@ -144,6 +144,8 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
   let lastDelegateEnd: { card: FeedCard; at: number } | undefined;
   /** A subagent's stop that is the session's own reaching it (ANT-241). */
   const cutOff = stoppedWithSession(events);
+  /** Claude Code's own helper stopping after the session's turn (ANT-242). */
+  const isHelperStop = helperStops(events);
 
   /** Another channel's record of this card's action, folded in rather than drawn twice. */
   const fold = (card: FeedCard, event: AttributedEvent) => {
@@ -234,6 +236,12 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
       fold(lastDelegateEnd.card, event);
       continue;
     }
+
+    // A SubagentStop that is Claude Code's own helper ending after the
+    // session's turn: no subagent the session started finished, and drawing
+    // it as a completed one beside writers still at work said one had
+    // (ANT-242).
+    if (isHelperStop(event)) continue;
 
     // The same call opened twice — the transcript's dispatch and the hooks'
     // PreToolUse for it. One card, not two; and the second used to take the

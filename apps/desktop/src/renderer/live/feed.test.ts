@@ -493,3 +493,43 @@ describe("subagents stopped along with the session, in the feed", () => {
     }
   });
 });
+
+/*
+  ANT-242. Two writers sent off in the background; the session's own turn
+  ended while they wrote, twice, and was then stopped. Each time Claude
+  Code's own helper fired a SubagentStop a moment later, naming nobody, and
+  each was drawn as a completed subagent beside writers still at work.
+*/
+describe("Claude Code's own helper stopping after the session's turn", () => {
+  const T = (s: number) => new Date(Date.parse("2026-10-01T01:08:00.000Z") + s * 1000).toISOString();
+  const tx = { channel: "claude-code:transcript", source: "transcript" as const };
+  const hook = { channel: "claude-code:hook", source: "hook" as const };
+  const byTheme = { parentToolUseId: "thm", author: { kind: "subagent" as const, name: "Theme Writer: THEMES.md" } };
+  const journal = [
+    event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "general-purpose", detail: "Caption Writer: CAPTIONS.md", toolUseId: "cap", background: true, at: T(27.5), ...tx }),
+    event({ kind: "tool.end", title: "Tool finished", toolUseId: "cap", background: true, at: T(28.8), ...tx }),
+    event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "general-purpose", detail: "Theme Writer: THEMES.md", toolUseId: "thm", background: true, at: T(33.9), ...tx }),
+    event({ kind: "tool.end", title: "Tool finished", toolUseId: "thm", background: true, at: T(35), ...tx }),
+    event({ kind: "turn.end", title: "The agent finished its turn", at: T(36.6), ...tx }),
+    event({ kind: "turn.end", title: "The agent finished its turn", at: T(36.7), ...hook }),
+    event({ kind: "subagent.end", title: "A subagent finished", at: T(38.4), ...hook }),
+    event({ kind: "prompt.submit", title: "A prompt was submitted", at: T(56), ...hook }),
+    event({ kind: "turn.end", title: "The agent finished its turn", at: T(64.3), ...hook }),
+    event({ kind: "subagent.end", title: "A subagent finished", at: T(66), ...hook }),
+    event({ kind: "tool.start", title: "Write", toolName: "Write", toolUseId: "w1", ...byTheme, at: T(77.8), ...tx }),
+    event({ kind: "tool.end", title: "Tool finished", toolUseId: "w1", ok: true, ...byTheme, at: T(78.1), ...tx }),
+    event({ kind: "notification", title: "Stopped by hand", at: T(93.5), ...tx }),
+    event({ kind: "subagent.end", title: "A subagent finished", at: T(95), ...hook }),
+  ];
+
+  it("draws no completed subagent while the writers are still at work", () => {
+    const agents = buildFeed(journal, false).filter((card) => card.kind === "agent");
+    expect(agents).toHaveLength(2);
+    expect(agents.every((card) => card.state === "working")).toBe(true);
+  });
+
+  it("leaves both writers' outcome unknown once the session is over", () => {
+    const agents = buildFeed(journal, true).filter((card) => card.kind === "agent");
+    expect(agents.map((card) => card.state)).toEqual(["unknown", "unknown"]);
+  });
+});

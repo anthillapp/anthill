@@ -141,9 +141,27 @@ export function attribute(
  * carries the agent it runs and a short description, and a harness plugin
  * writes the workflow's own agent name there ("Caption Writer"). Two steps
  * sharing an agent are evidence for neither (ANT-217).
+ *
+ * The description often goes on past the name — "Theme Writer: THEMES.md" —
+ * and read whole it named no agent, so the dispatch went to whichever step
+ * was announced last (ANT-242). With `opening`, a description that opens
+ * with an agent's name names that agent; when it opens with two (one name a
+ * prefix of the other), the longer is the one it names. Not for the agent
+ * type itself, which is a name and nothing more: `general-purpose` does not
+ * name an agent called "General".
  */
-export function stepForAgent(index: WorkflowIndex, name: string | undefined): string | undefined {
+export function stepForAgent(
+  index: WorkflowIndex,
+  name: string | undefined,
+  opening = false,
+): string | undefined {
   if (!name) return undefined;
-  const owners = index.byAgent.get(normalizeAgent(name));
+  const wanted = normalizeAgent(name);
+  let slug: string | undefined;
+  for (const agent of index.byAgent.keys()) {
+    if (wanted !== agent && !(opening && wanted.startsWith(`${agent}-`))) continue;
+    if (slug === undefined || agent.length > slug.length) slug = agent;
+  }
+  const owners = slug ? index.byAgent.get(slug) : undefined;
   return owners?.length === 1 ? owners[0] : undefined;
 }

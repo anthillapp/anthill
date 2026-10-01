@@ -170,6 +170,119 @@ export function stoppedWithSession(events: readonly ObservationEvent[]): (event:
   };
 }
 
+/** How soon after the session's own turn ends Claude Code's helper stops (ANT-242). */
+export const HELPER_STOP_MS = 5_000;
+/** How recently a subagent must have been heard from for a stop to be its, whatever ended before. */
+const OWN_STOP_MS = 1_500;
+
+/** A subagent's own record: work, words or an ending the call that started it names. */
+function isDelegateRecord(event: ObservationEvent): boolean {
+  return Boolean(event.parentToolUseId) || event.author?.kind === "subagent";
+}
+
+/**
+ * Which of the hooks' SubagentStop records are Claude Code's own helper, not
+ * a subagent the session started.
+ *
+ * After the session's turn ends, and after a Stop, Claude Code runs a helper
+ * of its own under the session's id (ANT-218), and its end fires SubagentStop
+ * a second or two later — naming no subagent, while the session's background
+ * writers are still listed as running. Read as one of them finishing, each
+ * foreground turn ending drew a "Completed" subagent card, and the first one
+ * settled a writer that went on for minutes (ANT-242). A subagent's own stop
+ * comes a moment after it last wrote; the helper's comes after the session
+ * yielded with no subagent heard from since.
+ */
+export function helperStops(events: readonly ObservationEvent[]): (event: ObservationEvent) => boolean {
+  const time = (event: ObservationEvent) => Date.parse(event.at);
+  const yields = events
+    .filter((event) => (event.kind === "turn.end" || isStopByHand(event)) && !isDelegateRecord(event))
+    .map(time)
+    .filter((at) => !Number.isNaN(at));
+  const delegates = events
+    .filter(isDelegateRecord)
+    .map(time)
+    .filter((at) => !Number.isNaN(at));
+  return (event) => {
+    if (event.kind !== "subagent.end" || event.toolUseId || isDelegateRecord(event)) return false;
+    if (!event.channel.endsWith(":hook")) return false;
+    const at = time(event);
+    if (Number.isNaN(at)) return false;
+    const yielded = yields.filter((y) => y <= at && at - y <= HELPER_STOP_MS);
+    if (yielded.length === 0) return false;
+    const since = Math.min(Math.max(...yielded), at - OWN_STOP_MS);
+    return !delegates.some((heard) => heard > since && heard <= at);
+  };
+}
+
+/** How long after a dispatch the report of a step announced with it may land (ANT-242). */
+export const LATE_REPORT_MS = 5_000;
+/** How long a call with no recorded end is still taken as the command that made a report. */
+const OPEN_CALL_MS = 60_000;
+
+/**
+ * The step each dispatch was started for, when the session announced it in
+ * the same breath and its report landed only after the dispatch.
+ *
+ * A plugin-bound run reports a step through `anthill step`, and that line is
+ * recorded when the CLI runs — after Claude Code has read the whole message,
+ * including an Agent call that comes after the command. So the Theme
+ * Writer's dispatch was read 0.7 s before its step was reported, went to the
+ * Caption step still announced, and its THEMES.md Write was then drawn
+ * "Confirmed · Write CAPTIONS.md" (ANT-242). The command that made the report
+ * was issued before the dispatch, though, and is still running when the report
+ * lands: that is the session announcing the step first. Only a report inside
+ * one of the session's own calls begun before the dispatch, landing soon
+ * after it, and only when one step is announced that way.
+ */
+function stepsAnnouncedAsDispatched(
+  journal: readonly ObservationEvent[],
+  index: WorkflowIndex,
+): Map<string, string> {
+  const time = (event: ObservationEvent) => Date.parse(event.at);
+  const dispatches = journal.filter(
+    (event) => event.kind === "subagent.start" && event.toolUseId && !isDelegateRecord(event),
+  );
+  const spawned = new Set(dispatches.map((event) => event.toolUseId as string));
+  /** The session's own calls, by id: when each began and, once known, ended. */
+  const calls = new Map<string, { from: number; to?: number }>();
+  for (const event of journal) {
+    if (event.kind !== "tool.start" && event.kind !== "tool.end") continue;
+    if (!event.toolUseId || spawned.has(event.toolUseId) || isDelegateRecord(event)) continue;
+    const at = time(event);
+    if (Number.isNaN(at)) continue;
+    const call = calls.get(event.toolUseId);
+    if (event.kind === "tool.start") {
+      if (!call) calls.set(event.toolUseId, { from: at });
+      else call.from = Math.min(call.from, at);
+    } else if (call) call.to = call.to === undefined ? at : Math.min(call.to, at);
+  }
+  const known = new Set(index.blocks.map((block) => block.id));
+  const reports = journal.filter(
+    (event) => event.kind === "step.marker" && event.channel === "anthill:report" && event.blockId && known.has(event.blockId),
+  );
+  const found = new Map<string, string>();
+  for (const dispatch of dispatches) {
+    const at = time(dispatch);
+    if (Number.isNaN(at)) continue;
+    const steps = new Set<string>();
+    for (const report of reports) {
+      const reported = time(report);
+      if (Number.isNaN(reported) || reported <= at || reported - at > LATE_REPORT_MS) continue;
+      // A call never seen ending counts only while it is recent: a PreToolUse
+      // nothing closed is not a command still running a minute on.
+      const inside = [...calls.values()].some(
+        (call) =>
+          call.from <= at &&
+          (call.to === undefined ? at - call.from <= OPEN_CALL_MS : reported <= call.to),
+      );
+      if (inside) steps.add(report.blockId as string);
+    }
+    if (steps.size === 1) found.set(dispatch.toolUseId as string, [...steps][0]);
+  }
+  return found;
+}
+
 function isStopByHand(event: ObservationEvent): boolean {
   return event.kind === "notification" && event.title === STOPPED_BY_HAND;
 }
@@ -523,6 +636,7 @@ export function foldLiveSession(
    */
   const cutOffFor = new Set<string>();
   const cutOffWithSession = stoppedWithSession(events);
+  const isHelperStop = helperStops(events);
   const STOPPED_NOTE = "A subagent working on this step was stopped by hand before it handed back.";
   const STOPPED_HERE_NOTE = "The session was stopped by hand on this step.";
 
@@ -586,6 +700,7 @@ export function foldLiveSession(
       saysItWorksOn.set(event.parentToolUseId, event.stepTag);
     }
   }
+  const announcedAsDispatched = stepsAnnouncedAsDispatched(journal, index);
   for (const event of journal) {
     /*
       A subagent that had handed back, at work again: the session reused it —
@@ -647,7 +762,9 @@ export function foldLiveSession(
     // that call has been read: Claude Code writes the message holding the
     // Agent calls only once the last is made, and the subagents are already
     // at work by then (ANT-164).
-    if (event.kind === "subagent.end" && !event.parentToolUseId && event.channel.endsWith(":hook")) {
+    // Claude Code's own helper stopping after the session's turn is nobody's
+    // end (ANT-242).
+    if (event.kind === "subagent.end" && !event.parentToolUseId && event.channel.endsWith(":hook") && !isHelperStop(event)) {
       if (hooksOwed > 0) {
         hooksOwed -= 1;
       } else {
@@ -760,7 +877,8 @@ export function foldLiveSession(
     if (event.kind === "subagent.start" && event.toolUseId) {
       const own = saysItWorksOn.get(event.toolUseId);
       // The agent it runs, when exactly one step has that agent (ANT-217).
-      const named = stepForAgent(index, event.agentName) ?? stepForAgent(index, event.detail);
+      const named = stepForAgent(index, event.agentName) ?? stepForAgent(index, event.detail, true);
+      const late = announcedAsDispatched.get(event.toolUseId);
       const target =
         event.stepTag && blocks[event.stepTag]
           ? event.stepTag
@@ -768,7 +886,9 @@ export function foldLiveSession(
             ? own
             : named && blocks[named]
               ? named
-              : announced;
+              : late && blocks[late]
+                ? late
+                : announced;
       if (target && blocks[target]) {
         // The dispatch card belongs where its subagent's work goes.
         const card = attributed[attributed.length - 1];
@@ -776,7 +896,9 @@ export function foldLiveSession(
           card.mapping =
             target === named && !event.stepTag && !own
               ? { blockId: target, confidence: "likely", how: "the agent this subagent runs belongs to this step" }
-              : { blockId: target, confidence: "exact", how: "a subagent started for this step" };
+              : target === late && !event.stepTag && !own
+                ? { blockId: target, confidence: "likely", how: "the session announced this step as it started this subagent" }
+                : { blockId: target, confidence: "exact", how: "a subagent started for this step" };
         }
         delegations.set(event.toolUseId, {
           blockId: target,
@@ -1051,18 +1173,16 @@ export function hasStepEvidence(view: LiveSessionView): boolean {
 }
 
 /**
- * How many steps have finished at least once.
+ * How many steps are finished now: whose current pass is over.
  *
- * A step the agent has come back to is drawn as running again, and it is —
- * but the pass it finished before is still finished. Counting only `done`
- * blocks made "9 of 10 steps finished" fall to 8 the moment the agent
- * returned to one of the nine, which read as progress being undone rather
- * than as a step being visited twice.
+ * A step the agent has come back to is working again, and is not counted
+ * until that pass ends. Counting it on the strength of an earlier pass read
+ * "3 of 3 steps finished" over a rework loop's "Run tests" still drawn as
+ * working on its second pass (ANT-243) — a header claiming the run complete
+ * while the diagram under it said otherwise. The count can fall when the agent
+ * returns to a step; that is the step being reopened, and the step's own
+ * "pass 2" says so. It is the same reading as the ended report's "N done".
  */
 export function finishedSteps(view: LiveSessionView): number {
-  return Object.values(view.blocks).filter(
-    (block) =>
-      block.state === "done" ||
-      ((block.state === "running" || block.state === "needsYou") && block.passes > 1),
-  ).length;
+  return Object.values(view.blocks).filter((block) => block.state === "done").length;
 }

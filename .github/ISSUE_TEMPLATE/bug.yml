@@ -1,0 +1,91 @@
+name: Bug report
+description: Something in Anthill did not work as it should.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A security problem goes to the **Security** tab instead (see SECURITY.md), not here.
+
+        **Please do not paste secrets.** Remove tokens, API keys, private paths and project contents from anything below.
+  - type: input
+    id: version
+    attributes:
+      label: Anthill version
+      description: Settings → About, or `git rev-parse --short HEAD` for a source build.
+      placeholder: 0.8.6
+    validations:
+      required: true
+  - type: dropdown
+    id: setup
+    attributes:
+      label: How you run Anthill
+      options:
+        - macOS app (downloaded release)
+        - Linux CLI (web page in a browser)
+        - Built from source
+        - Windows (experimental) — please use the Windows form instead
+    validations:
+      required: true
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Coding tool involved
+      multiple: true
+      options:
+        - Claude Code
+        - Codex
+        - Pi
+        - None, it happened in Anthill alone
+    validations:
+      required: true
+  - type: dropdown
+    id: handover
+    attributes:
+      label: How the workflow reached the tool
+      description: For a problem with a running session.
+      options:
+        - Through the plugin (/anthill:workflow or $anthill)
+        - I copied the prompt and pasted it
+        - Not about a session
+  - type: dropdown
+    id: hooks
+    attributes:
+      label: Live observation hooks
+      description: Settings → Live observation. Whether they are on decides most questions about a session Anthill misread.
+      options:
+        - Installed and working
+        - Installed, but not sure they work
+        - Not installed
+        - Don't know
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did
+      description: The steps that lead to the problem, as short as you can make them.
+      placeholder: |
+        1. Opened a workflow with a loop
+        2. Started it in Codex with $anthill watch …
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: The exact message you saw, if any. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs (sanitised)
+      description: Terminal output or the part of a log that shows the failure.
+      render: text

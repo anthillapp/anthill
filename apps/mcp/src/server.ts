@@ -28,6 +28,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -61,10 +62,17 @@ const SERVER_NAME = "anthill";
  * saying 0.6.6 — under a comment claiming the two were kept in step. A number
  * that has to be remembered in two places is a number that will disagree with
  * itself; this one can only be wrong if the package is.
+ *
+ * The copy bundled into a plugin has no package.json beside it, so
+ * scripts/build-plugin-server.mjs writes the package's version in as
+ * `__ANTHILL_MCP_VERSION__`. Built with tsc it is not defined, and the package
+ * is read as before.
  */
-const SERVER_VERSION = String(
-  (createRequire(import.meta.url)("../package.json") as { version?: unknown }).version ?? "0.0.0",
-);
+declare const __ANTHILL_MCP_VERSION__: string | undefined;
+const SERVER_VERSION =
+  typeof __ANTHILL_MCP_VERSION__ === "string"
+    ? __ANTHILL_MCP_VERSION__
+    : String((createRequire(import.meta.url)("../package.json") as { version?: unknown }).version ?? "0.0.0");
 
 /**
  * What the process ends on when the transport fails.
@@ -200,10 +208,25 @@ async function runServer(argv: readonly string[]): Promise<number> {
   return 0;
 }
 
-// Started as a program rather than imported by a test. `process.argv[1]` is the
-// script Node was given, so comparing it with this module's own URL is what
-// tells the two apart.
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+/**
+ * Whether this module is the program Node was started with, rather than one a
+ * test imported. `process.argv[1]` is the script Node was given, and
+ * `import.meta.url` is where Node found it after following links, so the two
+ * are compared as real paths. Compared as given, a server started through a
+ * symlinked path (a temporary directory on macOS, a linked checkout or plugin
+ * folder) took itself for an import and exited at once, answering nothing.
+ */
+function startedAsProgram(): boolean {
+  const script = process.argv[1];
+  if (!script) return false;
+  try {
+    return pathToFileURL(realpathSync(script)).href === import.meta.url;
+  } catch {
+    return false;
+  }
+}
+
+if (startedAsProgram()) {
   // Assigned only on a refusal to start. A clean start returns 0, and writing
   // that back would overwrite a code the transport had already set on its way
   // past.

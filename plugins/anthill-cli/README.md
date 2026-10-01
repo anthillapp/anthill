@@ -13,52 +13,79 @@ the desktop plugin UI still needs a manual smoke test because this environment
 cannot automate the Codex app. Other versions are untested rather than
 unsupported.
 
-## Install from this checkout
+## Install
 
-Build the shared MCP server first:
-
-```bash
-npm run build:deps
-npm run build --workspace=@anthill/mcp
-npm run build --workspace=@anthill/cli
-npm install --global ./apps/cli
-```
-
-Point the plugin at that exact built server. An absolute path is required:
+You need [Anthill](https://github.com/nstr/anthill) itself, and Node.js on your
+`PATH` (the plugin's server is a Node program).
 
 ```bash
-mkdir -p ~/.anthill
-printf '{"server": "%s/apps/mcp/dist/server.js"}\n' "$PWD" > ~/.anthill/plugin.json
-```
-
-Register this repository's marketplace and install the plugin:
-
-```bash
-codex plugin marketplace add "$PWD"
+codex plugin marketplace add nstr/anthill
 codex plugin add anthill-cli@anthill-local
 ```
 
 Start a new Codex task after installation. Plugins are loaded when a task
 starts, so an already-running task is not an installation check.
 
+The plugin carries its own copy of Anthill's MCP server and of the progress
+reporter (`server/anthill-mcp.mjs`, `server/anthill-report.mjs`), so there is
+nothing else to build or configure. To update it later:
+
+```bash
+codex plugin marketplace upgrade anthill-local
+codex plugin add anthill-cli@anthill-local
+```
+
 Check each local surface independently:
 
 ```bash
 codex plugin list --json
 codex mcp get exchange --json
-command -v anthill
 open -Ra Anthill
 ```
 
 The first two show that the skill package and MCP configuration are enabled;
-the latter two locate the progress reporter and installed desktop app. MCP can
-store a handover while Anthill is closed, so this is availability information,
-not proof that a queued display request was consumed.
+the last locates the installed desktop app. MCP can store a handover while
+Anthill is closed, so this is availability information, not proof that a
+queued display request was consumed.
+
+### What it runs
+
+* **`bin/anthill-mcp`**, started by Codex as the MCP server. It finds the
+  server (below) and runs it with Node on your machine, over stdio.
+* **The server** reads and writes handed-over workflows in Anthill's own data
+  folder on this machine, and opens Anthill with an `anthill://` link so the
+  workflow appears there. With `--dev` (below) it may start the development
+  build of a checkout (`npm run dev:desktop`); on Linux it may start the web
+  shell (`anthill`) on `127.0.0.1`.
+* **Progress reports.** When a run starts, the server gives Codex the commands
+  that report each step: `anthill run/step/done …`, or `node
+  …/server/anthill-report.mjs run/step/done …` when there is no `anthill` on
+  the `PATH`. Each appends one line to `~/.anthill/cli/harness-reports.jsonl`.
+* **Nothing is sent off this machine.** The server's one network request is to
+  the web shell's `/health` on this machine, to see whether it is running. No
+  telemetry, no error reports, no downloads.
+
+### Running a checkout's own server
+
+For working on Anthill itself, build the server and the CLI in your checkout and
+point the plugin at that server instead of the copy it carries:
+
+```bash
+npm run build:deps
+npm run build --workspace=@anthill/mcp
+npm run build --workspace=@anthill/cli
+npm install --global ./apps/cli
+mkdir -p ~/.anthill
+printf '{"server": "%s/apps/mcp/dist/server.js"}\n' "$PWD" > ~/.anthill/plugin.json
+codex plugin marketplace add "$PWD"
+codex plugin add anthill-cli@anthill-local
+```
 
 The plugin can also locate the server through `ANTHILL_MCP_SERVER` (the absolute
 `server.js` path) or `ANTHILL_REPO` (the absolute checkout path). The settings
 file is preferred for a desktop app launched from Finder or the Dock because it
-does not inherit shell-profile environment variables.
+does not inherit shell-profile environment variables. With none of the three
+set, the plugin starts the server it carries.
 
 ### Which Anthill it talks to
 

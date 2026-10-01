@@ -6,12 +6,16 @@
  *
  * | target                          | commands                                        |
  * | ------------------------------- | ----------------------------------------------- |
- * | `app`, `electron-dev`           | `anthill run/step/done …`                       |
- * | `web`, `anthill` on the PATH    | the same                                        |
- * | `web`, `anthill` not on it      | `<this node> <checkout>/apps/cli/out/cli/src/cli.js run/step/done …` |
+ * | `anthill` on the PATH           | `anthill run/step/done …`                       |
+ * | `web`, not on it, a checkout    | `<this node> <checkout>/apps/cli/out/cli/src/cli.js run/step/done …` |
+ * | not on it, this server in a plugin | `<this node> <plugin>/server/anthill-report.mjs run/step/done …` |
+ * | not on it, neither              | `anthill run/step/done …`, all there is to offer |
  *
- * The last is a from-source install that never ran `npm link`, which is how
- * the web shell is usually run on Linux and Windows. `node` is this process's
+ * The checkout's CLI is a from-source install that never ran `npm link`, which
+ * is how the web shell is usually run on Linux and Windows. The plugin's
+ * reporter is what a plugin installed from GitHub or a directory carries
+ * beside its server (scripts/build-plugin-server.mjs): someone with the
+ * installed app and no CLI has no `anthill` at all. `node` is this process's
  * own, so the commands work whatever PATH the harness has. The PATH is the
  * harness's — this server inherits it — and it is searched here, with no
  * shell. All of them write the same report file, `~/.anthill/cli/harness-reports.jsonl`,
@@ -19,8 +23,9 @@
  * keeps its data somewhere else.
  */
 
-import { accessSync, constants, statSync } from "node:fs";
-import { delimiter, join, resolve } from "node:path";
+import { accessSync, constants, existsSync, statSync } from "node:fs";
+import { delimiter, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { typedPath, type CliInvocation } from "@anthill/live";
 
@@ -33,7 +38,12 @@ export type InvocationDeps = TargetEnvironment & {
   executable: (path: string) => boolean;
   /** This process's `node`. */
   node: string;
+  /** The reporter this server's plugin carries beside it, when it is in one. */
+  reporter?: string;
 };
+
+/** The reporter's file name beside a bundled server. */
+export const PLUGIN_REPORTER = "anthill-report.mjs";
 
 /** The harness PATH's `anthill`, looked up as a shell would, without one. */
 export function onPath(name: string, deps: InvocationDeps): string | undefined {
@@ -53,22 +63,39 @@ export function onPath(name: string, deps: InvocationDeps): string | undefined {
 
 /** How this chat's harness should run the CLI; `{}` is plain `anthill`. */
 export function reportingInvocation(resolved: ResolvedTarget, deps: InvocationDeps): CliInvocation {
-  if (resolved.target !== "web") return {};
+  const onThePath = onPath("anthill", deps) !== undefined;
+  const reporter = deps.reporter ? { command: `${nodeFor(deps)} ${typedPath(deps.reporter, deps.platform)}` } : {};
+  if (resolved.target !== "web") return onThePath ? {} : reporter;
   const platform = { platform: deps.platform };
   const dataDir = resolve(resolved.dataDir) === resolve(targetDataDir("web", deps))
     ? {}
     : { dataDir: resolve(resolved.dataDir), ...platform };
-  if (onPath("anthill", deps) || !resolved.checkout) return dataDir;
+  if (onThePath) return dataDir;
+  if (!resolved.checkout) return { ...reporter, ...dataDir };
   const cli = typedPath(webShellCli(resolved.checkout), deps.platform);
-  // On Windows a line that starts with a quoted path is an expression to
-  // PowerShell, not a command, so a `node` on the PATH — where its installer
-  // puts it — leads instead. Without one, the quoted path works in cmd and Git
-  // Bash but not in PowerShell, which would need `& ` in front: a known
-  // limitation while Windows is experimental. Elsewhere this process's own
-  // node, by path.
-  const node = deps.platform === "win32" && onPath("node", deps) ? "node" : typedPath(deps.node, deps.platform);
-  return { command: `${node} ${cli}`, ...dataDir };
+  return { command: `${nodeFor(deps)} ${cli}`, ...dataDir };
 }
+
+/**
+ * The node a reporting command starts with.
+ *
+ * On Windows a line that starts with a quoted path is an expression to
+ * PowerShell, not a command, so a `node` on the PATH — where its installer
+ * puts it — leads instead. Without one, the quoted path works in cmd and Git
+ * Bash but not in PowerShell, which would need `& ` in front: a known
+ * limitation while Windows is experimental. Elsewhere this process's own
+ * node, by path.
+ */
+function nodeFor(deps: InvocationDeps): string {
+  return deps.platform === "win32" && onPath("node", deps) ? "node" : typedPath(deps.node, deps.platform);
+}
+
+/**
+ * Where a plugin's reporter is, if this server is the copy bundled into one:
+ * the bundle is a single file, so this module's own URL is the server's.
+ * Built with tsc it is apps/mcp/dist, where there is none.
+ */
+const besideThisServer = join(dirname(fileURLToPath(import.meta.url)), PLUGIN_REPORTER);
 
 /** The real machine. */
 export function invocationDeps(environment: TargetEnvironment): InvocationDeps {
@@ -84,5 +111,6 @@ export function invocationDeps(environment: TargetEnvironment): InvocationDeps {
       }
     },
     node: process.execPath,
+    ...(existsSync(besideThisServer) ? { reporter: besideThisServer } : {}),
   };
 }

@@ -51,3 +51,26 @@ describe("the version Anthill says it is", () => {
     expect(version.split("+")[0]).toBe(release);
   });
 });
+
+describe("the server each plugin carries", () => {
+  // scripts/build-plugin-server.mjs writes both copies from one build, with the
+  // version in its first line. A release that skipped `npm run plugin:bundle`
+  // would ship last release's server inside this release's plugin.
+  const bundles = [
+    { file: "anthill-mcp.mjs", title: "MCP server" },
+    { file: "anthill-report.mjs", title: "progress reporter" },
+  ];
+  const copies = (file: string) =>
+    ["plugins/anthill", "plugins/anthill-cli"].map((plugin) => readFileSync(join(ROOT, plugin, "server", file), "utf8"));
+
+  it.each(bundles)("is this release's $title — run `npm run plugin:bundle` after `npm run version:set`", ({ file, title }) => {
+    for (const copy of copies(file)) {
+      expect(copy.split("\n", 1)[0]).toBe(`// Anthill ${title} ${release}, built by scripts/build-plugin-server.mjs`);
+    }
+  });
+
+  it.each(bundles)("is the same $title in the Claude Code plugin and the Codex plugin", ({ file }) => {
+    const [claude, codex] = copies(file);
+    expect(claude).toBe(codex);
+  });
+});

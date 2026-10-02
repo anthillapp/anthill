@@ -1,5 +1,5 @@
 {
-  "name": "anthill-cli",
+  "name": "anthill",
   "version": "0.8.6+codex.20261001051450",
   "description": "Hand work from Codex to Anthill as a local, reviewable workflow and report progress against the bound revision.",
   "author": {

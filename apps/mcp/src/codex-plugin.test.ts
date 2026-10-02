@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const PLUGIN = resolve(ROOT, "plugins/anthill-cli");
+const PLUGIN = resolve(ROOT, "plugins/anthill-codex");
 
 function text(path: string): string {
   return readFileSync(resolve(PLUGIN, path), "utf8");
@@ -26,7 +26,7 @@ describe("the Codex plugin package", () => {
     };
 
     expect(manifest).toMatchObject({
-      name: "anthill-cli",
+      name: "anthill",
       skills: "./skills/",
       mcpServers: "./.mcp.json",
     });
@@ -63,12 +63,12 @@ describe("the Codex plugin package", () => {
 
   it("ships the same defensive MCP launcher as the Claude Code package", () => {
     const codex = text("bin/anthill-mcp");
-    const claude = readFileSync(resolve(ROOT, "plugins/anthill/bin/anthill-mcp"), "utf8");
+    const claude = readFileSync(resolve(ROOT, "plugins/anthill-claude/bin/anthill-mcp"), "utf8");
     expect(codex).toBe(claude);
   });
 
   it("starts the MCP server from a standalone installed-plugin layout", async () => {
-    const home = await mkdtemp(join(tmpdir(), "anthill-cli-plugin-"));
+    const home = await mkdtemp(join(tmpdir(), "anthill-codex-plugin-"));
     const installed = join(home, "plugin");
     cpSync(PLUGIN, installed, { recursive: true });
     mkdirSync(join(home, ".anthill"));

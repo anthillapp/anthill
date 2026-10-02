@@ -25,7 +25,7 @@
  * it was, and `"server"` is only written when the file names none.
  *
  * The status is the server's own answer, not a second opinion: the server is
- * found the way the launcher finds it (plugins/anthill/bin/anthill-mcp), and
+ * found the way the launcher finds it (plugins/anthill-claude/bin/anthill-mcp), and
  * the answer is computed by the `target.js` beside it (apps/mcp/src/target.ts),
  * so the two cannot drift apart. What it cannot see:
  *
@@ -94,7 +94,7 @@ function namesServer(settings) {
 
 /**
  * The server the plugins' launcher would start, found the way it finds it
- * (plugins/anthill/bin/anthill-mcp), or why it would start none.
+ * (plugins/anthill-claude/bin/anthill-mcp), or why it would start none.
  */
 function locateServer(settings) {
   const direct = process.env.ANTHILL_MCP_SERVER?.trim();

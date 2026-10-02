@@ -15,7 +15,7 @@
       "author": {
         "name": "Nick Nesterov"
       },
-      "source": "./plugins/anthill",
+      "source": "./plugins/anthill-claude",
       "category": "productivity",
       "homepage": "https://github.com/nstr/anthill",
       "tags": ["workflow", "planning", "observability", "anthill"]

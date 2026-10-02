@@ -49,11 +49,11 @@ claude plugin install anthill@anthill
 
 ```bash
 codex plugin marketplace add nstr/anthill
-codex plugin add anthill-cli@anthill-local
+codex plugin add anthill@anthill-local
 ```
 
-Then start a new session. More in the [Claude Code](plugins/anthill/README.md)
-and [Codex](plugins/anthill-cli/README.md) plugin guides.
+Then start a new session. More in the [Claude Code](plugins/anthill-claude/README.md)
+and [Codex](plugins/anthill-codex/README.md) plugin guides.
 
 Pi has no plugin. Copy the prompt from Anthill and paste it into Pi.
 

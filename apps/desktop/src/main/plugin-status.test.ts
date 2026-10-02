@@ -32,8 +32,8 @@ async function put(path: string, content: unknown): Promise<void> {
 /** A checkout offering both plugins at these versions. */
 async function checkout(root: string, claude = "0.7.8", codex = "0.7.8+codex.1"): Promise<string> {
   const dir = join(root, "checkout");
-  await put(join(dir, "plugins/anthill/.claude-plugin/plugin.json"), { name: "anthill", version: claude });
-  await put(join(dir, "plugins/anthill-cli/.codex-plugin/plugin.json"), { name: "anthill-cli", version: codex });
+  await put(join(dir, "plugins/anthill-claude/.claude-plugin/plugin.json"), { name: "anthill", version: claude });
+  await put(join(dir, "plugins/anthill-codex/.codex-plugin/plugin.json"), { name: "anthill", version: codex });
   return dir;
 }
 
@@ -99,7 +99,7 @@ enabled = true
 source_type = "local"
 source = "/Users/me/anthill"
 
-[plugins."anthill-cli@anthill-local"]
+[plugins."anthill@anthill-local"]
 enabled = false
 
 [plugins."pdf@openai-primary-runtime"]
@@ -110,7 +110,7 @@ enabled = true
 `);
     expect(config.marketplaces).toEqual({ "anthill-local": { sourceType: "local", source: "/Users/me/anthill" } });
     expect(config.plugins).toEqual({
-      "anthill-cli@anthill-local": { enabled: false },
+      "anthill@anthill-local": { enabled: false },
       "pdf@openai-primary-runtime": { enabled: true },
     });
   });
@@ -129,9 +129,9 @@ describe("Codex", () => {
     const source = await checkout(dir, "0.7.8", "0.7.8+codex.2");
     await put(
       join(dir, ".codex/config.toml"),
-      `[marketplaces.anthill-local]\nsource_type = "local"\nsource = "${source}"\n\n[plugins."anthill-cli@anthill-local"]\nenabled = true\n`,
+      `[marketplaces.anthill-local]\nsource_type = "local"\nsource = "${source}"\n\n[plugins."anthill@anthill-local"]\nenabled = true\n`,
     );
-    const cache = join(dir, ".codex/plugins/cache/anthill-local/anthill-cli");
+    const cache = join(dir, ".codex/plugins/cache/anthill-local/anthill");
     await put(join(cache, "0.7.7+codex.1/.keep"), "");
     await put(join(cache, "0.7.8+codex.1/.keep"), "");
     await utimes(join(cache, "0.7.7+codex.1"), new Date(1_000), new Date(1_000));
@@ -148,7 +148,7 @@ describe("Codex", () => {
 
   it("does not call a plugin installed that is only listed, with nothing cached", async () => {
     const dir = await home();
-    await put(join(dir, ".codex/config.toml"), `[plugins."anthill-cli@anthill-local"]\nenabled = true\n`);
+    await put(join(dir, ".codex/config.toml"), `[plugins."anthill@anthill-local"]\nenabled = true\n`);
     expect(await codexStatus(dir)).toMatchObject({ installed: false });
   });
 });

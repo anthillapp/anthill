@@ -69,7 +69,7 @@ describe("a tool without the plugin", () => {
       kind: "install",
       label: "Turn on for Claude Code",
     });
-    const codex = connection({ harness: "codex", label: "Codex", status: { ...off, harness: "codex", plugin: "anthill-cli" } });
+    const codex = connection({ harness: "codex", label: "Codex", status: { ...off, harness: "codex", plugin: "anthill" } });
     expect(pluginCard(codex, idle, "Codex").action).toMatchObject({ kind: "settings" });
   });
 });

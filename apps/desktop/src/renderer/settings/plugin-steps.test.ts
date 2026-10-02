@@ -21,7 +21,7 @@ const codex = (over: Partial<PluginHarnessStatus> = {}): PluginHarnessStatus => 
   ...claude(),
   harness: "codex",
   label: "Codex",
-  plugin: "anthill-cli",
+  plugin: "anthill",
   marketplace: "anthill-local",
   installedVersion: "0.7.8+codex.1",
   availableVersion: "0.7.8+codex.1",
@@ -60,7 +60,7 @@ describe("the steps", () => {
   it("install into Codex with Codex's own words for it", () => {
     expect(commands(codex({ installed: false, marketplace: undefined }))).toEqual([
       "codex plugin marketplace add /Users/me/anthill",
-      "codex plugin add anthill-cli@anthill-local",
+      "codex plugin add anthill@anthill-local",
     ]);
   });
 
@@ -71,14 +71,14 @@ describe("the steps", () => {
     ]);
     expect(commands(codex({ installed: false, checkout: undefined, marketplace: undefined }))).toEqual([
       `codex plugin marketplace add ${GITHUB_SOURCE}`,
-      "codex plugin add anthill-cli@anthill-local",
+      "codex plugin add anthill@anthill-local",
     ]);
   });
 
   it("update Codex from GitHub by fetching the marketplace first", () => {
     expect(commands(codex({ installedVersion: "0.7.6", checkout: undefined }))).toEqual([
       "codex plugin marketplace upgrade anthill-local",
-      "codex plugin add anthill-cli@anthill-local",
+      "codex plugin add anthill@anthill-local",
     ]);
   });
 

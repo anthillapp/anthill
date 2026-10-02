@@ -34,8 +34,8 @@ import type { PluginHarnessStatus, PluginServerStatus, PluginStatus } from "../s
 
 /** The plugin each harness installs, and the marketplace name this repository publishes it under. */
 export const PLUGINS = {
-  "claude-code": { plugin: "anthill", marketplace: "anthill", manifest: "plugins/anthill/.claude-plugin/plugin.json" },
-  codex: { plugin: "anthill-cli", marketplace: "anthill-local", manifest: "plugins/anthill-cli/.codex-plugin/plugin.json" },
+  "claude-code": { plugin: "anthill", marketplace: "anthill", manifest: "plugins/anthill-claude/.claude-plugin/plugin.json" },
+  codex: { plugin: "anthill", marketplace: "anthill-local", manifest: "plugins/anthill-codex/.codex-plugin/plugin.json" },
 } as const;
 
 type Json = Record<string, unknown>;

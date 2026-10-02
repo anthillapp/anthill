@@ -33,7 +33,7 @@ describe("the version Anthill says it is", () => {
   });
 
   it("is the Claude Code plugin's version, and its marketplace entry agrees", () => {
-    expect(json("plugins/anthill/.claude-plugin/plugin.json").version).toBe(release);
+    expect(json("plugins/anthill-claude/.claude-plugin/plugin.json").version).toBe(release);
     const marketplace = json(".claude-plugin/marketplace.json") as {
       plugins: { name: string; version?: string }[];
     };
@@ -42,12 +42,12 @@ describe("the version Anthill says it is", () => {
   });
 
   it("is the version the Claude Code skill's frontmatter names", () => {
-    const skill = readFileSync(join(ROOT, "plugins/anthill/skills/workflow/SKILL.md"), "utf8");
+    const skill = readFileSync(join(ROOT, "plugins/anthill-claude/skills/workflow/SKILL.md"), "utf8");
     expect(/^version:\s*(\S+)\s*$/m.exec(skill)?.[1]).toBe(release);
   });
 
   it("is the Codex plugin's version, before its build suffix", () => {
-    const version = String(json("plugins/anthill-cli/.codex-plugin/plugin.json").version);
+    const version = String(json("plugins/anthill-codex/.codex-plugin/plugin.json").version);
     expect(version.split("+")[0]).toBe(release);
   });
 });
@@ -61,7 +61,7 @@ describe("the server each plugin carries", () => {
     { file: "anthill-report.mjs", title: "progress reporter" },
   ];
   const copies = (file: string) =>
-    ["plugins/anthill", "plugins/anthill-cli"].map((plugin) => readFileSync(join(ROOT, plugin, "server", file), "utf8"));
+    ["plugins/anthill-claude", "plugins/anthill-codex"].map((plugin) => readFileSync(join(ROOT, plugin, "server", file), "utf8"));
 
   it.each(bundles)("is this release's $title — run `npm run plugin:bundle` after `npm run version:set`", ({ file, title }) => {
     for (const copy of copies(file)) {

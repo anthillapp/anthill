@@ -567,7 +567,7 @@ export type CodexModelOption = {
 export type PluginHarnessStatus = {
   harness: "claude-code" | "codex";
   label: string;
-  /** The plugin's name in that tool: `anthill` or `anthill-cli`. */
+  /** The plugin's name in that tool: `anthill` in every tool. */
   plugin: string;
   /** The tool's own directory exists, so it has been used on this machine. */
   toolFound: boolean;

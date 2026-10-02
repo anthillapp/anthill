@@ -14,8 +14,7 @@
  * stderr — with the one command that fixes it.
  */
 
-/** The harness a plugin copy was installed into, as its launcher reports it. */
-export type PluginHost = "claude-code" | "codex";
+import { isPluginHarness, type PluginHarness } from "@anthill/workflow";
 
 /** Environment the launcher sets on the server it spawns. Not the harness's. */
 export const PLUGIN_VERSION_ENV = "ANTHILL_PLUGIN_VERSION";
@@ -37,7 +36,7 @@ function compare(a: string, b: string): number {
 }
 
 /** How to refresh an installed copy, per harness. */
-const UPDATE: Record<PluginHost, string> = {
+const UPDATE: Record<PluginHarness, string> = {
   "claude-code": "run `claude plugin update anthill@anthill`, then start a new session",
   codex: "reinstall the Anthill plugin in Codex (`codex plugin marketplace upgrade anthill-local`, then `codex plugin add anthill@anthill-local`), then start a new task",
 };
@@ -59,7 +58,9 @@ export function pluginDriftNotice(
   const want = release(server);
   if (!have || !want || have === want) return undefined;
 
-  const how = UPDATE[host === "codex" ? "codex" : "claude-code"];
+  // A launcher that named no harness, or one this server does not know, gets
+  // Claude Code's command, as every plugin did before there was a choice.
+  const how = UPDATE[isPluginHarness(host) ? host : "claude-code"];
   if (compare(have, want) < 0) {
     return (
       `The Anthill plugin installed in this harness is ${have}, but the Anthill it is talking to is ${want}. ` +

@@ -19,6 +19,14 @@ export {
 } from "./harness.js";
 
 export {
+  PLUGIN_HARNESSES,
+  PLUGIN_HARNESS_INFO,
+  isPluginHarness,
+  type PluginHarness,
+  type PluginHarnessInfo,
+} from "./plugin-harness.js";
+
+export {
   HARNESS_DEFAULT,
   configuredHarnesses,
   explicitModelFor,

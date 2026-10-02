@@ -1,5 +1,5 @@
 /**
- * Whether Anthill's plugin is installed in Claude Code and in Codex (ANT-135).
+ * Whether Anthill's plugin is installed in each coding tool that takes it (ANT-135).
  *
  * Read-only, and read from the tools' own records rather than by asking them:
  * this is a Settings page, opened whenever someone likes, and starting two
@@ -30,13 +30,9 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
-import type { PluginHarnessStatus, PluginServerStatus, PluginStatus } from "../shared/ipc.js";
+import { PLUGIN_HARNESSES, PLUGIN_HARNESS_INFO, type PluginHarness } from "@anthill/workflow";
 
-/** The plugin each harness installs, and the marketplace name this repository publishes it under. */
-export const PLUGINS = {
-  "claude-code": { plugin: "anthill", marketplace: "anthill", manifest: "plugins/anthill-claude/.claude-plugin/plugin.json" },
-  codex: { plugin: "anthill", marketplace: "anthill-local", manifest: "plugins/anthill-codex/.codex-plugin/plugin.json" },
-} as const;
+import type { PluginHarnessStatus, PluginServerStatus, PluginStatus } from "../shared/ipc.js";
 
 type Json = Record<string, unknown>;
 
@@ -52,24 +48,24 @@ async function readJson(path: string): Promise<unknown> {
   }
 }
 
-/** The version a checkout's plugin manifest declares, when the checkout is on this disk. */
-async function versionIn(checkout: string | undefined, manifest: string): Promise<string | undefined> {
+/** The version a checkout's copy of a harness's plugin declares, when the checkout is on this disk. */
+async function versionIn(checkout: string | undefined, harness: PluginHarness): Promise<string | undefined> {
   if (!checkout) return undefined;
-  const value = await readJson(join(checkout, manifest));
+  const { folder, manifest } = PLUGIN_HARNESS_INFO[harness];
+  const value = await readJson(join(checkout, folder, manifest));
   return isRecord(value) && typeof value.version === "string" ? value.version : undefined;
 }
 
+/** What is said about a harness before anything is read about it. */
+function unread(harness: PluginHarness, toolFound: boolean): PluginHarnessStatus {
+  const { label, plugin } = PLUGIN_HARNESS_INFO[harness];
+  return { harness, label, plugin, toolFound, installed: false, enabled: false };
+}
+
 export async function claudeCodeStatus(home: string): Promise<PluginHarnessStatus> {
-  const { plugin, manifest } = PLUGINS["claude-code"];
+  const { plugin } = PLUGIN_HARNESS_INFO["claude-code"];
   const root = join(home, ".claude");
-  const base: PluginHarnessStatus = {
-    harness: "claude-code",
-    label: "Claude Code",
-    plugin,
-    toolFound: existsSync(root),
-    installed: false,
-    enabled: false,
-  };
+  const base = unread("claude-code", existsSync(root));
   if (!base.toolFound) return base;
 
   const installs = await readJson(join(root, "plugins", "installed_plugins.json"));
@@ -99,7 +95,7 @@ export async function claudeCodeStatus(home: string): Promise<PluginHarnessStatu
     ...(typeof install?.version === "string" ? { installedVersion: install.version } : {}),
     ...(marketplace ? { marketplace } : {}),
     ...(origin ? { source: origin } : {}),
-    ...(checkout ? { checkout, availableVersion: await versionIn(checkout, manifest) } : {}),
+    ...(checkout ? { checkout, availableVersion: await versionIn(checkout, "claude-code") } : {}),
   };
 }
 
@@ -164,16 +160,9 @@ async function codexInstalledVersion(home: string, marketplace: string, plugin: 
 }
 
 export async function codexStatus(home: string): Promise<PluginHarnessStatus> {
-  const { plugin, manifest } = PLUGINS.codex;
+  const { plugin, marketplace: defaultMarket } = PLUGIN_HARNESS_INFO.codex;
   const root = join(home, ".codex");
-  const base: PluginHarnessStatus = {
-    harness: "codex",
-    label: "Codex",
-    plugin,
-    toolFound: existsSync(root),
-    installed: false,
-    enabled: false,
-  };
+  const base = unread("codex", existsSync(root));
   if (!base.toolFound) return base;
 
   let config: ReturnType<typeof readCodexConfig>;
@@ -188,7 +177,7 @@ export async function codexStatus(home: string): Promise<PluginHarnessStatus> {
   // A local checkout offered as a marketplace, whether or not the plugin is
   // installed from it yet: it is what the install commands should name.
   const offered = Object.entries(config.marketplaces).find(
-    ([name, market]) => name === (marketplace ?? PLUGINS.codex.marketplace) && market.sourceType === "local",
+    ([name, market]) => name === (marketplace ?? defaultMarket) && market.sourceType === "local",
   )?.[1];
   const checkout = offered?.source && isAbsolute(offered.source) ? offered.source : undefined;
   const source = marketplace ? config.marketplaces[marketplace]?.source : undefined;
@@ -204,9 +193,15 @@ export async function codexStatus(home: string): Promise<PluginHarnessStatus> {
     ...(installedVersion ? { installedVersion } : {}),
     marketplace,
     ...(source ? { source } : {}),
-    ...(checkout ? { checkout, availableVersion: await versionIn(checkout, manifest) } : {}),
+    ...(checkout ? { checkout, availableVersion: await versionIn(checkout, "codex") } : {}),
   };
 }
+
+/** How each harness's own records are read. */
+const STATUS: Record<PluginHarness, (home: string) => Promise<PluginHarnessStatus>> = {
+  "claude-code": claudeCodeStatus,
+  codex: codexStatus,
+};
 
 /** Whether the launcher both plugins ship can find the server it launches. */
 export async function serverStatus(home: string): Promise<PluginServerStatus> {
@@ -220,6 +215,9 @@ export async function serverStatus(home: string): Promise<PluginServerStatus> {
 }
 
 export async function pluginStatus(home: string = homedir()): Promise<PluginStatus> {
-  const [claude, codex, server] = await Promise.all([claudeCodeStatus(home), codexStatus(home), serverStatus(home)]);
-  return { harnesses: [claude, codex], server };
+  const [harnesses, server] = await Promise.all([
+    Promise.all(PLUGIN_HARNESSES.map((harness) => STATUS[harness](home))),
+    serverStatus(home),
+  ]);
+  return { harnesses, server };
 }

@@ -15,7 +15,7 @@ import { homedir } from "node:os";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 
 import { parseWorkflow } from "@anthill/workflow-schema";
-import { checkWorkflowCompatibility, migrateWorkflow } from "@anthill/workflow";
+import { checkWorkflowCompatibility, isPluginHarness, migrateWorkflow, PLUGIN_HARNESS_INFO } from "@anthill/workflow";
 import { ExchangeStore } from "@anthill/exchange-store";
 import { MARKER_VERSION, workflowSteps } from "@anthill/live";
 import type { Workflow } from "@anthill/workflow-schema";
@@ -84,7 +84,7 @@ import { AgentLibraryStore } from "./agent-library.js";
 import { AssistantThreadStore } from "./assistant-threads.js";
 import { ModelPreferencesStore } from "./model-preferences.js";
 import { pluginStatus } from "./plugin-status.js";
-import { devCheckout, INSTALL_GUIDES, installPlugin, pluginConnections, type Harness } from "./plugin-connect.js";
+import { devCheckout, installPlugin, pluginConnections } from "./plugin-connect.js";
 import { SettingsStore, reportingConsentOnDisk, workflowFolderPath } from "./settings.js";
 import { DesktopAnalytics } from "./analytics.js";
 import { SENTRY_DSN, sanitizeErrorEvent } from "../shared/error-reporting.js";
@@ -1408,7 +1408,7 @@ function registerIpcHandlers(): void {
   });
   // Runs the tool's own plugin commands, and only on the author's click.
   handle(IpcChannel.pluginInstall, async (_event, harness: unknown) => {
-    if (harness !== "claude-code" && harness !== "codex") {
+    if (!isPluginHarness(harness)) {
       return { ok: false, changed: false, error: "Unknown coding tool." };
     }
     await userPath;
@@ -1421,8 +1421,7 @@ function registerIpcHandlers(): void {
   });
   // A fixed page per tool. The renderer names the tool, never the address.
   handle(IpcChannel.pluginGuide, async (_event, harness: unknown) => {
-    const url = INSTALL_GUIDES[harness as Harness];
-    if (url) await shell.openExternal(url);
+    if (isPluginHarness(harness)) await shell.openExternal(PLUGIN_HARNESS_INFO[harness].installGuide);
   });
   handle(IpcChannel.settingsRead, async () => settings().read());
   handle(IpcChannel.settingsWrite, async (_event, patch: Partial<AppSettings>) =>

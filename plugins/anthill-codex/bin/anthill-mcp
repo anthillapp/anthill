@@ -99,7 +99,7 @@ if ("problem" in located) {
 }
 
 /**
- * The version this installed copy of the plugin is, and which harness it is for.
+ * The version this installed copy of the plugin is.
  *
  * Read from the manifest beside this script, because this script is the one
  * part of the installed copy that runs every session. A copy installed from a
@@ -108,12 +108,11 @@ if ("problem" in located) {
  * manifest that cannot be read tells the server nothing, which it takes as
  * nothing to report.
  */
-function installedPlugin() {
-  const root = PLUGIN_ROOT;
-  for (const [dir, host] of [[".claude-plugin", "claude-code"], [".codex-plugin", "codex"]]) {
+function installedVersion() {
+  for (const dir of [".claude-plugin", ".codex-plugin"]) {
     try {
-      const manifest = JSON.parse(readFileSync(join(root, dir, "plugin.json"), "utf8"));
-      if (typeof manifest?.version === "string") return { version: manifest.version, host };
+      const manifest = JSON.parse(readFileSync(join(PLUGIN_ROOT, dir, "plugin.json"), "utf8"));
+      if (typeof manifest?.version === "string") return manifest.version;
     } catch {
       // Not this harness's manifest; try the other.
     }
@@ -121,19 +120,46 @@ function installedPlugin() {
   return undefined;
 }
 
-const plugin = installedPlugin();
+/**
+ * Which harness this copy is for, and the arguments meant for the server.
+ *
+ * Each plugin's `.mcp.json` says so with `--host <harness>`, because the
+ * manifest folder cannot: more than one harness reads `.claude-plugin`. The
+ * flag is the launcher's own and is taken out here, since the server refuses
+ * flags it does not know. Without it the server is told no harness, which it
+ * takes as nothing to say about one.
+ */
+function hostAndArgs(argv) {
+  const args = [];
+  let host;
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === "--host" && index + 1 < argv.length) {
+      host = argv[index + 1];
+      index += 1;
+    } else if (argv[index].startsWith("--host=")) {
+      host = argv[index].slice("--host=".length);
+    } else {
+      args.push(argv[index]);
+    }
+  }
+  return { host: host?.trim() || undefined, args };
+}
 
-// Arguments are passed through, so a data directory can be given in .mcp.json
-// without this script having to know what the server's flags mean. The
-// plugin's version travels in the child's environment rather than as a flag:
-// the server refuses flags it does not know, and an older server started by a
-// newer launcher must still start.
-const child = spawn(process.execPath, [located.path, ...process.argv.slice(2)], {
+const version = installedVersion();
+const { host, args } = hostAndArgs(process.argv.slice(2));
+
+// Other arguments are passed through, so a data directory can be given in
+// .mcp.json without this script having to know what the server's flags mean.
+// The plugin's version and harness travel in the child's environment rather
+// than as flags: the server refuses flags it does not know, and an older
+// server started by a newer launcher must still start.
+const child = spawn(process.execPath, [located.path, ...args], {
   stdio: "inherit",
   windowsHide: true,
   env: {
     ...process.env,
-    ...(plugin ? { ANTHILL_PLUGIN_VERSION: plugin.version, ANTHILL_PLUGIN_HOST: plugin.host } : {}),
+    ...(version ? { ANTHILL_PLUGIN_VERSION: version } : {}),
+    ...(host ? { ANTHILL_PLUGIN_HOST: host } : {}),
   },
 });
 for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {

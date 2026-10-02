@@ -10,6 +10,8 @@
  * is the author's to do.
  */
 
+import { PLUGIN_HARNESS_INFO, type PluginHarness } from "@anthill/workflow";
+
 import type { PluginHarnessStatus, PluginServerStatus } from "../../shared/ipc.js";
 
 export type PluginVerdict = "installed" | "update" | "off" | "missing" | "no-tool";
@@ -42,16 +44,52 @@ function shellPath(path: string): string {
   return /^[\w./~-]+$/.test(path) ? path : `'${path.replace(/'/g, `'\\''`)}'`;
 }
 
+/** Each tool's own commands, as its `--help` gives them. */
+type Commands = {
+  addMarketplace(source: string): string;
+  install(id: string): string;
+  /** What switches a disabled plugin back on. */
+  enable(id: string): PluginStep[];
+  /** What installs the newer version a marketplace now offers. */
+  update(status: PluginHarnessStatus, marketplace: string, id: string): PluginStep[];
+};
+
+const COMMANDS: Record<PluginHarness, Commands> = {
+  "claude-code": {
+    addMarketplace: (source) => `claude plugin marketplace add ${source}`,
+    install: (id) => `claude plugin install ${id}`,
+    enable: (id) => [{ says: "Switch the plugin back on.", command: `claude plugin enable ${id}` }],
+    update: (status, marketplace, id) => [
+      { says: "Have Claude Code read the marketplace again.", command: `claude plugin marketplace update ${marketplace}` },
+      { says: `Update the plugin to ${status.availableVersion}.`, command: `claude plugin update ${id}` },
+    ],
+  },
+  codex: {
+    addMarketplace: (source) => `codex plugin marketplace add ${source}`,
+    install: (id) => `codex plugin add ${id}`,
+    enable: (id) => [
+      {
+        says: `Switch it back on in Codex's plugin settings, or set \`enabled = true\` under \`[plugins."${id}"]\` in ~/.codex/config.toml.`,
+      },
+    ],
+    update: (status, marketplace, id) => [
+      ...(status.checkout
+        ? []
+        : [{ says: "Have Codex fetch the marketplace again.", command: `codex plugin marketplace upgrade ${marketplace}` }]),
+      { says: `Install it again from the marketplace, which now offers ${status.availableVersion}.`, command: `codex plugin add ${id}` },
+    ],
+  },
+};
+
 /** The steps that move a tool from where it is to a working plugin. */
 export function pluginSteps(status: PluginHarnessStatus): PluginStep[] {
   const verdict = pluginVerdict(status);
   // A checkout on this disk is offered as the source, for working on Anthill;
   // otherwise the repository on GitHub, which is what everyone else installs.
   const source = status.checkout ? shellPath(status.checkout) : GITHUB_SOURCE;
-  const claude = status.harness === "claude-code";
-  const marketplace = status.marketplace ?? (claude ? "anthill" : "anthill-local");
+  const commands = COMMANDS[status.harness];
+  const marketplace = status.marketplace ?? PLUGIN_HARNESS_INFO[status.harness].marketplace;
   const id = `${status.plugin}@${marketplace}`;
-  const tool = claude ? "claude" : "codex";
   const restart: PluginStep = {
     says: `Start a new ${status.label} session. Plugins are loaded when a session starts, so one already open will not see it.`,
   };
@@ -70,42 +108,20 @@ export function pluginSteps(status: PluginHarnessStatus): PluginStep[] {
           says: status.checkout
             ? `Offer this Anthill checkout to ${status.label} as a plugin marketplace.`
             : `Add Anthill's plugin marketplace to ${status.label}, from GitHub.`,
-          command: claude
-            ? `claude plugin marketplace add ${source}`
-            : `codex plugin marketplace add ${source}`,
+          command: commands.addMarketplace(source),
         },
         {
           says: `Install the ${status.plugin} plugin from it.`,
-          command: claude ? `claude plugin install ${id}` : `codex plugin add ${id}`,
+          command: commands.install(id),
         },
         restart,
       ];
 
     case "off":
-      return claude
-        ? [{ says: "Switch the plugin back on.", command: `claude plugin enable ${id}` }, restart]
-        : [
-            {
-              says: `Switch it back on in Codex's plugin settings, or set \`enabled = true\` under \`[plugins."${id}"]\` in ~/.codex/config.toml.`,
-            },
-            restart,
-          ];
+      return [...commands.enable(id), restart];
 
     case "update":
-      return [
-        ...(claude
-          ? [
-              { says: "Have Claude Code read the marketplace again.", command: `claude plugin marketplace update ${marketplace}` },
-              { says: `Update the plugin to ${status.availableVersion}.`, command: `claude plugin update ${id}` },
-            ]
-          : [
-              ...(status.checkout
-                ? []
-                : [{ says: "Have Codex fetch the marketplace again.", command: `codex plugin marketplace upgrade ${marketplace}` }]),
-              { says: `Install it again from the marketplace, which now offers ${status.availableVersion}.`, command: `${tool} plugin add ${id}` },
-            ]),
-        restart,
-      ];
+      return [...commands.update(status, marketplace, id), restart];
 
     case "installed":
       return [];

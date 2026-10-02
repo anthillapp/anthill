@@ -28,7 +28,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ValidationResult, Workflow } from "@anthill/workflow-schema";
-import { HARNESS_PROFILES, WorkflowCompileError, runRoot } from "@anthill/workflow";
+import { DEFAULT_TARGET, HARNESS_PROFILES, WorkflowCompileError, runRoot } from "@anthill/workflow";
 import {
   MARKER_VERSION,
   buildBootstrapPrompt,
@@ -114,9 +114,10 @@ export function PromptModal({
   onObserving,
   onRunRoot,
 }: PromptModalProps) {
-  const cli: MarkerCli =
-    workflow.target === "codex" ? "codex" : workflow.target === "pi" ? "pi" : "claude-code";
-  const harnessProfile = HARNESS_PROFILES[workflow.target ?? "claude-code"];
+  const target = workflow.target ?? DEFAULT_TARGET;
+  // The marker names the harness the workflow is written for.
+  const cli: MarkerCli = target;
+  const harnessProfile = HARNESS_PROFILES[target];
 
   /**
    * Whether the Codex on this machine will actually read the agent files.

@@ -75,6 +75,8 @@ async function paths(handler = "// test handler: anthill-observation-hook\n") {
     prefsPath: join(root, "prefs.json"),
     claudeConfigPath: join(root, ".claude", "settings.json"),
     codexConfigPath: join(root, ".codex", "hooks.json"),
+    vscodeConfigPath: join(root, ".copilot", "hooks", "anthill.json"),
+    vscodeUserDir: join(root, "Code", "User"),
     hookHandlerPath,
     // Named explicitly, as it is in the app: a hook must not depend on
     // whatever PATH the harness happens to hand it.
@@ -818,5 +820,41 @@ describe("when to ask about Anthill's hooks", () => {
     // Then withdrew it: asked again rather than held to the old decline.
     const withdrawn = await codexOf(new ObservationSetupService(p, fakeSpawn([{ stdout: await appServer(p, "untrusted") }]).spawnFn), p.root);
     expect(withdrawn.observationPrompt).toBe("trust");
+  });
+});
+
+/*
+  ANT-255. VS Code's agent reads every *.json in ~/.copilot/hooks/, in Claude
+  Code's format, with no approval to wait on; the file is Anthill's own.
+*/
+describe("VS Code's hooks", () => {
+  it("is found by its user data folder, not by a `code` on the PATH", async () => {
+    const p = await paths();
+    const { spawnFn, calls } = fakeSpawn([{ error: missing() }, { error: missing() }]);
+    const service = new ObservationSetupService(p, spawnFn);
+    expect((await service.status()).harnesses.find((item) => item.id === "vscode")).toMatchObject({ cliAvailable: false });
+
+    await mkdir(p.vscodeUserDir, { recursive: true });
+    const later = new ObservationSetupService(p, fakeSpawn([{ error: missing() }, { error: missing() }]).spawnFn);
+    expect((await later.status()).harnesses.find((item) => item.id === "vscode")).toMatchObject({ cliAvailable: true, label: "VS Code" });
+    expect(calls.map((call) => call.command)).not.toContain("code");
+  });
+
+  it("writes Anthill's own file, one entry per event, with no matcher and no trust to wait on", async () => {
+    const p = await paths();
+    await mkdir(p.vscodeUserDir, { recursive: true });
+    const service = new ObservationSetupService(p, fakeSpawn([{ error: missing() }, { error: missing() }, { stdout: "" }]).spawnFn);
+
+    await service.install("vscode");
+
+    const written = await json(p.vscodeConfigPath);
+    const hooks = written.hooks as Record<string, { matcher?: string; hooks: { type: string; command: string }[] }[]>;
+    expect(Object.keys(hooks)).toEqual(["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStop", "Stop"]);
+    for (const [event, entries] of Object.entries(hooks)) {
+      expect(entries).toEqual([{ hooks: [{ type: "command", command: expect.stringContaining(`anthill-observation-hook vscode ${event}`) }] }]);
+    }
+    const vscode = (await service.status()).harnesses.find((item) => item.id === "vscode");
+    expect(vscode?.hookEntriesPresent).toBe(true);
+    expect(vscode?.codexHooks).toBeUndefined();
   });
 });

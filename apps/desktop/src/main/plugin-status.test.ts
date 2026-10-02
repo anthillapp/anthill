@@ -11,7 +11,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { claudeCodeStatus, codexStatus, pluginStatus, readCodexConfig, serverStatus } from "./plugin-status.js";
+import { pathToFileURL } from "node:url";
+
+import { claudeCodeStatus, codexStatus, pluginStatus, readCodexConfig, readJsonc, serverStatus, vscodeStatus } from "./plugin-status.js";
 
 const homes: string[] = [];
 afterEach(async () => {
@@ -179,8 +181,82 @@ describe("the server the plugin launches", () => {
   });
 });
 
-it("answers for both tools and the server at once", async () => {
+it("answers for every tool and the server at once", async () => {
   const status = await pluginStatus(await home());
-  expect(status.harnesses.map((item) => item.harness)).toEqual(["claude-code", "codex"]);
+  expect(status.harnesses.map((item) => item.harness)).toEqual(["claude-code", "codex", "vscode"]);
   expect(status.server.configured).toBe(false);
+});
+
+describe("VS Code", () => {
+  /** VS Code's plugin folder, as a checkout or a marketplace clone holds it. */
+  async function vscodePlugin(dir: string, version = "0.8.7"): Promise<string> {
+    await put(join(dir, "plugin.json"), { name: "anthill", version });
+    await put(join(dir, "bin/anthill-mcp"), "");
+    return dir;
+  }
+
+  it("reads settings written with comments and trailing commas", () => {
+    expect(readJsonc('{\n  // a comment\n  "a": "x // not one",\n  /* block */ "b": [1, 2,],\n}\n')).toEqual({ a: "x // not one", b: [1, 2] });
+    expect(readJsonc("{ not json")).toBeUndefined();
+  });
+
+  it("has nothing to say about a VS Code never used here", async () => {
+    const dir = await home();
+    expect(await vscodeStatus(dir, join(dir, "Code", "User"))).toMatchObject({ harness: "vscode", toolFound: false, installed: false });
+  });
+
+  it("finds the plugin in a checkout VS Code was pointed at, and what the checkout offers", async () => {
+    const dir = await home();
+    const root = join(dir, "anthill");
+    await put(join(root, ".github/plugin/marketplace.json"), { plugins: [] });
+    await vscodePlugin(join(root, "plugins/anthill-vscode"), "0.8.8");
+    const user = join(dir, "Code", "User");
+    await put(join(user, "settings.json"), `{\n  // mine\n  "chat.pluginLocations": { "${root}/plugins/anthill-vscode": true },\n}`);
+
+    expect(await vscodeStatus(dir, user)).toEqual({
+      harness: "vscode",
+      label: "VS Code",
+      plugin: "anthill",
+      toolFound: true,
+      installed: true,
+      enabled: true,
+      installedVersion: "0.8.8",
+      source: join(root, "plugins/anthill-vscode"),
+      checkout: root,
+      availableVersion: "0.8.8",
+    });
+  });
+
+  it("finds a marketplace install in VS Code's installed.json, and ignores a folder switched off", async () => {
+    const dir = await home();
+    const clone = await vscodePlugin(join(dir, ".vscode/agent-plugins/github.com/nstr/anthill/plugins/anthill-vscode"));
+    await put(join(dir, ".vscode/agent-plugins/installed.json"), {
+      version: 1,
+      installed: [
+        { pluginUri: pathToFileURL(join(dir, "elsewhere")).href, marketplace: "someone/else", name: "anthill" },
+        { pluginUri: pathToFileURL(clone).href, marketplace: "nstr/anthill", name: "anthill" },
+      ],
+    });
+    const user = join(dir, "Code", "User");
+    await put(join(user, "settings.json"), { "chat.pluginLocations": { [clone]: false } });
+
+    expect(await vscodeStatus(dir, user)).toMatchObject({
+      installed: true,
+      marketplace: "nstr/anthill",
+      source: "nstr/anthill",
+      installedVersion: "0.8.7",
+    });
+  });
+
+  it("says not installed, naming a checkout offered as a marketplace", async () => {
+    const dir = await home();
+    const root = join(dir, "anthill");
+    await put(join(root, ".github/plugin/marketplace.json"), { plugins: [] });
+    const user = join(dir, "Code", "User");
+    // As VS Code takes a local marketplace: a file URI. A bare path it ignores.
+    await put(join(user, "settings.json"), { "chat.plugins.marketplaces": [root] });
+    expect((await vscodeStatus(dir, user)).checkout).toBeUndefined();
+    await put(join(user, "settings.json"), { "chat.plugins.marketplaces": [pathToFileURL(root).href] });
+    expect(await vscodeStatus(dir, user)).toMatchObject({ toolFound: true, installed: false, checkout: root });
+  });
 });

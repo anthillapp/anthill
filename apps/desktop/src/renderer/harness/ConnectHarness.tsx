@@ -20,7 +20,7 @@
 
 import { useEffect, useRef } from "react";
 
-import { harnessProfile, interpreterDefinition } from "@anthill/workflow";
+import { harnessProfile, interpreterDefinition, type InterpreterId } from "@anthill/workflow";
 import type { HarnessTarget } from "@anthill/workflow-schema";
 
 import { interpreterLogo } from "../workflow/interpreter-logos.js";
@@ -166,7 +166,7 @@ export function connectScript(
 export type ConnectContext = "agent" | "settings";
 
 export type ConnectHarnessProps = {
-  target: HarnessTarget;
+  target: InterpreterId;
   context?: ConnectContext;
   connection: HarnessConnection;
   /** Ask the machine again about this tool. */

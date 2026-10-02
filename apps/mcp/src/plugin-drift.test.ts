@@ -31,6 +31,11 @@ describe("an installed plugin measured against the server", () => {
     expect(notice).not.toContain("claude plugin update");
   });
 
+  it("gives Claude Code's command when the launcher named no harness, or one it does not know", () => {
+    expect(pluginDriftNotice("0.7.0", undefined, "0.7.8")).toContain("claude plugin update anthill@anthill");
+    expect(pluginDriftNotice("0.7.0", "elsewhere", "0.7.8")).toContain("claude plugin update anthill@anthill");
+  });
+
   it("compares numerically, so 0.7.10 is newer than 0.7.9", () => {
     expect(pluginDriftNotice("0.7.9", "claude-code", "0.7.10")).toContain("out of date");
   });

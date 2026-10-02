@@ -11,8 +11,8 @@ import { Onboarding } from "./Onboarding.js";
 
 afterEach(cleanup);
 
-function connection(harness: "claude-code" | "codex", over: Record<string, unknown> = {}) {
-  const label = harness === "codex" ? "Codex" : "Claude Code";
+function connection(harness: "claude-code" | "codex" | "vscode", over: Record<string, unknown> = {}) {
+  const label = { "claude-code": "Claude Code", codex: "Codex", vscode: "VS Code" }[harness];
   return {
     harness,
     label,
@@ -26,7 +26,11 @@ function connection(harness: "claude-code" | "codex", over: Record<string, unkno
 let api: Record<string, ReturnType<typeof vi.fn>>;
 beforeEach(() => {
   api = {
-    pluginConnections: vi.fn(async () => [connection("claude-code"), connection("codex", { cli: { available: false } })]),
+    pluginConnections: vi.fn(async () => [
+      connection("claude-code"),
+      connection("codex", { cli: { available: false } }),
+      connection("vscode"),
+    ]),
     pluginInstall: vi.fn(async () => ({ ok: true })),
     pluginGuide: vi.fn(async () => undefined),
   };
@@ -56,7 +60,7 @@ describe("the welcome page", () => {
   it("moves focus to the page it opens", () => {
     show();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    expect(document.activeElement?.textContent).toBe("Connect Codex or Claude Code");
+    expect(document.activeElement?.textContent).toBe("Connect Codex, Claude Code or VS Code");
     expect(screen.getByRole("img", { name: "Step 2 of 2" })).toBeTruthy();
   });
 });
@@ -74,7 +78,9 @@ describe("the connect page", () => {
     expect(screen.getByText("Optional")).toBeTruthy();
     await waitFor(() => expect(within(card("Claude Code")).getByRole("button", { name: "Install for Claude Code" })).toBeTruthy());
     expect(within(card("Codex")).getByText("Not found")).toBeTruthy();
-    expect(screen.getByText(/You can add either one later from Settings ▸ Plugins/)).toBeTruthy();
+    expect(screen.getByText(/You can add any of them later from Settings ▸ Plugins/)).toBeTruthy();
+    // No command installs into VS Code; its card points at the steps.
+    expect(within(card("VS Code")).getByRole("button", { name: "Show the steps" })).toBeTruthy();
   });
 
   it("installs through the card", async () => {

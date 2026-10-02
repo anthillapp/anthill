@@ -16,6 +16,7 @@
  *     (they depend on each other by `*`, so nothing else refers to it);
  *   - the Claude Code plugin manifest and its marketplace entry;
  *   - the Claude Code skill's frontmatter `version:`;
+ *   - the VS Code plugin manifest and its marketplace entry;
  *   - the Codex plugin manifest, as `<version>+codex.<UTC timestamp>` — the
  *     build suffix is what makes Codex treat a reinstall as new, so a fresh
  *     one is minted each time.
@@ -71,6 +72,8 @@ for (const path of packages) setVersion(path, version);
 
 setVersion("plugins/anthill-claude/.claude-plugin/plugin.json", version);
 setVersion(".claude-plugin/marketplace.json", version);
+setVersion("plugins/anthill-vscode/plugin.json", version);
+setVersion(".github/plugin/marketplace.json", version);
 
 // A new build suffix only when the version itself moved: re-running the
 // script for the same version is then a no-op, as it is everywhere else.

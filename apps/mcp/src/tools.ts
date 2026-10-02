@@ -122,7 +122,7 @@ which one, and nothing is stored.`,
             harness: z
               .unknown()
               .optional()
-              .describe('Which tool you are: "claude-code", "codex" or "pi".'),
+              .describe('Which tool you are: "claude-code", "codex", "pi" or "vscode".'),
             sessionId: z
               .unknown()
               .optional()

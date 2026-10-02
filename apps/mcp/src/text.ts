@@ -702,6 +702,7 @@ function harnessName(harness: string): string {
   if (harness === "claude-code") return "Claude Code";
   if (harness === "codex") return "Codex";
   if (harness === "pi") return "pi";
+  if (harness === "vscode") return "VS Code";
   return harness;
 }
 

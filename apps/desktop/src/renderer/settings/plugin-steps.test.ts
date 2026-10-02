@@ -132,3 +132,35 @@ describe("the server the plugin launches", () => {
     expect(steps[0].command).toContain("npm run build");
   });
 });
+
+describe("VS Code, which has no command for plugins", () => {
+  const vscode = (over: Partial<PluginHarnessStatus> = {}): PluginHarnessStatus => ({
+    harness: "vscode",
+    label: "VS Code",
+    plugin: "anthill",
+    toolFound: true,
+    installed: false,
+    enabled: false,
+    ...over,
+  });
+
+  it("points VS Code at a checkout's plugin folder with one settings line", () => {
+    const steps = pluginSteps(vscode({ checkout: "/Users/me/anthill" }));
+    expect(steps[0]?.says).toContain("Preferences: Open User Settings (JSON)");
+    expect(steps[0]?.command).toBe('"chat.pluginLocations": { "/Users/me/anthill/plugins/anthill-vscode": true }');
+    expect(steps.at(-1)?.says).toContain("Start a new chat");
+  });
+
+  it("adds the GitHub marketplace when there is no checkout, and runs nothing in a terminal", () => {
+    const steps = pluginSteps(vscode());
+    expect(commands(vscode())).toEqual([`"chat.plugins.marketplaces": ["${GITHUB_SOURCE}"]`]);
+    expect(steps.map((step) => step.says).join(" ")).toContain("Install anthill from the agent plugins VS Code then offers");
+    expect(commands(vscode()).some((command) => /^(claude|codex|code) /.test(command))).toBe(false);
+  });
+
+  it("does not send someone to the Coding tools page for VS Code", () => {
+    const [step] = pluginSteps(vscode({ toolFound: false }));
+    expect(step?.says).toContain("VS Code has not been used on this machine yet");
+    expect(step?.says).not.toContain("Coding tools");
+  });
+});

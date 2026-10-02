@@ -9,13 +9,13 @@
    ```
 
    This writes every workspace `package.json`, the Claude Code plugin manifest
-   and its marketplace entry, the Claude Code skill's frontmatter, and the
-   Codex plugin manifest (with a fresh `+codex.<timestamp>` build suffix, which
+   and its marketplace entry, the Claude Code skill's frontmatter, the VS Code
+   plugin manifest and its marketplace entry, and the Codex plugin manifest (with a fresh `+codex.<timestamp>` build suffix, which
    is what makes Codex treat a reinstall as new). `apps/mcp/src/versions.test.ts`
    fails if any of them disagree, so a version written by hand is caught.
 
    `npm run plugin:bundle` builds the MCP server and writes it, with this
-   version in its first line, into `server/anthill-mcp.mjs` in both plugins.
+   version in its first line, into `server/anthill-mcp.mjs` in every plugin.
    That copy is what a plugin installed from GitHub or a directory runs, so it
    is committed with the release. The same test fails when it is still last
    release's.
@@ -29,8 +29,10 @@
    claude plugin update anthill@anthill
    ```
 
-   and reinstall the Codex plugin from this checkout's marketplace. Then start
-   new sessions: a running session keeps the skill it started with.
+   and reinstall the Codex plugin from this checkout's marketplace. VS Code
+   updates a plugin installed from a marketplace on its own schedule, as it
+   does extensions, unless its auto-update is off. Then start new sessions: a
+   running session keeps the skill it started with.
 
    If this step is skipped, the plugin's launcher reports the version it was
    installed at, and the MCP server puts a notice at the top of its

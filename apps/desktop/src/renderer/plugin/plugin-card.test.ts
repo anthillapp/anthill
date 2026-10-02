@@ -123,3 +123,22 @@ describe("Ready", () => {
     expect(readyTools([{ label: "Codex", view: not }, { label: "Claude Code", view: ready }])).toEqual(["Claude Code"]);
   });
 });
+
+describe("a tool Anthill cannot install into", () => {
+  it("offers the steps rather than a button that could only fail", () => {
+    const view = pluginCard(
+      connection({ harness: "vscode", label: "VS Code", cli: { available: true }, status: { harness: "vscode", label: "VS Code" } }),
+      idle,
+      "VS Code",
+    );
+    expect(view.state).toBe("available");
+    expect(view.action).toEqual({ kind: "settings", label: "Show the steps", outlined: true });
+    expect(view.note).toContain("its own settings");
+  });
+
+  it("still turns green only when the installed plugin's server answers", () => {
+    const status = { harness: "vscode" as const, label: "VS Code", installed: true, enabled: true };
+    expect(pluginCard(connection({ harness: "vscode", status, serverAnswers: true }), idle, "VS Code").state).toBe("ready");
+    expect(pluginCard(connection({ harness: "vscode", status, serverAnswers: false }), idle, "VS Code").state).toBe("silent");
+  });
+});

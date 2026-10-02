@@ -34,7 +34,7 @@ describe("the Codex plugin package", () => {
     expect(mcp.mcpServers?.exchange).toEqual({
       type: "stdio",
       command: "./bin/anthill-mcp",
-      args: [],
+      args: ["--host", "codex"],
       cwd: ".",
     });
   });

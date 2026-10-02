@@ -123,8 +123,9 @@ export const OBSERVATION_FACE: Record<ObservationState, Face> = {
     note: "Retry to repair Anthill’s connection. Basic progress from session records and handing over remain available.",
   },
   /**
-   * A tool with no hook mechanism. There is nothing to install and nothing to
-   * fail: Anthill reads the session file the tool writes on this machine. The
+   * A tool Anthill installs no hooks for. There is nothing to install and
+   * nothing to fail: Anthill reads the session records the tool writes on this
+   * machine. The
    * row must not offer an install, because there is no hook to write — that
    * would be a button that does nothing.
    */
@@ -134,7 +135,7 @@ export const OBSERVATION_FACE: Record<ObservationState, Face> = {
     tone: "ok",
     install: false,
     primary: "Continue",
-    note: "This tool has no hook mechanism, so there is nothing to install. Anthill reads the session file it writes on this machine and shows progress once the session starts.",
+    note: "There is nothing to install. Anthill reads the session records this tool writes on this machine and shows progress once the session starts.",
   },
   unavailable: {
     title: "This CLI was not found on this machine",
@@ -204,7 +205,7 @@ export function ObservationStep({
           question about installing something on this machine. */}
       <p>
         {state === "passive"
-          ? `Anthill watches ${label} by reading the session file it writes on this machine – there is nothing to install, ${label} has no hook mechanism. `
+          ? `Anthill watches ${label} by reading the session records it writes on this machine – there is nothing to install. `
           : `Anthill can install local observation hooks for ${label}. `}
         It only observes the session you start yourself – it does not run it, control it, or
         answer it.

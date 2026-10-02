@@ -18,12 +18,13 @@
  * than per node. Optional so that execution-mode workflows, where each agent
  * node names its own `runtime`, stay valid.
  */
-export type HarnessTarget = "claude-code" | "codex" | "pi";
+export type HarnessTarget = "claude-code" | "codex" | "pi" | "vscode";
 
 export const HARNESS_TARGETS = [
   "claude-code",
   "codex",
   "pi",
+  "vscode",
 ] as const satisfies readonly HarnessTarget[];
 
 /**

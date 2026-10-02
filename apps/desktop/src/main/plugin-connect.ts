@@ -32,6 +32,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import { runProcess, type SpawnFn } from "@anthill/runtimes";
+import { PLUGIN_HARNESS_INFO, isInterpreterId, type CheckedPluginHarness } from "@anthill/workflow";
 
 import type {
   InterpreterInfo,
@@ -40,15 +41,8 @@ import type {
   PluginInstallResult,
   PluginStatus,
 } from "../shared/ipc.js";
-import { PLUGINS, pluginStatus, readCodexConfig } from "./plugin-status.js";
-
-export type Harness = "claude-code" | "codex";
-
-/** The page each tool's own makers keep for installing it. Fixed: nothing else is opened. */
-export const INSTALL_GUIDES: Record<Harness, string> = {
-  "claude-code": "https://code.claude.com/docs/en/setup",
-  codex: "https://developers.openai.com/codex/cli",
-};
+import { vscodeUserDir } from "./live/observers/vscode.js";
+import { pluginStatus, readCodexConfig, readJsonc, vscodeInstall } from "./plugin-status.js";
 
 /** Long enough for a slow machine to start node twice; short enough not to hang a card. */
 const PROBE_TIMEOUT_MS = 12_000;
@@ -117,29 +111,101 @@ async function readJson(path: string): Promise<unknown> {
   }
 }
 
+type Step = { command: string; args: string[] };
+
+/**
+ * What differs between the tools when Anthill installs and checks the plugin:
+ * where each keeps its installed copy, how each records a known marketplace,
+ * and which of its own commands install the plugin.
+ */
+type Tool = {
+  /**
+   * The directory the tool installed the plugin into, given an installed
+   * status. Claude Code and Codex key their installs by marketplace; VS Code
+   * also loads a plugin straight from a folder, with no marketplace at all.
+   */
+  installedRoot(home: string, status: PluginHarnessStatus): Promise<string | undefined>;
+  /** Whether the tool already offers the marketplace by this name. */
+  marketplaceKnown(home: string, name: string): Promise<boolean>;
+  installSteps(status: PluginHarnessStatus, id: string, source: string, marketplaceKnown: boolean): Step[];
+};
+
+const TOOLS: Record<CheckedPluginHarness, Tool> = {
+  "claude-code": {
+    async installedRoot(home, status) {
+      if (!status.marketplace) return undefined;
+      const installs = await readJson(join(home, ".claude", "plugins", "installed_plugins.json"));
+      const entry = isRecord(installs) && isRecord(installs.plugins)
+        ? installs.plugins[`${status.plugin}@${status.marketplace}`]
+        : undefined;
+      const first = (Array.isArray(entry) ? entry : [entry]).find(isRecord);
+      return typeof first?.installPath === "string" ? first.installPath : undefined;
+    },
+    async marketplaceKnown(home, name) {
+      const known = await readJson(join(home, ".claude", "plugins", "known_marketplaces.json"));
+      return isRecord(known) && isRecord(known[name]);
+    },
+    installSteps(status, id, source, marketplaceKnown) {
+      if (status.installed && !status.enabled) return [{ command: "claude", args: ["plugin", "enable", id] }];
+      return [
+        ...(marketplaceKnown ? [] : [{ command: "claude", args: ["plugin", "marketplace", "add", source] }]),
+        { command: "claude", args: ["plugin", "install", id, "--scope", "user"] },
+      ];
+    },
+  },
+  codex: {
+    async installedRoot(home, status) {
+      if (!status.marketplace) return undefined;
+      // Codex keeps each installed version side by side; the newest is the one it loads.
+      const dir = join(home, ".codex", "plugins", "cache", status.marketplace, status.plugin);
+      try {
+        const versions = await readdir(dir);
+        const dated = await Promise.all(
+          versions.map(async (name) => ({ name, at: (await stat(join(dir, name)).catch(() => undefined))?.mtimeMs ?? 0 })),
+        );
+        const newest = dated.sort((a, b) => b.at - a.at)[0]?.name;
+        return newest ? join(dir, newest) : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    async marketplaceKnown(home, name) {
+      try {
+        return name in readCodexConfig(await readFile(join(home, ".codex", "config.toml"), "utf8")).marketplaces;
+      } catch {
+        return false;
+      }
+    },
+    installSteps(_status, id, source, marketplaceKnown) {
+      return [
+        ...(marketplaceKnown ? [] : [{ command: "codex", args: ["plugin", "marketplace", "add", source] }]),
+        { command: "codex", args: ["plugin", "add", id] },
+      ];
+    },
+  },
+  vscode: {
+    async installedRoot(home) {
+      return (await vscodeInstall(home, await vscodeSettings(home)))?.path;
+    },
+    async marketplaceKnown(home) {
+      const settings = await vscodeSettings(home);
+      const marketplaces = isRecord(settings) && Array.isArray(settings["chat.plugins.marketplaces"]) ? settings["chat.plugins.marketplaces"] : [];
+      return marketplaces.includes(GITHUB_SOURCE);
+    },
+    // VS Code has no command for it. The card shows the steps instead, and
+    // `installPlugin` refuses before it would run nothing and call it done.
+    installSteps: () => [],
+  },
+};
+
+async function vscodeSettings(home: string): Promise<unknown> {
+  return readJsonc(await readFile(join(vscodeUserDir(home), "settings.json"), "utf8").catch(() => ""));
+}
+
 /** The directory the tool installed the plugin into, which holds the launcher it runs. */
 export async function installedRoot(home: string, status: PluginHarnessStatus): Promise<string | undefined> {
-  if (!status.installed || !status.marketplace) return undefined;
-  if (status.harness === "claude-code") {
-    const installs = await readJson(join(home, ".claude", "plugins", "installed_plugins.json"));
-    const entry = isRecord(installs) && isRecord(installs.plugins)
-      ? installs.plugins[`${status.plugin}@${status.marketplace}`]
-      : undefined;
-    const first = (Array.isArray(entry) ? entry : [entry]).find(isRecord);
-    return typeof first?.installPath === "string" ? first.installPath : undefined;
-  }
-  // Codex keeps each installed version side by side; the newest is the one it loads.
-  const dir = join(home, ".codex", "plugins", "cache", status.marketplace, status.plugin);
-  try {
-    const versions = await readdir(dir);
-    const dated = await Promise.all(
-      versions.map(async (name) => ({ name, at: (await stat(join(dir, name)).catch(() => undefined))?.mtimeMs ?? 0 })),
-    );
-    const newest = dated.sort((a, b) => b.at - a.at)[0]?.name;
-    return newest ? join(dir, newest) : undefined;
-  } catch {
-    return undefined;
-  }
+  if (!status.installed) return undefined;
+  return TOOLS[status.harness].installedRoot(home, status);
 }
 
 /**
@@ -221,7 +287,11 @@ export async function pluginConnections(deps: ConnectDeps): Promise<PluginConnec
       const connection: PluginConnection = {
         harness: harness.harness,
         label: harness.label,
-        cli: { available: cli?.available ?? false, ...(cli?.version ? { version: cli.version } : {}) },
+        // A tool with no CLI Anthill detects — VS Code — is there when it has
+        // been used here: its own folder is the evidence.
+        cli: isInterpreterId(harness.harness)
+          ? { available: cli?.available ?? false, ...(cli?.version ? { version: cli.version } : {}) }
+          : { available: harness.toolFound },
         status: harness,
         source,
       };
@@ -238,38 +308,16 @@ export async function pluginConnections(deps: ConnectDeps): Promise<PluginConnec
   );
 }
 
-type Step = { command: string; args: string[] };
-
 /** The tool's own commands that take it from where it is to an installed, enabled plugin. */
 export function installSteps(harness: PluginHarnessStatus, source: string, marketplaceKnown: boolean): Step[] {
-  const { plugin, marketplace: defaultMarket } = PLUGINS[harness.harness];
-  const market = harness.marketplace ?? defaultMarket;
-  const id = `${plugin}@${market}`;
-  if (harness.harness === "claude-code") {
-    if (harness.installed && !harness.enabled) return [{ command: "claude", args: ["plugin", "enable", id] }];
-    return [
-      ...(marketplaceKnown ? [] : [{ command: "claude", args: ["plugin", "marketplace", "add", source] }]),
-      { command: "claude", args: ["plugin", "install", id, "--scope", "user"] },
-    ];
-  }
-  return [
-    ...(marketplaceKnown ? [] : [{ command: "codex", args: ["plugin", "marketplace", "add", source] }]),
-    { command: "codex", args: ["plugin", "add", id] },
-  ];
+  const { plugin, marketplace: defaultMarket } = PLUGIN_HARNESS_INFO[harness.harness];
+  const id = `${plugin}@${harness.marketplace ?? defaultMarket}`;
+  return TOOLS[harness.harness].installSteps(harness, id, source, marketplaceKnown);
 }
 
 /** Whether the tool already offers Anthill's marketplace, so adding it again is not needed. */
-async function marketplaceKnown(home: string, harness: Harness): Promise<boolean> {
-  const name = PLUGINS[harness].marketplace;
-  if (harness === "claude-code") {
-    const known = await readJson(join(home, ".claude", "plugins", "known_marketplaces.json"));
-    return isRecord(known) && isRecord(known[name]);
-  }
-  try {
-    return name in readCodexConfig(await readFile(join(home, ".codex", "config.toml"), "utf8")).marketplaces;
-  } catch {
-    return false;
-  }
+function marketplaceKnown(home: string, harness: CheckedPluginHarness): Promise<boolean> {
+  return TOOLS[harness].marketplaceKnown(home, PLUGIN_HARNESS_INFO[harness].marketplace);
 }
 
 /** The last thing a failed command said, which is usually the reason. */
@@ -279,8 +327,15 @@ function reason(outcome: { stderr: string; stdout: string; timedOut: boolean }, 
   return lines.at(-1) ?? `${label} stopped without saying why.`;
 }
 
-export async function installPlugin(harness: Harness, deps: ConnectDeps): Promise<PluginInstallResult> {
+export async function installPlugin(harness: CheckedPluginHarness, deps: ConnectDeps): Promise<PluginInstallResult> {
   const home = deps.home ?? homedir();
+  if (!PLUGIN_HARNESS_INFO[harness].installsFromAnthill) {
+    return {
+      ok: false,
+      changed: false,
+      error: `${PLUGIN_HARNESS_INFO[harness].label} has no command for installing a plugin. Settings ▸ Plugins has the steps.`,
+    };
+  }
   const status = await pluginStatus(home);
   const current = status.harnesses.find((item) => item.harness === harness)!;
   const checkout = installSource(status, deps.appRoot);

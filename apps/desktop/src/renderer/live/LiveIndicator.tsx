@@ -273,7 +273,7 @@ export function LiveIndicator({ workflowId, onOpenSession }: LiveIndicatorProps 
                 ) : (
                   <button
                     onClick={() => void window.anthill.liveCancel(run.anthillRunId).then(setSnapshot)}
-                    title="Only Anthill stops observing this workflow. Your Codex or Claude Code session continues unchanged."
+                    title="Only Anthill stops observing this workflow. Your Codex, Claude Code or VS Code session continues unchanged."
                   >
                     Stop observing in Anthill
                   </button>

@@ -2,8 +2,8 @@
 
 Anthill turns a coding task into a workflow you can see. You draw the steps, or
 let your agent draft them: who does each one, and where work loops back. Then
-you watch Claude Code, Codex or Pi carry it out, step by step, on a live
-diagram.
+you watch Claude Code, Codex, Pi or VS Code's agent carry it out, step by step,
+on a live diagram.
 
 Anthill plans and observes. It never runs, stops or steers an agent: the work
 happens in your own CLI session, signed in as you.
@@ -29,8 +29,9 @@ anthill            # opens Anthill on 127.0.0.1
 macOS: desktop app and CLI. Linux: CLI. Windows support is coming soon – building from source is possible for experimentation, but Windows is not yet officially supported and some features may not work.
 
 You need at least one of [Claude Code](https://claude.com/claude-code),
-[Codex](https://github.com/openai/codex) or [Pi](https://pi.dev), installed and
-signed in.
+[Codex](https://github.com/openai/codex), [Pi](https://pi.dev) or
+[VS Code](https://code.visualstudio.com) with its agent, installed and signed
+in.
 
 ## Plugins
 
@@ -52,8 +53,17 @@ codex plugin marketplace add nstr/anthill
 codex plugin add anthill@anthill-local
 ```
 
-Then start a new session. More in the [Claude Code](plugins/anthill-claude/README.md)
-and [Codex](plugins/anthill-codex/README.md) plugin guides.
+**VS Code (beta):** VS Code has no command for plugins. Add this repository
+as a plugin marketplace in your user `settings.json`, then install **anthill**
+from the plugins VS Code offers:
+
+```json
+"chat.plugins.marketplaces": ["nstr/anthill"]
+```
+
+Then start a new session. More in the [Claude Code](plugins/anthill-claude/README.md),
+[Codex](plugins/anthill-codex/README.md) and [VS Code](plugins/anthill-vscode/README.md)
+plugin guides.
 
 Pi has no plugin. Copy the prompt from Anthill and paste it into Pi.
 
@@ -66,7 +76,7 @@ needs to know, drafts the workflow and stops. Edit it in Anthill, press
 **Save**, and tell the session to go.
 
 ```text
-/anthill:workflow design Add retry-once to the checkout flow     # Claude Code
+/anthill:workflow design Add retry-once to the checkout flow     # Claude Code, VS Code
 $anthill design Add retry-once to the checkout flow              # Codex
 ```
 
@@ -74,7 +84,7 @@ $anthill design Add retry-once to the checkout flow              # Codex
 it happens.
 
 ```text
-/anthill:workflow watch Rework the importer                      # Claude Code
+/anthill:workflow watch Rework the importer                      # Claude Code, VS Code
 $anthill watch Rework the importer                               # Codex
 ```
 

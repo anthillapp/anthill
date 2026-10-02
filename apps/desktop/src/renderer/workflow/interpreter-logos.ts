@@ -16,23 +16,28 @@
  * Without it Pi's mark renders about a fifth smaller than its neighbours and
  * reads as unfinished, which is the complaint this was fixing.
  *
- * Not every CLI has an official mark in this app. Where there is none, the
- * lookup returns a neutral placeholder — a plain disc, which is not an
- * approximation of anything — rather than a broken image or a redrawn mark.
- * Every CLI Anthill offers today has one; the placeholder is what the next one
- * gets until somebody finds its mark.
+ * `vscode.svg` is VS Code's own `code-icon.svg`, byte for byte, as VS Code
+ * ships it (`out/media/code-icon.svg` in the app, from
+ * `src/vs/workbench/browser/media/` in its repository): the mark is already
+ * drawn edge to edge, so nothing needed tightening.
+ *
+ * A harness without an official mark here gets a neutral placeholder — a
+ * plain disc, which is not an approximation of anything — rather than a broken
+ * image or a redrawn mark. Every harness Anthill offers today has one.
  */
 
-import type { InterpreterId } from "@anthill/workflow";
+import type { HarnessTarget } from "@anthill/workflow-schema";
 
 import claudeCode from "../assets/claude-code.webp";
 import codex from "../assets/codex.webp";
 import pi from "../assets/pi.svg";
+import vscode from "../assets/vscode.svg";
 
-export const INTERPRETER_LOGOS: Partial<Record<InterpreterId, string>> = {
+export const INTERPRETER_LOGOS: Partial<Record<HarnessTarget, string>> = {
   "claude-code": claudeCode,
   codex,
   pi,
+  vscode,
 };
 
 /**
@@ -53,7 +58,7 @@ const NO_MARK =
  * Always a string, so a caller can put it in an `src` or a `background-image`
  * without a branch.
  */
-export function interpreterLogo(id: InterpreterId): string {
+export function interpreterLogo(id: HarnessTarget): string {
   return INTERPRETER_LOGOS[id] ?? NO_MARK;
 }
 
@@ -72,6 +77,6 @@ export function interpreterLogo(id: InterpreterId): string {
  * wrong. Double quotes, with any of their own escaped, because the encodings
  * involved produce single quotes and never double ones.
  */
-export function interpreterLogoBackground(id: InterpreterId): string {
+export function interpreterLogoBackground(id: HarnessTarget): string {
   return `url("${interpreterLogo(id).replace(/"/g, "%22")}")`;
 }

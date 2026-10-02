@@ -2,12 +2,13 @@
 /**
  * Put the Anthill MCP server inside each plugin, as one file.
  *
- *   npm run plugin:bundle     build the server, then write both copies
+ *   npm run plugin:bundle     build the server, then write every plugin's copy
  *
  * A plugin installed from a marketplace or a directory is a copy of its own
  * folder and nothing else, so a server it has to find elsewhere is a server a
  * person has to point it at. This writes two files into plugins/anthill-claude
- * (Claude Code) and plugins/anthill-codex (Codex), each one ES module with
+ * (Claude Code), plugins/anthill-codex (Codex) and plugins/anthill-vscode
+ * (VS Code), each one ES module with
  * everything it imports, the @anthill packages and the npm ones, that needs
  * nothing but Node:
  *
@@ -31,7 +32,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const PLUGINS = ["plugins/anthill-claude", "plugins/anthill-codex"];
+const PLUGINS = ["plugins/anthill-claude", "plugins/anthill-codex", "plugins/anthill-vscode"];
 const BUNDLES = [
   { entry: join(ROOT, "apps", "mcp", "dist", "server.js"), file: "anthill-mcp.mjs", title: "MCP server" },
   { entry: join(ROOT, "apps", "cli", "src", "report-main.ts"), file: "anthill-report.mjs", title: "progress reporter" },

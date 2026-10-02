@@ -10,6 +10,8 @@
  * is the author's to do.
  */
 
+import { PLUGIN_HARNESS_INFO, type CheckedPluginHarness } from "@anthill/workflow";
+
 import type { PluginHarnessStatus, PluginServerStatus } from "../../shared/ipc.js";
 
 export type PluginVerdict = "installed" | "update" | "off" | "missing" | "no-tool";
@@ -17,7 +19,11 @@ export type PluginVerdict = "installed" | "update" | "off" | "missing" | "no-too
 export type PluginStep = {
   /** One sentence saying what the step is for. */
   says: string;
-  /** A command to paste into a terminal, when the step is one. */
+  /**
+   * Something to paste, when the step is one: a command for a terminal, or —
+   * for a tool with no command for it — a line for its settings. `says` says
+   * which.
+   */
   command?: string;
 };
 
@@ -42,70 +48,125 @@ function shellPath(path: string): string {
   return /^[\w./~-]+$/.test(path) ? path : `'${path.replace(/'/g, `'\\''`)}'`;
 }
 
+/**
+ * What each tool needs for each ending, from what the page knows.
+ *
+ * `source` is the marketplace to add, already a shell word; `id` is
+ * `plugin@marketplace`. Claude Code and Codex have commands for it, as their
+ * `--help` gives them. VS Code has none: its ways in are its own settings,
+ * which are the author's to edit, so its steps are lines to paste there.
+ */
+type ToolSteps = {
+  missing(status: PluginHarnessStatus, source: string, id: string): PluginStep[];
+  /** What switches a disabled plugin back on. */
+  enable(id: string): PluginStep[];
+  /** What installs the newer version a marketplace now offers. */
+  update(status: PluginHarnessStatus, marketplace: string, id: string): PluginStep[];
+  /** What a running session has to do before it sees the change. */
+  restart(status: PluginHarnessStatus): PluginStep;
+  /** What to do when the tool has not been used here, when the usual words do not fit. */
+  noTool?: PluginStep;
+};
+
+/** Offering the marketplace and installing from it, with the tool's two commands. */
+function fromMarketplace(status: PluginHarnessStatus, add: string, install: string): PluginStep[] {
+  return [
+    {
+      says: status.checkout
+        ? `Offer this Anthill checkout to ${status.label} as a plugin marketplace.`
+        : `Add Anthill's plugin marketplace to ${status.label}, from GitHub.`,
+      command: add,
+    },
+    { says: `Install the ${status.plugin} plugin from it.`, command: install },
+  ];
+}
+
+const newSession = (status: PluginHarnessStatus): PluginStep => ({
+  says: `Start a new ${status.label} session. Plugins are loaded when a session starts, so one already open will not see it.`,
+});
+
+/** Where VS Code's own settings are opened from, said the way its Command Palette says it. */
+const VSCODE_SETTINGS = "Preferences: Open User Settings (JSON)";
+
+const STEPS: Record<CheckedPluginHarness, ToolSteps> = {
+  "claude-code": {
+    missing: (status, source, id) =>
+      fromMarketplace(status, `claude plugin marketplace add ${source}`, `claude plugin install ${id}`),
+    enable: (id) => [{ says: "Switch the plugin back on.", command: `claude plugin enable ${id}` }],
+    update: (status, marketplace, id) => [
+      { says: "Have Claude Code read the marketplace again.", command: `claude plugin marketplace update ${marketplace}` },
+      { says: `Update the plugin to ${status.availableVersion}.`, command: `claude plugin update ${id}` },
+    ],
+    restart: newSession,
+  },
+  codex: {
+    missing: (status, source, id) => fromMarketplace(status, `codex plugin marketplace add ${source}`, `codex plugin add ${id}`),
+    enable: (id) => [
+      {
+        says: `Switch it back on in Codex's plugin settings, or set \`enabled = true\` under \`[plugins."${id}"]\` in ~/.codex/config.toml.`,
+      },
+    ],
+    update: (status, marketplace, id) => [
+      ...(status.checkout
+        ? []
+        : [{ says: "Have Codex fetch the marketplace again.", command: `codex plugin marketplace upgrade ${marketplace}` }]),
+      { says: `Install it again from the marketplace, which now offers ${status.availableVersion}.`, command: `codex plugin add ${id}` },
+    ],
+    restart: newSession,
+  },
+  vscode: {
+    // Pointing VS Code at a checkout's folder is the whole install; VS Code
+    // runs it from a copy it keeps in its own data folder.
+    missing: (status) =>
+      status.checkout
+        ? [
+            {
+              says: `Point VS Code at this checkout's plugin folder: add this line to your user settings (${VSCODE_SETTINGS} in the Command Palette).`,
+              command: `"chat.pluginLocations": { ${JSON.stringify(`${status.checkout}/${PLUGIN_HARNESS_INFO.vscode.folder}`)}: true }`,
+            },
+          ]
+        : [
+            {
+              says: `Add Anthill's repository as a plugin marketplace: add this line to your user settings (${VSCODE_SETTINGS} in the Command Palette).`,
+              command: `"chat.plugins.marketplaces": [${JSON.stringify(GITHUB_SOURCE)}]`,
+            },
+            { says: `Install ${status.plugin} from the agent plugins VS Code then offers.` },
+          ],
+    enable: () => [{ says: "Switch it back on in VS Code's list of agent plugins." }],
+    update: (status) => [
+      { says: `Update it in VS Code's list of agent plugins, which now offers ${status.availableVersion}.` },
+    ],
+    restart: () => ({ says: "Start a new chat. VS Code loads plugins when a chat starts, so one already open will not see it." }),
+    noTool: { says: "VS Code has not been used on this machine yet. Install it and sign in to GitHub Copilot, then come back here." },
+  },
+};
+
 /** The steps that move a tool from where it is to a working plugin. */
 export function pluginSteps(status: PluginHarnessStatus): PluginStep[] {
   const verdict = pluginVerdict(status);
   // A checkout on this disk is offered as the source, for working on Anthill;
   // otherwise the repository on GitHub, which is what everyone else installs.
   const source = status.checkout ? shellPath(status.checkout) : GITHUB_SOURCE;
-  const claude = status.harness === "claude-code";
-  const marketplace = status.marketplace ?? (claude ? "anthill" : "anthill-local");
+  const steps = STEPS[status.harness];
+  const marketplace = status.marketplace ?? PLUGIN_HARNESS_INFO[status.harness].marketplace;
   const id = `${status.plugin}@${marketplace}`;
-  const tool = claude ? "claude" : "codex";
-  const restart: PluginStep = {
-    says: `Start a new ${status.label} session. Plugins are loaded when a session starts, so one already open will not see it.`,
-  };
 
   switch (verdict) {
     case "no-tool":
       return [
-        {
+        steps.noTool ?? {
           says: `${status.label} has not been used on this machine yet. Install it and sign in first – the Coding tools page walks through that – then come back here.`,
         },
       ];
 
     case "missing":
-      return [
-        {
-          says: status.checkout
-            ? `Offer this Anthill checkout to ${status.label} as a plugin marketplace.`
-            : `Add Anthill's plugin marketplace to ${status.label}, from GitHub.`,
-          command: claude
-            ? `claude plugin marketplace add ${source}`
-            : `codex plugin marketplace add ${source}`,
-        },
-        {
-          says: `Install the ${status.plugin} plugin from it.`,
-          command: claude ? `claude plugin install ${id}` : `codex plugin add ${id}`,
-        },
-        restart,
-      ];
+      return [...steps.missing(status, source, id), steps.restart(status)];
 
     case "off":
-      return claude
-        ? [{ says: "Switch the plugin back on.", command: `claude plugin enable ${id}` }, restart]
-        : [
-            {
-              says: `Switch it back on in Codex's plugin settings, or set \`enabled = true\` under \`[plugins."${id}"]\` in ~/.codex/config.toml.`,
-            },
-            restart,
-          ];
+      return [...steps.enable(id), steps.restart(status)];
 
     case "update":
-      return [
-        ...(claude
-          ? [
-              { says: "Have Claude Code read the marketplace again.", command: `claude plugin marketplace update ${marketplace}` },
-              { says: `Update the plugin to ${status.availableVersion}.`, command: `claude plugin update ${id}` },
-            ]
-          : [
-              ...(status.checkout
-                ? []
-                : [{ says: "Have Codex fetch the marketplace again.", command: `codex plugin marketplace upgrade ${marketplace}` }]),
-              { says: `Install it again from the marketplace, which now offers ${status.availableVersion}.`, command: `${tool} plugin add ${id}` },
-            ]),
-        restart,
-      ];
+      return [...steps.update(status, marketplace, id), steps.restart(status)];
 
     case "installed":
       return [];

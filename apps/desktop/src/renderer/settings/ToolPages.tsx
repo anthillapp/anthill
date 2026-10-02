@@ -20,12 +20,15 @@ import {
   HARNESS_DEFAULT,
   MODEL_TIERS,
   MODEL_TIER_LABELS,
+  INTERPRETER_IDS,
+  PLUGIN_HARNESS_INFO,
   harnessProfile,
   type HarnessModelChoice,
+  type InterpreterId,
   type ModelPreferences,
   type ModelTierId,
 } from "@anthill/workflow";
-import { HARNESS_TARGETS, type HarnessTarget } from "@anthill/workflow-schema";
+import type { HarnessTarget } from "@anthill/workflow-schema";
 
 import type { ObservationSetupStatus, PluginHarnessStatus, PluginStatus } from "../../shared/ipc.js";
 import { BADGE } from "../agents/AgentModelFields.js";
@@ -72,7 +75,7 @@ function connectLabel(connection: HarnessConnection, name: string): string {
 
 export function CodingToolsPage() {
   const connections = useHarnessConnections();
-  const [connecting, setConnecting] = useState<HarnessTarget | undefined>();
+  const [connecting, setConnecting] = useState<InterpreterId | undefined>();
   const [hooks, setHooks] = useState<ObservationSetupStatus | null>(null);
 
   useEffect(() => {
@@ -100,7 +103,7 @@ export function CodingToolsPage() {
         title="Tools"
         footer="Checked again whenever you come back to Anthill, so signing in elsewhere shows up here without a restart."
       >
-        {HARNESS_TARGETS.map((target, index) => {
+        {INTERPRETER_IDS.map((target, index) => {
           const harness = harnessProfile(target);
           const connection = connections.of(target);
           const badge = BADGE[connection.status];
@@ -167,7 +170,7 @@ export function CodingToolsPage() {
 /* ------------------------------------------------------------------ */
 
 /** The tools an agent can be given a model for. Pi takes one per session. */
-const PER_AGENT: HarnessTarget[] = HARNESS_TARGETS.filter((target) => harnessProfile(target).supportsPerAgentModel);
+const PER_AGENT: InterpreterId[] = INTERPRETER_IDS.filter((target) => harnessProfile(target).supportsPerAgentModel);
 
 /** Where a tool's list comes from, said plainly. */
 function sourceOf(target: HarnessTarget, catalogues: ModelCatalogues): string {
@@ -280,7 +283,7 @@ export function ModelsPage() {
     });
 
   /** A tool whose list can be offered: connected, and a list was given. */
-  const usable = (target: HarnessTarget) =>
+  const usable = (target: InterpreterId) =>
     isConnected(connections.of(target)) && !catalogueMissing(target, catalogues);
 
   return (
@@ -328,7 +331,7 @@ export function ModelsPage() {
         ))}
       </SettingGroup>
 
-      {HARNESS_TARGETS.map((target) => {
+      {INTERPRETER_IDS.map((target) => {
         const harness = harnessProfile(target);
         const connection = connections.of(target);
         const options = modelOptionsFor(target, catalogues);
@@ -475,6 +478,7 @@ function Steps({ steps }: { steps: PluginStep[] }) {
 
 function pluginNote(status: PluginHarnessStatus): string {
   const parts = [`${status.plugin}${status.marketplace ? `@${status.marketplace}` : ""}`];
+  if (PLUGIN_HARNESS_INFO[status.harness].beta) parts.unshift("Beta");
   if (status.installedVersion) parts.push(`version ${status.installedVersion}`);
   if (status.availableVersion && status.availableVersion !== status.installedVersion) {
     parts.push(`${status.availableVersion} available in the checkout`);
@@ -507,9 +511,10 @@ export function PluginsPage() {
   return (
     <>
       <p className="settings-lede">
-        Anthill&rsquo;s plugin lets Claude Code and Codex hand a workflow to this window. This
-        page reads what each tool has recorded about it. It installs nothing: the commands
-        below are the tools&rsquo; own, for you to run in a terminal.
+        Anthill&rsquo;s plugin lets Claude Code, Codex and VS Code hand a workflow to this window.
+        This page reads what each tool has recorded about it. It installs nothing: the commands
+        below are the tools&rsquo; own, for you to run in a terminal, and VS Code&rsquo;s steps are
+        lines for its own settings.
       </p>
 
       {failed ? (
@@ -551,7 +556,7 @@ export function PluginsPage() {
             // it names a checkout's own build, for working on Anthill — and
             // then a name with nothing behind it stops the plugin.
             status.server.configured
-              ? "Both plugins start the server this file names instead of their own copy. A plugin that cannot find it fails the moment it is used."
+              ? "Every plugin starts the server this file names instead of its own copy. A plugin that cannot find it fails the moment it is used."
               : `Each plugin carries its own copy of Anthill's local MCP server and starts it. ${status.server.settingsFile} only matters for pointing the plugins at a checkout's own build.`
           }
         >

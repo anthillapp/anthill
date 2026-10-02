@@ -1,0 +1,20 @@
+{
+  "name": "anthill",
+  "metadata": {
+    "description": "Anthill's plugin for VS Code's agents, served from this repository."
+  },
+  "owner": {
+    "name": "Nick Nesterov"
+  },
+  "plugins": [
+    {
+      "name": "anthill",
+      "description": "Hand the work of this chat to Anthill as a reviewable workflow, then report progress against the revision the user approved.",
+      "version": "0.8.7",
+      "source": "./plugins/anthill-vscode",
+      "category": "productivity",
+      "homepage": "https://github.com/nstr/anthill",
+      "tags": ["workflow", "planning", "observability", "anthill"]
+    }
+  ]
+}

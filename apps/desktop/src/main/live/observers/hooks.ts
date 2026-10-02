@@ -251,6 +251,10 @@ export class HookLogObserver {
       const data = isRecord(row.data) ? minimalHookPayload(row.data) : undefined;
       if (!data) continue;
       if (str(data.session_id) !== run.detectedSessionId) continue;
+      // One session, one harness's hooks. VS Code can also run the entries
+      // Anthill wrote for Claude Code (`chat.useClaudeHooks`), and every event
+      // would then arrive twice, the second time under the wrong name.
+      if (str(row.harness) && str(row.harness) !== "unknown" && str(row.harness) !== run.selectedCli) continue;
       this.covered.add(run.anthillRunId);
 
       const name = str(data.hook_event_name) ?? str(row.eventType) ?? "";
@@ -289,6 +293,16 @@ export class HookLogObserver {
       const cli = (str(row.harness) as MarkerCli | undefined) ?? run.selectedCli;
       const at = str(row.recordedAt) ?? now;
       const toolName = str(data.tool_name);
+
+      /*
+        A VS Code tool call the hook cannot name. The Copilot harness — what
+        VS Code's Agent mode runs by default — hands hooks no call id and no
+        result in the shape read here, so every call would be drawn a second
+        time beside the one its own session record already carries, with an id
+        and its real outcome, and drawn as failed. The workbench's own harness
+        does send the id, and its calls are kept.
+      */
+      if (cli === "vscode" && (kind === "tool.start" || kind === "tool.end") && !str(data.tool_use_id)) continue;
 
       // Opened and closed, tracked by the id the tool call carries. A call
       // with no id cannot be paired, so it is not counted either way.

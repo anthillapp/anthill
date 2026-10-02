@@ -441,6 +441,43 @@ describe("folding a session", () => {
         expect(view.blocks.implement.note).toBe("to use AskUserQuestion");
       });
 
+      /*
+        ANT-255. A VS Code chat is found by the nonce in commands it runs after
+        binding, so Anthill's note that it found it can land after the done
+        line. That note is Anthill's own bookkeeping, not the session asking
+        anybody anything, and it left the last step "Waiting on you".
+      */
+      it("does not take Anthill's own note as the session asking for a person", () => {
+        const note = () =>
+          event({
+            kind: "notification",
+            title: "VS Code chat found",
+            source: "anthill",
+            channel: "exchange:session-resolution",
+          });
+        const done = () =>
+          event({
+            kind: "session.end",
+            title: "The harness reported the work as finished",
+            source: "anthill",
+            channel: "anthill:report",
+            completion: "done",
+          });
+        const after = foldLiveSession(workflow, run({ state: "completed" }), [
+          step("implement"),
+          step("test"),
+          worked(),
+          done(),
+          note(),
+          hookTurnEnd(),
+        ]);
+        expect(after.blocks.test.state).toBe("done");
+        expect(after.unmappedCount).toBe(0);
+
+        const during = foldLiveSession(workflow, run(), [step("implement"), worked(), note()]);
+        expect(during.blocks.implement.state).toBe("running");
+      });
+
       it("does not hold an earlier step's notification against a later step", () => {
         // The measured run: one permission prompt mid-run, none at the end.
         const view = foldLiveSession(workflow, run({ state: "completed" }), [

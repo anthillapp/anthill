@@ -50,6 +50,12 @@ export type HarnessProfile = {
   agentFileFormat?: "markdown" | "toml";
   /** False when per-block models cannot be honoured — the UI must say so. */
   supportsPerAgentModel: boolean;
+  /**
+   * Whether Anthill installs Live hooks for this harness. Without them it
+   * reads only the session records the harness writes for itself, which needs
+   * nothing installed.
+   */
+  liveHooks: boolean;
 };
 
 const CLAUDE_CODE: HarnessProfile = {
@@ -70,6 +76,7 @@ const CLAUDE_CODE: HarnessProfile = {
   agentDir: ".claude/agents",
   agentFileFormat: "markdown",
   supportsPerAgentModel: true,
+  liveHooks: true,
 };
 
 /**
@@ -100,6 +107,7 @@ const CODEX: HarnessProfile = {
   agentDir: ".codex/agents",
   agentFileFormat: "toml",
   supportsPerAgentModel: true,
+  liveHooks: true,
 };
 
 /**
@@ -130,12 +138,41 @@ const PI: HarnessProfile = {
   defaultModel: "the session's model",
   supportsReasoningEffort: true,
   supportsPerAgentModel: false,
+  // pi's hooks are TypeScript extensions it loads itself; there is no config to write.
+  liveHooks: false,
+};
+
+/**
+ * VS Code's own agents: Copilot agent mode, and the Copilot CLI harness it can
+ * run in its place.
+ *
+ * Models are the user's to pick in VS Code's model picker, from whatever their
+ * Copilot plan and their own keys offer, and nothing on disk lists them for
+ * Anthill to read — so none is declared here, and a step runs on the model of
+ * the session.
+ *
+ * VS Code does have custom agents (`.github/agents/*.agent.md`, each with an
+ * optional `model`), but this first version inlines blocks into the prompt, as
+ * for pi, and does not honour a per-agent model. Saying so is better than
+ * writing files whose model VS Code may resolve to something nobody chose.
+ */
+const VSCODE: HarnessProfile = {
+  target: "vscode",
+  displayName: "VS Code",
+  models: [],
+  modelsAreDeclared: false,
+  defaultModel: "the session's model",
+  supportsReasoningEffort: false,
+  supportsPerAgentModel: false,
+  // `~/.copilot/hooks/anthill.json`, which VS Code's agent reads by default.
+  liveHooks: true,
 };
 
 export const HARNESS_PROFILES: Record<HarnessTarget, HarnessProfile> = {
   "claude-code": CLAUDE_CODE,
   codex: CODEX,
   pi: PI,
+  vscode: VSCODE,
 };
 
 export function harnessProfile(target: HarnessTarget): HarnessProfile {

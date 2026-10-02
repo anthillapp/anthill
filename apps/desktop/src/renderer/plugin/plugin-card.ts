@@ -14,6 +14,8 @@
  * them proof, and none of them is drawn as one.
  */
 
+import { PLUGIN_HARNESS_INFO } from "@anthill/workflow";
+
 import type { PluginConnection, PluginInstallResult } from "../../shared/ipc.js";
 
 export type CardState =
@@ -105,14 +107,22 @@ export function pluginCard(connection: PluginConnection | undefined, local: Loca
   }
 
   if (status.installed && !status.enabled) {
-    // Claude Code has a command for it; Codex keeps the switch in its own settings.
-    return status.harness === "claude-code" && connection.source
+    // Some tools have a command for it; others keep the switch in their own settings.
+    return PLUGIN_HARNESS_INFO[status.harness].enablesFromCli && connection.source
       ? view("available", `The plugin is installed but switched off in ${label}. Anthill can switch it back on.`, {
           action: { kind: "install", label: `Turn on for ${label}` },
         })
       : view("available", `The plugin is installed but switched off. Turn it on in ${label}'s plugin settings.`, {
           action: { kind: "settings", label: "Show the steps", outlined: true },
         });
+  }
+
+  if (!PLUGIN_HARNESS_INFO[status.harness].installsFromAnthill) {
+    // No command to run for it: the tool takes plugins from its own settings,
+    // which are the author's to edit. A button that could only fail is not offered.
+    return view("available", `${tool} is here. Add the plugin from its own settings – Settings ▸ Plugins has the line to paste.`, {
+      action: { kind: "settings", label: "Show the steps", outlined: true },
+    });
   }
 
   if (!connection.source) {

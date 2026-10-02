@@ -30,6 +30,7 @@ function example(path: string): Workflow {
 describe.each([
   { plugin: "Claude Code", path: "plugins/anthill-claude/skills/workflow/reference/workflow-format.md", harness: "claude-code" as const },
   { plugin: "Codex", path: "plugins/anthill-codex/skills/anthill/reference/workflow-format.md", harness: "codex" as const },
+  { plugin: "VS Code", path: "plugins/anthill-vscode/skills/workflow/reference/workflow-format.md", harness: "vscode" as const },
 ])("the $plugin reference", ({ path, harness }) => {
   it("shows an example whose agents already answer the model question", () => {
     const problems = checkCompleteness(example(path), { harness, sessionId: "s", taskText: "The task." });
@@ -50,6 +51,7 @@ describe.each([
 describe.each([
   { plugin: "Claude Code", path: "plugins/anthill-claude/skills/workflow/SKILL.md" },
   { plugin: "Codex", path: "plugins/anthill-codex/skills/anthill/SKILL.md" },
+  { plugin: "VS Code", path: "plugins/anthill-vscode/skills/workflow/SKILL.md" },
 ])("the $plugin skill", ({ path }) => {
   const text = () => readFileSync(join(ROOT, path), "utf8");
 
@@ -80,6 +82,7 @@ describe.each([
 describe.each([
   { plugin: "Claude Code", path: "plugins/anthill-claude/skills/workflow/SKILL.md" },
   { plugin: "Codex", path: "plugins/anthill-codex/skills/anthill/SKILL.md" },
+  { plugin: "VS Code", path: "plugins/anthill-vscode/skills/workflow/SKILL.md" },
 ])("the $plugin skill's progress reports", ({ path }) => {
   const text = () => readFileSync(join(ROOT, path), "utf8").replace(/\s+/g, " ");
 

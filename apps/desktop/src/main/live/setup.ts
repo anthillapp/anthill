@@ -11,6 +11,7 @@ import { existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { readCodexHookStatus } from "./codex-hook-status.js";
+import { vscodeUserDir } from "./observers/vscode.js";
 import { hookFingerprint, hookPrompt, isDeclined } from "./hook-prompt.js";
 
 import { detectBinary, runProcess, type SpawnFn } from "@anthill/runtimes";
@@ -31,11 +32,45 @@ const OWNER_MARKER = "anthill-observation-hook";
  */
 const TAIL_WINDOW_BYTES = 256 * 1024;
 
+/** What differs between the harnesses Anthill installs observation hooks into. */
+type HookHarnessDefinition = {
+  label: string;
+  cliCommand: string;
+  configFile: () => string;
+  /** The path option that stands in for `configFile`, for tests and other homes. */
+  configOption: "claudeConfigPath" | "codexConfigPath" | "vscodeConfigPath";
+  /**
+   * Whether the tool is on this machine, when its CLI on the PATH is not the
+   * way to tell. Without it, the CLI is asked for its version.
+   */
+  present?: (paths: ObservationSetupPaths) => boolean;
+  /**
+   * The harness's own answer on whether it will run these hooks, for a
+   * harness that asks its user to trust each hook first. Entries alone are not
+   * ready there.
+   */
+  trust: typeof readCodexHookStatus | undefined;
+  events: readonly string[];
+  matcherEvents: ReadonlySet<string>;
+  boundary: string;
+};
+
+/**
+ * The harnesses with a config file Anthill can install observation hooks
+ * into.
+ *
+ * pi has no config-file hook mechanism — its extension hooks are TypeScript
+ * that pi itself loads — so it is not in this table. Its observation is the
+ * session files it writes for itself, which need no install and no status
+ * row here.
+ */
 const HARNESS = {
   "claude-code": {
     label: "Claude Code",
     cliCommand: "claude",
     configFile: () => join(homedir(), ".claude", "settings.json"),
+    configOption: "claudeConfigPath",
+    trust: undefined,
     events: [
       "SessionStart",
       "UserPromptSubmit",
@@ -54,23 +89,39 @@ const HARNESS = {
     label: "Codex CLI",
     cliCommand: "codex",
     configFile: () => join(process.env.CODEX_HOME || join(homedir(), ".codex"), "hooks.json"),
+    configOption: "codexConfigPath",
+    trust: readCodexHookStatus,
     events: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"],
     matcherEvents: new Set<string>(),
     boundary:
       "Anthill reads local hook events and Codex rollout/session metadata on this machine. It stores only observation state and correlation metadata needed for Live Session UI, never private reasoning.",
   },
-} as const;
+  /*
+   * VS Code's agent reads every `*.json` in `~/.copilot/hooks/` (its
+   * `chat.hookFilesLocations` default), in Claude Code's format, and runs
+   * them while `chat.useHooks` is on, which it is unless somebody turned it
+   * off — and only in a trusted workspace. There is no per-file approval to
+   * wait on. The file is Anthill's own, so nothing of anyone else's is merged.
+   * The Copilot CLI reads the same folder, which is why the handler must
+   * always exit 0: a failing hook there can deny the tool it was about.
+   * `matcher` is ignored, so none is written.
+   */
+  vscode: {
+    label: "VS Code",
+    cliCommand: "code",
+    configFile: () => join(homedir(), ".copilot", "hooks", "anthill.json"),
+    configOption: "vscodeConfigPath",
+    trust: undefined,
+    // `code` is often not on the PATH; VS Code's own user data folder is.
+    present: (paths) => existsSync(paths.vscodeUserDir ?? vscodeUserDir()),
+    events: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStop", "Stop"],
+    matcherEvents: new Set<string>(),
+    boundary:
+      "Anthill reads local hook events and the chat sessions VS Code saves on this machine. It stores only observation state and correlation metadata needed for Live Session UI, never private reasoning.",
+  },
+} as const satisfies Record<string, HookHarnessDefinition>;
 
-/**
- * The harnesses with a config file Anthill can install observation hooks
- * into.
- *
- * pi has no config-file hook mechanism — its extension hooks are TypeScript
- * that pi itself loads — so it is not in this table. Its observation is the
- * session files it writes for itself, which need no install and no status
- * row here.
- */
-type HookHarness = "claude-code" | "codex";
+type HookHarness = keyof typeof HARNESS;
 
 type HarnessDefinition = (typeof HARNESS)[HookHarness];
 
@@ -89,6 +140,9 @@ export type ObservationSetupPaths = {
   hookLogPath?: string;
   claudeConfigPath?: string;
   codexConfigPath?: string;
+  vscodeConfigPath?: string;
+  /** VS Code's user data folder, whose presence says VS Code has been used here. */
+  vscodeUserDir?: string;
   hookHandlerPath?: string;
   /**
    * The interpreter the installed hook command names.
@@ -160,8 +214,9 @@ export class ObservationSetupService {
         const parsed = parseHookCommand(command);
         return parsed && (!existsSync(parsed.execPath) || !handlerPresent(parsed.handlerPath));
       });
-      let codexHooks = id === "codex" && harness.cliAvailable && harness.hookEntriesPresent
-        ? await readCodexHookStatus({ commands: anthillCommands(config, HARNESS[id]), configPath: this.configPath(id), cwd, spawnFn: this.spawnFn })
+      const trust = HARNESS[id].trust;
+      let codexHooks = trust && harness.cliAvailable && harness.hookEntriesPresent
+        ? await trust({ commands: anthillCommands(config, HARNESS[id]), configPath: this.configPath(id), cwd, spawnFn: this.spawnFn })
         : harness.codexHooks;
       if (codexHooks?.state === "ready" && harness.hookUsesCurrentRuntime === false) {
         codexHooks = { state: "unknown", message: "Codex trusts these hooks, but they use another Anthill runtime that this installation has not tested. Repair the connection to use this Anthill’s bundled handler." };
@@ -221,7 +276,7 @@ export class ObservationSetupService {
       entriesPresent: harness.hookEntriesPresent,
       installed: harness.hookInstalled,
       usesCurrentRuntime: harness.hookUsesCurrentRuntime !== false,
-      codexState: id === "codex" ? harness.codexHooks?.state : "ready",
+      codexState: HARNESS[id].trust ? harness.codexHooks?.state : "ready",
       confirmedInSession: harness.codexHooks?.confirmedInSession,
       declined,
     });
@@ -326,11 +381,15 @@ export class ObservationSetupService {
   private async describeHarness(id: HookHarness, prefs: SetupPrefs, cwd: string, sessionId?: string): Promise<ObservationHarnessSetup> {
     const def = HARNESS[id];
     const installedAt = prefs?.harnesses?.[id]?.installedAt;
-    const detection = await detectBinary({
-      command: def.cliCommand,
-      notFoundReason: `${def.label} was not found on your PATH.`,
-      spawnFn: this.spawnFn,
-    });
+    const detection = "present" in def && def.present
+      ? (def.present(this.paths)
+        ? { available: true }
+        : { available: false, reason: `${def.label} has not been used on this machine.` })
+      : await detectBinary({
+        command: def.cliCommand,
+        notFoundReason: `${def.label} was not found on your PATH.`,
+        spawnFn: this.spawnFn,
+      });
     const configPath = this.configPath(id);
     const config = await this.readJsonObject(configPath).catch(() => ({}));
     const hookHandlerPath = this.hookHandlerPath();
@@ -347,12 +406,12 @@ export class ObservationSetupService {
     // A hook of Anthill's that has fired in this very session is the answer:
     // Codex ran it, so it is installed, enabled and trusted, here. No call into
     // Codex is needed — which matters, because a sandboxed agent cannot make one.
-    const confirmed = id === "codex" && sessionId !== undefined && usesCurrentRuntime && problem === undefined &&
+    const confirmed = def.trust !== undefined && sessionId !== undefined && usesCurrentRuntime && problem === undefined &&
       await this.firedInSession(sessionId);
     let codexHooks: CodexHookStatus | undefined = confirmed
       ? { state: "ready", confirmedInSession: true, message: "Anthill’s hooks are already working in this Codex session." }
-      : id === "codex" && detection.available && entriesPresent
-        ? await readCodexHookStatus({ commands, configPath, cwd, spawnFn: this.spawnFn })
+      : def.trust && detection.available && entriesPresent
+        ? await def.trust({ commands, configPath, cwd, spawnFn: this.spawnFn })
         : undefined;
     if (codexHooks?.state === "ready" && commands.some(({ command }) => !this.ownHook(command, id))) {
       codexHooks = { state: "unknown", message: "Codex trusts these hooks, but they use another Anthill runtime that this installation has not tested. Repair the connection to use this Anthill’s bundled handler." };
@@ -392,8 +451,7 @@ export class ObservationSetupService {
   }
 
   private configPath(harness: HookHarness): string {
-    if (harness === "claude-code") return this.paths.claudeConfigPath ?? HARNESS[harness].configFile();
-    return this.paths.codexConfigPath ?? HARNESS[harness].configFile();
+    return this.paths[HARNESS[harness].configOption] ?? HARNESS[harness].configFile();
   }
 
   private hookHandlerPath(): string {
@@ -989,7 +1047,7 @@ function labelEvent(event: string): string {
 }
 
 function isHookHarnessId(value: unknown): value is HookHarness {
-  return value === "claude-code" || value === "codex";
+  return typeof value === "string" && Object.hasOwn(HARNESS, value);
 }
 
 /** Plain Node cannot stat members of Electron's asar; the probe verifies the member. */

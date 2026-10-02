@@ -9,16 +9,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { CHECKED_PLUGIN_HARNESSES, PLUGIN_HARNESS_INFO, type CheckedPluginHarness } from "@anthill/workflow";
+
 import type { PluginConnection } from "../../shared/ipc.js";
 
 import { pluginCard, type LocalCardState, type PluginCardView } from "./plugin-card.js";
 
-export type Harness = PluginConnection["harness"];
+export type Harness = CheckedPluginHarness;
 
-export const HARNESSES: { id: Harness; label: string }[] = [
-  { id: "claude-code", label: "Claude Code" },
-  { id: "codex", label: "Codex" },
-];
+export const HARNESSES: { id: Harness; label: string }[] = CHECKED_PLUGIN_HARNESSES.map((id) => ({
+  id,
+  label: PLUGIN_HARNESS_INFO[id].label,
+}));
 
 export type PluginConnections = {
   views: Record<Harness, PluginCardView>;
@@ -29,9 +31,14 @@ export type PluginConnections = {
 
 const IDLE: LocalCardState = { kind: "idle" };
 
+/** One value per plugin harness. */
+function perHarness<T>(make: (id: Harness) => T): Record<Harness, T> {
+  return Object.fromEntries(CHECKED_PLUGIN_HARNESSES.map((id) => [id, make(id)])) as Record<Harness, T>;
+}
+
 export function usePluginConnections(): PluginConnections {
   const [connections, setConnections] = useState<PluginConnection[] | undefined>();
-  const [local, setLocal] = useState<Record<Harness, LocalCardState>>({ "claude-code": IDLE, codex: IDLE });
+  const [local, setLocal] = useState<Record<Harness, LocalCardState>>(() => perHarness(() => IDLE));
   const alive = useRef(true);
 
   const check = useCallback(() => {
@@ -70,10 +77,7 @@ export function usePluginConnections(): PluginConnections {
   // "Check again" is the author saying they restarted the session: from here
   // on the card goes by what the check finds.
   const checkAgain = useCallback(() => {
-    setLocal((prev) => ({
-      "claude-code": prev["claude-code"].kind === "installed" ? IDLE : prev["claude-code"],
-      codex: prev.codex.kind === "installed" ? IDLE : prev.codex,
-    }));
+    setLocal((prev) => perHarness((id) => (prev[id].kind === "installed" ? IDLE : prev[id])));
     check();
   }, [check]);
 
@@ -81,16 +85,13 @@ export function usePluginConnections(): PluginConnections {
     void window.anthill.pluginGuide(harness).catch(() => undefined);
   }, []);
 
-  const views = Object.fromEntries(
-    HARNESSES.map(({ id, label }) => [
-      id,
-      pluginCard(
-        connections?.find((item) => item.harness === id),
-        local[id],
-        label,
-      ),
-    ]),
-  ) as Record<Harness, PluginCardView>;
+  const views = perHarness((id) =>
+    pluginCard(
+      connections?.find((item) => item.harness === id),
+      local[id],
+      PLUGIN_HARNESS_INFO[id].label,
+    ),
+  );
 
   return { views, install, check: checkAgain, guide };
 }

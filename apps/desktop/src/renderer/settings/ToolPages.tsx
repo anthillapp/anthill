@@ -489,6 +489,21 @@ function pluginNote(status: PluginHarnessStatus): string {
 export function PluginsPage() {
   const [status, setStatus] = useState<PluginStatus | null>(null);
   const [failed, setFailed] = useState(false);
+  // For the shortcuts VS Code's steps name: ⌘ on a Mac, Ctrl elsewhere.
+  const [platform, setPlatform] = useState<string | undefined>();
+
+  useEffect(() => {
+    let live = true;
+    Promise.resolve()
+      .then(() => window.anthill.capabilities())
+      .then((capabilities) => {
+        if (live) setPlatform(capabilities.platform);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const refresh = useCallback(() => {
     setFailed(false);
@@ -539,7 +554,7 @@ export function PluginsPage() {
                   </SettingRow>
                   {/* A checkout either tool knows about is the one to name: the
                       same repository serves both plugins. */}
-                  <Steps steps={pluginSteps({ ...harness, checkout: harness.checkout ?? checkout })} />
+                  <Steps steps={pluginSteps({ ...harness, checkout: harness.checkout ?? checkout }, platform)} />
                 </div>
               </Fragment>
             );

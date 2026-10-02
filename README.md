@@ -53,15 +53,42 @@ codex plugin marketplace add nstr/anthill
 codex plugin add anthill@anthill-local
 ```
 
-**VS Code (beta):** VS Code has no command for plugins. Add this repository
-as a plugin marketplace in your user `settings.json`, then install **anthill**
-from the plugins VS Code offers:
+Then start a new session.
 
-```json
-"chat.plugins.marketplaces": ["nstr/anthill"]
-```
+**VS Code (beta):** VS Code has no command for plugins. To install it, you
+first add Anthill's marketplace to VS Code's settings, then install the plugin
+from that marketplace:
 
-Then start a new session. More in the [Claude Code](plugins/anthill-claude/README.md),
+1. Open Settings (**⌘,** on macOS, **Ctrl+,** on Windows and Linux) and search
+   for `chat.plugins.marketplaces`. Under **Chat › Plugins: Marketplaces**,
+   choose **Add Item**, enter `nstr/anthill` and choose **OK**. The marketplace
+   that is already there stays.
+
+   Or in `settings.json` (**Preferences: Open User Settings (JSON)** in the
+   Command Palette, **⇧⌘P** / **Ctrl+Shift+P**). The setting replaces VS
+   Code's list, so keep its own marketplace in it:
+
+   ```json
+   "chat.plugins.marketplaces": ["github/awesome-copilot#marketplace", "nstr/anthill"]
+   ```
+
+2. Open the Agents window: run **Open Agents Window** from the Command
+   Palette, or press **⇧⌥⌘A** on macOS, **Ctrl+Shift+Alt+A** on Windows and
+   Linux.
+3. Choose **Customizations** at the top left, then **Plugins**, then **Browse
+   Marketplace** next to Available.
+4. Type `anthill` in the search box, choose **Install** on **anthill**, then
+   **Trust** when VS Code asks about `nstr/anthill`.
+5. **Back to Installed** now lists anthill with "1 skill · 1 MCP server". Start
+   a new session (**New**: **⌘N** on macOS, **Ctrl+N** on Windows and Linux)
+   and try `/anthill:workflow watch <your task>`.
+
+When VS Code asks for permission, allow Anthill's tools (`exchange: …`) with
+**Allow in this Session**. For terminal commands, choose **Allow Once** from
+the button's arrow menu: **Allow in this Session** on a terminal command offers
+to auto-approve every command.
+
+More in the [Claude Code](plugins/anthill-claude/README.md),
 [Codex](plugins/anthill-codex/README.md) and [VS Code](plugins/anthill-vscode/README.md)
 plugin guides.
 

@@ -31,20 +31,47 @@ You need [Anthill](https://github.com/nstr/anthill) itself, and Node.js on your
 
 VS Code has no command line for plugins; both ways in are settings.
 
-**From GitHub.** Add Anthill's repository as a plugin marketplace in your user
-`settings.json`, then install **anthill** from the plugins VS Code offers:
+**From GitHub.** To install the plugin, you first add Anthill's marketplace to
+VS Code's settings, then install the plugin from that marketplace:
 
-```json
-"chat.plugins.marketplaces": ["nstr/anthill"]
-```
+1. Open Settings (**⌘,** on macOS, **Ctrl+,** on Windows and Linux) and search
+   for `chat.plugins.marketplaces`. Under **Chat › Plugins: Marketplaces**,
+   choose **Add Item**, enter `nstr/anthill` and choose **OK**. The marketplace
+   that is already there stays.
+
+   Or in `settings.json` (**Preferences: Open User Settings (JSON)** in the
+   Command Palette, **⇧⌘P** / **Ctrl+Shift+P**). The setting replaces VS
+   Code's list, so keep its own marketplace in it:
+
+   ```json
+   "chat.plugins.marketplaces": ["github/awesome-copilot#marketplace", "nstr/anthill"]
+   ```
+
+2. Open the Agents window: run **Open Agents Window** from the Command
+   Palette, or press **⇧⌥⌘A** on macOS, **Ctrl+Shift+Alt+A** on Windows and
+   Linux.
+3. Choose **Customizations** at the top left, then **Plugins**, then **Browse
+   Marketplace** next to Available.
+4. Type `anthill` in the search box, choose **Install** on **anthill**, then
+   **Trust** when VS Code asks about `nstr/anthill`.
+5. **Back to Installed** now lists anthill with "1 skill · 1 MCP server". Start
+   a new session (**New**: **⌘N** on macOS, **Ctrl+N** on Windows and Linux)
+   and try `/anthill:workflow watch <your task>`.
+
+When VS Code asks for permission, allow Anthill's tools (`exchange: …`) with
+**Allow in this Session**. For terminal commands, choose **Allow Once** from
+the button's arrow menu: **Allow in this Session** on a terminal command offers
+to auto-approve every command.
 
 VS Code reads this repository's `.github/plugin/marketplace.json`, which lists
 this plugin. Claude Code reads `.claude-plugin/marketplace.json` from the same
 repository and never this one, so each tool gets its own plugin named
 `anthill`.
 
-**From a checkout.** Point VS Code at this folder. VS Code runs the plugin from
-a copy it keeps in its own data folder (`Code/agentPlugins/`):
+**From a checkout.** In **Agent Customizations ▸ Plugins**, choose **Install
+from Source** and pick this folder, or point VS Code at it in `settings.json`,
+which is what Install from Source writes. VS Code runs the plugin from a copy
+it keeps in its own data folder (`Code/agentPlugins/`):
 
 ```json
 "chat.pluginLocations": { "/abs/path/to/anthill/plugins/anthill-vscode": true }

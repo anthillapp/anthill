@@ -115,10 +115,11 @@ using it — the same chat is the same session. Never reuse a value another chat
 made, and never shorten or reformat it. It is not VS Code's own id and does not
 pretend to be one; the `vscode-` prefix is what says so.
 
-Anthill does not read VS Code's chat records yet, so what it shows of the work
-is the steps you report and nothing between them. That matters more under
-`watch` than under `design`, because watching is the whole point of it — which
-is one more reason every step gets its report.
+Anthill finds this chat by the run's own nonce, in the commands you run after
+binding, and reads what VS Code saves of it. VS Code saves a chat about once a
+minute, so in the moment it is the steps you report that move the graph. That
+matters more under `watch` than under `design`, because watching is the whole
+point of it — which is one more reason every step gets its report.
 
 ## Handing a workflow over
 

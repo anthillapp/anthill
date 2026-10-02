@@ -201,14 +201,14 @@ export function PromptModal({
   const [detection, setDetection] = useState<"waiting" | "ambiguous">("waiting");
 
   /**
-   * Pi has no hook mechanism, so its observation is passive: there is nothing
-   * to install, and Anthill reads the session file pi writes on this machine.
-   * The hook-based setup status never names pi, so pi's state is not derived
-   * from it — it is `passive` on its own, and it is watchable, which is what
-   * lets a pi run's handover close and go live.
+   * A harness Anthill installs no hooks for — pi, VS Code — is observed
+   * passively: there is nothing to install, and Anthill reads the session
+   * records it writes on this machine. The hook-based setup status never names
+   * it, so its state is not derived from that — it is `passive` on its own, and
+   * it is watchable, which is what lets its handover close and go live.
    */
   const observation: ObservationState =
-    cli === "pi" ? "passive" : observationState(setup, installFailed !== undefined);
+    !harnessProfile.liveHooks ? "passive" : observationState(setup, installFailed !== undefined);
   const face = OBSERVATION_FACE[observation];
   /** Basic session observation is independent of hook installation or trust. */
   const willWatch = observation !== "unavailable";
@@ -279,7 +279,7 @@ export function PromptModal({
     const asked = setup?.observationPrompt === undefined
       ? Boolean(setup && !setup.hookInstalled)
       : setup.observationPrompt === "connect" || setup.observationPrompt === "trust";
-    if (cli !== "pi" && asked) {
+    if (harnessProfile.liveHooks && asked) {
       try {
         await window.anthill.liveSetupDecline(cli);
         setSetup((current) => current ? { ...current, observationDeclined: true } : current);
@@ -601,7 +601,7 @@ export function PromptModal({
                   : observation === "unavailable"
                     ? "There is nothing to install for a CLI Anthill cannot find."
                     : observation === "passive"
-                      ? "Nothing to install – this tool has no hook mechanism."
+                      ? "Nothing to install – Anthill reads the tool’s own session records."
                       : observation === "needs-trust" || observation === "disabled" || observation === "check-failed"
                         ? "Basic progress remains available while you finish connecting."
                         : "Already set up – nothing is written again."}

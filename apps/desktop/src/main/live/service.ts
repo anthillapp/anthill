@@ -102,7 +102,8 @@ export type ObservationRoots = {
   claudeDesktopRoot?: string;
   codexRoot?: string;
   piRoot?: string;
-  vscodeRoot?: string;
+  /** VS Code's user data folder, which holds its saved chats. */
+  vscodeUserDir?: string;
   hookLogPath?: string;
   reportLogPath?: string;
   journalDir?: string;
@@ -160,7 +161,7 @@ export class LiveSessionService {
         : new ClaudeCodeObserver(),
       codex: roots.codexRoot ? new CodexObserver(roots.codexRoot) : new CodexObserver(),
       pi: roots.piRoot ? new PiObserver(roots.piRoot) : new PiObserver(),
-      vscode: roots.vscodeRoot ? new VSCodeObserver(roots.vscodeRoot) : new VSCodeObserver(),
+      vscode: roots.vscodeUserDir ? new VSCodeObserver(roots.vscodeUserDir) : new VSCodeObserver(),
     };
     this.hooks = roots.hookLogPath ? new HookLogObserver(roots.hookLogPath) : new HookLogObserver();
     this.reports = roots.reportLogPath

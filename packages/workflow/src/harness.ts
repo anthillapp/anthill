@@ -51,14 +51,11 @@ export type HarnessProfile = {
   /** False when per-block models cannot be honoured — the UI must say so. */
   supportsPerAgentModel: boolean;
   /**
-   * Whether Anthill can recognise a session this harness starts from a pasted
-   * prompt, so a prompt copied for it can go live.
-   *
-   * False for a harness whose sessions Anthill does not read yet. A workflow
-   * can still arrive from it through its plugin, which binds the run itself;
-   * what is not offered is a hand-over Anthill would wait on forever.
+   * Whether Anthill installs Live hooks for this harness. Without them it
+   * reads only the session records the harness writes for itself, which needs
+   * nothing installed.
    */
-  followsPastedPrompt: boolean;
+  liveHooks: boolean;
 };
 
 const CLAUDE_CODE: HarnessProfile = {
@@ -79,7 +76,7 @@ const CLAUDE_CODE: HarnessProfile = {
   agentDir: ".claude/agents",
   agentFileFormat: "markdown",
   supportsPerAgentModel: true,
-  followsPastedPrompt: true,
+  liveHooks: true,
 };
 
 /**
@@ -110,7 +107,7 @@ const CODEX: HarnessProfile = {
   agentDir: ".codex/agents",
   agentFileFormat: "toml",
   supportsPerAgentModel: true,
-  followsPastedPrompt: true,
+  liveHooks: true,
 };
 
 /**
@@ -141,7 +138,8 @@ const PI: HarnessProfile = {
   defaultModel: "the session's model",
   supportsReasoningEffort: true,
   supportsPerAgentModel: false,
-  followsPastedPrompt: true,
+  // pi's hooks are TypeScript extensions it loads itself; there is no config to write.
+  liveHooks: false,
 };
 
 /**
@@ -166,8 +164,8 @@ const VSCODE: HarnessProfile = {
   defaultModel: "the session's model",
   supportsReasoningEffort: false,
   supportsPerAgentModel: false,
-  // Its chat sessions are not read yet (ANT-255, stage 2).
-  followsPastedPrompt: false,
+  // VS Code has hooks of its own; Anthill does not install them yet.
+  liveHooks: false,
 };
 
 export const HARNESS_PROFILES: Record<HarnessTarget, HarnessProfile> = {

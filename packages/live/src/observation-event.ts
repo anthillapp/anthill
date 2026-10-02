@@ -32,6 +32,8 @@ export type ObservationSource =
   | "rollout"
   /** pi's own session file. */
   | "session"
+  /** A chat VS Code saved for itself. */
+  | "chat"
   /** Anthill's own bookkeeping, not the CLI's. */
   | "anthill";
 
@@ -230,5 +232,8 @@ export function completionOf(event: ObservationEvent): ObservationEvent["complet
  * five minutes, until silence closed it again (ANT-215).
  */
 export function isAnthillTool(name: string | undefined): boolean {
-  return name !== undefined && /^mcp__(plugin_anthill_[\w-]+|anthill[\w-]*)__/i.test(name);
+  if (name === undefined) return false;
+  // VS Code names an MCP tool `mcp_<server>_<tool>`, the server by the name it
+  // announces — `anthill`, numbered when two servers share it.
+  return /^mcp__(plugin_anthill_[\w-]+|anthill[\w-]*)__/i.test(name) || /^mcp_anthill\d*_/i.test(name);
 }

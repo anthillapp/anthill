@@ -93,9 +93,25 @@ build of an Anthill checkout; without it, the installed app.
 ## What Anthill sees
 
 VS Code gives a chat no id a tool can read, so the skill makes one for each chat
-(`vscode-<uuid>`) and hands it over as the session. Anthill does not read VS
-Code's chat records yet: what the Live Session shows is the steps the agent
-reports, and nothing between them.
+(`vscode-<uuid>`) and hands it over as the session. Anthill finds the chat
+itself by the run's nonce, which appears in the commands the agent runs after
+binding, and reads the chat as VS Code saves it under
+`workspaceStorage/<hash>/chatSessions/`: the agent's messages, which tools it
+ran and whether they worked, and whether a request finished, was stopped or
+failed. Never the model's thinking. A tool's input and output are searched
+for the run's nonce, and nothing else is taken from them.
+
+VS Code saves a chat about once a minute, when its window loses focus, and on
+exit, so the Live Session can trail the chat by that much. The steps the agent
+reports with `anthill step` arrive at once.
+
+A prompt copied from Anthill and pasted into a VS Code chat is found the same
+way, by the marker it carries.
+
+That is the record VS Code keeps for its own agent (Agent mode, the Local
+harness). A chat run by another harness inside VS Code, such as the Copilot
+CLI, may keep its record elsewhere; Anthill then shows the reported steps
+only.
 
 Every step runs in the chat, on the chat's model. The agents a workflow names
 are roles in one prompt, not separate VS Code agents, and Anthill does not pin

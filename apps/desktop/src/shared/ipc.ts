@@ -12,7 +12,7 @@
 
 import type { ExternalLink } from "./links.js";
 import type { Workflow, WorkflowRun, NodeRun } from "@anthill/workflow-schema";
-import type { AgentModels, InterpreterId, ModelPreferences, PluginHarness } from "@anthill/workflow";
+import type { AgentModels, InterpreterId, ModelPreferences, CheckedPluginHarness } from "@anthill/workflow";
 import type { LiveSessionState, MarkerCli, ObservationEvent, PendingRun } from "@anthill/live";
 import type { BoundWorkflowResult, ExchangeView } from "@anthill/workflow-exchange";
 
@@ -565,7 +565,7 @@ export type CodexModelOption = {
  * (ANT-135). Read from files the tool keeps, never by running it.
  */
 export type PluginHarnessStatus = {
-  harness: PluginHarness;
+  harness: CheckedPluginHarness;
   label: string;
   /** The plugin's name in that tool: `anthill` in every tool. */
   plugin: string;
@@ -610,7 +610,7 @@ export type PluginStatus = {
  * would be claiming a connection nobody tested.
  */
 export type PluginConnection = {
-  harness: PluginHarness;
+  harness: CheckedPluginHarness;
   label: string;
   /** The tool's CLI runs on this machine, and says which version it is. */
   cli: { available: boolean; version?: string };
@@ -1101,9 +1101,9 @@ export interface AnthillApi {
    * Install (or switch back on) Anthill's plugin in one tool, by running that
    * tool's own plugin commands. The tool may still ask for confirmation.
    */
-  pluginInstall(harness: PluginHarness): Promise<PluginInstallResult>;
+  pluginInstall(harness: CheckedPluginHarness): Promise<PluginInstallResult>;
   /** Open the tool's own install guide in the browser: one fixed page per tool. */
-  pluginGuide(harness: PluginHarness): Promise<void>;
+  pluginGuide(harness: CheckedPluginHarness): Promise<void>;
   /** Open one of Anthill's own pages (`shared/links.ts`) in the default browser. */
   openLink?(name: ExternalLink): Promise<void>;
   /**

@@ -19,17 +19,17 @@
  * Not every CLI has an official mark in this app. Where there is none, the
  * lookup returns a neutral placeholder — a plain disc, which is not an
  * approximation of anything — rather than a broken image or a redrawn mark.
- * Every CLI Anthill offers today has one; the placeholder is what the next one
- * gets until somebody finds its mark.
+ * Every CLI Anthill offers today has one; VS Code, a harness without a CLI of
+ * its own here, has the placeholder until its mark is added the same way.
  */
 
-import type { InterpreterId } from "@anthill/workflow";
+import type { HarnessTarget } from "@anthill/workflow-schema";
 
 import claudeCode from "../assets/claude-code.webp";
 import codex from "../assets/codex.webp";
 import pi from "../assets/pi.svg";
 
-export const INTERPRETER_LOGOS: Partial<Record<InterpreterId, string>> = {
+export const INTERPRETER_LOGOS: Partial<Record<HarnessTarget, string>> = {
   "claude-code": claudeCode,
   codex,
   pi,
@@ -53,7 +53,7 @@ const NO_MARK =
  * Always a string, so a caller can put it in an `src` or a `background-image`
  * without a branch.
  */
-export function interpreterLogo(id: InterpreterId): string {
+export function interpreterLogo(id: HarnessTarget): string {
   return INTERPRETER_LOGOS[id] ?? NO_MARK;
 }
 
@@ -72,6 +72,6 @@ export function interpreterLogo(id: InterpreterId): string {
  * wrong. Double quotes, with any of their own escaped, because the encodings
  * involved produce single quotes and never double ones.
  */
-export function interpreterLogoBackground(id: InterpreterId): string {
+export function interpreterLogoBackground(id: HarnessTarget): string {
   return `url("${interpreterLogo(id).replace(/"/g, "%22")}")`;
 }

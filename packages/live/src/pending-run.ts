@@ -823,6 +823,7 @@ export const CLI_LABEL: Record<MarkerCli, string> = {
   codex: "Codex",
   "claude-code": "Claude Code",
   pi: "Pi",
+  vscode: "VS Code",
 };
 
 /**

@@ -11,7 +11,23 @@
  * file that grants access; if one ever appears, it is a bug.
  */
 
-export type InterpreterId = "claude-code" | "codex" | "pi";
+import type { HarnessTarget } from "@anthill/workflow-schema";
+
+/**
+ * The harnesses that are also a CLI Anthill can find, sign-in check and ask.
+ *
+ * A subset of the workflow targets: VS Code is a target, but its agents run
+ * inside the editor, with no CLI for Anthill to detect or to draft through.
+ * Screens about connecting a CLI, or about models chosen per agent, list
+ * these rather than every target.
+ */
+export const INTERPRETER_IDS = ["claude-code", "codex", "pi"] as const satisfies readonly HarnessTarget[];
+
+export type InterpreterId = (typeof INTERPRETER_IDS)[number];
+
+export function isInterpreterId(value: unknown): value is InterpreterId {
+  return typeof value === "string" && (INTERPRETER_IDS as readonly string[]).includes(value);
+}
 
 export type InterpreterDefinition = {
   id: InterpreterId;

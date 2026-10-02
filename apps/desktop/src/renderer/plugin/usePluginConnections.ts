@@ -9,15 +9,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { PLUGIN_HARNESSES, PLUGIN_HARNESS_INFO, type PluginHarness } from "@anthill/workflow";
+import { CHECKED_PLUGIN_HARNESSES, PLUGIN_HARNESS_INFO, type CheckedPluginHarness } from "@anthill/workflow";
 
 import type { PluginConnection } from "../../shared/ipc.js";
 
 import { pluginCard, type LocalCardState, type PluginCardView } from "./plugin-card.js";
 
-export type Harness = PluginHarness;
+export type Harness = CheckedPluginHarness;
 
-export const HARNESSES: { id: Harness; label: string }[] = PLUGIN_HARNESSES.map((id) => ({
+export const HARNESSES: { id: Harness; label: string }[] = CHECKED_PLUGIN_HARNESSES.map((id) => ({
   id,
   label: PLUGIN_HARNESS_INFO[id].label,
 }));
@@ -33,7 +33,7 @@ const IDLE: LocalCardState = { kind: "idle" };
 
 /** One value per plugin harness. */
 function perHarness<T>(make: (id: Harness) => T): Record<Harness, T> {
-  return Object.fromEntries(PLUGIN_HARNESSES.map((id) => [id, make(id)])) as Record<Harness, T>;
+  return Object.fromEntries(CHECKED_PLUGIN_HARNESSES.map((id) => [id, make(id)])) as Record<Harness, T>;
 }
 
 export function usePluginConnections(): PluginConnections {

@@ -13,9 +13,21 @@
  * table is a compile error everywhere it still needs an answer.
  */
 
-export const PLUGIN_HARNESSES = ["claude-code", "codex"] as const;
+export const PLUGIN_HARNESSES = ["claude-code", "codex", "vscode"] as const;
 
 export type PluginHarness = (typeof PLUGIN_HARNESSES)[number];
+
+/**
+ * The plugin harnesses Anthill reads the install records of, and offers to
+ * install into: a card each in Settings ▸ Plugins and in onboarding.
+ *
+ * VS Code is not one yet. Its plugin ships, but Anthill does not read where
+ * VS Code records an install, and VS Code has no command to install one with,
+ * so a card for it could only guess (ANT-255, stage 3).
+ */
+export const CHECKED_PLUGIN_HARNESSES = ["claude-code", "codex"] as const satisfies readonly PluginHarness[];
+
+export type CheckedPluginHarness = (typeof CHECKED_PLUGIN_HARNESSES)[number];
 
 export type PluginHarnessInfo = {
   id: PluginHarness;
@@ -61,8 +73,29 @@ export const PLUGIN_HARNESS_INFO: Record<PluginHarness, PluginHarnessInfo> = {
     enablesFromCli: false,
     installGuide: "https://developers.openai.com/codex/cli",
   },
+  vscode: {
+    id: "vscode",
+    label: "VS Code",
+    cli: "code",
+    folder: "plugins/anthill-vscode",
+    // VS Code's own plugin format: a manifest at the root, and no `$schema`,
+    // which would make it the stricter format that expands no plugin root.
+    manifest: "plugin.json",
+    plugin: "anthill",
+    // The name `.github/plugin/marketplace.json` gives itself. VS Code reads
+    // that file before `.claude-plugin/marketplace.json`; Claude Code never
+    // reads it, so the two plugins named `anthill` do not collide.
+    marketplace: "anthill",
+    // VS Code has no command line for plugins at all.
+    enablesFromCli: false,
+    installGuide: "https://code.visualstudio.com/download",
+  },
 };
 
 export function isPluginHarness(value: unknown): value is PluginHarness {
   return typeof value === "string" && (PLUGIN_HARNESSES as readonly string[]).includes(value);
+}
+
+export function isCheckedPluginHarness(value: unknown): value is CheckedPluginHarness {
+  return typeof value === "string" && (CHECKED_PLUGIN_HARNESSES as readonly string[]).includes(value);
 }

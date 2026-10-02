@@ -1491,3 +1491,57 @@ describe("a chat that asks for the development build", () => {
     expect((open.structuredContent as { outcome: string }).outcome).toBe("invalid");
   });
 });
+
+/*
+  ANT-255. VS Code is a harness of its own: its plugin hands over as `vscode`,
+  with a workflow targeting VS Code, and an id the skill makes for the chat
+  because VS Code gives it none.
+*/
+describe("a handover from VS Code", () => {
+  const fromVSCode = () =>
+    completeWorkflow({
+      target: "vscode",
+      metadata: {
+        workflow: {
+          formatVersion: WORKFLOW_FORMAT_VERSION,
+          agents: [
+            {
+              id: "agent-1",
+              name: "Developer",
+              description:
+                "Reads the code around the change, makes the smallest fix that holds, and hands back a diff with a test that fails without it.",
+              models: { vscode: { id: "__default__" } },
+            },
+          ],
+        },
+      },
+    });
+  const chat = "vscode-0f7d4c2a-9b1e-4c33-8a5f-6d2e1b7c0a94";
+
+  it("is stored, opened and bound like any other", async () => {
+    const { handlers, opened } = await openTools();
+    const created = answerOf(await handlers.createWorkflowDraft(draftInput({
+      mode: "watch",
+      source: { harness: "vscode", sessionId: chat, taskText: "Fix the crash on startup." },
+      workflow: fromVSCode(),
+    })));
+    expect(created.outcome).toBe("created");
+    expect(opened).toHaveLength(1);
+
+    const found = answerOf(await handlers.getWorkflow({ workflowId: "workflow-1" }));
+    expect(found.source).toMatchObject({ harness: "vscode", sessionId: chat });
+
+    const bound = answerOf(await handlers.bindRun(bindInput({ digest: revisionDigest(fromVSCode()) })));
+    expect(bound.outcome).toBe("bound");
+    expect(bound.sessionId).toBe(chat);
+  });
+
+  it("is refused when the workflow was written for another tool", async () => {
+    const { handlers } = await openTools();
+    const answer = answerOf(await handlers.createWorkflowDraft(draftInput({
+      source: { harness: "vscode", sessionId: chat, taskText: "Fix the crash on startup." },
+    })));
+    expect(answer.outcome).toBe("incomplete");
+    expect(problemCodes(answer)).toContain("HANDOVER_TARGET_MISMATCH");
+  });
+});

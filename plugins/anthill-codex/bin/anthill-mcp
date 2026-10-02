@@ -109,12 +109,13 @@ if ("problem" in located) {
  * nothing to report.
  */
 function installedVersion() {
-  for (const dir of [".claude-plugin", ".codex-plugin"]) {
+  // VS Code's plugin keeps its manifest at the root.
+  for (const dir of [".claude-plugin", ".codex-plugin", "."]) {
     try {
       const manifest = JSON.parse(readFileSync(join(PLUGIN_ROOT, dir, "plugin.json"), "utf8"));
       if (typeof manifest?.version === "string") return manifest.version;
     } catch {
-      // Not this harness's manifest; try the other.
+      // Not this harness's manifest; try the next.
     }
   }
   return undefined;

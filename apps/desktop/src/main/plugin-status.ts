@@ -30,7 +30,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
-import { PLUGIN_HARNESSES, PLUGIN_HARNESS_INFO, type PluginHarness } from "@anthill/workflow";
+import { CHECKED_PLUGIN_HARNESSES, PLUGIN_HARNESS_INFO, type CheckedPluginHarness } from "@anthill/workflow";
 
 import type { PluginHarnessStatus, PluginServerStatus, PluginStatus } from "../shared/ipc.js";
 
@@ -49,7 +49,7 @@ async function readJson(path: string): Promise<unknown> {
 }
 
 /** The version a checkout's copy of a harness's plugin declares, when the checkout is on this disk. */
-async function versionIn(checkout: string | undefined, harness: PluginHarness): Promise<string | undefined> {
+async function versionIn(checkout: string | undefined, harness: CheckedPluginHarness): Promise<string | undefined> {
   if (!checkout) return undefined;
   const { folder, manifest } = PLUGIN_HARNESS_INFO[harness];
   const value = await readJson(join(checkout, folder, manifest));
@@ -57,7 +57,7 @@ async function versionIn(checkout: string | undefined, harness: PluginHarness): 
 }
 
 /** What is said about a harness before anything is read about it. */
-function unread(harness: PluginHarness, toolFound: boolean): PluginHarnessStatus {
+function unread(harness: CheckedPluginHarness, toolFound: boolean): PluginHarnessStatus {
   const { label, plugin } = PLUGIN_HARNESS_INFO[harness];
   return { harness, label, plugin, toolFound, installed: false, enabled: false };
 }
@@ -198,7 +198,7 @@ export async function codexStatus(home: string): Promise<PluginHarnessStatus> {
 }
 
 /** How each harness's own records are read. */
-const STATUS: Record<PluginHarness, (home: string) => Promise<PluginHarnessStatus>> = {
+const STATUS: Record<CheckedPluginHarness, (home: string) => Promise<PluginHarnessStatus>> = {
   "claude-code": claudeCodeStatus,
   codex: codexStatus,
 };
@@ -216,7 +216,7 @@ export async function serverStatus(home: string): Promise<PluginServerStatus> {
 
 export async function pluginStatus(home: string = homedir()): Promise<PluginStatus> {
   const [harnesses, server] = await Promise.all([
-    Promise.all(PLUGIN_HARNESSES.map((harness) => STATUS[harness](home))),
+    Promise.all(CHECKED_PLUGIN_HARNESSES.map((harness) => STATUS[harness](home))),
     serverStatus(home),
   ]);
   return { harnesses, server };

@@ -19,9 +19,12 @@ export {
 } from "./harness.js";
 
 export {
+  CHECKED_PLUGIN_HARNESSES,
   PLUGIN_HARNESSES,
   PLUGIN_HARNESS_INFO,
+  isCheckedPluginHarness,
   isPluginHarness,
+  type CheckedPluginHarness,
   type PluginHarness,
   type PluginHarnessInfo,
 } from "./plugin-harness.js";
@@ -240,8 +243,10 @@ export { nextIdFor, rememberIds, rememberIdsUnder } from "./id-counter.js";
 export {
   DEFAULT_INTERPRETER,
   INTERPRETERS,
+  INTERPRETER_IDS,
   describeInterpreterCommand,
   interpreterDefinition,
+  isInterpreterId,
   isSignedOutFailure,
   type InterpreterDefinition,
   type InterpreterId,

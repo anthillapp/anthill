@@ -46,6 +46,15 @@ describe("the version Anthill says it is", () => {
     expect(/^version:\s*(\S+)\s*$/m.exec(skill)?.[1]).toBe(release);
   });
 
+  it("is the VS Code plugin's version, and its marketplace entry agrees", () => {
+    expect(json("plugins/anthill-vscode/plugin.json").version).toBe(release);
+    const marketplace = json(".github/plugin/marketplace.json") as {
+      plugins: { name: string; version?: string }[];
+    };
+    const entry = marketplace.plugins.find((plugin) => plugin.name === "anthill");
+    expect(entry?.version).toBe(release);
+  });
+
   it("is the Codex plugin's version, before its build suffix", () => {
     const version = String(json("plugins/anthill-codex/.codex-plugin/plugin.json").version);
     expect(version.split("+")[0]).toBe(release);
@@ -53,7 +62,7 @@ describe("the version Anthill says it is", () => {
 });
 
 describe("the server each plugin carries", () => {
-  // scripts/build-plugin-server.mjs writes both copies from one build, with the
+  // scripts/build-plugin-server.mjs writes every copy from one build, with the
   // version in its first line. A release that skipped `npm run plugin:bundle`
   // would ship last release's server inside this release's plugin.
   const bundles = [
@@ -61,7 +70,9 @@ describe("the server each plugin carries", () => {
     { file: "anthill-report.mjs", title: "progress reporter" },
   ];
   const copies = (file: string) =>
-    ["plugins/anthill-claude", "plugins/anthill-codex"].map((plugin) => readFileSync(join(ROOT, plugin, "server", file), "utf8"));
+    ["plugins/anthill-claude", "plugins/anthill-codex", "plugins/anthill-vscode"].map((plugin) =>
+      readFileSync(join(ROOT, plugin, "server", file), "utf8"),
+    );
 
   it.each(bundles)("is this release's $title — run `npm run plugin:bundle` after `npm run version:set`", ({ file, title }) => {
     for (const copy of copies(file)) {
@@ -69,8 +80,8 @@ describe("the server each plugin carries", () => {
     }
   });
 
-  it.each(bundles)("is the same $title in the Claude Code plugin and the Codex plugin", ({ file }) => {
-    const [claude, codex] = copies(file);
-    expect(claude).toBe(codex);
+  it.each(bundles)("is the same $title in every plugin", ({ file }) => {
+    const [claude, ...others] = copies(file);
+    for (const other of others) expect(other).toBe(claude);
   });
 });

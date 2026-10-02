@@ -271,7 +271,12 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
             <option value="" disabled>
               Choose…
             </option>
-            {HARNESS_TARGETS.map((target) => (
+            {/* A harness Anthill cannot follow a pasted prompt into is left
+                out, unless it is already this workflow's: a hand-over to it
+                would wait for a session that is never recognised. */}
+            {HARNESS_TARGETS.filter(
+              (target) => HARNESS_PROFILES[target].followsPastedPrompt || target === workflow.target,
+            ).map((target) => (
               <option key={target} value={target}>
                 {HARNESS_PROFILES[target].displayName}
               </option>

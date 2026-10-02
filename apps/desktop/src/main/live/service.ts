@@ -53,6 +53,7 @@ import {
 import { isEnding } from "./workflow-status.js";
 import { CodexObserver } from "./observers/codex.js";
 import { PiObserver } from "./observers/pi.js";
+import { VSCodeObserver } from "./observers/vscode.js";
 import { HookLogObserver } from "./observers/hooks.js";
 import type {
   LiveSessionObserver,
@@ -101,6 +102,7 @@ export type ObservationRoots = {
   claudeDesktopRoot?: string;
   codexRoot?: string;
   piRoot?: string;
+  vscodeRoot?: string;
   hookLogPath?: string;
   reportLogPath?: string;
   journalDir?: string;
@@ -158,6 +160,7 @@ export class LiveSessionService {
         : new ClaudeCodeObserver(),
       codex: roots.codexRoot ? new CodexObserver(roots.codexRoot) : new CodexObserver(),
       pi: roots.piRoot ? new PiObserver(roots.piRoot) : new PiObserver(),
+      vscode: roots.vscodeRoot ? new VSCodeObserver(roots.vscodeRoot) : new VSCodeObserver(),
     };
     this.hooks = roots.hookLogPath ? new HookLogObserver(roots.hookLogPath) : new HookLogObserver();
     this.reports = roots.reportLogPath

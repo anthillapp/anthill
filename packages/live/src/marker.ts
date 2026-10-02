@@ -17,7 +17,13 @@
  *   chosen CLI, and a timestamp.
  */
 
-export type MarkerCli = "codex" | "claude-code" | "pi";
+export const MARKER_CLIS = ["codex", "claude-code", "pi", "vscode"] as const;
+
+export type MarkerCli = (typeof MARKER_CLIS)[number];
+
+export function isMarkerCli(value: unknown): value is MarkerCli {
+  return typeof value === "string" && (MARKER_CLIS as readonly string[]).includes(value);
+}
 
 export type RunMarker = {
   /** Stable Anthill Run ID, created before the prompt leaves Anthill. */
@@ -449,7 +455,7 @@ export function parseMarker(text: string): RunMarker | undefined {
   const promptVersion = read(FIELD.promptVersion);
   const issuedAt = read(FIELD.issuedAt);
   if (!runId || !nonce || !issuedAt) return undefined;
-  if (cli !== "codex" && cli !== "claude-code" && cli !== "pi") return undefined;
+  if (!isMarkerCli(cli)) return undefined;
 
   const workflowId = read(FIELD.workflowId);
   return {

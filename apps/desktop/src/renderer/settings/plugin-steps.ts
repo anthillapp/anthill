@@ -10,7 +10,7 @@
  * is the author's to do.
  */
 
-import { PLUGIN_HARNESS_INFO, type PluginHarness } from "@anthill/workflow";
+import { PLUGIN_HARNESS_INFO, type CheckedPluginHarness } from "@anthill/workflow";
 
 import type { PluginHarnessStatus, PluginServerStatus } from "../../shared/ipc.js";
 
@@ -54,7 +54,7 @@ type Commands = {
   update(status: PluginHarnessStatus, marketplace: string, id: string): PluginStep[];
 };
 
-const COMMANDS: Record<PluginHarness, Commands> = {
+const COMMANDS: Record<CheckedPluginHarness, Commands> = {
   "claude-code": {
     addMarketplace: (source) => `claude plugin marketplace add ${source}`,
     install: (id) => `claude plugin install ${id}`,

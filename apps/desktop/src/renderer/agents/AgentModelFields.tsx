@@ -27,8 +27,15 @@
  * about — which is exactly why the two are kept apart and never translated.
  */
 
-import { HARNESS_DEFAULT, harnessProfile, visibleModelIds, type AgentModels } from "@anthill/workflow";
-import { HARNESS_TARGETS, type HarnessTarget } from "@anthill/workflow-schema";
+import {
+  HARNESS_DEFAULT,
+  INTERPRETER_IDS,
+  harnessProfile,
+  visibleModelIds,
+  type AgentModels,
+  type InterpreterId,
+} from "@anthill/workflow";
+import type { HarnessTarget } from "@anthill/workflow-schema";
 
 import type { CodexModelCatalog, PiModelCatalog } from "../../shared/ipc.js";
 import { interpreterLogo } from "../workflow/interpreter-logos.js";
@@ -90,7 +97,7 @@ export type AgentModelFieldsProps = {
    * is no fetchedAt and no stale-cache caveat to show.
    */
   pi: PiModelCatalog | undefined;
-  onConnect: (target: HarnessTarget) => void;
+  onConnect: (target: InterpreterId) => void;
   onChange: (models: AgentModels) => void;
   /** So focus can be handed to a field once connecting has made one. */
   fieldRef?: React.RefObject<HTMLSelectElement>;
@@ -117,7 +124,7 @@ export function AgentModelFields({
   // this machine; nothing about them is written into the agent.
   const { preferences } = useModelPreferences();
 
-  const anyConnected = HARNESS_TARGETS.some((target) => isConnected(connections.of(target)));
+  const anyConnected = INTERPRETER_IDS.some((target) => isConnected(connections.of(target)));
 
   /*
    * The CLI is there and reads no custom agents, so a per-agent model cannot
@@ -159,7 +166,7 @@ export function AgentModelFields({
       ) : null}
 
       <div className="agent-models" role="group" aria-label="Model per coding tool">
-        {HARNESS_TARGETS.map((target) => {
+        {INTERPRETER_IDS.map((target) => {
           const harness = harnessProfile(target);
           const connection = connections.of(target);
           const live = isConnected(connection);

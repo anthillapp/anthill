@@ -8,7 +8,7 @@ import { parseWorkflow } from "@anthill/workflow-schema";
 import {
   checkWorkflowCompatibility,
   INTERPRETERS,
-  isPluginHarness,
+  isCheckedPluginHarness,
   migrateWorkflow,
   type InterpreterId,
 } from "@anthill/workflow";
@@ -796,7 +796,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
   register(IpcChannel.pluginStatus, async () => pluginStatus());
   register(IpcChannel.pluginConnections, async () => pluginConnections(pluginDeps()));
   register(IpcChannel.pluginInstall, async (args) =>
-    isPluginHarness(args[0])
+    isCheckedPluginHarness(args[0])
       ? installPlugin(args[0], pluginDeps())
       : { ok: false, changed: false, error: "Unknown coding tool." },
   );

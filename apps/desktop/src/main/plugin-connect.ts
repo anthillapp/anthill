@@ -32,7 +32,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import { runProcess, type SpawnFn } from "@anthill/runtimes";
-import { PLUGIN_HARNESS_INFO, type PluginHarness } from "@anthill/workflow";
+import { PLUGIN_HARNESS_INFO, type CheckedPluginHarness } from "@anthill/workflow";
 
 import type {
   InterpreterInfo,
@@ -125,7 +125,7 @@ type Tool = {
   installSteps(status: PluginHarnessStatus, id: string, source: string, marketplaceKnown: boolean): Step[];
 };
 
-const TOOLS: Record<PluginHarness, Tool> = {
+const TOOLS: Record<CheckedPluginHarness, Tool> = {
   "claude-code": {
     async installedRoot(home, status) {
       const installs = await readJson(join(home, ".claude", "plugins", "installed_plugins.json"));
@@ -288,7 +288,7 @@ export function installSteps(harness: PluginHarnessStatus, source: string, marke
 }
 
 /** Whether the tool already offers Anthill's marketplace, so adding it again is not needed. */
-function marketplaceKnown(home: string, harness: PluginHarness): Promise<boolean> {
+function marketplaceKnown(home: string, harness: CheckedPluginHarness): Promise<boolean> {
   return TOOLS[harness].marketplaceKnown(home, PLUGIN_HARNESS_INFO[harness].marketplace);
 }
 
@@ -299,7 +299,7 @@ function reason(outcome: { stderr: string; stdout: string; timedOut: boolean }, 
   return lines.at(-1) ?? `${label} stopped without saying why.`;
 }
 
-export async function installPlugin(harness: PluginHarness, deps: ConnectDeps): Promise<PluginInstallResult> {
+export async function installPlugin(harness: CheckedPluginHarness, deps: ConnectDeps): Promise<PluginInstallResult> {
   const home = deps.home ?? homedir();
   const status = await pluginStatus(home);
   const current = status.harnesses.find((item) => item.harness === harness)!;

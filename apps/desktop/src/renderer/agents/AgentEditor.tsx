@@ -17,9 +17,8 @@
  */
 
 import { useEffect, useRef } from "react";
-import { configuredHarnesses, harnessProfile, type AgentModels } from "@anthill/workflow";
+import { configuredHarnesses, harnessProfile, type AgentModels, type InterpreterId } from "@anthill/workflow";
 
-import type { HarnessTarget } from "@anthill/workflow-schema";
 
 import type {
   CodexModelCatalog,
@@ -84,8 +83,8 @@ export type AgentEditorProps = {
   /** What pi listed for this machine, or undefined when the CLI was not reached. */
   pi: PiModelCatalog | undefined;
   /** Which tool's setup sheet is open, if any. */
-  connecting: HarnessTarget | undefined;
-  onConnect: (target: HarnessTarget | undefined) => void;
+  connecting: InterpreterId | undefined;
+  onConnect: (target: InterpreterId | undefined) => void;
   onPatch: (change: Partial<AgentDraft>) => void;
   onSave: () => void;
   onSaveAndLeave: () => void;

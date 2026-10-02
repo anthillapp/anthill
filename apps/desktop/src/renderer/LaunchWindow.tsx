@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isWatching, type LiveSessionState, type PendingRun } from "@anthill/live";
 
-import type { HarnessTarget } from "@anthill/workflow-schema";
+import type { InterpreterId } from "@anthill/workflow";
 
 import type {
   CodexModelCatalog,
@@ -195,7 +195,7 @@ export function LaunchWindow({
    */
   const { codex, pi } = useModelCatalogues();
   /** Which tool's connection panel the editor has open, if any. */
-  const [connecting, setConnecting] = useState<HarnessTarget | undefined>();
+  const [connecting, setConnecting] = useState<InterpreterId | undefined>();
 
   useEffect(() => {
     let live = true;

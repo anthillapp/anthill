@@ -15,7 +15,7 @@ import { homedir } from "node:os";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 
 import { parseWorkflow } from "@anthill/workflow-schema";
-import { checkWorkflowCompatibility, isPluginHarness, migrateWorkflow, PLUGIN_HARNESS_INFO } from "@anthill/workflow";
+import { checkWorkflowCompatibility, isCheckedPluginHarness, migrateWorkflow, PLUGIN_HARNESS_INFO } from "@anthill/workflow";
 import { ExchangeStore } from "@anthill/exchange-store";
 import { MARKER_VERSION, workflowSteps } from "@anthill/live";
 import type { Workflow } from "@anthill/workflow-schema";
@@ -1408,7 +1408,7 @@ function registerIpcHandlers(): void {
   });
   // Runs the tool's own plugin commands, and only on the author's click.
   handle(IpcChannel.pluginInstall, async (_event, harness: unknown) => {
-    if (!isPluginHarness(harness)) {
+    if (!isCheckedPluginHarness(harness)) {
       return { ok: false, changed: false, error: "Unknown coding tool." };
     }
     await userPath;
@@ -1421,7 +1421,7 @@ function registerIpcHandlers(): void {
   });
   // A fixed page per tool. The renderer names the tool, never the address.
   handle(IpcChannel.pluginGuide, async (_event, harness: unknown) => {
-    if (isPluginHarness(harness)) await shell.openExternal(PLUGIN_HARNESS_INFO[harness].installGuide);
+    if (isCheckedPluginHarness(harness)) await shell.openExternal(PLUGIN_HARNESS_INFO[harness].installGuide);
   });
   handle(IpcChannel.settingsRead, async () => settings().read());
   handle(IpcChannel.settingsWrite, async (_event, patch: Partial<AppSettings>) =>

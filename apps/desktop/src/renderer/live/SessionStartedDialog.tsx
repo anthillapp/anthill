@@ -16,7 +16,7 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 
-import { CLI_LABEL, type PendingRun } from "@anthill/live";
+import { BOUND_CHANNEL, CLI_LABEL, type PendingRun } from "@anthill/live";
 
 import { PresenceChip } from "./PresenceChip.js";
 import { presenceKey } from "./presence.js";
@@ -93,7 +93,9 @@ export function SessionStartedDialog({
         <p className="session-started-how">
           {run.evidenceChannel === "anthill:report"
             ? `${CLI_LABEL[run.selectedCli]} reported progress through the Anthill CLI with this run's ID and nonce.`
-            : `${CLI_LABEL[run.selectedCli]} wrote matching local session evidence for this workflow.`}
+            : run.evidenceChannel === BOUND_CHANNEL
+              ? `The Anthill plugin bound this run to the ${CLI_LABEL[run.selectedCli]} session, which has started writing.`
+              : `${CLI_LABEL[run.selectedCli]} wrote matching local session evidence for this workflow.`}
         </p>
 
         <dl className="session-started-facts">
@@ -104,7 +106,13 @@ export function SessionStartedDialog({
             <code>{run.detectedSessionId ?? "–"}</code>
           </dd>
           <dt>Evidence</dt>
-          <dd>{run.evidenceChannel === "anthill:report" ? "run ID and nonce in a CLI report" : "run marker in the session record · confirmed"}</dd>
+          <dd>
+            {run.evidenceChannel === "anthill:report"
+              ? "run ID and nonce in a CLI report"
+              : run.evidenceChannel === BOUND_CHANNEL
+                ? "session bound by the plugin · confirmed"
+                : "run marker in the session record · confirmed"}
+          </dd>
         </dl>
 
         <p className="session-started-boundary">

@@ -330,7 +330,7 @@ export class CodexObserver implements LiveSessionObserver {
         // deliberately skips — Codex's own reasoning, for one — and reporting
         // that as activity would keep a finished run looking alive.
         state.reportedActivityAt = state.lastActivityAt;
-        evidence.push({ kind: "activity", sessionId, at: state.lastActivityAt });
+        evidence.push({ kind: "activity", sessionId, channel: CHANNEL, at: state.lastActivityAt });
       }
 
       // A subagent's file carries the session's id, so a binding follows it

@@ -261,7 +261,7 @@ export class PiObserver implements LiveSessionObserver {
         // deliberately skips — settings changes, for one — and reporting
         // those as activity would keep a finished run looking alive.
         state.reportedActivityAt = state.lastActivityAt;
-        evidence.push({ kind: "activity", sessionId, at: state.lastActivityAt });
+        evidence.push({ kind: "activity", sessionId, channel: CHANNEL, at: state.lastActivityAt });
       }
 
       if (state.failure) {

@@ -420,7 +420,7 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
           state.lastWorkAt !== undefined &&
           (state.reportedActivityAt === undefined || state.lastWorkAt > state.reportedActivityAt);
         state.reportedActivityAt = state.lastActivityAt;
-        evidence.push({ kind: "activity", sessionId, at: state.lastActivityAt, resumes });
+        evidence.push({ kind: "activity", sessionId, channel: CHANNEL, at: state.lastActivityAt, resumes });
       }
 
       /*

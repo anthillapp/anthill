@@ -98,6 +98,31 @@ describe("evidence", () => {
     expect(applyEvidence(run(), { kind: "activity", sessionId: "sess-1", channel: "codex:rollout", at: later(5_000) }).confidence).toBeUndefined();
   });
 
+  it("names the binding when a bound run's first evidence carries no channel, until a channel does (ANT-257)", () => {
+    const bound = run({
+      selectedCli: "codex",
+      exchange: { revision: 1, digest: "abc", sessionId: "sess-1" },
+      detectedSessionId: "sess-1",
+    });
+    // The rollout observer says the session wrote something, not through which record.
+    const live = applyEvidence(bound, { kind: "activity", sessionId: "sess-1", at: later(5_000) });
+    expect(live.state).toBe("detected_live");
+    expect(live.evidenceChannel).toBe("exchange:bind");
+    expect(live.confidence).toBe("strong");
+    // The first channel that names itself replaces the placeholder...
+    const named = applyEvidence(live, { kind: "activity", sessionId: "sess-1", channel: "codex:rollout", at: later(6_000) });
+    expect(named.evidenceChannel).toBe("codex:rollout");
+    expect(named.confidence).toBe("strong");
+    // ...and stays, as it did before: a later report does not take it over.
+    const reported = applyEvidence(named, { kind: "activity", sessionId: "sess-1", channel: "anthill:report", at: later(7_000) });
+    expect(reported.evidenceChannel).toBe("codex:rollout");
+    // A report arriving while only the placeholder is known replaces it too.
+    const viaReport = applyEvidence(live, { kind: "activity", sessionId: "sess-1", channel: "anthill:report", at: later(6_000) });
+    expect(viaReport.evidenceChannel).toBe("anthill:report");
+    // The placeholder is for bound runs only: an unbound run still learns nothing from channel-less activity.
+    expect(applyEvidence(run(), { kind: "activity", sessionId: "sess-1", at: later(5_000) }).evidenceChannel).toBeUndefined();
+  });
+
   it("goes live on a marker found in a record the tool wrote", () => {
     const next = applyEvidence(run(), strongMatch);
     expect(next.state).toBe("detected_live");

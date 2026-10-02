@@ -411,13 +411,14 @@ export class HookLogObserver {
       events.push(base);
     }
 
-    const newest = events.reduce<string | undefined>(
-      (latest, event) => (latest && latest >= event.at ? latest : event.at),
+    const latest = events.reduce<ObservationEventDraft | undefined>(
+      (kept, event) => (kept && kept.at >= event.at ? kept : event),
       undefined,
     );
+    const newest = latest?.at;
     const already = this.reportedAt.get(run.anthillRunId);
     const evidence: Evidence[] = [];
-    if (newest && (!already || newest > already)) {
+    if (latest && newest && (!already || newest > already)) {
       this.reportedAt.set(run.anthillRunId, newest);
       // Whether any of it is work: a prompt, or a tool called. A Stop or a
       // turn ending after the done line is the same turn finishing, and must
@@ -429,7 +430,7 @@ export class HookLogObserver {
           (event.kind === "prompt.submit" ||
             (event.kind === "tool.start" && !isAnthillTool(event.toolName) && !notWork.has(index))),
       );
-      evidence.push({ kind: "activity", sessionId, at: newest, resumes });
+      evidence.push({ kind: "activity", sessionId, channel: latest.channel, at: newest, resumes });
     }
     if (ended) {
       evidence.push({

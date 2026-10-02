@@ -1,4 +1,4 @@
-// Anthill MCP server 0.8.6, built by scripts/build-plugin-server.mjs
+// Anthill MCP server 0.8.7, built by scripts/build-plugin-server.mjs
 // from https://github.com/nstr/anthill. Do not edit: run
 // `npm run plugin:bundle` to write it again. MIT licensed.
 import { createRequire as __anthillCreateRequire } from "node:module";
@@ -39373,7 +39373,7 @@ function compare(a, b) {
 __name(compare, "compare");
 var UPDATE = {
   "claude-code": "run `claude plugin update anthill@anthill`, then start a new session",
-  codex: "reinstall the Anthill plugin in Codex (`codex plugin marketplace upgrade anthill-local`, then `codex plugin add anthill-cli@anthill-local`), then start a new task"
+  codex: "reinstall the Anthill plugin in Codex (`codex plugin marketplace upgrade anthill-local`, then `codex plugin add anthill@anthill-local`), then start a new task"
 };
 function pluginDriftNotice(installed, host, server) {
   if (!installed?.trim())
@@ -39576,7 +39576,7 @@ __name(registerExchangeTools, "registerExchangeTools");
 
 // apps/mcp/dist/server.js
 var SERVER_NAME = "anthill";
-var SERVER_VERSION = true ? "0.8.6" : String(createRequire(import.meta.url)("../package.json").version ?? "0.0.0");
+var SERVER_VERSION = true ? "0.8.7" : String(createRequire(import.meta.url)("../package.json").version ?? "0.0.0");
 var TRANSPORT_FAILURE_EXIT_CODE = 1;
 function transportFailureLine(error51) {
   const reason = error51 instanceof Error ? error51.message : String(error51);

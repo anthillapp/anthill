@@ -1,4 +1,4 @@
-// Anthill progress reporter 0.8.6, built by scripts/build-plugin-server.mjs
+// Anthill progress reporter 0.8.7, built by scripts/build-plugin-server.mjs
 // from https://github.com/nstr/anthill. Do not edit: run
 // `npm run plugin:bundle` to write it again. MIT licensed.
 import { createRequire as __anthillCreateRequire } from "node:module";

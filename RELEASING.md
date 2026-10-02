@@ -29,8 +29,10 @@
    claude plugin update anthill@anthill
    ```
 
-   and reinstall the Codex plugin from this checkout's marketplace. Then start
-   new sessions: a running session keeps the skill it started with.
+   and reinstall the Codex plugin from this checkout's marketplace. VS Code
+   updates a plugin installed from a marketplace on its own schedule, as it
+   does extensions, unless its auto-update is off. Then start new sessions: a
+   running session keeps the skill it started with.
 
    If this step is skipped, the plugin's launcher reports the version it was
    installed at, and the MCP server puts a notice at the top of its

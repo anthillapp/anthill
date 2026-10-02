@@ -61,6 +61,7 @@ import {
   type ObserverCapabilities,
   type PollResult,
 } from "./types.js";
+import { CopilotSessionReader, copilotSessionRoot } from "./copilot-session.js";
 
 const CHANNEL = "vscode:chat";
 
@@ -280,24 +281,32 @@ export class VSCodeObserver implements LiveSessionObserver {
 
   private readonly seen = new Map<string, Map<string, FileState>>();
 
-  /** The user data folder is injectable so the reader can be tested against fixtures. */
-  constructor(private readonly userDir: string = vscodeUserDir()) {}
+  private readonly copilot: CopilotSessionReader;
+
+  /** Both folders are injectable so the readers can be tested against fixtures. */
+  constructor(
+    private readonly userDir: string = vscodeUserDir(),
+    copilotRoot: string = copilotSessionRoot(),
+  ) {
+    this.copilot = new CopilotSessionReader(copilotRoot);
+  }
 
   private get workspaceStorage(): string {
     return join(this.userDir, "workspaceStorage");
   }
 
   async detectCapabilities(): Promise<ObserverCapabilities> {
-    const available = await stat(this.workspaceStorage).then(
+    const chats = await stat(this.workspaceStorage).then(
       (info) => info.isDirectory(),
       () => false,
     );
+    const available = chats || (await this.copilot.available());
     return {
       cli: this.cli,
       available,
       root: this.workspaceStorage,
       note: available
-        ? "Anthill reads the chat sessions VS Code saves for itself. VS Code saves them about once a minute, so what Anthill shows can trail the chat by that much."
+        ? "Anthill reads the sessions VS Code's agent keeps for itself: the Copilot harness's own session record as it is written, and the chats VS Code saves about once a minute."
         : "VS Code has saved no chat sessions on this machine, so there is nothing to read.",
       reportsCompletion: true,
       reportsFailure: true,
@@ -306,13 +315,30 @@ export class VSCodeObserver implements LiveSessionObserver {
 
   forget(runId: string): void {
     this.seen.delete(runId);
+    this.copilot.forget(runId);
   }
 
+  /**
+   * A chat runs in one of two places, and each keeps its own record: the
+   * workbench's chat files, or — the default since VS Code 1.140 — the
+   * Copilot harness's session state. Whichever holds this run speaks for it;
+   * both holding different sessions is the one case nothing is attributed.
+   */
   async poll(run: PendingRun, now: string): Promise<PollResult> {
+    const bound = boundSessionId(run);
+    const [chat, copilot] = await Promise.all([this.pollChats(run, now), this.copilot.poll(run, now, bound)]);
+    if (chat && copilot && chat.sessionId !== copilot.sessionId) {
+      return { events: [], evidence: [{ kind: "ambiguous", sessionIds: [chat.sessionId, copilot.sessionId], channel: CHANNEL, at: now }] };
+    }
+    const found = chat ?? copilot;
+    return found ? { evidence: found.evidence, events: found.events } : { events: [], evidence: [] };
+  }
+
+  private async pollChats(run: PendingRun, now: string): Promise<(PollResult & { sessionId: string }) | undefined> {
     const files = await this.candidates(run);
     // No chat saved yet is a VS Code that has not been asked anything, not one
     // Anthill cannot read: the ordinary wait applies (ANT-212).
-    if (files === undefined) return { events: [], evidence: [] };
+    if (files === undefined) return undefined;
 
     const states = this.statesFor(run.anthillRunId);
     const marker: Marker = { runId: run.anthillRunId, nonce: run.correlationNonce };
@@ -337,16 +363,17 @@ export class VSCodeObserver implements LiveSessionObserver {
       const speaking = matched.filter(([, state]) => contends(state, now));
       if (speaking.length > 1) {
         return {
+          sessionId: speaking[0]![1].chat!.sessionId!,
           events: [],
           evidence: [{ kind: "ambiguous", sessionIds: speaking.map(([, state]) => state.chat!.sessionId!), channel: CHANNEL, at: now }],
         };
       }
-      if (speaking.length === 0) return { events: [], evidence: [] };
+      if (speaking.length === 0) return undefined;
       matched.splice(0, matched.length, ...speaking);
     }
 
     const [entry] = matched;
-    if (!entry) return { events: [], evidence: [] };
+    if (!entry) return undefined;
     const [, state] = entry;
     const chat = state.chat!;
     const sessionId = chat.sessionId!;
@@ -384,7 +411,7 @@ export class VSCodeObserver implements LiveSessionObserver {
     }
     state.reportedActivityAt = lastAt;
     evidence.push(...standing(chat, state.from!, sessionId, run, now, lastAt));
-    return { evidence, events };
+    return { sessionId, evidence, events };
   }
 
   /**
@@ -395,6 +422,12 @@ export class VSCodeObserver implements LiveSessionObserver {
    * with this run's nonce after binding — one chat, or no answer.
    */
   async locate(run: PendingRun): Promise<string | undefined> {
+    const [chat, copilot] = await Promise.all([this.locateChat(run), this.copilot.locate(run)]);
+    if (chat && copilot && chat !== copilot) return undefined;
+    return chat ?? copilot;
+  }
+
+  private async locateChat(run: PendingRun): Promise<string | undefined> {
     const files = await this.candidates(run);
     if (!files) return undefined;
     const states = this.statesFor(run.anthillRunId);

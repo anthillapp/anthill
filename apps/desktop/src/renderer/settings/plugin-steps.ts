@@ -115,8 +115,8 @@ const STEPS: Record<CheckedPluginHarness, ToolSteps> = {
     restart: newSession,
   },
   vscode: {
-    // A checkout's folder is read where it is, so pointing VS Code at it is the
-    // whole install, and a pull is picked up by the next chat.
+    // Pointing VS Code at a checkout's folder is the whole install; VS Code
+    // runs it from a copy it keeps in its own data folder.
     missing: (status) =>
       status.checkout
         ? [

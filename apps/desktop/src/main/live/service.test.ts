@@ -63,6 +63,7 @@ async function harness(startAt = "2026-08-29T10:00:00.000Z"): Promise<Harness> {
       claudeDesktopRoot,
       codexRoot: join(dir, "codex"),
       vscodeUserDir: join(dir, "vscode"),
+      copilotSessionRoot: join(dir, "copilot", "session-state"),
       journalDir: join(dir, "observations"),
       hookLogPath,
       reportLogPath,

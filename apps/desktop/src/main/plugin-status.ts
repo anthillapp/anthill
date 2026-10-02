@@ -267,7 +267,8 @@ function isOurPlugin(path: string): boolean {
 /**
  * Where VS Code finds Anthill's plugin, if it does.
  *
- * A folder in `chat.pluginLocations` switched on, which is read where it is;
+ * A folder in `chat.pluginLocations` switched on, which VS Code runs from a
+ * copy in its own data folder;
  * or an install from a marketplace, which VS Code clones into
  * `~/.vscode/agent-plugins/` and lists in its `installed.json`
  * (`{version, installed: [{pluginUri, marketplace, name?}]}`).

@@ -35,8 +35,8 @@ this plugin. Claude Code reads `.claude-plugin/marketplace.json` from the same
 repository and never this one, so each tool gets its own plugin named
 `anthill`.
 
-**From a checkout.** Point VS Code at this folder; it is read where it is, so a
-pull is picked up by the next chat:
+**From a checkout.** Point VS Code at this folder. VS Code runs the plugin from
+a copy it keeps in its own data folder (`Code/agentPlugins/`):
 
 ```json
 "chat.pluginLocations": { "/abs/path/to/anthill/plugins/anthill-vscode": true }

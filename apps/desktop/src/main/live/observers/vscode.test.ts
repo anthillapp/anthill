@@ -111,7 +111,7 @@ describe("the VS Code observer", () => {
       { kind: 2, k: ["requests"], v: [request(MARKED, T)] },
       { kind: 2, k: ["requests", 1, "response"], v: [markdown("Reading the note now."), terminal("npm test", 0, T + 2_000), markdown("Half a sen")] },
     ]);
-    const observer = new VSCodeObserver(dir);
+    const observer = new VSCodeObserver(dir, join(dir, "copilot"));
 
     const first = await observer.poll(run(), new Date(T + 3_000).toISOString());
     expect(first.evidence).toContainEqual(
@@ -132,7 +132,7 @@ describe("the VS Code observer", () => {
       { kind: 2, k: ["requests", 0, "response"], v: [markdown("Half a sen")] },
     ];
     const path = await writeChat(dir, lines);
-    const observer = new VSCodeObserver(dir);
+    const observer = new VSCodeObserver(dir, join(dir, "copilot"));
     const r = run();
     expect(kinds(await observer.poll(r, new Date(T + 1_000).toISOString()))).toEqual(["prompt.submit"]);
 
@@ -156,7 +156,7 @@ describe("the VS Code observer", () => {
   it("calls a finished chat done only after it has been quiet", async () => {
     const dir = await userDir();
     await writeChat(dir, [snapshot([request(MARKED, T, { modelState: { value: 1, completedAt: T + 1_000 } })])]);
-    const observer = new VSCodeObserver(dir);
+    const observer = new VSCodeObserver(dir, join(dir, "copilot"));
     const r = { ...run(), detectedSessionId: CHAT };
     expect((await observer.poll(r, new Date(T + 60_000).toISOString())).evidence.map((item) => item.kind)).not.toContain("completed");
     expect((await observer.poll(r, new Date(T + 7 * 60_000).toISOString())).evidence.map((item) => item.kind)).toContain("completed");
@@ -171,7 +171,7 @@ describe("the VS Code observer", () => {
     await writeChat(dir, [
       snapshot([request(MARKED, T, { modelState, result: { errorDetails: { message: "Rate limited." } } })]),
     ]);
-    const evidence = (await new VSCodeObserver(dir).poll(run(), new Date(T + 2_000).toISOString())).evidence;
+    const evidence = (await new VSCodeObserver(dir, join(dir, "copilot")).poll(run(), new Date(T + 2_000).toISOString())).evidence;
     expect(evidence).toContainEqual(expect.objectContaining({ kind, sessionId: CHAT }));
     if (kind === "failed") expect(evidence).toContainEqual(expect.objectContaining({ detail: "Rate limited." }));
   });
@@ -193,12 +193,12 @@ describe("the VS Code observer", () => {
         ],
       },
     ]);
-    const observer = new VSCodeObserver(dir);
+    const observer = new VSCodeObserver(dir, join(dir, "copilot"));
     // Under the id the plugin made, no chat is that one yet.
     expect(await observer.poll(run(bound), new Date(T + 3_000).toISOString())).toEqual({ events: [], evidence: [] });
     expect(await observer.locate(run(bound))).toBe(CHAT);
 
-    const result = await new VSCodeObserver(dir).poll(run(bound, CHAT), new Date(T + 3_000).toISOString());
+    const result = await new VSCodeObserver(dir, join(dir, "copilot")).poll(run(bound, CHAT), new Date(T + 3_000).toISOString());
     expect(result.evidence).toContainEqual(expect.objectContaining({ kind: "match", sessionId: CHAT }));
     expect(result.events.every((event) => event.sessionId === CHAT)).toBe(true);
     // From the bind on; the composing before it is not the run.
@@ -216,8 +216,8 @@ describe("the VS Code observer", () => {
   it("does not take a pasted marker for a bound run, nor a nonce for a pasted one", async () => {
     const dir = await userDir();
     await writeChat(dir, [snapshot([request(MARKED, T)])]);
-    expect(await new VSCodeObserver(dir).locate(run("vscode-x"))).toBeUndefined();
-    expect((await new VSCodeObserver(dir).poll(run("vscode-x", CHAT), new Date(T + 1_000).toISOString())).evidence).toEqual([]);
+    expect(await new VSCodeObserver(dir, join(dir, "copilot")).locate(run("vscode-x"))).toBeUndefined();
+    expect((await new VSCodeObserver(dir, join(dir, "copilot")).poll(run("vscode-x", CHAT), new Date(T + 1_000).toISOString())).evidence).toEqual([]);
   });
 
   it("follows one chat saved under two workspace folders as one", async () => {
@@ -225,7 +225,7 @@ describe("the VS Code observer", () => {
     const lines = [snapshot([request(MARKED, T)])];
     await writeChat(dir, lines, "first");
     await writeChat(dir, lines, "second");
-    const evidence = (await new VSCodeObserver(dir).poll(run(), new Date(T + 1_000).toISOString())).evidence;
+    const evidence = (await new VSCodeObserver(dir, join(dir, "copilot")).poll(run(), new Date(T + 1_000).toISOString())).evidence;
     expect(evidence.map((item) => item.kind)).not.toContain("ambiguous");
     expect(evidence).toContainEqual(expect.objectContaining({ kind: "match", sessionId: CHAT }));
   });
@@ -236,12 +236,12 @@ describe("the VS Code observer", () => {
       snapshot([request(MARKED, T, { modelState: { value: 1, completedAt: T + 1_000 } })]),
       { kind: 2, k: ["requests", 0, "response"], v: [{ kind: "thinking", value: `ANTHILL-STEP ${RUN_ID} ${NONCE} n9 secret plan` }] },
     ]);
-    const result = await new VSCodeObserver(dir).poll(run(), new Date(T + 2_000).toISOString());
+    const result = await new VSCodeObserver(dir, join(dir, "copilot")).poll(run(), new Date(T + 2_000).toISOString());
     expect(kinds(result)).toEqual(["prompt.submit", "turn.end"]);
   });
 
   it("has nothing to say before VS Code has saved a chat", async () => {
-    const result = await new VSCodeObserver(join(await userDir(), "nowhere")).poll(run(), new Date(T).toISOString());
+    const result = await new VSCodeObserver(join(await userDir(), "nowhere"), join(await userDir(), "nowhere")).poll(run(), new Date(T).toISOString());
     expect(result).toEqual({ events: [], evidence: [] });
   });
 });
@@ -252,5 +252,99 @@ describe("Anthill's own tools, as VS Code names them", () => {
     expect(isAnthillTool("mcp_anthill2_get_workflow")).toBe(true);
     expect(isAnthillTool("mcp_github_create_issue")).toBe(false);
     expect(isAnthillTool("run_in_terminal")).toBe(false);
+  });
+});
+
+/*
+  VS Code 1.140 runs an Agent-mode chat in the Agent Host's Copilot harness by
+  default, and the record is the Copilot CLI's own:
+  ~/.copilot/session-state/<id>/events.jsonl, written as it happens. These
+  lines follow a real session's shape.
+*/
+describe("the VS Code observer, on the Copilot harness's session state", () => {
+  const SESSION = "5de3f494-9449-4832-8043-d1219850b9c3";
+  const at = (ms: number) => new Date(T + ms).toISOString();
+  const line = (type: string, data: Record<string, unknown>, ms: number) =>
+    JSON.stringify({ type, data, id: `${type}-${ms}`, timestamp: at(ms), parentId: null });
+
+  async function copilotSession(root: string, lines: string[]): Promise<string> {
+    const dir = join(root, SESSION);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "workspace.yaml"), `id: ${SESSION}\ncwd: /Users/me/shop\nclient_name: vscode-agent-host\n`);
+    const path = join(dir, "events.jsonl");
+    await writeFile(path, lines.join("\n") + "\n");
+    return path;
+  }
+
+  it("finds a pasted prompt by its marker and follows the session as it is written", async () => {
+    const dir = await userDir();
+    const root = join(dir, "copilot");
+    await copilotSession(root, [
+      line("session.start", { sessionId: SESSION, context: { cwd: "/Users/me/shop" } }, 0),
+      line("user.message", { content: MARKED }, 10),
+      line("assistant.turn_start", { turnId: "0" }, 20),
+      line("assistant.message", {
+        content: `Reading the note.\n\nANTHILL-STEP ${RUN_ID} ${NONCE} n1`,
+        reasoningOpaque: "SECRET_REASONING",
+        encryptedContent: "SECRET_REASONING",
+      }, 30),
+      line("tool.execution_start", { toolCallId: "call_1", toolName: "bash", arguments: { command: "cat note.txt" } }, 40),
+    ]);
+    const observer = new VSCodeObserver(join(dir, "nowhere"), root);
+
+    const first = await observer.poll(run(), at(50));
+    expect(first.evidence).toContainEqual(expect.objectContaining({ kind: "match", sessionId: SESSION, channel: "vscode:copilot", cwd: "/Users/me/shop" }));
+    expect(first.evidence).toContainEqual(expect.objectContaining({ kind: "working", sessionId: SESSION }));
+    expect(kinds(first)).toEqual(["prompt.submit", "step.marker", "message", "tool.start"]);
+    expect(JSON.stringify(first)).not.toContain("SECRET_REASONING");
+    expect(JSON.stringify(first)).not.toContain("cat note.txt");
+  });
+
+  it("says when the person is being asked, and calls a finished session done only after it is quiet", async () => {
+    const dir = await userDir();
+    const root = join(dir, "copilot");
+    const path = await copilotSession(root, [
+      line("user.message", { content: MARKED }, 0),
+      line("assistant.turn_start", { turnId: "0" }, 10),
+      line("permission.requested", { requestId: "p1" }, 20),
+    ]);
+    const observer = new VSCodeObserver(join(dir, "nowhere"), root);
+    const r = run();
+    expect((await observer.poll(r, at(30))).evidence).toContainEqual(expect.objectContaining({ kind: "awaiting", sessionId: SESSION }));
+
+    await writeFile(path, [
+      line("user.message", { content: MARKED }, 0),
+      line("assistant.turn_start", { turnId: "0" }, 10),
+      line("permission.requested", { requestId: "p1" }, 20),
+      line("permission.completed", { requestId: "p1" }, 25),
+      line("tool.execution_start", { toolCallId: "c1", toolName: "bash" }, 26),
+      line("tool.execution_complete", { toolCallId: "c1", success: false }, 27),
+      line("assistant.turn_end", { turnId: "0" }, 28),
+    ].join("\n") + "\n");
+    const seen = { ...r, detectedSessionId: SESSION };
+    const second = await observer.poll(seen, at(40));
+    expect(second.events.filter((event) => event.kind === "tool.end").map((event) => event.ok)).toEqual([false]);
+    expect(second.evidence.map((item) => item.kind)).not.toContain("completed");
+    expect((await observer.poll(seen, at(7 * 60_000))).evidence.map((item) => item.kind)).toContain("completed");
+  });
+
+  it("finds a plugin handover's session by the run's nonce, and follows it once resolved", async () => {
+    const dir = await userDir();
+    const root = join(dir, "copilot");
+    await copilotSession(root, [
+      line("user.message", { content: "/anthill:workflow watch fix it" }, 0),
+      line("tool.execution_start", { toolCallId: "c0", toolName: "bash", arguments: { command: "ls" } }, 5),
+      line("tool.execution_start", { toolCallId: "c1", toolName: "bash", arguments: { command: `anthill run ${RUN_ID} ${NONCE}` } }, 10),
+      line("tool.execution_complete", { toolCallId: "c1", success: true }, 11),
+    ]);
+    const observer = new VSCodeObserver(join(dir, "nowhere"), root);
+    const bound = "vscode-0f7d4c2a-9b1e-4c33-8a5f-6d2e1b7c0a94";
+    expect(await observer.poll(run(bound), at(20))).toEqual({ events: [], evidence: [] });
+    expect(await observer.locate(run(bound))).toBe(SESSION);
+
+    const followed = await new VSCodeObserver(join(dir, "nowhere"), root).poll(run(bound, SESSION), at(20));
+    expect(followed.evidence).toContainEqual(expect.objectContaining({ kind: "match", sessionId: SESSION }));
+    // From the bind on: the earlier `ls` is not this run's.
+    expect(followed.events.map((event) => [event.kind, event.toolUseId])).toEqual([["tool.start", "c1"], ["tool.end", "c1"]]);
   });
 });

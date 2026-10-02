@@ -104,6 +104,8 @@ export type ObservationRoots = {
   piRoot?: string;
   /** VS Code's user data folder, which holds its saved chats. */
   vscodeUserDir?: string;
+  /** The Copilot harness's session records, `~/.copilot/session-state`. */
+  copilotSessionRoot?: string;
   hookLogPath?: string;
   reportLogPath?: string;
   journalDir?: string;
@@ -157,7 +159,7 @@ export class LiveSessionService {
   ) {
     // An injected transcript root must never fall through to the user's metadata.
     this.claudeDesktopRoot = roots.claudeDesktopRoot ?? (roots.claudeRoot ? undefined : claudeDesktopSessionsRoot());
-    this.vscode = roots.vscodeUserDir ? new VSCodeObserver(roots.vscodeUserDir) : new VSCodeObserver();
+    this.vscode = new VSCodeObserver(roots.vscodeUserDir, roots.copilotSessionRoot);
     this.observers = {
       "claude-code": roots.claudeRoot
         ? new ClaudeCodeObserver(roots.claudeRoot)

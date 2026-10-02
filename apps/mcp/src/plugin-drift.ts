@@ -39,8 +39,8 @@ function compare(a: string, b: string): number {
 const UPDATE: Record<PluginHarness, string> = {
   "claude-code": "run `claude plugin update anthill@anthill`, then start a new session",
   codex: "reinstall the Anthill plugin in Codex (`codex plugin marketplace upgrade anthill-local`, then `codex plugin add anthill@anthill-local`), then start a new task",
-  // VS Code has no command for it; a folder named in `chat.pluginLocations` is
-  // read where it is and never drifts, so this is a marketplace install.
+  // VS Code has no command for it: a plugin is updated or reinstalled from its
+  // plugins list.
   vscode: "update or reinstall the Anthill agent plugin in VS Code, then start a new chat",
 };
 

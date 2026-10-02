@@ -339,6 +339,24 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
   return next;
 }
 
+/**
+ * What a run bound to its session says about the evidence behind it.
+ *
+ * A plugin binds a run to the session's own id, so the run never goes through
+ * the marker match that names a channel and a confidence: it goes live on the
+ * first record that session writes. The page then read "no evidence · unknown
+ * confidence" for a session it was visibly reading (ANT-248). The binding is
+ * the strongest evidence there is, so the first channel that confirms it is
+ * named and the confidence is strong.
+ */
+function boundEvidence(run: PendingRun, channel: string | undefined): Pick<PendingRun, "evidenceChannel" | "confidence"> {
+  if (!boundSessionId(run)) return {};
+  return {
+    ...(run.evidenceChannel ?? channel ? { evidenceChannel: run.evidenceChannel ?? channel } : {}),
+    confidence: run.confidence ?? "strong",
+  };
+}
+
 function foldEvidence(run: PendingRun, evidence: Evidence): PendingRun {
   const pinned = boundSessionId(run);
   if (pinned && "sessionId" in evidence && evidence.sessionId !== pinned) return run;
@@ -502,6 +520,7 @@ function foldEvidence(run: PendingRun, evidence: Evidence): PendingRun {
       const viaReport = evidence.channel === "anthill:report";
       return {
         ...run,
+        ...boundEvidence(run, evidence.channel),
         ...(viaReport ? { evidenceChannel: run.evidenceChannel ?? evidence.channel, confidence: run.confidence ?? "strong" as const } : {}),
         state: "detected_live",
         expiresAt: windowFrom(run, evidence.at),
@@ -527,6 +546,7 @@ function foldEvidence(run: PendingRun, evidence: Evidence): PendingRun {
           : evidence.at;
       return {
         ...run,
+        ...boundEvidence(run, evidence.channel),
         state: "completed",
         expiresAt: windowFrom(run, latest),
         lastObservedAt: latest,
@@ -563,6 +583,7 @@ function foldEvidence(run: PendingRun, evidence: Evidence): PendingRun {
       if (run.state !== "detected_live" && run.state !== "pending_after_copy") return run;
       return {
         ...run,
+        ...boundEvidence(run, evidence.channel),
         state: "observation_lost",
         lastObservedAt: evidence.at,
         evidenceChannel: evidence.channel,
@@ -575,6 +596,7 @@ function foldEvidence(run: PendingRun, evidence: Evidence): PendingRun {
       if (run.detectedSessionId && run.detectedSessionId !== evidence.sessionId) return run;
       return {
         ...run,
+        ...boundEvidence(run, evidence.channel),
         state: "failed",
         lastObservedAt: evidence.at,
         evidenceChannel: evidence.channel,

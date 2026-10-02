@@ -63,6 +63,13 @@ export type DraftAnswer = {
   /** Stored with `open: false`: nothing was asked of the app yet (ANT-138). */
   openDeferred?: boolean;
   /**
+   * The detailed-progress check, as this machine's harness has to type it.
+   *
+   * `anthill observation status` where the CLI is on the PATH, the plugin's own
+   * reporter where it is not (ANT-249). `enable` and `skip` take its place.
+   */
+  observationCommand?: string;
+  /**
    * What became of bringing Anthill up for this.
    *
    * Separate from `displayRequested`, which is about the request left in the
@@ -312,6 +319,11 @@ export function draftText(answer: DraftAnswer): string {
       : ". No display request was queued. Desktop display is not confirmed.";
 
   const parts = [`${stored}${shown}`];
+  if (answer.openDeferred && answer.observationCommand) {
+    parts.push(
+      `Check detailed progress with \`${answer.observationCommand}\` (replace \`status\` with \`enable\` or \`skip\` for the other two).`,
+    );
+  }
 
   // A stored revision is a complete one — an incomplete submission is refused
   // without being stored — so there is one thing to say about it and one

@@ -1157,6 +1157,9 @@ describe("storing now and opening later", () => {
     expect(await inbox(store)).toEqual([]);
     expect(textOf(result)).toContain("open_workflow");
     expect((await store.readWorkflow("workflow-1"))?.head?.revision).toBe(1);
+    // The detailed-progress check is handed over as a command to run (ANT-249).
+    expect(answerOf(result)).toMatchObject({ observationCommand: "anthill observation status" });
+    expect(textOf(result)).toContain("`anthill observation status`");
   });
 
   it("opens it afterwards, once, however often it is asked", async () => {

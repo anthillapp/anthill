@@ -35,8 +35,18 @@ const target = (over: Partial<ResolvedTarget> = {}): ResolvedTarget => ({
 });
 
 describe("the reporting command", () => {
-  it.each(["app", "electron-dev"] as const)("is plain anthill for %s", (id) => {
-    expect(reportingInvocation(target({ target: id }), machine([]))).toEqual({});
+  it.each(["app", "electron-dev"] as const)("is plain anthill for %s when anthill is on the PATH", (id) => {
+    expect(reportingInvocation(target({ target: id }), machine(["/usr/bin/anthill"]))).toEqual({});
+  });
+
+  // ANT-249: a chat sent to the dev build from a server built in a checkout,
+  // on a machine with no `anthill`, got commands that could never run.
+  it.each(["app", "electron-dev"] as const)("is this node on the checkout's CLI for %s with no anthill on the PATH", (id) => {
+    expect(reportingInvocation(target({ target: id }), machine([]))).toEqual({ command: `${NODE} ${webShellCli("/src/anthill")}` });
+  });
+
+  it.each(["app", "electron-dev"] as const)("is plain anthill for %s with no checkout and no reporter", (id) => {
+    expect(reportingInvocation(target({ target: id, checkout: undefined }), machine([]))).toEqual({});
   });
 
   it("is plain anthill for the web shell when anthill is on the harness PATH", () => {

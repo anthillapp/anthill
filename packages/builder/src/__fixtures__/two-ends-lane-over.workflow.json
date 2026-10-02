@@ -1,0 +1,228 @@
+{
+  "id": "workflow-086b-m8-notes-review",
+  "name": "Notes summary with bounded review",
+  "version": "0.1.0",
+  "target": "codex",
+  "brief": {
+    "goal": "Classify every line of notes.txt and produce SUMMARY.md with correct counts independently reviewed, allowing at most two Writer passes.",
+    "context": "Work only in /tmp/m8, within the existing Anthill E2E QA project. The source currently contains alpha: ready, beta: TODO, and gamma: ready. User confirmed the exact scope and rules before design submission.",
+    "verification": "Reviewer reads notes.txt independently on each review and recomputes every line classification, each category count, the total, and each source-backed assertion in SUMMARY.md; also check that source content is preserved and file writes were limited to Writer's SUMMARY.md.",
+    "doneCriteria": [
+      "SUMMARY.md accounts for every source line with a classification of ready, TODO, or unrecognized and correct per-category and total counts.",
+      "Reviewer independently recomputes classifications and counts from notes.txt and approves the summary before Done.",
+      "At most two Writer passes occur; if the second review fails, reach Stopped and report concrete unresolved issues to the user."
+    ],
+    "constraints": [
+      "All task work is confined to /tmp/m8.",
+      "Preserve notes.txt exactly.",
+      "Only Writer may create or edit SUMMARY.md; Analyst and Reviewer are read-only and hand findings back in messages.",
+      "Writer writes only SUMMARY.md, no additional files.",
+      "Use switch connections for every branch; no block positions.",
+      "The retry is unrolled into a distinct second Writer pass and second review so the attempt bound is explicit."
+    ],
+    "prohibitedActions": [
+      "Do not change notes.txt or any other source file.",
+      "Do not write outside the specified folder.",
+      "Do not take a third Writer pass.",
+      "Do not claim Done when review fails.",
+      "Do not create another QA project."
+    ],
+    "finalAction": "On approved review, report the verified SUMMARY.md and reach Done. On a failed second review, report unresolved discrepancies with source line evidence and reach Stopped.",
+    "report": [
+      "Terminal outcome: Done or Stopped",
+      "Writer passes used",
+      "Verified counts or concrete unresolved issues with source evidence",
+      "SUMMARY.md location"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "name": "Start",
+      "config": {}
+    },
+    {
+      "id": "analyst",
+      "type": "agent",
+      "name": "Classify source lines",
+      "config": {
+        "actionKind": "extract-structure",
+        "agentId": "analyst-agent",
+        "task": "Read /tmp/m8/notes.txt. Classify every physical source line as ready if its status after the colon is exactly ready (ignoring surrounding whitespace), TODO if exactly TODO, otherwise unrecognized. Do not silently omit blank or malformed lines: classify them as unrecognized. Return a numbered line-by-line classification, source evidence, per-category counts, and total to Writer in a message. Make no file edits.",
+        "expectedOutput": "A source-grounded line ledger, classification rule, per-category counts, and total supplied to Writer.",
+        "successCriteria": [
+          "Every source line is included exactly once.",
+          "Each classification has original source evidence.",
+          "All counts reconcile to the total."
+        ]
+      }
+    },
+    {
+      "id": "writer-pass-1",
+      "type": "agent",
+      "name": "Write summary — pass 1",
+      "config": {
+        "actionKind": "generate-artifact",
+        "agentId": "writer-agent",
+        "task": "First Writer pass. Read notes.txt and Analyst's handoff, then create /tmp/m8/SUMMARY.md. Include the classification rule, every numbered source line and its category, counts for ready, TODO and unrecognized, and total lines. Ground all claims in notes.txt. Write only SUMMARY.md; preserve notes.txt.",
+        "expectedOutput": "SUMMARY.md, first draft, plus handoff to Reviewer stating Writer pass 1.",
+        "successCriteria": [
+          "SUMMARY.md includes traceable classifications and reconciled counts.",
+          "Only SUMMARY.md was written."
+        ]
+      }
+    },
+    {
+      "id": "review-pass-1",
+      "type": "agent",
+      "name": "Independently review — pass 1",
+      "config": {
+        "actionKind": "fact-check",
+        "agentId": "reviewer-agent",
+        "task": "Read /tmp/m8/notes.txt independently before comparing SUMMARY.md. Recompute each classification and count from the source under the agreed rule; check total, full line coverage, source-backed claims, and source preservation. Return reviewer.decision as passed only if every check agrees; otherwise failed with concrete discrepancies, expected corrections, and source line evidence. Send failed review feedback to Writer for its second and final pass. Make no edits.",
+        "expectedOutput": "reviewer.decision = passed or failed, independent counts, and concrete evidence for each discrepancy.",
+        "successCriteria": [
+          "Independent recomputation covers every source line and every summary count.",
+          "A pass is issued only when the entire summary agrees with the source."
+        ]
+      }
+    },
+    {
+      "id": "writer-pass-2",
+      "type": "agent",
+      "name": "Revise summary — pass 2 of 2",
+      "config": {
+        "actionKind": "transform-rewrite",
+        "agentId": "writer-agent",
+        "task": "Only after failed first review, revise /tmp/m8/SUMMARY.md using Reviewer feedback and rechecking notes.txt. This is the second and final Writer pass. Correct every reported discrepancy without weakening the agreed rule or omitting source lines. Write only SUMMARY.md and hand it back for a fresh independent review. No third pass is allowed.",
+        "expectedOutput": "Revised SUMMARY.md and a message accounting for each review correction; Writer pass 2 of 2.",
+        "successCriteria": [
+          "Every reported issue is addressed against source evidence.",
+          "Only SUMMARY.md was edited.",
+          "The two-pass limit is respected."
+        ]
+      }
+    },
+    {
+      "id": "review-pass-2",
+      "type": "agent",
+      "name": "Independently review — final pass",
+      "config": {
+        "actionKind": "fact-check",
+        "agentId": "reviewer-agent",
+        "task": "Independently reread /tmp/m8/notes.txt and recompute all line classifications and category and total counts; compare the revised SUMMARY.md and every source-backed assertion. Check source preservation and required scope. Return reviewer.decision = passed only if all checks agree, else failed. If failed, report every unresolved issue to the user with expected versus actual counts or claims and source line evidence, explain that two Writer passes were used, and stop without another revision. Make no file edits.",
+        "expectedOutput": "reviewer.decision = passed or failed, independent verification evidence, and on failure a concrete unresolved-issues report to the user.",
+        "successCriteria": [
+          "A pass certifies source coverage, classifications and all counts.",
+          "Failure produces an unresolved-issues report before Stopped.",
+          "No third Writer pass occurs."
+        ]
+      }
+    },
+    {
+      "id": "done",
+      "type": "end",
+      "name": "Done",
+      "config": {}
+    },
+    {
+      "id": "stopped",
+      "type": "end",
+      "name": "Stopped",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "start-analyst",
+      "source": "start",
+      "target": "analyst"
+    },
+    {
+      "id": "analyst-writer-1",
+      "source": "analyst",
+      "target": "writer-pass-1"
+    },
+    {
+      "id": "writer-1-review-1",
+      "source": "writer-pass-1",
+      "target": "review-pass-1"
+    },
+    {
+      "id": "review-1-done",
+      "source": "review-pass-1",
+      "target": "done",
+      "condition": "reviewer.decision == \"passed\"",
+      "label": "Review passed",
+      "kind": "switch"
+    },
+    {
+      "id": "review-1-writer-2",
+      "source": "review-pass-1",
+      "target": "writer-pass-2",
+      "label": "Otherwise: return to Writer",
+      "kind": "switch"
+    },
+    {
+      "id": "writer-2-review-2",
+      "source": "writer-pass-2",
+      "target": "review-pass-2"
+    },
+    {
+      "id": "review-2-done",
+      "source": "review-pass-2",
+      "target": "done",
+      "condition": "reviewer.decision == \"passed\"",
+      "label": "Final review passed",
+      "kind": "switch"
+    },
+    {
+      "id": "review-2-stopped",
+      "source": "review-pass-2",
+      "target": "stopped",
+      "label": "Otherwise: report unresolved issues",
+      "kind": "switch"
+    }
+  ],
+  "metadata": {
+    "workflow": {
+      "formatVersion": 5,
+      "agents": [
+        {
+          "id": "analyst-agent",
+          "name": "Analyst",
+          "role": "Classifies all source lines and hands evidence and counts to Writer.",
+          "description": "Work only in /tmp/m8. Read notes.txt without editing it, classify each line under the agreed ready, TODO, or unrecognized rule, and account for all lines including malformed or blank ones. Hand Writer the numbered ledger, source evidence, category counts and total in a message. Finish when the ledger is complete and counts reconcile; write no files.",
+          "models": {
+            "codex": {
+              "id": "__default__"
+            }
+          }
+        },
+        {
+          "id": "writer-agent",
+          "name": "Writer",
+          "role": "Creates and, if needed, revises only SUMMARY.md in at most two passes.",
+          "description": "Work only in /tmp/m8 and write only SUMMARY.md. Use Analyst's evidence and notes.txt to produce a traceable summary with every classification, category counts and total. On failed first review, correct the documented discrepancies against the source in one final second pass and return the revision to Reviewer. Do not weaken requirements, change notes.txt, write other files, or take a third pass.",
+          "models": {
+            "codex": {
+              "id": "__default__"
+            }
+          }
+        },
+        {
+          "id": "reviewer-agent",
+          "name": "Reviewer",
+          "role": "Independently verifies each draft against the source and reports unresolved issues after the final failure.",
+          "description": "Work read-only in /tmp/m8. For each review, independently read notes.txt and recompute classifications and counts before comparing SUMMARY.md; verify coverage and source-backed assertions, and check source preservation. Report reviewer.decision as passed or failed with concrete evidence. Send first-pass failure feedback to Writer; after a second-pass failure, report unresolved issues to the user and stop. Never edit files or approve a summary with unresolved discrepancies.",
+          "models": {
+            "codex": {
+              "id": "__default__"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

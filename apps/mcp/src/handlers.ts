@@ -361,6 +361,9 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
           displayed: false,
           displayRequested: false,
           openDeferred: true,
+          // Asked next, before open_workflow: the same command a report would
+          // use, so it works on a machine with no `anthill` (ANT-249).
+          observationCommand: `${(reach.resolved ? invocation(reach.resolved) : {}).command ?? "anthill"} observation status`,
           ...(reach.resolved ? { target: { id: reach.resolved.target, label: reach.resolved.label } } : {}),
           ...(problems.length > 0 ? { problems, questions: questionsFrom(problems, submission.workflow) } : {}),
         });

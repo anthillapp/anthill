@@ -95,13 +95,17 @@ hooks add the agent's actions and detailed progress. Settle them once per task,
 **after** the workflow is stored and **before** it is opened — see "Submit
 exactly once": store with `open: false`, do this, then call `open_workflow`.
 
-Run `anthill observation status` from the project directory. It only reads; it
-never installs hooks or changes Codex permissions. If the command is missing or
-fails, continue with basic progress and do not invent a setup command.
+Run the `observationCommand` that `create_workflow_draft` returned with
+`open: false`, from the project directory: `anthill observation status`, or the
+plugin's own reporter (`node …/anthill-report.mjs observation status`) on a
+machine without the CLI. For `enable` and `skip` below, run the same command
+with `status` replaced. It only reads; it never installs hooks or changes Codex
+permissions. If the command fails, continue with basic progress and do not
+invent a setup command.
 
 If the result says `requiresHostAccess: true` (even with exit code zero), or the
 command reports a local filesystem permission failure, request host approval for
-that exact `anthill observation` command and retry once. Do not change sandbox
+that exact observation command and retry once. Do not change sandbox
 configuration or broaden future permissions. If approval is unavailable, say so
 and continue with basic progress.
 
@@ -113,15 +117,15 @@ Then act on `ask`, and on nothing else:
   two sentences that they let Anthill show the agent's actions and detailed
   progress, and that basic progress works without them. Offer **Connect** and
   **Continue with basic progress**, in the user's language. Wait for the answer;
-  silence is not consent. On Connect, run `anthill observation enable` and act on
-  its `ask` the same way. On Continue, run `anthill observation skip`.
+  silence is not consent. On Connect, run the command with `enable` and act on
+  its `ask` the same way. On Continue, run it with `skip`.
 - **`"trust"`** — Codex holds the hooks but has not approved them. Ask the user to
   type `/hooks` in Codex, choose **Review hooks**, and allow only the entries
   containing `anthill-observation-hook`. Never suggest **Trust all**: it would
   also approve every other tool's hooks in that list. Never grant trust
   yourself or work around the check. When the user says they are done, run
-  `anthill observation status` again and act on the new result. If they would
-  rather not, run `anthill observation skip` and continue.
+  the command with `status` again and act on the new result. If they would
+  rather not, run it with `skip` and continue.
 - **`"hint"`** — Anthill could not confirm the hooks' state. Do not call them
   unapproved. Relay the `message` in plain words and continue with basic
   progress.

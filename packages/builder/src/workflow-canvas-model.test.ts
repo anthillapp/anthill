@@ -726,7 +726,13 @@ describe("a switcher whose fingers both end just past its hub", () => {
         if (other === own) continue;
         expect(mine, `${id} vs ${other.output.id}`).toBeLessThan(distanceTo(own.label, pathPoints(other.geometry.path)));
       }
-      expect(Math.hypot(own.label.x - hub.x, own.label.y - hub.y), id).toBeLessThan(120);
+      // Along its own finger, between the hub and the End it lands on. Since
+      // the gap after a switcher fits its labels (ANT-250), the finger is
+      // longer than the 120px from the hub this used to be measured against.
+      const points = pathPoints(own.geometry.path);
+      const end = points[points.length - 1];
+      expect(own.label.x, id).toBeGreaterThan(hub.x);
+      expect(own.label.x, id).toBeLessThan(end.x);
     }
   });
 
@@ -742,6 +748,80 @@ describe("a switcher whose fingers both end just past its hub", () => {
         expect(through, `${id} sits on ${other.output.id}`).toBe(false);
       }
     }
+  });
+});
+
+/*
+  ANT-250, the 0.8.6 QA: on two handovers laid out by Anthill (no positions),
+  the labels of switcher fingers that did not fit between the hub and the next
+  step went wherever there was room — "Final review approved" onto the lane of
+  "Otherwise: retry tests failed", "Otherwise: report unresolved issues" high
+  above the row. The gap after a switcher now fits its widest label.
+*/
+describe("switcher labels on handovers Anthill laid out itself", () => {
+  for (const file of ["ant250-two-ends-retry", "ant250-notes-review"]) {
+    const model = buildCanvasModel(
+      withDisplayLayout(JSON.parse(readFileSync(`src/__fixtures__/${file}.workflow.json`, "utf8")) as Workflow),
+    );
+    const fingers = model.connected.filter((path) => path.switcher);
+
+    it(`${file}: every finger's label is nearer its own line than any other`, () => {
+      expect(fingers.length).toBeGreaterThan(0);
+      for (const own of fingers) {
+        if (own.geometry.lane) continue;
+        const mine = distanceTo(own.label, pathPoints(own.geometry.path));
+        for (const other of model.connected) {
+          if (other === own) continue;
+          // A tie is two fingers still side by side as they leave one hub.
+          expect(mine, `${own.output.id} vs ${other.output.id}`).toBeLessThanOrEqual(
+            distanceTo(own.label, pathPoints(other.geometry.path)),
+          );
+        }
+      }
+    });
+
+    it(`${file}: no finger's label sits on another line`, () => {
+      for (const own of fingers) {
+        const { halfW, halfH } = labelHalfSize(own.output.label ?? " ");
+        for (const other of model.connected) {
+          if (other === own) continue;
+          const through = pathPoints(other.geometry.path).some(
+            (point) => Math.abs(point.x - own.label.x) < halfW && Math.abs(point.y - own.label.y) < halfH,
+          );
+          expect(through, `${own.output.id} sits on ${other.output.id}`).toBe(false);
+        }
+      }
+    });
+  }
+});
+
+/*
+  ANT-254, the 0.8.6 QA, M8: a first review's "passed" to the upper of two stacked Ends
+  was sent round over the row and still landed on that End's bottom, so the
+  line dropped through the End and its arrow pointed up from underneath.
+*/
+describe("a line sent round over the row to a block above its port", () => {
+  const model = buildCanvasModel(
+    withDisplayLayout(JSON.parse(readFileSync("src/__fixtures__/two-ends-lane-over.workflow.json", "utf8")) as Workflow),
+  );
+  const over = model.connected.find((path) => path.output.id === "review-1-done");
+
+  it("goes over the top and lands on the End's side, not its bottom", () => {
+    expect(over?.geometry.lane?.up).toBe(true);
+    expect((over?.geometry.to as { side?: string } | undefined)?.side).toBe("left");
+  });
+
+  it("never passes through the End it lands on", () => {
+    const done = model.rects.get("done");
+    expect(done).toBeDefined();
+    const inside = pathPoints(over!.geometry.path).filter(
+      (point) =>
+        point.x > done!.left + 1 &&
+        point.x < done!.left + done!.w - 1 &&
+        point.y > done!.top + 1 &&
+        point.y < done!.top + done!.h - 1,
+    );
+    expect(inside).toEqual([]);
   });
 });
 

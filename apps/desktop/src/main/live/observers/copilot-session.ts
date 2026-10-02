@@ -14,14 +14,16 @@
  *
  * - `session.start`: that the session began;
  * - `user.message`: only whether `data.content` carries the run marker;
- * - `assistant.message`: `data.content`, for step markers and one cut-down
- *   line of what the agent said. The model's own working rides on the same
- *   line as `reasoningOpaque`, `encryptedContent` and `reasoningBlocks`, and
- *   is never read;
+ * - `assistant.message`: `data.content`, for step and done markers, the step
+ *   tag, and one cut-down line of what the agent said. The model's own working
+ *   rides on the same line as `reasoningOpaque`, `encryptedContent` and
+ *   `reasoningBlocks`, and is never read;
  * - `tool.execution_start` / `tool.execution_complete`: the tool's name, the
- *   call's id, and whether it succeeded. Never its arguments or its result —
- *   except that a bound run's nonce is looked for in the line, which is the one
- *   way a plugin handover's session can be told apart;
+ *   call's id, and whether it succeeded. Never its arguments, and of a shell
+ *   command's output only the step and done markers it printed — an agent told
+ *   to print a marker prints it with `printf` — and a bound run's nonce is
+ *   looked for in the line, which is the one way a plugin handover's session
+ *   can be told apart;
  * - `permission.requested` / `permission.completed`: that the person is being
  *   asked something, and when that ends;
  * - `assistant.turn_start` / `assistant.turn_end`: a model round beginning and
@@ -40,7 +42,9 @@ import {
   TIMING,
   isAnthillTool,
   messageExcerpt,
+  parseDoneMarker,
   parseStepMarkers,
+  parseStepTag,
   textCarriesMarker,
   type Evidence,
   type PendingRun,
@@ -75,6 +79,9 @@ type SessionState = {
   asking: Map<string, string>;
   failure?: string;
   interruptedAt?: string;
+  /** The last step announced, and where: a reply repeating a command's line is the same announcement. */
+  lastStep?: { blockId: string; from: "reply" | "command" };
+  doneReported: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -180,7 +187,7 @@ export class CopilotSessionReader {
       if (!info?.isFile() || info.mtimeMs < floor) continue;
       let state = states.get(name);
       if (!state) {
-        state = { cursor: newCursor(), sessionId: name, matched: false, openTurns: 0, openTools: new Map(), asking: new Map() };
+        state = { cursor: newCursor(), sessionId: name, matched: false, openTurns: 0, openTools: new Map(), asking: new Map(), doneReported: false };
         const cwd = await sessionFolder(dir);
         if (cwd) state.cwd = cwd;
         states.set(name, state);
@@ -244,11 +251,11 @@ function scan(lines: string[], state: SessionState, marker: Marker, bound: boole
       // `content` only. The reasoning fields on the same line are left unread.
       const text = typeof data.content === "string" ? data.content : "";
       const messageId = str(data.messageId);
-      for (const blockId of parseStepMarkers(text, marker)) {
-        events.push({ ...base, kind: "step.marker", title: "Step announced", detail: blockId, blockId });
-      }
+      announceSteps(text, "reply", state, marker, base, events);
+      announceDone(text, state, marker, base, events);
       const said = messageExcerpt(text, marker);
       if (said) {
+        const tag = parseStepTag(text);
         events.push({
           ...base,
           kind: "message",
@@ -256,6 +263,7 @@ function scan(lines: string[], state: SessionState, marker: Marker, bound: boole
           detail: said,
           author: { kind: "main" },
           ...(messageId ? { toolUseId: messageId } : {}),
+          ...(tag ? { stepTag: tag } : {}),
         });
       }
       continue;
@@ -269,8 +277,18 @@ function scan(lines: string[], state: SessionState, marker: Marker, bound: boole
     }
     if (type === "tool.execution_complete") {
       const id = str(data.toolCallId);
+      const name = id ? state.openTools.get(id)?.toolName : undefined;
       if (id) state.openTools.delete(id);
       events.push({ ...base, kind: "tool.end", title: "Tool finished", ok: data.success !== false, ...(id ? { toolUseId: id } : {}) });
+      // Asked to print a marker, the agent prints it with a shell, and the
+      // line exists only in the command's output (as for Codex, ANT-147). A
+      // file it read is not a command printing, and a command that printed
+      // the prompt itself carries every step's line at once (ANT-162).
+      const output = isRecord(data.result) ? str(data.result.content) : undefined;
+      if (output && name && SHELL_TOOL.test(name) && !textCarriesMarker(output, marker)) {
+        announceSteps(output, "command", state, marker, id ? { ...base, printedBy: id } : base, events);
+        announceDone(output, state, marker, base, events);
+      }
       continue;
     }
     if (type === "permission.requested") {
@@ -297,6 +315,37 @@ function scan(lines: string[], state: SessionState, marker: Marker, bound: boole
       events.push({ ...base, kind: "error", title: "The session recorded an error", detail: state.failure });
     }
   }
+}
+
+/** The Copilot CLI's shell tools, synchronous and not. */
+const SHELL_TOOL = /^(bash|powershell|shell|(read|write)_(bash|powershell))$/i;
+
+type Base = Omit<ObservationEventDraft, "kind" | "title">;
+
+/**
+ * Every step the text announces. A line printed by a command and then echoed
+ * in the reply, or the reverse, is one announcement: each counts as a pass of
+ * the step, and a loop must not appear where none happened.
+ */
+function announceSteps(text: string, from: "reply" | "command", state: SessionState, marker: Marker, base: Base, events: ObservationEventDraft[]): void {
+  for (const blockId of parseStepMarkers(text, marker)) {
+    if (state.lastStep?.blockId === blockId && state.lastStep.from !== from) continue;
+    state.lastStep = { blockId, from };
+    events.push({ ...base, kind: "step.marker", title: "Step announced", detail: blockId, blockId });
+  }
+}
+
+/** The done line, in a reply or a command's output. Finished once, however often it is repeated. */
+function announceDone(text: string, state: SessionState, marker: Marker, base: Base, events: ObservationEventDraft[]): void {
+  if (state.doneReported || !parseDoneMarker(text, marker)) return;
+  state.doneReported = true;
+  events.push({
+    ...base,
+    kind: "session.end",
+    title: "The harness reported the work as finished",
+    author: { kind: "main" },
+    completion: "done",
+  });
 }
 
 /** What the session's state says about now. Repeated on every look while it holds. */

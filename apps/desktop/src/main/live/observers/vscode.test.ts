@@ -153,6 +153,25 @@ describe("the VS Code observer", () => {
     expect(third.events).toEqual([]);
   });
 
+  it("reads the done line once, and the step a message is tagged with", async () => {
+    const dir = await userDir();
+    await writeChat(dir, [
+      snapshot([request(MARKED, T, { modelState: { value: 1, completedAt: T + 1_000 } })]),
+      {
+        kind: 2,
+        k: ["requests", 0, "response"],
+        v: [
+          markdown(`[//]: # (anthill:test)\n\n**Decision: passed.**\n\nANTHILL-DONE ${RUN_ID} ${NONCE}`),
+          markdown(`Wrapping up, as said.\n\nANTHILL-DONE ${RUN_ID} ${NONCE}`),
+        ],
+      },
+    ]);
+    const result = await new VSCodeObserver(dir, join(dir, "copilot")).poll(run(), new Date(T + 2_000).toISOString());
+    expect(kinds(result)).toEqual(["prompt.submit", "session.end", "message", "message", "turn.end"]);
+    expect(result.events.find((event) => event.kind === "session.end")).toMatchObject({ completion: "done" });
+    expect(result.events.filter((event) => event.kind === "message").map((event) => event.stepTag)).toEqual(["test", undefined]);
+  });
+
   it("calls a finished chat done only after it has been quiet", async () => {
     const dir = await userDir();
     await writeChat(dir, [snapshot([request(MARKED, T, { modelState: { value: 1, completedAt: T + 1_000 } })])]);
@@ -326,6 +345,51 @@ describe("the VS Code observer, on the Copilot harness's session state", () => {
     expect(second.events.filter((event) => event.kind === "tool.end").map((event) => event.ok)).toEqual([false]);
     expect(second.evidence.map((item) => item.kind)).not.toContain("completed");
     expect((await observer.poll(seen, at(7 * 60_000))).evidence.map((item) => item.kind)).toContain("completed");
+  });
+
+  /*
+    A real pasted run (M11 c): the agent printed every step line with
+    `printf` in a command, so it was only in the command's output, and the
+    done line only in its closing reply. Neither was read, and the run showed
+    no step at all.
+  */
+  it("reads step lines a command printed, and the done line, once each", async () => {
+    const dir = await userDir();
+    const root = join(dir, "copilot");
+    const printed = (id: string, step: string, ms: number) => [
+      line("tool.execution_start", { toolCallId: id, toolName: "bash", arguments: { command: `printf 'ANTHILL-STEP ${RUN_ID} ${NONCE} ${step}\\n'; ls` } }, ms),
+      line("tool.execution_complete", {
+        toolCallId: id,
+        success: true,
+        result: { content: `ANTHILL-STEP ${RUN_ID} ${NONCE} ${step}\nslug.py\n<shellId: 45 completed with exit code 0>` },
+      }, ms + 1),
+    ];
+    await copilotSession(root, [
+      line("user.message", { content: MARKED }, 0),
+      line("assistant.message", { content: `[//]: # (anthill:implement)\n\nANTHILL-RUN ${RUN_ID} ${NONCE}` }, 5),
+      ...printed("c1", "implement", 10),
+      line("assistant.message", { content: `[//]: # (anthill:implement)\n\nANTHILL-STEP ${RUN_ID} ${NONCE} implement\n\nLooking at it.` }, 15),
+      // A file the agent read that happens to hold step lines is not a command printing them.
+      line("tool.execution_start", { toolCallId: "v1", toolName: "view" }, 16),
+      line("tool.execution_complete", { toolCallId: "v1", success: true, result: { content: `ANTHILL-STEP ${RUN_ID} ${NONCE} fix` } }, 17),
+      // Nor is a command that printed the whole prompt, with every step's line in it.
+      line("tool.execution_start", { toolCallId: "p1", toolName: "bash" }, 18),
+      line("tool.execution_complete", { toolCallId: "p1", success: true, result: { content: `${MARKED}\nANTHILL-STEP ${RUN_ID} ${NONCE} fix` } }, 19),
+      ...printed("c2", "test", 20),
+      line("assistant.message", { content: `[//]: # (anthill:test)\n\n**Decision: passed.**\n\nANTHILL-DONE ${RUN_ID} ${NONCE}` }, 30),
+      line("assistant.message", { content: `Wrapping up, as said.\n\nANTHILL-DONE ${RUN_ID} ${NONCE}` }, 31),
+    ]);
+    const result = await new VSCodeObserver(join(dir, "nowhere"), root).poll(run(), at(40));
+
+    const steps = result.events.filter((event) => event.kind === "step.marker");
+    expect(steps.map((event) => [event.blockId, event.printedBy])).toEqual([["implement", "c1"], ["test", "c2"]]);
+    expect(result.events.filter((event) => event.kind === "session.end")).toEqual([
+      expect.objectContaining({ completion: "done", at: at(30) }),
+    ]);
+    const tagged = result.events.filter((event) => event.kind === "message").map((event) => event.stepTag);
+    expect(tagged).toEqual(["implement", "test", undefined]);
+    // Only the marker lines are taken from a command's output.
+    expect(JSON.stringify(result)).not.toContain("slug.py");
   });
 
   it("finds a plugin handover's session by the run's nonce, and follows it once resolved", async () => {

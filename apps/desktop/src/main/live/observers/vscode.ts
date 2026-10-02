@@ -24,9 +24,9 @@
  * - each request's user text: only whether it carries the run marker;
  * - each request's state: pending, complete, cancelled, failed, or waiting
  *   for the person, and when it completed;
- * - markdown parts of a response: any Anthill step marker, and one cut-down
- *   line of what the agent said. `thinking` parts are skipped by name before
- *   anything is read out of them;
+ * - markdown parts of a response: any Anthill step or done marker, the step
+ *   tag, and one cut-down line of what the agent said. `thinking` parts are
+ *   skipped by name before anything is read out of them;
  * - tool parts: the tool's id, the call's id, and whether it came back and
  *   how. Never its input, its output, or a terminal command's text — except
  *   that the whole record is searched for a bound run's nonce, which is the
@@ -48,7 +48,9 @@ import {
   boundSessionId,
   isAnthillTool,
   messageExcerpt,
+  parseDoneMarker,
   parseStepMarkers,
+  parseStepTag,
   textCarriesMarker,
   type Evidence,
   type PendingRun,
@@ -544,6 +546,8 @@ type Keyed = ObservationEventDraft & { key: string };
 export function eventsOf(chat: Chat, from: { request: number; part: number }, marker: Marker, sessionId: string): Keyed[] {
   const out: Keyed[] = [];
   const base = { cli: "vscode" as const, source: "chat" as const, channel: CHANNEL, sessionId };
+  // The done line, once, however often the agent repeats it.
+  let done = false;
 
   for (const request of chat.requests) {
     if (request.index < from.request) continue;
@@ -569,9 +573,31 @@ export function eventsOf(chat: Chat, from: { request: number; part: number }, ma
         for (const blockId of parseStepMarkers(part.text, marker)) {
           out.push({ ...base, key: key(`${index}:step:${blockId}`), at, kind: "step.marker", title: "Step announced", detail: blockId, blockId });
         }
+        if (!done && parseDoneMarker(part.text, marker)) {
+          done = true;
+          out.push({
+            ...base,
+            key: key(`${index}:done`),
+            at,
+            kind: "session.end",
+            title: "The harness reported the work as finished",
+            author: { kind: "main" },
+            completion: "done",
+          });
+        }
         const said = messageExcerpt(part.text, marker);
         if (said) {
-          out.push({ ...base, key: key(`${index}:message`), at, kind: "message", title: "Message", detail: said, author: { kind: "main" } });
+          const tag = parseStepTag(part.text);
+          out.push({
+            ...base,
+            key: key(`${index}:message`),
+            at,
+            kind: "message",
+            title: "Message",
+            detail: said,
+            author: { kind: "main" },
+            ...(tag ? { stepTag: tag } : {}),
+          });
         }
         return;
       }

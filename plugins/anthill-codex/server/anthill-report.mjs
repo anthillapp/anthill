@@ -1,4 +1,4 @@
-// Anthill progress reporter 0.8.7, built by scripts/build-plugin-server.mjs
+// Anthill progress reporter 0.8.8, built by scripts/build-plugin-server.mjs
 // from https://github.com/nstr/anthill. Do not edit: run
 // `npm run plugin:bundle` to write it again. MIT licensed.
 import { createRequire as __anthillCreateRequire } from "node:module";
@@ -49,8 +49,8 @@ __name(observationRuntime, "observationRuntime");
 // apps/desktop/src/main/live/setup.ts
 import { copyFile, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync as existsSync3 } from "node:fs";
-import { homedir as homedir3, tmpdir } from "node:os";
-import { dirname as dirname2, isAbsolute, join as join3 } from "node:path";
+import { homedir as homedir4, tmpdir } from "node:os";
+import { dirname as dirname2, isAbsolute, join as join4 } from "node:path";
 
 // apps/desktop/src/main/live/codex-hook-status.ts
 import { realpathSync } from "node:fs";
@@ -408,788 +408,9 @@ function samePath(actual, expected) {
 }
 __name(samePath, "samePath");
 
-// apps/desktop/src/main/live/hook-prompt.ts
-import { createHash } from "node:crypto";
-function hookFingerprint(commands) {
-  const canonical = [...commands].map(({ command, event }) => `${event}\0${command}`).sort().join("");
-  return createHash("sha256").update(canonical).digest("hex").slice(0, 16);
-}
-__name(hookFingerprint, "hookFingerprint");
-function isDeclined(prefs, fingerprint) {
-  if (!prefs?.declinedAt) return false;
-  return prefs.declinedFor == null || prefs.declinedFor === fingerprint;
-}
-__name(isDeclined, "isDeclined");
-function hookPrompt(input) {
-  if (!input.cliAvailable || input.installProblem) return null;
-  if (input.confirmedInSession) return null;
-  if (input.declined) return null;
-  if (!input.entriesPresent || !input.installed || !input.usesCurrentRuntime) return "connect";
-  switch (input.codexState) {
-    case "ready":
-      return null;
-    case "needs-trust":
-    case "disabled":
-      return "trust";
-    default:
-      return "hint";
-  }
-}
-__name(hookPrompt, "hookPrompt");
-
-// apps/desktop/src/main/live/setup.ts
-var OWNER_MARKER = "anthill-observation-hook";
-var TAIL_WINDOW_BYTES = 256 * 1024;
-var HARNESS = {
-  "claude-code": {
-    label: "Claude Code",
-    cliCommand: "claude",
-    configFile: /* @__PURE__ */ __name(() => join3(homedir3(), ".claude", "settings.json"), "configFile"),
-    events: [
-      "SessionStart",
-      "UserPromptSubmit",
-      "PreToolUse",
-      "PostToolUse",
-      "Stop",
-      "SubagentStop",
-      "Notification",
-      "SessionEnd"
-    ],
-    matcherEvents: /* @__PURE__ */ new Set(["PreToolUse", "PostToolUse", "Stop", "SubagentStop", "Notification"]),
-    boundary: "Anthill reads local hook events and Claude Code session transcripts on this machine. It stores only observation state and correlation metadata needed for Live Session UI, never private reasoning."
-  },
-  codex: {
-    label: "Codex CLI",
-    cliCommand: "codex",
-    configFile: /* @__PURE__ */ __name(() => join3(process.env.CODEX_HOME || join3(homedir3(), ".codex"), "hooks.json"), "configFile"),
-    events: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"],
-    matcherEvents: /* @__PURE__ */ new Set(),
-    boundary: "Anthill reads local hook events and Codex rollout/session metadata on this machine. It stores only observation state and correlation metadata needed for Live Session UI, never private reasoning."
-  }
-};
-var SESSION_ID = /^[0-9a-fA-F-]{8,64}$/;
-var ObservationSetupService = class {
-  constructor(paths, spawnFn) {
-    this.paths = paths;
-    this.spawnFn = spawnFn;
-  }
-  static {
-    __name(this, "ObservationSetupService");
-  }
-  snapshots = /* @__PURE__ */ new Map();
-  configSnapshots = /* @__PURE__ */ new Map();
-  statusRequests = /* @__PURE__ */ new Map();
-  /**
-   * @param sessionId The Codex session asking, when it is one (the plugin
-   *   passes `CODEX_SESSION_ID`). A hook of Anthill's that has already fired in
-   *   that session answers the question outright, with no call into Codex.
-   */
-  status(cwd, refreshOnly = false, sessionId) {
-    const directory = typeof cwd === "string" && isAbsolute(cwd) ? cwd : homedir3();
-    const session = sessionId && SESSION_ID.test(sessionId) ? sessionId : void 0;
-    const key = `${directory}\0${session ?? ""}`;
-    const pending = this.statusRequests.get(key);
-    if (pending) return pending;
-    const request = (refreshOnly && this.snapshots.has(directory) ? this.refreshStatus(directory, session) : this.readStatus(directory, session)).then((status) => {
-      this.snapshots.set(directory, status);
-      return status;
-    }).finally(() => this.statusRequests.delete(key));
-    this.statusRequests.set(key, request);
-    return request;
-  }
-  async readStatus(cwd, sessionId) {
-    const prefs = await this.readPrefs();
-    return {
-      dismissed: prefs.dismissed === true,
-      trigger: "Offer optional detailed progress when handing a workflow to the user's CLI.",
-      harnesses: await Promise.all(
-        Object.keys(HARNESS).map((id) => this.describeHarness(id, prefs, cwd, sessionId))
-      )
-    };
-  }
-  /** Refresh permissions and receipts only; no CLI detection or handler execution. */
-  async refreshStatus(cwd, sessionId) {
-    const previous = this.snapshots.get(cwd);
-    const prefs = await this.readPrefs();
-    const harnesses = await Promise.all(previous.harnesses.map(async (harness) => {
-      if (!isHookHarnessId(harness.id)) return harness;
-      const id = harness.id;
-      const config2 = await this.readJsonObject(this.configPath(id)).catch(() => ({}));
-      if (JSON.stringify(config2) !== this.configSnapshots.get(`${cwd}:${id}`)) {
-        return this.describeHarness(id, prefs, cwd, sessionId);
-      }
-      const missingRuntime = anthillCommands(config2, HARNESS[id]).some(({ command }) => {
-        const parsed = parseHookCommand(command);
-        return parsed && (!existsSync3(parsed.execPath) || !handlerPresent(parsed.handlerPath));
-      });
-      let codexHooks = id === "codex" && harness.cliAvailable && harness.hookEntriesPresent ? await readCodexHookStatus({ commands: anthillCommands(config2, HARNESS[id]), configPath: this.configPath(id), cwd, spawnFn: this.spawnFn }) : harness.codexHooks;
-      if (codexHooks?.state === "ready" && harness.hookUsesCurrentRuntime === false) {
-        codexHooks = { state: "unknown", message: "Codex trusts these hooks, but they use another Anthill runtime that this installation has not tested. Repair the connection to use this Anthill\u2019s bundled handler." };
-      }
-      const refreshed = {
-        ...harness,
-        codexHooks,
-        ...missingRuntime ? { hookInstalled: false, hookProblem: "The configured Anthill runtime is missing. Repair the connection." } : {},
-        hookLastEventAt: harness.hookEntriesPresent ? await this.lastHookEvent(id) : void 0
-      };
-      return this.withPrompt(id, refreshed, prefs);
-    }));
-    return { ...previous, dismissed: prefs.dismissed === true, harnesses };
-  }
-  async dismiss() {
-    await this.updatePrefs((prefs) => ({ ...prefs, dismissed: true }));
-    return this.status();
-  }
-  /**
-   * "Continue with basic progress", remembered against the exact commands this
-   * Anthill would install — so it is asked again only when those change, or
-   * after an approval that the person later withdrew (ANT-138).
-   */
-  async decline(harness) {
-    if (!isHookHarnessId(harness)) throw new Error("Unsupported observation harness.");
-    const declinedFor = hookFingerprint(this.expectedCommands(harness));
-    await this.updatePrefs((prefs) => ({ ...prefs, harnesses: {
-      ...prefs.harnesses,
-      [harness]: { ...prefs.harnesses?.[harness], declinedAt: (/* @__PURE__ */ new Date()).toISOString(), declinedFor }
-    } }));
-  }
-  /** The commands this Anthill writes for a harness: what a decline or an approval is about. */
-  expectedCommands(id) {
-    return HARNESS[id].events.map((event) => ({ event, command: commandFor(id, event, this.hookHandlerPath(), this.execPath()) }));
-  }
-  /**
-   * What to ask about this harness now, worked out once for every path that
-   * describes it — a full read and a light refresh alike.
-   *
-   * An approval seen after a decline clears the decline, best effort: whoever
-   * trusted the hooks by hand has changed their mind, and if they later revoke
-   * that trust they should be asked again rather than held to an old "no".
-   */
-  async withPrompt(id, harness, prefs) {
-    const fingerprint = hookFingerprint(this.expectedCommands(id));
-    let declined = isDeclined(prefs.harnesses?.[id], fingerprint);
-    if (declined && harness.codexHooks?.state === "ready") {
-      declined = false;
-      await this.updatePrefs((current) => ({ ...current, harnesses: {
-        ...current.harnesses,
-        [id]: { ...current.harnesses?.[id], declinedAt: null, declinedFor: null }
-      } })).catch(() => void 0);
-    }
-    const observationPrompt = hookPrompt({
-      cliAvailable: harness.cliAvailable,
-      installProblem: harness.hookInstallProblem,
-      entriesPresent: harness.hookEntriesPresent,
-      installed: harness.hookInstalled,
-      usesCurrentRuntime: harness.hookUsesCurrentRuntime !== false,
-      codexState: id === "codex" ? harness.codexHooks?.state : "ready",
-      confirmedInSession: harness.codexHooks?.confirmedInSession,
-      declined
-    });
-    return { ...harness, observationDeclined: declined, observationPrompt };
-  }
-  /**
-   * Whether a hook of Anthill's has fired in this Codex session.
-   *
-   * Read from the log the hooks themselves write, which a sandboxed agent can
-   * read. Absence proves nothing — the session may predate the install, or
-   * simply not have reached a hook yet — so it is only ever used to skip a
-   * question, never to raise one.
-   */
-  async firedInSession(sessionId) {
-    const marker = `"session_id":"${sessionId}"`;
-    return Boolean(
-      await this.searchTail(marker, 8 * 1024 * 1024) ?? await this.searchTail(marker, 8 * 1024 * 1024, `${this.hookLogPath()}.1`)
-    );
-  }
-  async install(harness, cwd) {
-    return this.modify(harness, "install", cwd);
-  }
-  async disable(harness) {
-    return this.modify(harness, "disable");
-  }
-  async modify(harness, action, cwd) {
-    try {
-      if (!isHookHarnessId(harness)) {
-        return {
-          ok: false,
-          status: await this.status(),
-          error: `Unsupported observation harness: ${String(harness)}.`
-        };
-      }
-      if (action === "install" && this.paths.installProblem) throw new Error(this.paths.installProblem);
-      const def = HARNESS[harness];
-      const configPath = this.configPath(harness);
-      const hookHandlerPath = this.hookHandlerPath();
-      if (action === "install" && !handlerPresent(hookHandlerPath)) {
-        return {
-          ok: false,
-          status: await this.status(),
-          error: `Anthill's hook handler was not found at ${hookHandlerPath}.`
-        };
-      }
-      const before = await this.readJsonObject(configPath);
-      const after = action === "install" ? withAnthillHooks(before, def, harness, hookHandlerPath, this.execPath()) : withoutAnthillHooks(before, def);
-      const changed = JSON.stringify(before) !== JSON.stringify(after);
-      const backupPath = changed ? await this.backup(configPath) : void 0;
-      if (changed) {
-        await mkdir(dirname2(configPath), { recursive: true });
-        await writeFile(configPath, `${JSON.stringify(after, null, 2)}
-`, "utf8");
-        await this.recordHarnessAction(harness, action);
-      }
-      if (action === "install" && !changed) {
-        await this.updatePrefs((prefs) => ({ ...prefs, harnesses: {
-          ...prefs.harnesses,
-          [harness]: { ...prefs.harnesses?.[harness], declinedAt: null, declinedFor: null }
-        } }));
-      }
-      await Promise.allSettled([...this.statusRequests.values()]);
-      const status = await this.status(cwd);
-      const installed = status.harnesses.find((item) => item.id === harness)?.hookInstalled;
-      if (action === "install" && !installed) {
-        return {
-          ok: false,
-          status,
-          backupPath,
-          error: `${def.label} hooks were written, but verification did not find the expected Anthill entries.`
-        };
-      }
-      return {
-        ok: true,
-        status,
-        backupPath,
-        message: action === "install" ? `${def.label} observation hooks are installed. ${status.harnesses.find((item) => item.id === harness)?.codexHooks?.message ?? "Start a session to receive detailed progress."}` : `${def.label} observation hooks are disabled. The CLI itself is unchanged.`
-      };
-    } catch (error51) {
-      return {
-        ok: false,
-        status: await this.status(),
-        error: error51 instanceof Error ? error51.message : String(error51)
-      };
-    }
-  }
-  async describeHarness(id, prefs, cwd, sessionId) {
-    const def = HARNESS[id];
-    const installedAt = prefs?.harnesses?.[id]?.installedAt;
-    const detection = await detectBinary({
-      command: def.cliCommand,
-      notFoundReason: `${def.label} was not found on your PATH.`,
-      spawnFn: this.spawnFn
-    });
-    const configPath = this.configPath(id);
-    const config2 = await this.readJsonObject(configPath).catch(() => ({}));
-    const hookHandlerPath = this.hookHandlerPath();
-    this.configSnapshots.set(`${cwd}:${id}`, JSON.stringify(config2));
-    const entriesPresent = hasEveryAnthillHook(config2, def);
-    const commands = anthillCommands(config2, def);
-    const problem = entriesPresent ? await this.hookProblem(commands, id) : void 0;
-    const lastEventAt = entriesPresent ? await this.lastHookEvent(id) : void 0;
-    const usesCurrentRuntime = entriesPresent && commands.every(({ command }) => this.ownHook(command, id));
-    const confirmed = id === "codex" && sessionId !== void 0 && usesCurrentRuntime && problem === void 0 && await this.firedInSession(sessionId);
-    let codexHooks = confirmed ? { state: "ready", confirmedInSession: true, message: "Anthill\u2019s hooks are already working in this Codex session." } : id === "codex" && detection.available && entriesPresent ? await readCodexHookStatus({ commands, configPath, cwd, spawnFn: this.spawnFn }) : void 0;
-    if (codexHooks?.state === "ready" && commands.some(({ command }) => !this.ownHook(command, id))) {
-      codexHooks = { state: "unknown", message: "Codex trusts these hooks, but they use another Anthill runtime that this installation has not tested. Repair the connection to use this Anthill\u2019s bundled handler." };
-    }
-    return this.withPrompt(id, {
-      id,
-      label: def.label,
-      cliCommand: def.cliCommand,
-      cliAvailable: detection.available,
-      ...detection.version ? { version: trimVersion(detection.version) } : {},
-      ...detection.available ? {} : { reason: detection.reason },
-      hookInstalled: entriesPresent && problem === void 0,
-      hookUsesCurrentRuntime: usesCurrentRuntime,
-      hookInstallProblem: this.paths.installProblem,
-      hookEntriesPresent: entriesPresent,
-      ...codexHooks ? { codexHooks } : {},
-      ...problem ? { hookProblem: problem } : {},
-      ...lastEventAt ? { hookLastEventAt: lastEventAt } : {},
-      ...installedAt && entriesPresent ? { hookInstalledAt: installedAt } : {},
-      configPath,
-      hookHandlerPath,
-      installerAction: "No shell installer command is run. After you click Enable, Anthill's main process backs up and merges Anthill-owned hook entries into this local config file.",
-      installCommand: commandFor(id, def.events[0], hookHandlerPath, this.execPath()),
-      hookCommands: def.events.map(
-        (event) => commandFor(id, event, hookHandlerPath, this.execPath())
-      ),
-      eventCategories: def.events.map(labelEvent),
-      localDataBoundary: `${def.boundary} MCP is optional and not required for this hooks-based observation.`,
-      changes: [
-        `Back up ${configPath} before changing it.`,
-        `Merge Anthill-owned hook entries into ${configPath}; unrelated hooks stay in place.`,
-        `Reference ${hookHandlerPath} from each Anthill hook entry.`,
-        "Record hook payloads locally for observation; do not start, attach to, stop, or steer any session."
-      ]
-    }, prefs);
-  }
-  configPath(harness) {
-    if (harness === "claude-code") return this.paths.claudeConfigPath ?? HARNESS[harness].configFile();
-    return this.paths.codexConfigPath ?? HARNESS[harness].configFile();
-  }
-  hookHandlerPath() {
-    return this.paths.hookHandlerPath ?? join3(__dirname, "live-hook-handler.js");
-  }
-  execPath() {
-    return this.paths.execPath ?? process.execPath;
-  }
-  /**
-   * Whether this entry names *this* installation's own executable and handler
-   * — the only thing this app will ever spawn.
-   *
-   * Deliberately stricter than "is it Anthill's line". A path that merely
-   * looks like a hook handler is still somebody else's program, so the exact
-   * comparison stays exactly where it guards a spawn. What it must not do is
-   * decide what the user is *told*: see `hookProblem`.
-   */
-  ownHook(command, harness) {
-    const parsed = parseHookCommand(command);
-    return Boolean(parsed && parsed.runnable && parsed.execPath === this.execPath() && parsed.handlerPath === this.hookHandlerPath() && isHookHarnessId(parsed.harness) && (!harness || parsed.harness === harness) && HARNESS[parsed.harness].events.includes(parsed.event));
-  }
-  /**
-   * What is wrong with this harness's Anthill entries, or nothing at all.
-   *
-   * Four questions, in this order because they are four different questions:
-   * is there an entry to speak about; does it name an interpreter nobody here
-   * can resolve; is it Anthill's line at all; and does the handler actually
-   * run. Only the last one spawns anything, and only ever this installation's
-   * own handler.
-   *
-   * The middle distinction is the one that was missing. An entry another
-   * Anthill wrote — the CLI bridge beside the desktop app, a dev build beside
-   * the packaged one, last version's bundle beside this one — carries the same
-   * marker in the same position, names the same harness and the same slot, and
-   * fires perfectly well into the same log this installation reads. Judging it
-   * by *this* process's `execPath` made each shell announce the other's
-   * working install as "Anthill installed hooks here, but they are not
-   * running", and Enable then moved the complaint to the other shell rather
-   * than ending it. So a foreign Anthill entry is reported as working and left
-   * alone; it is simply never probed, because probing means spawning.
-   */
-  async hookProblem(commands, harness) {
-    const mismatch = "The hook config names a different executable, handler or event. Re-enable observation to repair Anthill's entries. No config command was run.";
-    if (commands.length === 0) return this.probeHook(void 0);
-    if (commands.some(({ command }) => parseHookCommand(command)?.runnable === false)) {
-      return "The hook interpreter depends on PATH. Re-enable observation to use Anthill's absolute path.";
-    }
-    if (commands.some(({ command, event }) => !anthillShaped(command, harness, event))) return mismatch;
-    for (const { command } of commands.filter(({ command: command2 }) => !this.ownHook(command2, harness))) {
-      const parsed = parseHookCommand(command);
-      if (!parsed || !await anthillElsewhere(parsed)) return mismatch;
-    }
-    const own = commands.find(({ command }) => this.ownHook(command, harness));
-    return own ? this.probeHook(own.command) : void 0;
-  }
-  /**
-   * Run the hook once, exactly as written, and say what went wrong if it will
-   * not run.
-   *
-   * Checking that the entries exist and the file is on disk was the whole of
-   * verification, and it passed on a machine where every hook had been failing
-   * since installation — the interpreter the command named was not on the
-   * harness's PATH. Entries prove the install wrote them; only running the
-   * thing proves the harness can run it.
-   *
-   * Only a configured command matching this installation's interpreter and
-   * handler can be probed, without a shell. Older or altered commands require
-   * explicit repair; checking settings must never execute arbitrary programs.
-   *
-   * It writes to a temporary log rather than the real one, so it exercises the
-   * handler's actual job — parse, open, append — without putting a fake event
-   * in anybody's record.
-   */
-  async probeHook(command) {
-    if (!command) return "No Anthill hook command was found in the config file.";
-    const parsed = parseHookCommand(command);
-    if (!parsed) {
-      return "This hook entry is not one Anthill recognises, so it was not run. Review it in the config file, then re-enable observation to rewrite Anthill's own entries.";
-    }
-    if (!parsed.runnable) {
-      return "The hook command finds its interpreter through PATH, which the harness may not share with Anthill. Re-enable observation to rewrite the entries with an absolute path.";
-    }
-    if (!this.ownHook(command)) return "The configured hook is not the handler shipped with this Anthill. Re-enable observation to repair it.";
-    const log = join3(tmpdir(), `anthill-hook-probe-${process.pid}-${Date.now()}.jsonl`);
-    try {
-      const outcome = await runProcess({
-        command: parsed.execPath,
-        args: [parsed.handlerPath, OWNER_MARKER, parsed.harness, parsed.event],
-        env: { ELECTRON_RUN_AS_NODE: "1", ANTHILL_LIVE_HOOK_LOG: log, ANTHILL_OBSERVATION_PROBE: "1" },
-        stdinPayload: "{}",
-        timeoutMs: 1e4,
-        ...this.spawnFn ? { spawnFn: this.spawnFn } : {}
-      });
-      if (outcome.spawnError) {
-        return `The hook command could not be started: ${outcome.spawnError.message}. Re-enable observation to rewrite the hook entries.`;
-      }
-      if (outcome.exitCode !== 0) {
-        const said = (outcome.stderr || outcome.stdout).trim().split("\n")[0];
-        return `The hook command exited with ${outcome.exitCode}${said ? `: ${said}` : "."} Re-enable observation to rewrite the hook entries.`;
-      }
-      return void 0;
-    } catch (error51) {
-      return `The hook command could not be checked: ${error51.message}`;
-    } finally {
-      await rm(log, { force: true }).catch(() => void 0);
-    }
-  }
-  hookLogPath() {
-    return this.paths.hookLogPath ?? join3(homedir3(), ".anthill", "live-hooks", "events.jsonl");
-  }
-  /**
-   * When this harness last wrote to the hook log, if it ever has.
-   *
-   * ANT-42. Verification runs the hook command, which proves Anthill can run
-   * it; it says nothing about whether the harness ever does. Codex had six
-   * entries in `~/.codex/hooks.json`, written with an absolute interpreter
-   * path, a handler that runs on demand, and — across eight sessions — not one
-   * event. Claude Code's hooks had written hundreds to the same file in the
-   * same period, so the log and the handler were both plainly fine. Only the
-   * harness was not calling it, and the card said Enabled throughout.
-   *
-   * Search bounded windows, including the retained rotated file. Older
-   * versions left unbounded logs, so even the fallback must have a byte cap.
-   */
-  async lastHookEvent(harness) {
-    const marker = `"harness":"${harness}"`;
-    const fromTail = await this.searchTail(marker);
-    if (fromTail) return fromTail;
-    return await this.searchTail(marker, 8 * 1024 * 1024) ?? await this.searchTail(marker, 8 * 1024 * 1024, `${this.hookLogPath()}.1`);
-  }
-  /**
-   * The newest matching record in the last stretch of the log, if it is there.
-   *
-   * The first line of the window is dropped: a read that starts mid-file
-   * almost certainly starts mid-line, and half a JSON object is not a record.
-   */
-  async searchTail(marker, limit = TAIL_WINDOW_BYTES, path = this.hookLogPath()) {
-    const handle = await open(path, "r").catch(() => void 0);
-    if (!handle) return void 0;
-    try {
-      const { size } = await handle.stat();
-      const window = Math.min(size, limit);
-      if (window === 0) return void 0;
-      const buffer = Buffer.allocUnsafe(window);
-      const { bytesRead } = await handle.read(buffer, 0, window, size - window);
-      const lines = buffer.subarray(0, bytesRead).toString("utf8").split("\n");
-      if (window < size) lines.shift();
-      for (let index = lines.length - 1; index >= 0; index -= 1) {
-        if (!lines[index].includes(marker)) continue;
-        try {
-          const row = JSON.parse(lines[index]);
-          if (typeof row.recordedAt === "string") return row.recordedAt;
-        } catch {
-          continue;
-        }
-      }
-      return void 0;
-    } catch {
-      return void 0;
-    } finally {
-      await handle.close().catch(() => void 0);
-    }
-  }
-  prefsPath() {
-    return this.paths.prefsPath ?? join3(homedir3(), ".anthill", "live-observation-setup.json");
-  }
-  async readPrefs() {
-    let merged = {};
-    const legacy = this.paths.prefsPath ? [] : [
-      join3(homedir3(), "Library/Application Support/@anthill/desktop/live-observation-setup.json"),
-      join3(homedir3(), ".config/@anthill/desktop/live-observation-setup.json"),
-      join3(homedir3(), ".anthill/cli/live-observation-setup.json")
-    ];
-    for (const path of [...legacy, ...this.paths.legacyPrefsPaths ?? [], this.prefsPath()]) {
-      let prefs;
-      try {
-        prefs = JSON.parse(await readFile(path, "utf8"));
-      } catch {
-        continue;
-      }
-      if (!prefs || typeof prefs !== "object" || Array.isArray(prefs)) continue;
-      const harnesses = { ...merged.harnesses };
-      for (const id of Object.keys(HARNESS)) {
-        if (prefs.harnesses?.[id]) harnesses[id] = { ...harnesses[id], ...prefs.harnesses[id] };
-      }
-      merged = { ...merged, ...prefs, harnesses };
-    }
-    return merged;
-  }
-  async writePrefs(prefs) {
-    const path = this.prefsPath();
-    await mkdir(dirname2(path), { recursive: true });
-    await writeFile(path, `${JSON.stringify(prefs, null, 2)}
-`, "utf8");
-  }
-  async updatePrefs(update) {
-    await this.writePrefs(update(await this.readPrefs()));
-  }
-  async recordHarnessAction(harness, action) {
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    await this.updatePrefs((prefs) => ({
-      ...prefs,
-      dismissed: true,
-      harnesses: {
-        ...prefs.harnesses ?? {},
-        [harness]: action === "install" ? { installedAt: now, declinedAt: null, declinedFor: null } : { ...prefs.harnesses?.[harness] ?? {}, disabledAt: now }
-      }
-    }));
-  }
-  async readJsonObject(path) {
-    const text = await readFile(path, "utf8").catch((error51) => {
-      if (error51.code === "ENOENT") return "";
-      throw error51;
-    });
-    if (!text.trim()) return {};
-    const parsed = JSON.parse(text);
-    if (!isRecord(parsed)) throw new Error(`${path} is not a JSON object.`);
-    return parsed;
-  }
-  async backup(path) {
-    const exists = await stat(path).then(
-      (info) => info.isFile(),
-      () => false
-    );
-    if (!exists) return void 0;
-    const backupPath = `${path}.anthill-backup-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}`;
-    await copyFile(path, backupPath);
-    return backupPath;
-  }
-};
-function commandFor(harness, event, hookHandlerPath, execPath) {
-  return `ELECTRON_RUN_AS_NODE=1 "${execPath}" "${hookHandlerPath}" ${OWNER_MARKER} ${harness} ${event}`;
-}
-__name(commandFor, "commandFor");
-function hookEntry(harness, event, def, hookHandlerPath, execPath) {
-  const entry = {
-    hooks: [
-      {
-        type: "command",
-        command: commandFor(harness, event, hookHandlerPath, execPath)
-      }
-    ]
-  };
-  if (def.matcherEvents.has(event)) entry.matcher = "*";
-  return entry;
-}
-__name(hookEntry, "hookEntry");
-function withAnthillHooks(config2, def, harness, hookHandlerPath, execPath) {
-  const hooks = hooksObject(config2);
-  for (const event of def.events) {
-    const existing = entriesFor(hooks[event]).filter((entry) => !isAnthillEntry(entry));
-    hooks[event] = [...existing, hookEntry(harness, event, def, hookHandlerPath, execPath)];
-  }
-  return { ...config2, hooks };
-}
-__name(withAnthillHooks, "withAnthillHooks");
-function withoutAnthillHooks(config2, def) {
-  const hooks = hooksObject(config2);
-  for (const event of def.events) {
-    hooks[event] = entriesFor(hooks[event]).filter((entry) => !isAnthillEntry(entry));
-  }
-  return { ...config2, hooks };
-}
-__name(withoutAnthillHooks, "withoutAnthillHooks");
-var SHELL_METACHARACTERS = /[;|&$`><(){}[\]!*?~\n\r\\#]/;
-var QUOTED_METACHARACTERS = /[$`\\\n\r]/;
-function tokenise(command) {
-  const tokens = [];
-  let index = 0;
-  while (index < command.length) {
-    while (index < command.length && command[index] === " ") index += 1;
-    if (index >= command.length) break;
-    if (command[index] === '"') {
-      const end2 = command.indexOf('"', index + 1);
-      if (end2 === -1) return void 0;
-      tokens.push({ value: command.slice(index + 1, end2), quoted: true });
-      index = end2 + 1;
-      if (index < command.length && command[index] !== " ") return void 0;
-      continue;
-    }
-    const end = command.indexOf(" ", index);
-    const stop = end === -1 ? command.length : end;
-    const token = command.slice(index, stop);
-    if (token.includes('"')) return void 0;
-    tokens.push({ value: token, quoted: false });
-    index = stop;
-  }
-  return tokens;
-}
-__name(tokenise, "tokenise");
-function parseHookCommand(command) {
-  const tokens = tokenise(command);
-  if (!tokens) return void 0;
-  for (const token of tokens) {
-    const forbidden = token.quoted ? QUOTED_METACHARACTERS : SHELL_METACHARACTERS;
-    if (forbidden.test(token.value)) return void 0;
-  }
-  const words = tokens.map((token) => token.value);
-  const rest = words[0] === "ELECTRON_RUN_AS_NODE=1" ? words.slice(1) : words;
-  if (rest.length !== 5) return void 0;
-  const [execPath, handlerPath, marker, harness, event] = rest;
-  if (marker !== OWNER_MARKER) return void 0;
-  if (!/^[a-z-]+$/.test(harness) || !/^[A-Za-z]+$/.test(event)) return void 0;
-  const runnable = execPath.startsWith("/") && handlerPath.startsWith("/");
-  return { execPath, handlerPath, harness, event, runnable };
-}
-__name(parseHookCommand, "parseHookCommand");
-var HANDLER_HEAD_BYTES = 256 * 1024;
-async function anthillElsewhere(parsed) {
-  if (!existsSync3(parsed.execPath)) return false;
-  if (await carriesMarker(parsed.handlerPath)) return true;
-  const inside = parsed.handlerPath.indexOf(".asar/");
-  return inside > 0 && existsSync3(parsed.handlerPath.slice(0, inside + ".asar".length));
-}
-__name(anthillElsewhere, "anthillElsewhere");
-async function carriesMarker(path) {
-  const handle = await open(path, "r").catch(() => void 0);
-  if (!handle) return false;
-  try {
-    const buffer = Buffer.alloc(HANDLER_HEAD_BYTES);
-    const { bytesRead } = await handle.read(buffer, 0, HANDLER_HEAD_BYTES, 0);
-    return buffer.subarray(0, bytesRead).toString("utf8").includes(OWNER_MARKER);
-  } catch {
-    return false;
-  } finally {
-    await handle.close().catch(() => void 0);
-  }
-}
-__name(carriesMarker, "carriesMarker");
-function anthillShaped(command, harness, event) {
-  const parsed = parseHookCommand(command);
-  return Boolean(parsed && isHookHarnessId(parsed.harness) && parsed.harness === harness && parsed.event === event);
-}
-__name(anthillShaped, "anthillShaped");
-function anthillCommands(config2, def) {
-  const hooks = isRecord(config2.hooks) ? config2.hooks : {};
-  const out = [];
-  for (const event of def.events) {
-    for (const entry of entriesFor(hooks[event])) {
-      if (typeof entry.command === "string" && parseHookCommand(entry.command)) {
-        out.push({ command: entry.command, event });
-        continue;
-      }
-      for (const hook of Array.isArray(entry.hooks) ? entry.hooks : []) {
-        if (isRecord(hook) && typeof hook.command === "string" && hook.command.includes(OWNER_MARKER)) {
-          out.push({ command: hook.command, event });
-        }
-      }
-    }
-  }
-  return out;
-}
-__name(anthillCommands, "anthillCommands");
-function hasEveryAnthillHook(config2, def) {
-  const hooks = isRecord(config2.hooks) ? config2.hooks : {};
-  return def.events.every((event) => entriesFor(hooks[event]).some(isAnthillEntry));
-}
-__name(hasEveryAnthillHook, "hasEveryAnthillHook");
-function hooksObject(config2) {
-  return isRecord(config2.hooks) ? { ...config2.hooks } : {};
-}
-__name(hooksObject, "hooksObject");
-function entriesFor(value) {
-  return Array.isArray(value) ? value.filter(isRecord) : [];
-}
-__name(entriesFor, "entriesFor");
-function isAnthillEntry(entry) {
-  if (typeof entry.command === "string" && entry.command.includes(OWNER_MARKER)) return true;
-  const hooks = Array.isArray(entry.hooks) ? entry.hooks : [];
-  return hooks.some(
-    (hook) => isRecord(hook) && typeof hook.command === "string" && hook.command.includes(OWNER_MARKER)
-  );
-}
-__name(isAnthillEntry, "isAnthillEntry");
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-__name(isRecord, "isRecord");
-function trimVersion(version2) {
-  return version2.replace(/\s*\([^)]*\)\s*$/, "").trim();
-}
-__name(trimVersion, "trimVersion");
-function labelEvent(event) {
-  return event.replace(/([a-z])([A-Z])/g, "$1 $2").replace("Pre Tool Use", "Tool start").replace("Post Tool Use", "Tool completion").replace("User Prompt Submit", "User prompt submit");
-}
-__name(labelEvent, "labelEvent");
-function isHookHarnessId(value) {
-  return value === "claude-code" || value === "codex";
-}
-__name(isHookHarnessId, "isHookHarnessId");
-function handlerPresent(path) {
-  if (existsSync3(path)) return true;
-  const inside = path.indexOf(".asar/");
-  return inside > 0 && existsSync3(path.slice(0, inside + 5));
-}
-__name(handlerPresent, "handlerPresent");
-
-// apps/cli/src/observation.ts
-async function observationCommand(action, service = new ObservationSetupService(observationRuntime()), cwd = process.cwd()) {
-  if (!["status", "enable", "skip"].includes(action ?? "")) {
-    return { exitCode: 1, result: { error: "Usage: anthill observation status|enable|skip. Run from the project directory." } };
-  }
-  if (action === "skip") {
-    await service.decline("codex");
-    return { exitCode: 0, result: { outcome: "skipped", offer: false, message: "Use basic progress. Do not ask about detailed progress again unless the user asks, or until Anthill's hooks change." } };
-  }
-  const sessionId = process.env.CODEX_SESSION_ID?.trim() || void 0;
-  let status = await service.status(cwd, false, sessionId);
-  let harness = status.harnesses.find((harness2) => harness2.id === "codex");
-  if (action === "enable" && !harness?.cliAvailable) {
-    return { exitCode: 1, result: { error: "Codex CLI was not found. Basic progress remains available." } };
-  }
-  if (action === "enable" && (!harness?.hookInstalled || harness.hookUsesCurrentRuntime === false || harness.observationDeclined)) {
-    const installed = await service.install("codex", cwd);
-    if (!installed.ok) return { exitCode: 1, result: { error: installed.error, offer: false } };
-    status = installed.status;
-    harness = status.harnesses.find((harness2) => harness2.id === "codex");
-  }
-  const broken = Boolean(harness?.hookEntriesPresent && !harness.hookInstalled);
-  const ask = harness?.observationPrompt ?? null;
-  return { exitCode: 0, result: {
-    // What to put to the user now, if anything: "connect", "trust", "hint".
-    ask,
-    // Kept for callers that read the older field.
-    offer: ask === "connect",
-    installed: harness?.hookInstalled ?? false,
-    state: broken ? "broken" : harness?.codexHooks?.state ?? (harness?.cliAvailable ? "not-installed" : "unavailable"),
-    confirmedInSession: harness?.codexHooks?.confirmedInSession ?? false,
-    message: askMessage(ask, harness, broken),
-    requiresHostAccess: harness?.codexHooks?.requiresHostAccess ?? false,
-    lastEventAt: harness?.hookLastEventAt ?? null
-  } };
-}
-__name(observationCommand, "observationCommand");
-function askMessage(ask, harness, broken) {
-  if (broken) {
-    return `${harness?.hookProblem ?? "The Anthill hook handler could not run."} ${ask === "connect" ? "Ask: Connect to repair it, or Continue with basic progress." : "Basic progress remains available."}`;
-  }
-  if (ask === "connect") {
-    return broken || harness?.hookEntriesPresent ? "Anthill's hooks need to be reconnected to this Anthill. They let Anthill show the agent's actions and detailed progress. Ask: Connect, or Continue with basic progress." : "Anthill's hooks are not connected. They let Anthill show the agent's actions and detailed progress; basic progress works without them. Ask: Connect, or Continue with basic progress.";
-  }
-  if (ask === "trust") {
-    return "Codex has Anthill's hooks but has not approved them. Ask the user to type /hooks in Codex, choose Review hooks, and allow only the entries containing anthill-observation-hook. Do not suggest Trust all. Basic progress keeps working meanwhile.";
-  }
-  if (ask === "hint") {
-    return `Anthill could not confirm the state of its hooks in Codex; that does not mean they are unapproved. ${harness?.codexHooks?.message ?? ""} Basic progress keeps working.`.replace(/\s+/g, " ").trim();
-  }
-  return harness?.codexHooks?.message ?? harness?.hookInstallProblem ?? "Basic progress works without detailed observation.";
-}
-__name(askMessage, "askMessage");
-
-// apps/cli/src/paths.ts
-import { homedir as homedir4 } from "node:os";
-import { join as join4, resolve } from "node:path";
-var DEFAULT_DATA_DIR = ".anthill/cli";
-async function resolvePaths(options) {
-  const home = homedir4();
-  const dataDir = options?.dataDir;
-  const userData = dataDir ? resolve(dataDir) : join4(home, DEFAULT_DATA_DIR);
-  return { userData, home };
-}
-__name(resolvePaths, "resolvePaths");
-
-// apps/cli/src/report.ts
-import { appendFile, mkdir as mkdir2 } from "node:fs/promises";
-import { join as join5 } from "node:path";
+// apps/desktop/src/main/live/observers/vscode.ts
+import { homedir as homedir3 } from "node:os";
+import { join as join3 } from "node:path";
 
 // packages/live/dist/marker.js
 var ID = "([A-Za-z0-9_.:-]+)";
@@ -1231,7 +452,8 @@ var TIMING = {
 var HARNESS_TARGETS = [
   "claude-code",
   "codex",
-  "pi"
+  "pi",
+  "vscode"
 ];
 var NODE_ID_PATTERN = /^[A-Za-z0-9_.:-]+$/;
 var EDGE_ANCHORS = [
@@ -16962,10 +16184,831 @@ function reportLine(report) {
 }
 __name(reportLine, "reportLine");
 
+// apps/desktop/src/main/live/observers/tail.ts
+var MAX_CHUNK_BYTES = 4 * 1024 * 1024;
+
+// apps/desktop/src/main/live/observers/copilot-session.ts
+var SETTLE_MS = 5 * 6e4;
+
+// apps/desktop/src/main/live/observers/vscode.ts
+var SETTLE_MS2 = 5 * 6e4;
+var MAX_FILE_BYTES = 64 * 1024 * 1024;
+function vscodeUserDir(home = homedir3(), platform = process.platform) {
+  return platform === "darwin" ? join3(home, "Library", "Application Support", "Code", "User") : platform === "win32" ? join3(process.env.APPDATA || join3(home, "AppData", "Roaming"), "Code", "User") : join3(process.env.XDG_CONFIG_HOME || join3(home, ".config"), "Code", "User");
+}
+__name(vscodeUserDir, "vscodeUserDir");
+
+// apps/desktop/src/main/live/hook-prompt.ts
+import { createHash } from "node:crypto";
+function hookFingerprint(commands) {
+  const canonical = [...commands].map(({ command, event }) => `${event}\0${command}`).sort().join("");
+  return createHash("sha256").update(canonical).digest("hex").slice(0, 16);
+}
+__name(hookFingerprint, "hookFingerprint");
+function isDeclined(prefs, fingerprint) {
+  if (!prefs?.declinedAt) return false;
+  return prefs.declinedFor == null || prefs.declinedFor === fingerprint;
+}
+__name(isDeclined, "isDeclined");
+function hookPrompt(input) {
+  if (!input.cliAvailable || input.installProblem) return null;
+  if (input.confirmedInSession) return null;
+  if (input.declined) return null;
+  if (!input.entriesPresent || !input.installed || !input.usesCurrentRuntime) return "connect";
+  switch (input.codexState) {
+    case "ready":
+      return null;
+    case "needs-trust":
+    case "disabled":
+      return "trust";
+    default:
+      return "hint";
+  }
+}
+__name(hookPrompt, "hookPrompt");
+
+// apps/desktop/src/main/live/setup.ts
+var OWNER_MARKER = "anthill-observation-hook";
+var TAIL_WINDOW_BYTES = 256 * 1024;
+var HARNESS = {
+  "claude-code": {
+    label: "Claude Code",
+    cliCommand: "claude",
+    configFile: /* @__PURE__ */ __name(() => join4(homedir4(), ".claude", "settings.json"), "configFile"),
+    configOption: "claudeConfigPath",
+    trust: void 0,
+    events: [
+      "SessionStart",
+      "UserPromptSubmit",
+      "PreToolUse",
+      "PostToolUse",
+      "Stop",
+      "SubagentStop",
+      "Notification",
+      "SessionEnd"
+    ],
+    matcherEvents: /* @__PURE__ */ new Set(["PreToolUse", "PostToolUse", "Stop", "SubagentStop", "Notification"]),
+    boundary: "Anthill reads local hook events and Claude Code session transcripts on this machine. It stores only observation state and correlation metadata needed for Live Session UI, never private reasoning."
+  },
+  codex: {
+    label: "Codex CLI",
+    cliCommand: "codex",
+    configFile: /* @__PURE__ */ __name(() => join4(process.env.CODEX_HOME || join4(homedir4(), ".codex"), "hooks.json"), "configFile"),
+    configOption: "codexConfigPath",
+    trust: readCodexHookStatus,
+    events: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"],
+    matcherEvents: /* @__PURE__ */ new Set(),
+    boundary: "Anthill reads local hook events and Codex rollout/session metadata on this machine. It stores only observation state and correlation metadata needed for Live Session UI, never private reasoning."
+  },
+  /*
+   * VS Code's agent reads every `*.json` in `~/.copilot/hooks/` (its
+   * `chat.hookFilesLocations` default), in Claude Code's format, and runs
+   * them while `chat.useHooks` is on, which it is unless somebody turned it
+   * off — and only in a trusted workspace. There is no per-file approval to
+   * wait on. The file is Anthill's own, so nothing of anyone else's is merged.
+   * The Copilot CLI reads the same folder, which is why the handler must
+   * always exit 0: a failing hook there can deny the tool it was about.
+   * `matcher` is ignored, so none is written.
+   */
+  vscode: {
+    label: "VS Code",
+    cliCommand: "code",
+    configFile: /* @__PURE__ */ __name(() => join4(homedir4(), ".copilot", "hooks", "anthill.json"), "configFile"),
+    configOption: "vscodeConfigPath",
+    trust: void 0,
+    // `code` is often not on the PATH; VS Code's own user data folder is.
+    present: /* @__PURE__ */ __name((paths) => existsSync3(paths.vscodeUserDir ?? vscodeUserDir()), "present"),
+    events: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStop", "Stop"],
+    matcherEvents: /* @__PURE__ */ new Set(),
+    boundary: "Anthill reads local hook events and the chat sessions VS Code saves on this machine. It stores only observation state and correlation metadata needed for Live Session UI, never private reasoning."
+  }
+};
+var SESSION_ID = /^[0-9a-fA-F-]{8,64}$/;
+var ObservationSetupService = class {
+  constructor(paths, spawnFn) {
+    this.paths = paths;
+    this.spawnFn = spawnFn;
+  }
+  static {
+    __name(this, "ObservationSetupService");
+  }
+  snapshots = /* @__PURE__ */ new Map();
+  configSnapshots = /* @__PURE__ */ new Map();
+  statusRequests = /* @__PURE__ */ new Map();
+  /**
+   * @param sessionId The Codex session asking, when it is one (the plugin
+   *   passes `CODEX_SESSION_ID`). A hook of Anthill's that has already fired in
+   *   that session answers the question outright, with no call into Codex.
+   */
+  status(cwd, refreshOnly = false, sessionId) {
+    const directory = typeof cwd === "string" && isAbsolute(cwd) ? cwd : homedir4();
+    const session = sessionId && SESSION_ID.test(sessionId) ? sessionId : void 0;
+    const key = `${directory}\0${session ?? ""}`;
+    const pending = this.statusRequests.get(key);
+    if (pending) return pending;
+    const request = (refreshOnly && this.snapshots.has(directory) ? this.refreshStatus(directory, session) : this.readStatus(directory, session)).then((status) => {
+      this.snapshots.set(directory, status);
+      return status;
+    }).finally(() => this.statusRequests.delete(key));
+    this.statusRequests.set(key, request);
+    return request;
+  }
+  async readStatus(cwd, sessionId) {
+    const prefs = await this.readPrefs();
+    return {
+      dismissed: prefs.dismissed === true,
+      trigger: "Offer optional detailed progress when handing a workflow to the user's CLI.",
+      harnesses: await Promise.all(
+        Object.keys(HARNESS).map((id) => this.describeHarness(id, prefs, cwd, sessionId))
+      )
+    };
+  }
+  /** Refresh permissions and receipts only; no CLI detection or handler execution. */
+  async refreshStatus(cwd, sessionId) {
+    const previous = this.snapshots.get(cwd);
+    const prefs = await this.readPrefs();
+    const harnesses = await Promise.all(previous.harnesses.map(async (harness) => {
+      if (!isHookHarnessId(harness.id)) return harness;
+      const id = harness.id;
+      const config2 = await this.readJsonObject(this.configPath(id)).catch(() => ({}));
+      if (JSON.stringify(config2) !== this.configSnapshots.get(`${cwd}:${id}`)) {
+        return this.describeHarness(id, prefs, cwd, sessionId);
+      }
+      const missingRuntime = anthillCommands(config2, HARNESS[id]).some(({ command }) => {
+        const parsed = parseHookCommand(command);
+        return parsed && (!existsSync3(parsed.execPath) || !handlerPresent(parsed.handlerPath));
+      });
+      const trust = HARNESS[id].trust;
+      let codexHooks = trust && harness.cliAvailable && harness.hookEntriesPresent ? await trust({ commands: anthillCommands(config2, HARNESS[id]), configPath: this.configPath(id), cwd, spawnFn: this.spawnFn }) : harness.codexHooks;
+      if (codexHooks?.state === "ready" && harness.hookUsesCurrentRuntime === false) {
+        codexHooks = { state: "unknown", message: "Codex trusts these hooks, but they use another Anthill runtime that this installation has not tested. Repair the connection to use this Anthill\u2019s bundled handler." };
+      }
+      const refreshed = {
+        ...harness,
+        codexHooks,
+        ...missingRuntime ? { hookInstalled: false, hookProblem: "The configured Anthill runtime is missing. Repair the connection." } : {},
+        hookLastEventAt: harness.hookEntriesPresent ? await this.lastHookEvent(id) : void 0
+      };
+      return this.withPrompt(id, refreshed, prefs);
+    }));
+    return { ...previous, dismissed: prefs.dismissed === true, harnesses };
+  }
+  async dismiss() {
+    await this.updatePrefs((prefs) => ({ ...prefs, dismissed: true }));
+    return this.status();
+  }
+  /**
+   * "Continue with basic progress", remembered against the exact commands this
+   * Anthill would install — so it is asked again only when those change, or
+   * after an approval that the person later withdrew (ANT-138).
+   */
+  async decline(harness) {
+    if (!isHookHarnessId(harness)) throw new Error("Unsupported observation harness.");
+    const declinedFor = hookFingerprint(this.expectedCommands(harness));
+    await this.updatePrefs((prefs) => ({ ...prefs, harnesses: {
+      ...prefs.harnesses,
+      [harness]: { ...prefs.harnesses?.[harness], declinedAt: (/* @__PURE__ */ new Date()).toISOString(), declinedFor }
+    } }));
+  }
+  /** The commands this Anthill writes for a harness: what a decline or an approval is about. */
+  expectedCommands(id) {
+    return HARNESS[id].events.map((event) => ({ event, command: commandFor(id, event, this.hookHandlerPath(), this.execPath()) }));
+  }
+  /**
+   * What to ask about this harness now, worked out once for every path that
+   * describes it — a full read and a light refresh alike.
+   *
+   * An approval seen after a decline clears the decline, best effort: whoever
+   * trusted the hooks by hand has changed their mind, and if they later revoke
+   * that trust they should be asked again rather than held to an old "no".
+   */
+  async withPrompt(id, harness, prefs) {
+    const fingerprint = hookFingerprint(this.expectedCommands(id));
+    let declined = isDeclined(prefs.harnesses?.[id], fingerprint);
+    if (declined && harness.codexHooks?.state === "ready") {
+      declined = false;
+      await this.updatePrefs((current) => ({ ...current, harnesses: {
+        ...current.harnesses,
+        [id]: { ...current.harnesses?.[id], declinedAt: null, declinedFor: null }
+      } })).catch(() => void 0);
+    }
+    const observationPrompt = hookPrompt({
+      cliAvailable: harness.cliAvailable,
+      installProblem: harness.hookInstallProblem,
+      entriesPresent: harness.hookEntriesPresent,
+      installed: harness.hookInstalled,
+      usesCurrentRuntime: harness.hookUsesCurrentRuntime !== false,
+      codexState: HARNESS[id].trust ? harness.codexHooks?.state : "ready",
+      confirmedInSession: harness.codexHooks?.confirmedInSession,
+      declined
+    });
+    return { ...harness, observationDeclined: declined, observationPrompt };
+  }
+  /**
+   * Whether a hook of Anthill's has fired in this Codex session.
+   *
+   * Read from the log the hooks themselves write, which a sandboxed agent can
+   * read. Absence proves nothing — the session may predate the install, or
+   * simply not have reached a hook yet — so it is only ever used to skip a
+   * question, never to raise one.
+   */
+  async firedInSession(sessionId) {
+    const marker = `"session_id":"${sessionId}"`;
+    return Boolean(
+      await this.searchTail(marker, 8 * 1024 * 1024) ?? await this.searchTail(marker, 8 * 1024 * 1024, `${this.hookLogPath()}.1`)
+    );
+  }
+  async install(harness, cwd) {
+    return this.modify(harness, "install", cwd);
+  }
+  async disable(harness) {
+    return this.modify(harness, "disable");
+  }
+  async modify(harness, action, cwd) {
+    try {
+      if (!isHookHarnessId(harness)) {
+        return {
+          ok: false,
+          status: await this.status(),
+          error: `Unsupported observation harness: ${String(harness)}.`
+        };
+      }
+      if (action === "install" && this.paths.installProblem) throw new Error(this.paths.installProblem);
+      const def = HARNESS[harness];
+      const configPath = this.configPath(harness);
+      const hookHandlerPath = this.hookHandlerPath();
+      if (action === "install" && !handlerPresent(hookHandlerPath)) {
+        return {
+          ok: false,
+          status: await this.status(),
+          error: `Anthill's hook handler was not found at ${hookHandlerPath}.`
+        };
+      }
+      const before = await this.readJsonObject(configPath);
+      const after = action === "install" ? withAnthillHooks(before, def, harness, hookHandlerPath, this.execPath()) : withoutAnthillHooks(before, def);
+      const changed = JSON.stringify(before) !== JSON.stringify(after);
+      const backupPath = changed ? await this.backup(configPath) : void 0;
+      if (changed) {
+        await mkdir(dirname2(configPath), { recursive: true });
+        await writeFile(configPath, `${JSON.stringify(after, null, 2)}
+`, "utf8");
+        await this.recordHarnessAction(harness, action);
+      }
+      if (action === "install" && !changed) {
+        await this.updatePrefs((prefs) => ({ ...prefs, harnesses: {
+          ...prefs.harnesses,
+          [harness]: { ...prefs.harnesses?.[harness], declinedAt: null, declinedFor: null }
+        } }));
+      }
+      await Promise.allSettled([...this.statusRequests.values()]);
+      const status = await this.status(cwd);
+      const installed = status.harnesses.find((item) => item.id === harness)?.hookInstalled;
+      if (action === "install" && !installed) {
+        return {
+          ok: false,
+          status,
+          backupPath,
+          error: `${def.label} hooks were written, but verification did not find the expected Anthill entries.`
+        };
+      }
+      return {
+        ok: true,
+        status,
+        backupPath,
+        message: action === "install" ? `${def.label} observation hooks are installed. ${status.harnesses.find((item) => item.id === harness)?.codexHooks?.message ?? "Start a session to receive detailed progress."}` : `${def.label} observation hooks are disabled. The CLI itself is unchanged.`
+      };
+    } catch (error51) {
+      return {
+        ok: false,
+        status: await this.status(),
+        error: error51 instanceof Error ? error51.message : String(error51)
+      };
+    }
+  }
+  async describeHarness(id, prefs, cwd, sessionId) {
+    const def = HARNESS[id];
+    const installedAt = prefs?.harnesses?.[id]?.installedAt;
+    const detection = "present" in def && def.present ? def.present(this.paths) ? { available: true } : { available: false, reason: `${def.label} has not been used on this machine.` } : await detectBinary({
+      command: def.cliCommand,
+      notFoundReason: `${def.label} was not found on your PATH.`,
+      spawnFn: this.spawnFn
+    });
+    const configPath = this.configPath(id);
+    const config2 = await this.readJsonObject(configPath).catch(() => ({}));
+    const hookHandlerPath = this.hookHandlerPath();
+    this.configSnapshots.set(`${cwd}:${id}`, JSON.stringify(config2));
+    const entriesPresent = hasEveryAnthillHook(config2, def);
+    const commands = anthillCommands(config2, def);
+    const problem = entriesPresent ? await this.hookProblem(commands, id) : void 0;
+    const lastEventAt = entriesPresent ? await this.lastHookEvent(id) : void 0;
+    const usesCurrentRuntime = entriesPresent && commands.every(({ command }) => this.ownHook(command, id));
+    const confirmed = def.trust !== void 0 && sessionId !== void 0 && usesCurrentRuntime && problem === void 0 && await this.firedInSession(sessionId);
+    let codexHooks = confirmed ? { state: "ready", confirmedInSession: true, message: "Anthill\u2019s hooks are already working in this Codex session." } : def.trust && detection.available && entriesPresent ? await def.trust({ commands, configPath, cwd, spawnFn: this.spawnFn }) : void 0;
+    if (codexHooks?.state === "ready" && commands.some(({ command }) => !this.ownHook(command, id))) {
+      codexHooks = { state: "unknown", message: "Codex trusts these hooks, but they use another Anthill runtime that this installation has not tested. Repair the connection to use this Anthill\u2019s bundled handler." };
+    }
+    return this.withPrompt(id, {
+      id,
+      label: def.label,
+      cliCommand: def.cliCommand,
+      cliAvailable: detection.available,
+      ...detection.version ? { version: trimVersion(detection.version) } : {},
+      ...detection.available ? {} : { reason: detection.reason },
+      hookInstalled: entriesPresent && problem === void 0,
+      hookUsesCurrentRuntime: usesCurrentRuntime,
+      hookInstallProblem: this.paths.installProblem,
+      hookEntriesPresent: entriesPresent,
+      ...codexHooks ? { codexHooks } : {},
+      ...problem ? { hookProblem: problem } : {},
+      ...lastEventAt ? { hookLastEventAt: lastEventAt } : {},
+      ...installedAt && entriesPresent ? { hookInstalledAt: installedAt } : {},
+      configPath,
+      hookHandlerPath,
+      installerAction: "No shell installer command is run. After you click Enable, Anthill's main process backs up and merges Anthill-owned hook entries into this local config file.",
+      installCommand: commandFor(id, def.events[0], hookHandlerPath, this.execPath()),
+      hookCommands: def.events.map(
+        (event) => commandFor(id, event, hookHandlerPath, this.execPath())
+      ),
+      eventCategories: def.events.map(labelEvent),
+      localDataBoundary: `${def.boundary} MCP is optional and not required for this hooks-based observation.`,
+      changes: [
+        `Back up ${configPath} before changing it.`,
+        `Merge Anthill-owned hook entries into ${configPath}; unrelated hooks stay in place.`,
+        `Reference ${hookHandlerPath} from each Anthill hook entry.`,
+        "Record hook payloads locally for observation; do not start, attach to, stop, or steer any session."
+      ]
+    }, prefs);
+  }
+  configPath(harness) {
+    return this.paths[HARNESS[harness].configOption] ?? HARNESS[harness].configFile();
+  }
+  hookHandlerPath() {
+    return this.paths.hookHandlerPath ?? join4(__dirname, "live-hook-handler.js");
+  }
+  execPath() {
+    return this.paths.execPath ?? process.execPath;
+  }
+  /**
+   * Whether this entry names *this* installation's own executable and handler
+   * — the only thing this app will ever spawn.
+   *
+   * Deliberately stricter than "is it Anthill's line". A path that merely
+   * looks like a hook handler is still somebody else's program, so the exact
+   * comparison stays exactly where it guards a spawn. What it must not do is
+   * decide what the user is *told*: see `hookProblem`.
+   */
+  ownHook(command, harness) {
+    const parsed = parseHookCommand(command);
+    return Boolean(parsed && parsed.runnable && parsed.execPath === this.execPath() && parsed.handlerPath === this.hookHandlerPath() && isHookHarnessId(parsed.harness) && (!harness || parsed.harness === harness) && HARNESS[parsed.harness].events.includes(parsed.event));
+  }
+  /**
+   * What is wrong with this harness's Anthill entries, or nothing at all.
+   *
+   * Four questions, in this order because they are four different questions:
+   * is there an entry to speak about; does it name an interpreter nobody here
+   * can resolve; is it Anthill's line at all; and does the handler actually
+   * run. Only the last one spawns anything, and only ever this installation's
+   * own handler.
+   *
+   * The middle distinction is the one that was missing. An entry another
+   * Anthill wrote — the CLI bridge beside the desktop app, a dev build beside
+   * the packaged one, last version's bundle beside this one — carries the same
+   * marker in the same position, names the same harness and the same slot, and
+   * fires perfectly well into the same log this installation reads. Judging it
+   * by *this* process's `execPath` made each shell announce the other's
+   * working install as "Anthill installed hooks here, but they are not
+   * running", and Enable then moved the complaint to the other shell rather
+   * than ending it. So a foreign Anthill entry is reported as working and left
+   * alone; it is simply never probed, because probing means spawning.
+   */
+  async hookProblem(commands, harness) {
+    const mismatch = "The hook config names a different executable, handler or event. Re-enable observation to repair Anthill's entries. No config command was run.";
+    if (commands.length === 0) return this.probeHook(void 0);
+    if (commands.some(({ command }) => parseHookCommand(command)?.runnable === false)) {
+      return "The hook interpreter depends on PATH. Re-enable observation to use Anthill's absolute path.";
+    }
+    if (commands.some(({ command, event }) => !anthillShaped(command, harness, event))) return mismatch;
+    for (const { command } of commands.filter(({ command: command2 }) => !this.ownHook(command2, harness))) {
+      const parsed = parseHookCommand(command);
+      if (!parsed || !await anthillElsewhere(parsed)) return mismatch;
+    }
+    const own = commands.find(({ command }) => this.ownHook(command, harness));
+    return own ? this.probeHook(own.command) : void 0;
+  }
+  /**
+   * Run the hook once, exactly as written, and say what went wrong if it will
+   * not run.
+   *
+   * Checking that the entries exist and the file is on disk was the whole of
+   * verification, and it passed on a machine where every hook had been failing
+   * since installation — the interpreter the command named was not on the
+   * harness's PATH. Entries prove the install wrote them; only running the
+   * thing proves the harness can run it.
+   *
+   * Only a configured command matching this installation's interpreter and
+   * handler can be probed, without a shell. Older or altered commands require
+   * explicit repair; checking settings must never execute arbitrary programs.
+   *
+   * It writes to a temporary log rather than the real one, so it exercises the
+   * handler's actual job — parse, open, append — without putting a fake event
+   * in anybody's record.
+   */
+  async probeHook(command) {
+    if (!command) return "No Anthill hook command was found in the config file.";
+    const parsed = parseHookCommand(command);
+    if (!parsed) {
+      return "This hook entry is not one Anthill recognises, so it was not run. Review it in the config file, then re-enable observation to rewrite Anthill's own entries.";
+    }
+    if (!parsed.runnable) {
+      return "The hook command finds its interpreter through PATH, which the harness may not share with Anthill. Re-enable observation to rewrite the entries with an absolute path.";
+    }
+    if (!this.ownHook(command)) return "The configured hook is not the handler shipped with this Anthill. Re-enable observation to repair it.";
+    const log = join4(tmpdir(), `anthill-hook-probe-${process.pid}-${Date.now()}.jsonl`);
+    try {
+      const outcome = await runProcess({
+        command: parsed.execPath,
+        args: [parsed.handlerPath, OWNER_MARKER, parsed.harness, parsed.event],
+        env: { ELECTRON_RUN_AS_NODE: "1", ANTHILL_LIVE_HOOK_LOG: log, ANTHILL_OBSERVATION_PROBE: "1" },
+        stdinPayload: "{}",
+        timeoutMs: 1e4,
+        ...this.spawnFn ? { spawnFn: this.spawnFn } : {}
+      });
+      if (outcome.spawnError) {
+        return `The hook command could not be started: ${outcome.spawnError.message}. Re-enable observation to rewrite the hook entries.`;
+      }
+      if (outcome.exitCode !== 0) {
+        const said = (outcome.stderr || outcome.stdout).trim().split("\n")[0];
+        return `The hook command exited with ${outcome.exitCode}${said ? `: ${said}` : "."} Re-enable observation to rewrite the hook entries.`;
+      }
+      return void 0;
+    } catch (error51) {
+      return `The hook command could not be checked: ${error51.message}`;
+    } finally {
+      await rm(log, { force: true }).catch(() => void 0);
+    }
+  }
+  hookLogPath() {
+    return this.paths.hookLogPath ?? join4(homedir4(), ".anthill", "live-hooks", "events.jsonl");
+  }
+  /**
+   * When this harness last wrote to the hook log, if it ever has.
+   *
+   * ANT-42. Verification runs the hook command, which proves Anthill can run
+   * it; it says nothing about whether the harness ever does. Codex had six
+   * entries in `~/.codex/hooks.json`, written with an absolute interpreter
+   * path, a handler that runs on demand, and — across eight sessions — not one
+   * event. Claude Code's hooks had written hundreds to the same file in the
+   * same period, so the log and the handler were both plainly fine. Only the
+   * harness was not calling it, and the card said Enabled throughout.
+   *
+   * Search bounded windows, including the retained rotated file. Older
+   * versions left unbounded logs, so even the fallback must have a byte cap.
+   */
+  async lastHookEvent(harness) {
+    const marker = `"harness":"${harness}"`;
+    const fromTail = await this.searchTail(marker);
+    if (fromTail) return fromTail;
+    return await this.searchTail(marker, 8 * 1024 * 1024) ?? await this.searchTail(marker, 8 * 1024 * 1024, `${this.hookLogPath()}.1`);
+  }
+  /**
+   * The newest matching record in the last stretch of the log, if it is there.
+   *
+   * The first line of the window is dropped: a read that starts mid-file
+   * almost certainly starts mid-line, and half a JSON object is not a record.
+   */
+  async searchTail(marker, limit = TAIL_WINDOW_BYTES, path = this.hookLogPath()) {
+    const handle = await open(path, "r").catch(() => void 0);
+    if (!handle) return void 0;
+    try {
+      const { size } = await handle.stat();
+      const window = Math.min(size, limit);
+      if (window === 0) return void 0;
+      const buffer = Buffer.allocUnsafe(window);
+      const { bytesRead } = await handle.read(buffer, 0, window, size - window);
+      const lines = buffer.subarray(0, bytesRead).toString("utf8").split("\n");
+      if (window < size) lines.shift();
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        if (!lines[index].includes(marker)) continue;
+        try {
+          const row = JSON.parse(lines[index]);
+          if (typeof row.recordedAt === "string") return row.recordedAt;
+        } catch {
+          continue;
+        }
+      }
+      return void 0;
+    } catch {
+      return void 0;
+    } finally {
+      await handle.close().catch(() => void 0);
+    }
+  }
+  prefsPath() {
+    return this.paths.prefsPath ?? join4(homedir4(), ".anthill", "live-observation-setup.json");
+  }
+  async readPrefs() {
+    let merged = {};
+    const legacy = this.paths.prefsPath ? [] : [
+      join4(homedir4(), "Library/Application Support/@anthill/desktop/live-observation-setup.json"),
+      join4(homedir4(), ".config/@anthill/desktop/live-observation-setup.json"),
+      join4(homedir4(), ".anthill/cli/live-observation-setup.json")
+    ];
+    for (const path of [...legacy, ...this.paths.legacyPrefsPaths ?? [], this.prefsPath()]) {
+      let prefs;
+      try {
+        prefs = JSON.parse(await readFile(path, "utf8"));
+      } catch {
+        continue;
+      }
+      if (!prefs || typeof prefs !== "object" || Array.isArray(prefs)) continue;
+      const harnesses = { ...merged.harnesses };
+      for (const id of Object.keys(HARNESS)) {
+        if (prefs.harnesses?.[id]) harnesses[id] = { ...harnesses[id], ...prefs.harnesses[id] };
+      }
+      merged = { ...merged, ...prefs, harnesses };
+    }
+    return merged;
+  }
+  async writePrefs(prefs) {
+    const path = this.prefsPath();
+    await mkdir(dirname2(path), { recursive: true });
+    await writeFile(path, `${JSON.stringify(prefs, null, 2)}
+`, "utf8");
+  }
+  async updatePrefs(update) {
+    await this.writePrefs(update(await this.readPrefs()));
+  }
+  async recordHarnessAction(harness, action) {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await this.updatePrefs((prefs) => ({
+      ...prefs,
+      dismissed: true,
+      harnesses: {
+        ...prefs.harnesses ?? {},
+        [harness]: action === "install" ? { installedAt: now, declinedAt: null, declinedFor: null } : { ...prefs.harnesses?.[harness] ?? {}, disabledAt: now }
+      }
+    }));
+  }
+  async readJsonObject(path) {
+    const text = await readFile(path, "utf8").catch((error51) => {
+      if (error51.code === "ENOENT") return "";
+      throw error51;
+    });
+    if (!text.trim()) return {};
+    const parsed = JSON.parse(text);
+    if (!isRecord(parsed)) throw new Error(`${path} is not a JSON object.`);
+    return parsed;
+  }
+  async backup(path) {
+    const exists = await stat(path).then(
+      (info) => info.isFile(),
+      () => false
+    );
+    if (!exists) return void 0;
+    const backupPath = `${path}.anthill-backup-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}`;
+    await copyFile(path, backupPath);
+    return backupPath;
+  }
+};
+function commandFor(harness, event, hookHandlerPath, execPath) {
+  return `ELECTRON_RUN_AS_NODE=1 "${execPath}" "${hookHandlerPath}" ${OWNER_MARKER} ${harness} ${event}`;
+}
+__name(commandFor, "commandFor");
+function hookEntry(harness, event, def, hookHandlerPath, execPath) {
+  const entry = {
+    hooks: [
+      {
+        type: "command",
+        command: commandFor(harness, event, hookHandlerPath, execPath)
+      }
+    ]
+  };
+  if (def.matcherEvents.has(event)) entry.matcher = "*";
+  return entry;
+}
+__name(hookEntry, "hookEntry");
+function withAnthillHooks(config2, def, harness, hookHandlerPath, execPath) {
+  const hooks = hooksObject(config2);
+  for (const event of def.events) {
+    const existing = entriesFor(hooks[event]).filter((entry) => !isAnthillEntry(entry));
+    hooks[event] = [...existing, hookEntry(harness, event, def, hookHandlerPath, execPath)];
+  }
+  return { ...config2, hooks };
+}
+__name(withAnthillHooks, "withAnthillHooks");
+function withoutAnthillHooks(config2, def) {
+  const hooks = hooksObject(config2);
+  for (const event of def.events) {
+    hooks[event] = entriesFor(hooks[event]).filter((entry) => !isAnthillEntry(entry));
+  }
+  return { ...config2, hooks };
+}
+__name(withoutAnthillHooks, "withoutAnthillHooks");
+var SHELL_METACHARACTERS = /[;|&$`><(){}[\]!*?~\n\r\\#]/;
+var QUOTED_METACHARACTERS = /[$`\\\n\r]/;
+function tokenise(command) {
+  const tokens = [];
+  let index = 0;
+  while (index < command.length) {
+    while (index < command.length && command[index] === " ") index += 1;
+    if (index >= command.length) break;
+    if (command[index] === '"') {
+      const end2 = command.indexOf('"', index + 1);
+      if (end2 === -1) return void 0;
+      tokens.push({ value: command.slice(index + 1, end2), quoted: true });
+      index = end2 + 1;
+      if (index < command.length && command[index] !== " ") return void 0;
+      continue;
+    }
+    const end = command.indexOf(" ", index);
+    const stop = end === -1 ? command.length : end;
+    const token = command.slice(index, stop);
+    if (token.includes('"')) return void 0;
+    tokens.push({ value: token, quoted: false });
+    index = stop;
+  }
+  return tokens;
+}
+__name(tokenise, "tokenise");
+function parseHookCommand(command) {
+  const tokens = tokenise(command);
+  if (!tokens) return void 0;
+  for (const token of tokens) {
+    const forbidden = token.quoted ? QUOTED_METACHARACTERS : SHELL_METACHARACTERS;
+    if (forbidden.test(token.value)) return void 0;
+  }
+  const words = tokens.map((token) => token.value);
+  const rest = words[0] === "ELECTRON_RUN_AS_NODE=1" ? words.slice(1) : words;
+  if (rest.length !== 5) return void 0;
+  const [execPath, handlerPath, marker, harness, event] = rest;
+  if (marker !== OWNER_MARKER) return void 0;
+  if (!/^[a-z-]+$/.test(harness) || !/^[A-Za-z]+$/.test(event)) return void 0;
+  const runnable = execPath.startsWith("/") && handlerPath.startsWith("/");
+  return { execPath, handlerPath, harness, event, runnable };
+}
+__name(parseHookCommand, "parseHookCommand");
+var HANDLER_HEAD_BYTES = 256 * 1024;
+async function anthillElsewhere(parsed) {
+  if (!existsSync3(parsed.execPath)) return false;
+  if (await carriesMarker(parsed.handlerPath)) return true;
+  const inside = parsed.handlerPath.indexOf(".asar/");
+  return inside > 0 && existsSync3(parsed.handlerPath.slice(0, inside + ".asar".length));
+}
+__name(anthillElsewhere, "anthillElsewhere");
+async function carriesMarker(path) {
+  const handle = await open(path, "r").catch(() => void 0);
+  if (!handle) return false;
+  try {
+    const buffer = Buffer.alloc(HANDLER_HEAD_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, HANDLER_HEAD_BYTES, 0);
+    return buffer.subarray(0, bytesRead).toString("utf8").includes(OWNER_MARKER);
+  } catch {
+    return false;
+  } finally {
+    await handle.close().catch(() => void 0);
+  }
+}
+__name(carriesMarker, "carriesMarker");
+function anthillShaped(command, harness, event) {
+  const parsed = parseHookCommand(command);
+  return Boolean(parsed && isHookHarnessId(parsed.harness) && parsed.harness === harness && parsed.event === event);
+}
+__name(anthillShaped, "anthillShaped");
+function anthillCommands(config2, def) {
+  const hooks = isRecord(config2.hooks) ? config2.hooks : {};
+  const out = [];
+  for (const event of def.events) {
+    for (const entry of entriesFor(hooks[event])) {
+      if (typeof entry.command === "string" && parseHookCommand(entry.command)) {
+        out.push({ command: entry.command, event });
+        continue;
+      }
+      for (const hook of Array.isArray(entry.hooks) ? entry.hooks : []) {
+        if (isRecord(hook) && typeof hook.command === "string" && hook.command.includes(OWNER_MARKER)) {
+          out.push({ command: hook.command, event });
+        }
+      }
+    }
+  }
+  return out;
+}
+__name(anthillCommands, "anthillCommands");
+function hasEveryAnthillHook(config2, def) {
+  const hooks = isRecord(config2.hooks) ? config2.hooks : {};
+  return def.events.every((event) => entriesFor(hooks[event]).some(isAnthillEntry));
+}
+__name(hasEveryAnthillHook, "hasEveryAnthillHook");
+function hooksObject(config2) {
+  return isRecord(config2.hooks) ? { ...config2.hooks } : {};
+}
+__name(hooksObject, "hooksObject");
+function entriesFor(value) {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+__name(entriesFor, "entriesFor");
+function isAnthillEntry(entry) {
+  if (typeof entry.command === "string" && entry.command.includes(OWNER_MARKER)) return true;
+  const hooks = Array.isArray(entry.hooks) ? entry.hooks : [];
+  return hooks.some(
+    (hook) => isRecord(hook) && typeof hook.command === "string" && hook.command.includes(OWNER_MARKER)
+  );
+}
+__name(isAnthillEntry, "isAnthillEntry");
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+__name(isRecord, "isRecord");
+function trimVersion(version2) {
+  return version2.replace(/\s*\([^)]*\)\s*$/, "").trim();
+}
+__name(trimVersion, "trimVersion");
+function labelEvent(event) {
+  return event.replace(/([a-z])([A-Z])/g, "$1 $2").replace("Pre Tool Use", "Tool start").replace("Post Tool Use", "Tool completion").replace("User Prompt Submit", "User prompt submit");
+}
+__name(labelEvent, "labelEvent");
+function isHookHarnessId(value) {
+  return typeof value === "string" && Object.hasOwn(HARNESS, value);
+}
+__name(isHookHarnessId, "isHookHarnessId");
+function handlerPresent(path) {
+  if (existsSync3(path)) return true;
+  const inside = path.indexOf(".asar/");
+  return inside > 0 && existsSync3(path.slice(0, inside + 5));
+}
+__name(handlerPresent, "handlerPresent");
+
+// apps/cli/src/observation.ts
+async function observationCommand(action, service = new ObservationSetupService(observationRuntime()), cwd = process.cwd()) {
+  if (!["status", "enable", "skip"].includes(action ?? "")) {
+    return { exitCode: 1, result: { error: "Usage: anthill observation status|enable|skip. Run from the project directory." } };
+  }
+  if (action === "skip") {
+    await service.decline("codex");
+    return { exitCode: 0, result: { outcome: "skipped", offer: false, message: "Use basic progress. Do not ask about detailed progress again unless the user asks, or until Anthill's hooks change." } };
+  }
+  const sessionId = process.env.CODEX_SESSION_ID?.trim() || void 0;
+  let status = await service.status(cwd, false, sessionId);
+  let harness = status.harnesses.find((harness2) => harness2.id === "codex");
+  if (action === "enable" && !harness?.cliAvailable) {
+    return { exitCode: 1, result: { error: "Codex CLI was not found. Basic progress remains available." } };
+  }
+  if (action === "enable" && (!harness?.hookInstalled || harness.hookUsesCurrentRuntime === false || harness.observationDeclined)) {
+    const installed = await service.install("codex", cwd);
+    if (!installed.ok) return { exitCode: 1, result: { error: installed.error, offer: false } };
+    status = installed.status;
+    harness = status.harnesses.find((harness2) => harness2.id === "codex");
+  }
+  const broken = Boolean(harness?.hookEntriesPresent && !harness.hookInstalled);
+  const ask = harness?.observationPrompt ?? null;
+  return { exitCode: 0, result: {
+    // What to put to the user now, if anything: "connect", "trust", "hint".
+    ask,
+    // Kept for callers that read the older field.
+    offer: ask === "connect",
+    installed: harness?.hookInstalled ?? false,
+    state: broken ? "broken" : harness?.codexHooks?.state ?? (harness?.cliAvailable ? "not-installed" : "unavailable"),
+    confirmedInSession: harness?.codexHooks?.confirmedInSession ?? false,
+    message: askMessage(ask, harness, broken),
+    requiresHostAccess: harness?.codexHooks?.requiresHostAccess ?? false,
+    lastEventAt: harness?.hookLastEventAt ?? null
+  } };
+}
+__name(observationCommand, "observationCommand");
+function askMessage(ask, harness, broken) {
+  if (broken) {
+    return `${harness?.hookProblem ?? "The Anthill hook handler could not run."} ${ask === "connect" ? "Ask: Connect to repair it, or Continue with basic progress." : "Basic progress remains available."}`;
+  }
+  if (ask === "connect") {
+    return broken || harness?.hookEntriesPresent ? "Anthill's hooks need to be reconnected to this Anthill. They let Anthill show the agent's actions and detailed progress. Ask: Connect, or Continue with basic progress." : "Anthill's hooks are not connected. They let Anthill show the agent's actions and detailed progress; basic progress works without them. Ask: Connect, or Continue with basic progress.";
+  }
+  if (ask === "trust") {
+    return "Codex has Anthill's hooks but has not approved them. Ask the user to type /hooks in Codex, choose Review hooks, and allow only the entries containing anthill-observation-hook. Do not suggest Trust all. Basic progress keeps working meanwhile.";
+  }
+  if (ask === "hint") {
+    return `Anthill could not confirm the state of its hooks in Codex; that does not mean they are unapproved. ${harness?.codexHooks?.message ?? ""} Basic progress keeps working.`.replace(/\s+/g, " ").trim();
+  }
+  return harness?.codexHooks?.message ?? harness?.hookInstallProblem ?? "Basic progress works without detailed observation.";
+}
+__name(askMessage, "askMessage");
+
+// apps/cli/src/paths.ts
+import { homedir as homedir5 } from "node:os";
+import { join as join5, resolve } from "node:path";
+var DEFAULT_DATA_DIR = ".anthill/cli";
+async function resolvePaths(options) {
+  const home = homedir5();
+  const dataDir = options?.dataDir;
+  const userData = dataDir ? resolve(dataDir) : join5(home, DEFAULT_DATA_DIR);
+  return { userData, home };
+}
+__name(resolvePaths, "resolvePaths");
+
 // apps/cli/src/report.ts
+import { appendFile, mkdir as mkdir2 } from "node:fs/promises";
+import { join as join6 } from "node:path";
 var REPORT_FILE_NAME = "harness-reports.jsonl";
 function reportPath(paths) {
-  return join5(paths.userData, REPORT_FILE_NAME);
+  return join6(paths.userData, REPORT_FILE_NAME);
 }
 __name(reportPath, "reportPath");
 async function appendReport(paths, report) {

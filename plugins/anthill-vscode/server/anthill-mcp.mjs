@@ -1,4 +1,4 @@
-// Anthill MCP server 0.8.7, built by scripts/build-plugin-server.mjs
+// Anthill MCP server 0.8.8, built by scripts/build-plugin-server.mjs
 // from https://github.com/nstr/anthill. Do not edit: run
 // `npm run plugin:bundle` to write it again. MIT licensed.
 import { createRequire as __anthillCreateRequire } from "node:module";
@@ -34150,7 +34150,8 @@ var CLAUDE_CODE = {
   supportsReasoningEffort: false,
   agentDir: ".claude/agents",
   agentFileFormat: "markdown",
-  supportsPerAgentModel: true
+  supportsPerAgentModel: true,
+  liveHooks: true
 };
 var CODEX = {
   target: "codex",
@@ -34164,7 +34165,8 @@ var CODEX = {
   supportsReasoningEffort: true,
   agentDir: ".codex/agents",
   agentFileFormat: "toml",
-  supportsPerAgentModel: true
+  supportsPerAgentModel: true,
+  liveHooks: true
 };
 var PI = {
   target: "pi",
@@ -34176,12 +34178,26 @@ var PI = {
   // naming one.
   defaultModel: "the session's model",
   supportsReasoningEffort: true,
-  supportsPerAgentModel: false
+  supportsPerAgentModel: false,
+  // pi's hooks are TypeScript extensions it loads itself; there is no config to write.
+  liveHooks: false
+};
+var VSCODE = {
+  target: "vscode",
+  displayName: "VS Code",
+  models: [],
+  modelsAreDeclared: false,
+  defaultModel: "the session's model",
+  supportsReasoningEffort: false,
+  supportsPerAgentModel: false,
+  // `~/.copilot/hooks/anthill.json`, which VS Code's agent reads by default.
+  liveHooks: true
 };
 var HARNESS_PROFILES = {
   "claude-code": CLAUDE_CODE,
   codex: CODEX,
-  pi: PI
+  pi: PI,
+  vscode: VSCODE
 };
 function harnessProfile(target) {
   return HARNESS_PROFILES[target];
@@ -34189,11 +34205,19 @@ function harnessProfile(target) {
 __name(harnessProfile, "harnessProfile");
 var DEFAULT_TARGET = "claude-code";
 
+// packages/workflow/dist/plugin-harness.js
+var PLUGIN_HARNESSES = ["claude-code", "codex", "vscode"];
+function isPluginHarness(value) {
+  return typeof value === "string" && PLUGIN_HARNESSES.includes(value);
+}
+__name(isPluginHarness, "isPluginHarness");
+
 // packages/workflow-schema/dist/types.js
 var HARNESS_TARGETS = [
   "claude-code",
   "codex",
-  "pi"
+  "pi",
+  "vscode"
 ];
 var NODE_ID_PATTERN = /^[A-Za-z0-9_.:-]+$/;
 var EDGE_ANCHORS = [
@@ -37991,6 +38015,8 @@ function harnessName(harness) {
     return "Codex";
   if (harness === "pi")
     return "pi";
+  if (harness === "vscode")
+    return "VS Code";
   return harness;
 }
 __name(harnessName, "harnessName");
@@ -39373,7 +39399,10 @@ function compare(a, b) {
 __name(compare, "compare");
 var UPDATE = {
   "claude-code": "run `claude plugin update anthill@anthill`, then start a new session",
-  codex: "reinstall the Anthill plugin in Codex (`codex plugin marketplace upgrade anthill-local`, then `codex plugin add anthill@anthill-local`), then start a new task"
+  codex: "reinstall the Anthill plugin in Codex (`codex plugin marketplace upgrade anthill-local`, then `codex plugin add anthill@anthill-local`), then start a new task",
+  // VS Code has no command for it: a plugin is updated or reinstalled from its
+  // plugins list.
+  vscode: "update or reinstall the Anthill agent plugin in VS Code, then start a new chat"
 };
 function pluginDriftNotice(installed, host, server) {
   if (!installed?.trim())
@@ -39382,7 +39411,7 @@ function pluginDriftNotice(installed, host, server) {
   const want = release(server);
   if (!have || !want || have === want)
     return void 0;
-  const how = UPDATE[host === "codex" ? "codex" : "claude-code"];
+  const how = UPDATE[isPluginHarness(host) ? host : "claude-code"];
   if (compare(have, want) < 0) {
     return `The Anthill plugin installed in this harness is ${have}, but the Anthill it is talking to is ${want}. Its skill and instructions are out of date and may describe behaviour Anthill no longer has. Before relying on them, tell the user: to update it, ${how}.`;
   }
@@ -39424,7 +39453,7 @@ which one, and nothing is stored.`,
       idempotencyKey: external_exports.unknown().optional().describe("Your own key for this handover, repeated verbatim if you retry it. It is not an address: a submission lands on the id its workflow document carries, and this key is your promise that a second submission under that id is the same call rather than different work. The same key under a different document id creates a second workflow rather than revising the first."),
       mode: external_exports.unknown().optional().describe('Which of the two things the user asked for. "design" means they want a workflow of their own: Anthill opens it in the editor, and they read, change and save it. "watch" means they want to see the work happen: you composed the graph yourself and are already doing the work, so Anthill opens the Live Session and there is no editing step. It chooses which screen the handover lands on and holds no work back \u2013 nothing here can stop a harness working, and what decides whether work starts is the user telling you to. The older names "show-and-go" and "approval-gate" are still accepted and both read as "design".'),
       source: external_exports.object({
-        harness: external_exports.unknown().optional().describe('Which tool you are: "claude-code", "codex" or "pi".'),
+        harness: external_exports.unknown().optional().describe('Which tool you are: "claude-code", "codex", "pi" or "vscode".'),
         sessionId: external_exports.unknown().optional().describe("Your own identifier for this conversation: letters, digits, hyphens and underscores. Anthill does not read it, but it writes it down and matches it against your own session files, so a run started from this handover can be picked up again after it goes quiet."),
         taskText: external_exports.unknown().optional().describe("What the user asked for, in the user's own words rather than your summary of it. Anthill shows this back to them so they can check it understood the same job they did, and it is written down once at the handover: nothing said later replaces it, and it is not in the document they can edit. Quote them.")
       }).optional().describe("Who is handing this over, and what they were asked to do: all three of harness, sessionId and taskText."),
@@ -39576,7 +39605,7 @@ __name(registerExchangeTools, "registerExchangeTools");
 
 // apps/mcp/dist/server.js
 var SERVER_NAME = "anthill";
-var SERVER_VERSION = true ? "0.8.7" : String(createRequire(import.meta.url)("../package.json").version ?? "0.0.0");
+var SERVER_VERSION = true ? "0.8.8" : String(createRequire(import.meta.url)("../package.json").version ?? "0.0.0");
 var TRANSPORT_FAILURE_EXIT_CODE = 1;
 function transportFailureLine(error51) {
   const reason = error51 instanceof Error ? error51.message : String(error51);

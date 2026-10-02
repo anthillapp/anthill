@@ -294,6 +294,16 @@ export class HookLogObserver {
       const at = str(row.recordedAt) ?? now;
       const toolName = str(data.tool_name);
 
+      /*
+        A VS Code tool call the hook cannot name. The Copilot harness — what
+        VS Code's Agent mode runs by default — hands hooks no call id and no
+        result in the shape read here, so every call would be drawn a second
+        time beside the one its own session record already carries, with an id
+        and its real outcome, and drawn as failed. The workbench's own harness
+        does send the id, and its calls are kept.
+      */
+      if (cli === "vscode" && (kind === "tool.start" || kind === "tool.end") && !str(data.tool_use_id)) continue;
+
       // Opened and closed, tracked by the id the tool call carries. A call
       // with no id cannot be paired, so it is not counted either way.
       if (name === "UserPromptSubmit") this.doneFor.delete(run.anthillRunId);

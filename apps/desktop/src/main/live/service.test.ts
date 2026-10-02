@@ -2153,6 +2153,12 @@ describe("a run handed over from VS Code", () => {
       source: "anthill-observation-hook", harness: "vscode", eventType: "PreToolUse", recordedAt: "2026-08-29T10:00:06.000Z",
       data: { session_id: chat, hook_event_name: "PreToolUse", tool_name: "run_in_terminal", tool_use_id: "call_hook" },
     }) + "\n");
+    // The Copilot harness's hooks carry no call id; its session record has the
+    // call already, so the hook's copy is not drawn a second time.
+    await appendFile(h.hookLogPath, JSON.stringify({
+      source: "anthill-observation-hook", harness: "vscode", eventType: "PreToolUse", recordedAt: "2026-08-29T10:00:06.500Z",
+      data: { session_id: chat, hook_event_name: "PreToolUse", tool_name: "id_less_tool" },
+    }) + "\n");
     // The same event through Claude Code's entries, which VS Code runs too
     // when `chat.useClaudeHooks` is on. It is not this run's harness speaking.
     await appendFile(h.hookLogPath, JSON.stringify({
@@ -2176,6 +2182,7 @@ describe("a run handed over from VS Code", () => {
       expect(events.some((event) => event.channel === "vscode:chat" && event.toolName === "run_in_terminal")).toBe(true);
       expect(events.some((event) => event.source === "hook" && event.toolUseId === "call_hook")).toBe(true);
       expect(events.some((event) => event.toolUseId === "call_twice")).toBe(false);
+      expect(events.some((event) => event.toolName === "id_less_tool")).toBe(false);
       expect(events.filter((event) => event.channel === "exchange:session-mismatch")).toEqual([]);
     } finally {
       h.service.stop();

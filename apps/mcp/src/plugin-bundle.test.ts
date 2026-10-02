@@ -55,7 +55,7 @@ async function initializeInstalledCopy(plugin: string): Promise<{ code: number |
 }
 
 describe("a plugin installed on its own", () => {
-  for (const plugin of ["plugins/anthill", "plugins/anthill-cli"]) {
+  for (const plugin of ["plugins/anthill-claude", "plugins/anthill-codex"]) {
     it(`starts the server ${plugin} carries, with nothing configured`, async () => {
       const { code, stdout, stderr } = await initializeInstalledCopy(plugin);
       expect(code, stderr).toBe(0);

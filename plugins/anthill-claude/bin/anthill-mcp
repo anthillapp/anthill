@@ -4,7 +4,7 @@
  *
  * Where the plugin runs from depends on how it was installed, so it cannot
  * reach anything outside itself by a relative path. Installed from a local
- * marketplace, `CLAUDE_PLUGIN_ROOT` is the checkout's own `plugins/anthill`,
+ * marketplace, `CLAUDE_PLUGIN_ROOT` is the checkout's own `plugins/anthill-claude`,
  * and `../../apps/mcp/dist/server.js` would in fact resolve — but the same
  * plugin fetched from a git marketplace is a copy of this directory and nothing
  * else, where that path climbs out of the plugin into whatever happens to be

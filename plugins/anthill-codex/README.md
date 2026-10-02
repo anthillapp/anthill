@@ -20,7 +20,7 @@ You need [Anthill](https://github.com/nstr/anthill) itself, and Node.js on your
 
 ```bash
 codex plugin marketplace add nstr/anthill
-codex plugin add anthill-cli@anthill-local
+codex plugin add anthill@anthill-local
 ```
 
 Start a new Codex task after installation. Plugins are loaded when a task
@@ -32,7 +32,7 @@ nothing else to build or configure. To update it later:
 
 ```bash
 codex plugin marketplace upgrade anthill-local
-codex plugin add anthill-cli@anthill-local
+codex plugin add anthill@anthill-local
 ```
 
 Check each local surface independently:
@@ -78,7 +78,7 @@ npm install --global ./apps/cli
 mkdir -p ~/.anthill
 printf '{"server": "%s/apps/mcp/dist/server.js"}\n' "$PWD" > ~/.anthill/plugin.json
 codex plugin marketplace add "$PWD"
-codex plugin add anthill-cli@anthill-local
+codex plugin add anthill@anthill-local
 ```
 
 The plugin can also locate the server through `ANTHILL_MCP_SERVER` (the absolute
@@ -178,8 +178,8 @@ After pulling changes from this local checkout, reinstall so Codex copies a
 fresh plugin version into its cache:
 
 ```bash
-codex plugin remove anthill-cli@anthill-local
-codex plugin add anthill-cli@anthill-local
+codex plugin remove anthill@anthill-local
+codex plugin add anthill@anthill-local
 ```
 
 `codex plugin marketplace upgrade` refreshes Git-backed marketplaces; it is
@@ -189,7 +189,7 @@ Use the Codex Plugins UI to disable the plugin without deleting it. To remove
 the cached installation:
 
 ```bash
-codex plugin remove anthill-cli@anthill-local
+codex plugin remove anthill@anthill-local
 ```
 
 Removing the plugin does not remove `~/.anthill/plugin.json`, workflows,

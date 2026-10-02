@@ -95,7 +95,7 @@ describe("where the plugin is installed from", () => {
     const root = await home();
     const dir = await checkout(root);
     const base: PluginStatus = {
-      harnesses: [status(), status({ harness: "codex", label: "Codex", plugin: "anthill-cli" })],
+      harnesses: [status(), status({ harness: "codex", label: "Codex", plugin: "anthill" })],
       server: { configured: false, settingsFile: "/x" },
     };
     expect(installSource(base)).toBeUndefined();
@@ -131,10 +131,10 @@ describe("the tools' own commands", () => {
   });
 
   it("uses Codex's own verbs and marketplace", () => {
-    const codex = status({ harness: "codex", label: "Codex", plugin: "anthill-cli" });
+    const codex = status({ harness: "codex", label: "Codex", plugin: "anthill" });
     expect(installSteps(codex, "/src", false).map((step) => [step.command, ...step.args].join(" "))).toEqual([
       "codex plugin marketplace add /src",
-      "codex plugin add anthill-cli@anthill-local",
+      "codex plugin add anthill@anthill-local",
     ]);
   });
 });
@@ -157,7 +157,7 @@ describe("installing", () => {
     const dir = await home();
     const { calls, spawnFn } = tools();
     expect(await installPlugin("codex", { home: dir, spawnFn, interpreters: async () => [] })).toEqual({ ok: true });
-    expect(calls).toEqual([`codex plugin marketplace add ${GITHUB_SOURCE}`, "codex plugin add anthill-cli@anthill-local"]);
+    expect(calls).toEqual([`codex plugin marketplace add ${GITHUB_SOURCE}`, "codex plugin add anthill@anthill-local"]);
   });
 
   it("refuses up front when the server it would launch is not built", async () => {

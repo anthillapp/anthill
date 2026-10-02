@@ -31,7 +31,7 @@ const PLUGINS: PluginStatus = {
       marketplace: "anthill",
       checkout: "/Users/me/anthill",
     },
-    { harness: "codex", label: "Codex", plugin: "anthill-cli", toolFound: true, installed: false, enabled: false },
+    { harness: "codex", label: "Codex", plugin: "anthill", toolFound: true, installed: false, enabled: false },
   ],
   server: { configured: true, settingsFile: "/Users/me/.anthill/plugin.json", path: "/Users/me/anthill/apps/mcp/dist/server.js", exists: true },
 };

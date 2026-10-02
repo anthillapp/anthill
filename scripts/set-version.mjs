@@ -69,17 +69,17 @@ for (const group of ["apps", "packages"]) {
 }
 for (const path of packages) setVersion(path, version);
 
-setVersion("plugins/anthill/.claude-plugin/plugin.json", version);
+setVersion("plugins/anthill-claude/.claude-plugin/plugin.json", version);
 setVersion(".claude-plugin/marketplace.json", version);
 
 // A new build suffix only when the version itself moved: re-running the
 // script for the same version is then a no-op, as it is everywhere else.
 const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
-setVersion("plugins/anthill-cli/.codex-plugin/plugin.json", (current) =>
+setVersion("plugins/anthill-codex/.codex-plugin/plugin.json", (current) =>
   current.split("+")[0] === version ? current : `${version}+codex.${stamp}`,
 );
 
-const skill = "plugins/anthill/skills/workflow/SKILL.md";
+const skill = "plugins/anthill-claude/skills/workflow/SKILL.md";
 const text = readFileSync(join(ROOT, skill), "utf8");
 if (!/^version:/m.test(text)) {
   process.stderr.write(`${skill} has no version: line in its frontmatter\n`);

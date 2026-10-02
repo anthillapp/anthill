@@ -5,10 +5,10 @@
   },
   "plugins": [
     {
-      "name": "anthill-cli",
+      "name": "anthill",
       "source": {
         "source": "local",
-        "path": "./plugins/anthill-cli"
+        "path": "./plugins/anthill-codex"
       },
       "policy": {
         "installation": "AVAILABLE",

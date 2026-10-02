@@ -22,7 +22,7 @@ function connection(harness: "claude-code" | "codex", over: Partial<PluginConnec
     status: {
       harness,
       label,
-      plugin: harness === "codex" ? "anthill-cli" : "anthill",
+      plugin: "anthill",
       toolFound: true,
       installed: false,
       enabled: false,

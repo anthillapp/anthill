@@ -6,13 +6,13 @@
  *
  * A plugin installed from a marketplace or a directory is a copy of its own
  * folder and nothing else, so a server it has to find elsewhere is a server a
- * person has to point it at. This writes two files into plugins/anthill
- * (Claude Code) and plugins/anthill-cli (Codex), each one ES module with
+ * person has to point it at. This writes two files into plugins/anthill-claude
+ * (Claude Code) and plugins/anthill-codex (Codex), each one ES module with
  * everything it imports, the @anthill packages and the npm ones, that needs
  * nothing but Node:
  *
  *   server/anthill-mcp.mjs     the MCP server; the launcher starts it when
- *                              nothing names another (plugins/anthill/bin/anthill-mcp)
+ *                              nothing names another (plugins/anthill-claude/bin/anthill-mcp)
  *   server/anthill-report.mjs  `run/step/done` alone (apps/cli/src/report-main.ts);
  *                              the server hands it to a harness with no
  *                              `anthill` on its PATH (apps/mcp/src/report-command.ts)
@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const PLUGINS = ["plugins/anthill", "plugins/anthill-cli"];
+const PLUGINS = ["plugins/anthill-claude", "plugins/anthill-codex"];
 const BUNDLES = [
   { entry: join(ROOT, "apps", "mcp", "dist", "server.js"), file: "anthill-mcp.mjs", title: "MCP server" },
   { entry: join(ROOT, "apps", "cli", "src", "report-main.ts"), file: "anthill-report.mjs", title: "progress reporter" },

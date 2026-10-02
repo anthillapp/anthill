@@ -18,7 +18,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { AnthillMark } from "../AnthillMark.js";
-import { interpreterLogo } from "../workflow/interpreter-logos.js";
+import { interpreterLogoBackground } from "../workflow/interpreter-logos.js";
 import { PluginCard } from "../plugin/PluginCard.js";
 import { readyTools } from "../plugin/plugin-card.js";
 import { usePluginConnections, type Harness } from "../plugin/usePluginConnections.js";
@@ -220,8 +220,13 @@ function Connect({
 
         <div className="ob-path" aria-label="How the handover works" role="img">
           <span>
-            <i style={{ backgroundImage: `url(${interpreterLogo("codex")})` }} />
-            <i className="is-second" style={{ backgroundImage: `url(${interpreterLogo("claude-code")})` }} />
+            {TOOLS.map((tool, index) => (
+              <i
+                key={tool.id}
+                className={index > 0 ? "is-second" : undefined}
+                style={{ backgroundImage: interpreterLogoBackground(tool.id) }}
+              />
+            ))}
             Describe the task
           </span>
           <span className="arrow">→</span>

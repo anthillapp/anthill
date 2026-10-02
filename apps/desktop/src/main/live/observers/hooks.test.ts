@@ -186,7 +186,7 @@ describe("hook lines as evidence the session is alive", () => {
     ]);
     const { evidence } = await new HookLogObserver(path).poll(pending(), new Date().toISOString());
     // One piece of evidence for the poll, at the moment of the latest line.
-    expect(evidence).toEqual([{ kind: "activity", resumes: true, sessionId: "sess-1", at: "2026-08-29T10:00:04.000Z" }]);
+    expect(evidence).toEqual([{ kind: "activity", resumes: true, sessionId: "sess-1", channel: "claude-code:hook", at: "2026-08-29T10:00:04.000Z" }]);
   });
 
   it("says nothing about a line that belongs to another session", async () => {

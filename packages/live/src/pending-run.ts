@@ -340,6 +340,25 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
 }
 
 /**
+ * The evidence a bound run names before any record of the session has.
+ *
+ * Not a channel anything is read through: the plugin's binding itself, which
+ * is the one thing the run has as evidence until a record is read.
+ */
+export const BOUND_CHANNEL = "exchange:bind";
+
+/**
+ * The channel a run keeps: the first one that named itself.
+ *
+ * The placeholder is the exception. It stands in only until a record names
+ * where it came from, and the first one that does takes its place.
+ */
+function firstNamedChannel(run: PendingRun, channel: string | undefined): string | undefined {
+  if (run.evidenceChannel && run.evidenceChannel !== BOUND_CHANNEL) return run.evidenceChannel;
+  return channel ?? run.evidenceChannel;
+}
+
+/**
  * What a run bound to its session says about the evidence behind it.
  *
  * A plugin binds a run to the session's own id, so the run never goes through
@@ -348,11 +367,17 @@ export function applyEvidence(run: PendingRun, evidence: Evidence): PendingRun {
  * confidence" for a session it was visibly reading (ANT-248). The binding is
  * the strongest evidence there is, so the first channel that confirms it is
  * named and the confidence is strong.
+ *
+ * And when that first record names no channel — an observer reporting
+ * activity says the session wrote, not through which file — the binding is
+ * named in its place (ANT-257). "No evidence · strong confidence" was the
+ * page contradicting itself about a session it was plainly reading. The
+ * placeholder yields to the first channel that does name itself.
  */
 function boundEvidence(run: PendingRun, channel: string | undefined): Pick<PendingRun, "evidenceChannel" | "confidence"> {
   if (!boundSessionId(run)) return {};
   return {
-    ...(run.evidenceChannel ?? channel ? { evidenceChannel: run.evidenceChannel ?? channel } : {}),
+    evidenceChannel: firstNamedChannel(run, channel) ?? BOUND_CHANNEL,
     confidence: run.confidence ?? "strong",
   };
 }
@@ -521,7 +546,7 @@ function foldEvidence(run: PendingRun, evidence: Evidence): PendingRun {
       return {
         ...run,
         ...boundEvidence(run, evidence.channel),
-        ...(viaReport ? { evidenceChannel: run.evidenceChannel ?? evidence.channel, confidence: run.confidence ?? "strong" as const } : {}),
+        ...(viaReport ? { evidenceChannel: firstNamedChannel(run, evidence.channel), confidence: run.confidence ?? "strong" as const } : {}),
         state: "detected_live",
         expiresAt: windowFrom(run, evidence.at),
         lastObservedAt: evidence.at,

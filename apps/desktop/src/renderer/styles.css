@@ -8772,6 +8772,17 @@ button.presence-chip {
 }
 .plugin-card.is-missing .plugin-card-logo { opacity: 0.55; filter: grayscale(1); }
 .plugin-card-name { flex: 1; min-width: 0; font-size: 16px; font-weight: 600; }
+.plugin-beta {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: 2px;
+  color: var(--ink-quiet);
+}
 .plugin-badge {
   display: inline-flex;
   align-items: center;

@@ -49,6 +49,11 @@ export type PluginHarnessInfo = {
   installsFromAnthill: boolean;
   /** The page the tool's own makers keep for installing it. */
   installGuide: string;
+  /**
+   * Shipped as a beta: it works end to end, with gaps its README names.
+   * Every surface that names the plugin says so.
+   */
+  beta: boolean;
 };
 
 export const PLUGIN_HARNESS_INFO: Record<PluginHarness, PluginHarnessInfo> = {
@@ -63,6 +68,7 @@ export const PLUGIN_HARNESS_INFO: Record<PluginHarness, PluginHarnessInfo> = {
     enablesFromCli: true,
     installsFromAnthill: true,
     installGuide: "https://code.claude.com/docs/en/setup",
+    beta: false,
   },
   codex: {
     id: "codex",
@@ -76,6 +82,7 @@ export const PLUGIN_HARNESS_INFO: Record<PluginHarness, PluginHarnessInfo> = {
     enablesFromCli: false,
     installsFromAnthill: true,
     installGuide: "https://developers.openai.com/codex/cli",
+    beta: false,
   },
   vscode: {
     id: "vscode",
@@ -95,6 +102,9 @@ export const PLUGIN_HARNESS_INFO: Record<PluginHarness, PluginHarnessInfo> = {
     enablesFromCli: false,
     installsFromAnthill: false,
     installGuide: "https://code.visualstudio.com/download",
+    // Tool calls reach Anthill from VS Code's session record, not its hooks,
+    // and the plugin is installed from VS Code's settings, not from Anthill.
+    beta: true,
   },
 };
 

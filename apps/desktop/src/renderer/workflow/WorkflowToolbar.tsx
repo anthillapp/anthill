@@ -33,7 +33,7 @@
  */
 
 import { useRef, useState } from "react";
-import { HARNESS_PROFILES } from "@anthill/workflow";
+import { HARNESS_PROFILES, PLUGIN_HARNESS_INFO, isPluginHarness } from "@anthill/workflow";
 import { HARNESS_TARGETS, type HarnessTarget } from "@anthill/workflow-schema";
 import type { Workflow } from "@anthill/workflow-schema";
 import { AnthillMark } from "../AnthillMark.js";
@@ -274,6 +274,7 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
             {HARNESS_TARGETS.map((target) => (
               <option key={target} value={target}>
                 {HARNESS_PROFILES[target].displayName}
+                {isPluginHarness(target) && PLUGIN_HARNESS_INFO[target].beta ? " (beta)" : ""}
               </option>
             ))}
           </select>

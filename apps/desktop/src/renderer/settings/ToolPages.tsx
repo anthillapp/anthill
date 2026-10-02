@@ -21,6 +21,7 @@ import {
   MODEL_TIERS,
   MODEL_TIER_LABELS,
   INTERPRETER_IDS,
+  PLUGIN_HARNESS_INFO,
   harnessProfile,
   type HarnessModelChoice,
   type InterpreterId,
@@ -477,6 +478,7 @@ function Steps({ steps }: { steps: PluginStep[] }) {
 
 function pluginNote(status: PluginHarnessStatus): string {
   const parts = [`${status.plugin}${status.marketplace ? `@${status.marketplace}` : ""}`];
+  if (PLUGIN_HARNESS_INFO[status.harness].beta) parts.unshift("Beta");
   if (status.installedVersion) parts.push(`version ${status.installedVersion}`);
   if (status.availableVersion && status.availableVersion !== status.installedVersion) {
     parts.push(`${status.availableVersion} available in the checkout`);

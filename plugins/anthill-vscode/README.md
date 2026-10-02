@@ -1,4 +1,4 @@
-# The Anthill plugin for VS Code
+# The Anthill plugin for VS Code (beta)
 
 Hands the work of a VS Code agent chat to Anthill as a workflow you can read and
 edit, then reports progress against the graph you settled on.
@@ -8,8 +8,16 @@ watches.
 
 This is VS Code's own agent-plugin format: `plugin.json` at the root,
 `.mcp.json`, and `skills/`. It needs VS Code with agent plugins (1.110 or
-later) and a chat that can use tools, such as one in Agent mode. It has not yet
-been verified end to end.
+later) and a chat that can use tools, such as one in Agent mode.
+
+**Beta.** Both modes and a copied prompt work end to end in VS Code's Agents
+window. What is still rough:
+
+* Anthill cannot install it for you; VS Code takes plugins only from its own
+  settings (see Installing).
+* Tool calls reach Anthill from VS Code's session record rather than from its
+  hooks, which carry no call id to pair a start with its end.
+* Every step runs on the chat's model; a workflow cannot pin a model per agent.
 
 ## What it gives you
 
@@ -95,18 +103,25 @@ build of an Anthill checkout; without it, the installed app.
 VS Code gives a chat no id a tool can read, so the skill makes one for each chat
 (`vscode-<uuid>`) and hands it over as the session. Anthill finds the chat
 itself by the run's nonce, which appears in the commands the agent runs after
-binding, and reads the chat as VS Code saves it under
-`workspaceStorage/<hash>/chatSessions/`: the agent's messages, which tools it
-ran and whether they worked, and whether a request finished, was stopped or
-failed. Never the model's thinking. A tool's input and output are searched
-for the run's nonce, and nothing else is taken from them.
+binding. A prompt copied from Anthill and pasted into a chat is found by the
+marker it carries.
 
-VS Code saves a chat about once a minute, when its window loses focus, and on
-exit, so the Live Session can trail the chat by that much. The steps the agent
-reports with `anthill step` arrive at once.
+Where the chat's record is depends on what runs it:
 
-A prompt copied from Anthill and pasted into a VS Code chat is found the same
-way, by the marker it carries.
+* **The Agents window, and Agent mode since VS Code 1.140**, run on the
+  Copilot agent host, which writes
+  `~/.copilot/session-state/<id>/events.jsonl` as the work happens.
+* **The workbench's own agent** (the Local harness) keeps the chat under
+  `workspaceStorage/<hash>/chatSessions/` and saves it about once a minute,
+  when its window loses focus, and on exit, so the Live Session can trail the
+  chat by that much.
+
+From either, Anthill reads the agent's messages, which tools it ran and
+whether they worked, and whether a request finished, was stopped or failed.
+Never the model's thinking. A shell command's output is searched for the
+run's markers, and a tool's input and output for the run's nonce; nothing else
+is taken from them. The steps the agent reports with `anthill step` arrive at
+once.
 
 ### Detailed progress
 
@@ -128,10 +143,8 @@ the line to add to your settings when it does not. Whether a plugin is
 switched on VS Code keeps to itself, so an installed plugin is taken as on;
 the card turns green only when the installed plugin's server answers.
 
-That is the record VS Code keeps for its own agent (Agent mode, the Local
-harness). A chat run by another harness inside VS Code, such as the Copilot
-CLI, may keep its record elsewhere; Anthill then shows the reported steps
-only.
+A chat run by a harness other than these two may keep its record elsewhere;
+Anthill then shows the reported steps only.
 
 Every step runs in the chat, on the chat's model. The agents a workflow names
 are roles in one prompt, not separate VS Code agents, and Anthill does not pin

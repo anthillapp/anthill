@@ -8,6 +8,8 @@
  * one would read as a way to install that nobody could follow.
  */
 
+import { PLUGIN_HARNESS_INFO } from "@anthill/workflow";
+
 import { interpreterLogoBackground } from "../workflow/interpreter-logos.js";
 
 import type { PluginCardView } from "./plugin-card.js";
@@ -40,7 +42,10 @@ export function PluginCard({ harness, label, view, onInstall, onCheck, onGuide, 
           aria-hidden="true"
           style={{ backgroundImage: interpreterLogoBackground(harness) }}
         />
-        <span className="plugin-card-name">{label}</span>
+        <span className="plugin-card-name">
+          {label}
+          {PLUGIN_HARNESS_INFO[harness].beta ? <span className="plugin-beta">Beta</span> : null}
+        </span>
         <span className={`plugin-badge is-${view.state}`} role="status">
           <i aria-hidden="true" />
           {view.badge}

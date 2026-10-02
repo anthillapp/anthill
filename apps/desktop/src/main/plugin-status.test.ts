@@ -253,7 +253,10 @@ describe("VS Code", () => {
     const root = join(dir, "anthill");
     await put(join(root, ".github/plugin/marketplace.json"), { plugins: [] });
     const user = join(dir, "Code", "User");
+    // As VS Code takes a local marketplace: a file URI. A bare path it ignores.
     await put(join(user, "settings.json"), { "chat.plugins.marketplaces": [root] });
+    expect((await vscodeStatus(dir, user)).checkout).toBeUndefined();
+    await put(join(user, "settings.json"), { "chat.plugins.marketplaces": [pathToFileURL(root).href] });
     expect(await vscodeStatus(dir, user)).toMatchObject({ toolFound: true, installed: false, checkout: root });
   });
 });

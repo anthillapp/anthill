@@ -315,10 +315,17 @@ export async function vscodeStatus(home: string, userDir: string = vscodeUserDir
   const settings = readJsonc(await readFile(join(userDir, "settings.json"), "utf8").catch(() => ""));
   const install = await vscodeInstall(home, settings);
   // A checkout offered as a marketplace, whether or not anything is installed
-  // from it yet: it is what the steps should name.
+  // from it yet: it is what the steps should name. VS Code takes a local
+  // marketplace only as a `file://` URI; a bare path there it ignores.
   const offered = (isRecord(settings) && Array.isArray(settings["chat.plugins.marketplaces"]) ? settings["chat.plugins.marketplaces"] : [])
-    .filter((value): value is string => typeof value === "string")
-    .map((value) => expandHome(value, home))
+    .filter((value): value is string => typeof value === "string" && /^file:\/\//i.test(value.trim()))
+    .map((value) => {
+      try {
+        return fileURLToPath(value.trim());
+      } catch {
+        return "";
+      }
+    })
     .find((value) => isAbsolute(value) && existsSync(join(value, ".github", "plugin", "marketplace.json")));
   const checkout = install?.checkout ?? offered;
   if (!install) return { ...base, ...(checkout ? { checkout } : {}) };

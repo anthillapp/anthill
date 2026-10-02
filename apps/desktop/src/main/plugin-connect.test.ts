@@ -253,4 +253,23 @@ describe("checking the server answers", () => {
     expect(connections[1]).toMatchObject({ harness: "codex", cli: { available: false } });
     expect(connections[1].serverAnswers).toBeUndefined();
   });
+
+  it("asks VS Code's plugin loaded from a folder, which has no marketplace", async () => {
+    // Settings ▸ Plugins said Installed while the onboarding card said the
+    // tool's record named no installed copy: the check wanted a marketplace.
+    if (process.platform === "win32") return;
+    const dir = await home();
+    const plugin = join(dir, "anthill/plugins/anthill-vscode");
+    await put(join(plugin, "plugin.json"), { name: "anthill", version: "0.8.7" });
+    await put(join(plugin, "bin/anthill-mcp"), ANSWERS);
+    const user = process.platform === "darwin"
+      ? join(dir, "Library/Application Support/Code/User")
+      : join(dir, ".config/Code/User");
+    await put(join(user, "settings.json"), { "chat.pluginLocations": { [plugin]: true } });
+    const connections = await pluginConnections({ home: dir, interpreters: async () => [] });
+    expect(connections.find((item) => item.harness === "vscode")).toMatchObject({
+      status: { installed: true },
+      serverAnswers: true,
+    });
+  });
 });

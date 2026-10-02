@@ -119,8 +119,12 @@ type Step = { command: string; args: string[] };
  * and which of its own commands install the plugin.
  */
 type Tool = {
-  /** The directory the tool installed the plugin into, given an installed status. */
-  installedRoot(home: string, status: PluginHarnessStatus & { marketplace: string }): Promise<string | undefined>;
+  /**
+   * The directory the tool installed the plugin into, given an installed
+   * status. Claude Code and Codex key their installs by marketplace; VS Code
+   * also loads a plugin straight from a folder, with no marketplace at all.
+   */
+  installedRoot(home: string, status: PluginHarnessStatus): Promise<string | undefined>;
   /** Whether the tool already offers the marketplace by this name. */
   marketplaceKnown(home: string, name: string): Promise<boolean>;
   installSteps(status: PluginHarnessStatus, id: string, source: string, marketplaceKnown: boolean): Step[];
@@ -129,6 +133,7 @@ type Tool = {
 const TOOLS: Record<CheckedPluginHarness, Tool> = {
   "claude-code": {
     async installedRoot(home, status) {
+      if (!status.marketplace) return undefined;
       const installs = await readJson(join(home, ".claude", "plugins", "installed_plugins.json"));
       const entry = isRecord(installs) && isRecord(installs.plugins)
         ? installs.plugins[`${status.plugin}@${status.marketplace}`]
@@ -150,6 +155,7 @@ const TOOLS: Record<CheckedPluginHarness, Tool> = {
   },
   codex: {
     async installedRoot(home, status) {
+      if (!status.marketplace) return undefined;
       // Codex keeps each installed version side by side; the newest is the one it loads.
       const dir = join(home, ".codex", "plugins", "cache", status.marketplace, status.plugin);
       try {
@@ -198,8 +204,8 @@ async function vscodeSettings(home: string): Promise<unknown> {
 
 /** The directory the tool installed the plugin into, which holds the launcher it runs. */
 export async function installedRoot(home: string, status: PluginHarnessStatus): Promise<string | undefined> {
-  if (!status.installed || !status.marketplace) return undefined;
-  return TOOLS[status.harness].installedRoot(home, { ...status, marketplace: status.marketplace });
+  if (!status.installed) return undefined;
+  return TOOLS[status.harness].installedRoot(home, status);
 }
 
 /**

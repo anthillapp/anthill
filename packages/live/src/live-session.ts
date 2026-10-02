@@ -801,6 +801,11 @@ export function foldLiveSession(
     }
     const mapping = attribute(event, index, announced, delegatedFrom);
     attributed.push({ ...event, mapping });
+    // Anthill's own notes — the session it found, a session that wrote
+    // nothing — are shown in the feed and are nothing the session did. Read
+    // as a request for a person, the note that a VS Code chat was found,
+    // which can land after the done line, left the last step waiting on you.
+    if (event.source === "anthill" && event.kind === "notification") continue;
     if (event.kind === "tool.start" && event.toolUseId && event.toolName) toolNames.set(event.toolUseId, event.toolName);
     if (event.kind === "tool.end" && event.toolUseId && mapping.blockId && event.ok !== undefined) {
       const tool = event.toolName ?? toolNames.get(event.toolUseId);

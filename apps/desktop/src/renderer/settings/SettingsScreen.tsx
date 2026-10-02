@@ -602,7 +602,7 @@ function ObservationPage() {
       {/* The lede, which used to be the nested card's own heading and two
           paragraphs. The page owns it now. */}
       <p className="settings-lede">
-        Anthill can watch the Codex or Claude Code session you start yourself
+        Anthill can watch the Codex, Claude Code or VS Code session you start yourself
         from a copied prompt. This is optional – designing workflows and copying
         prompts work without it. Hooks add permission and notification events
         and real tool durations on top of the session records Anthill already

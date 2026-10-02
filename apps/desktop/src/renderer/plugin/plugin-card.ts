@@ -117,6 +117,14 @@ export function pluginCard(connection: PluginConnection | undefined, local: Loca
         });
   }
 
+  if (!PLUGIN_HARNESS_INFO[status.harness].installsFromAnthill) {
+    // No command to run for it: the tool takes plugins from its own settings,
+    // which are the author's to edit. A button that could only fail is not offered.
+    return view("available", `${tool} is here. Add the plugin from its own settings – Settings ▸ Plugins has the line to paste.`, {
+      action: { kind: "settings", label: "Show the steps", outlined: true },
+    });
+  }
+
   if (!connection.source) {
     // Nothing to install from. The main process names a checkout or GitHub
     // every time now; this is for a main process that left it out. A button

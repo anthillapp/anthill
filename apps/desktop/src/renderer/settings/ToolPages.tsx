@@ -509,9 +509,10 @@ export function PluginsPage() {
   return (
     <>
       <p className="settings-lede">
-        Anthill&rsquo;s plugin lets Claude Code and Codex hand a workflow to this window. This
-        page reads what each tool has recorded about it. It installs nothing: the commands
-        below are the tools&rsquo; own, for you to run in a terminal.
+        Anthill&rsquo;s plugin lets Claude Code, Codex and VS Code hand a workflow to this window.
+        This page reads what each tool has recorded about it. It installs nothing: the commands
+        below are the tools&rsquo; own, for you to run in a terminal, and VS Code&rsquo;s steps are
+        lines for its own settings.
       </p>
 
       {failed ? (
@@ -553,7 +554,7 @@ export function PluginsPage() {
             // it names a checkout's own build, for working on Anthill — and
             // then a name with nothing behind it stops the plugin.
             status.server.configured
-              ? "Both plugins start the server this file names instead of their own copy. A plugin that cannot find it fails the moment it is used."
+              ? "Every plugin starts the server this file names instead of its own copy. A plugin that cannot find it fails the moment it is used."
               : `Each plugin carries its own copy of Anthill's local MCP server and starts it. ${status.server.settingsFile} only matters for pointing the plugins at a checkout's own build.`
           }
         >

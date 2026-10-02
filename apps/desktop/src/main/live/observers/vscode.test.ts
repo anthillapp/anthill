@@ -22,7 +22,7 @@ const MARKED = `<!-- Anthill run marker.\nanthill-run-id: ${RUN_ID}\nanthill-non
 /** A moment a little after the run was created, so events count as this run's. */
 const T = Date.now();
 
-function run(bound?: string): PendingRun {
+function run(bound?: string, resolved?: string): PendingRun {
   const made = createPendingRun({
     anthillRunId: RUN_ID,
     correlationNonce: NONCE,
@@ -31,7 +31,9 @@ function run(bound?: string): PendingRun {
     bootstrapPromptHash: "abcd1234",
     now: new Date(T - 5_000).toISOString(),
   });
-  return bound ? { ...made, exchange: { revision: 1, digest: "d", sessionId: bound } } : made;
+  return bound
+    ? { ...made, exchange: { revision: 1, digest: "d", sessionId: bound, ...(resolved ? { resolvedSessionId: resolved } : {}) } }
+    : made;
 }
 
 type Line = Record<string, unknown>;
@@ -174,7 +176,7 @@ describe("the VS Code observer", () => {
     if (kind === "failed") expect(evidence).toContainEqual(expect.objectContaining({ detail: "Rate limited." }));
   });
 
-  it("finds a plugin handover's chat by the run's nonce, under the id the binding gave it", async () => {
+  it("finds a plugin handover's chat by the run's nonce, and follows it once the service has resolved it", async () => {
     const dir = await userDir();
     const bound = "vscode-0f7d4c2a-9b1e-4c33-8a5f-6d2e1b7c0a94";
     await writeChat(dir, [
@@ -191,9 +193,14 @@ describe("the VS Code observer", () => {
         ],
       },
     ]);
-    const result = await new VSCodeObserver(dir).poll(run(bound), new Date(T + 3_000).toISOString());
-    expect(result.evidence).toContainEqual(expect.objectContaining({ kind: "match", sessionId: bound }));
-    expect(result.events.every((event) => event.sessionId === bound)).toBe(true);
+    const observer = new VSCodeObserver(dir);
+    // Under the id the plugin made, no chat is that one yet.
+    expect(await observer.poll(run(bound), new Date(T + 3_000).toISOString())).toEqual({ events: [], evidence: [] });
+    expect(await observer.locate(run(bound))).toBe(CHAT);
+
+    const result = await new VSCodeObserver(dir).poll(run(bound, CHAT), new Date(T + 3_000).toISOString());
+    expect(result.evidence).toContainEqual(expect.objectContaining({ kind: "match", sessionId: CHAT }));
+    expect(result.events.every((event) => event.sessionId === CHAT)).toBe(true);
     // From the bind on; the composing before it is not the run.
     expect(result.events.map((event) => [event.kind, event.toolName])).toEqual([
       ["tool.start", "mcp_anthill_bind_run"],
@@ -209,7 +216,8 @@ describe("the VS Code observer", () => {
   it("does not take a pasted marker for a bound run, nor a nonce for a pasted one", async () => {
     const dir = await userDir();
     await writeChat(dir, [snapshot([request(MARKED, T)])]);
-    expect((await new VSCodeObserver(dir).poll(run("vscode-x"), new Date(T + 1_000).toISOString())).evidence).toEqual([]);
+    expect(await new VSCodeObserver(dir).locate(run("vscode-x"))).toBeUndefined();
+    expect((await new VSCodeObserver(dir).poll(run("vscode-x", CHAT), new Date(T + 1_000).toISOString())).evidence).toEqual([]);
   });
 
   it("follows one chat saved under two workspace folders as one", async () => {

@@ -32,7 +32,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import { runProcess, type SpawnFn } from "@anthill/runtimes";
-import { PLUGIN_HARNESS_INFO, type CheckedPluginHarness } from "@anthill/workflow";
+import { PLUGIN_HARNESS_INFO, isInterpreterId, type CheckedPluginHarness } from "@anthill/workflow";
 
 import type {
   InterpreterInfo,
@@ -41,7 +41,8 @@ import type {
   PluginInstallResult,
   PluginStatus,
 } from "../shared/ipc.js";
-import { pluginStatus, readCodexConfig } from "./plugin-status.js";
+import { vscodeUserDir } from "./live/observers/vscode.js";
+import { pluginStatus, readCodexConfig, readJsonc, vscodeInstall } from "./plugin-status.js";
 
 /** Long enough for a slow machine to start node twice; short enough not to hang a card. */
 const PROBE_TIMEOUT_MS = 12_000;
@@ -176,7 +177,24 @@ const TOOLS: Record<CheckedPluginHarness, Tool> = {
       ];
     },
   },
+  vscode: {
+    async installedRoot(home) {
+      return (await vscodeInstall(home, await vscodeSettings(home)))?.path;
+    },
+    async marketplaceKnown(home) {
+      const settings = await vscodeSettings(home);
+      const marketplaces = isRecord(settings) && Array.isArray(settings["chat.plugins.marketplaces"]) ? settings["chat.plugins.marketplaces"] : [];
+      return marketplaces.includes(GITHUB_SOURCE);
+    },
+    // VS Code has no command for it. The card shows the steps instead, and
+    // `installPlugin` refuses before it would run nothing and call it done.
+    installSteps: () => [],
+  },
 };
+
+async function vscodeSettings(home: string): Promise<unknown> {
+  return readJsonc(await readFile(join(vscodeUserDir(home), "settings.json"), "utf8").catch(() => ""));
+}
 
 /** The directory the tool installed the plugin into, which holds the launcher it runs. */
 export async function installedRoot(home: string, status: PluginHarnessStatus): Promise<string | undefined> {
@@ -263,7 +281,11 @@ export async function pluginConnections(deps: ConnectDeps): Promise<PluginConnec
       const connection: PluginConnection = {
         harness: harness.harness,
         label: harness.label,
-        cli: { available: cli?.available ?? false, ...(cli?.version ? { version: cli.version } : {}) },
+        // A tool with no CLI Anthill detects — VS Code — is there when it has
+        // been used here: its own folder is the evidence.
+        cli: isInterpreterId(harness.harness)
+          ? { available: cli?.available ?? false, ...(cli?.version ? { version: cli.version } : {}) }
+          : { available: harness.toolFound },
         status: harness,
         source,
       };
@@ -301,6 +323,13 @@ function reason(outcome: { stderr: string; stdout: string; timedOut: boolean }, 
 
 export async function installPlugin(harness: CheckedPluginHarness, deps: ConnectDeps): Promise<PluginInstallResult> {
   const home = deps.home ?? homedir();
+  if (!PLUGIN_HARNESS_INFO[harness].installsFromAnthill) {
+    return {
+      ok: false,
+      changed: false,
+      error: `${PLUGIN_HARNESS_INFO[harness].label} has no command for installing a plugin. Settings ▸ Plugins has the steps.`,
+    };
+  }
   const status = await pluginStatus(home);
   const current = status.harnesses.find((item) => item.harness === harness)!;
   const checkout = installSource(status, deps.appRoot);

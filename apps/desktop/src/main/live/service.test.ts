@@ -27,6 +27,7 @@ type Harness = {
   store: PendingRunStore;
   claudeRoot: string;
   claudeDesktopRoot: string;
+  vscodeUserDir: string;
   hookLogPath: string;
   reportLogPath: string;
   storePath: string;
@@ -61,6 +62,7 @@ async function harness(startAt = "2026-08-29T10:00:00.000Z"): Promise<Harness> {
       claudeRoot,
       claudeDesktopRoot,
       codexRoot: join(dir, "codex"),
+      vscodeUserDir: join(dir, "vscode"),
       journalDir: join(dir, "observations"),
       hookLogPath,
       reportLogPath,
@@ -81,6 +83,7 @@ async function harness(startAt = "2026-08-29T10:00:00.000Z"): Promise<Harness> {
     store,
     claudeRoot,
     claudeDesktopRoot,
+    vscodeUserDir: join(dir, "vscode"),
     hookLogPath,
     reportLogPath,
     storePath,
@@ -2104,5 +2107,77 @@ describe("the hooks on the poll that found the session", () => {
 
   it("keep the session the run already had", () => {
     expect(withSessionFrom(run({ detectedSessionId: "sess-1" }), [match("sess-2")]).detectedSessionId).toBe("sess-1");
+  });
+});
+
+/*
+  ANT-255. The VS Code plugin hands over under an id it made, because VS Code
+  gives a chat none it can read. The chat is found by the run's nonce in what
+  the agent ran after binding, and from then on its records and its hooks —
+  which carry VS Code's own id — are this run's.
+*/
+describe("a run handed over from VS Code", () => {
+  const minted = "vscode-0f7d4c2a-9b1e-4c33-8a5f-6d2e1b7c0a94";
+  const chat = "24a7ba39-82a1-42e0-97d2-1b6b3710b3ac";
+  const at = (seconds: number) => Date.parse("2026-08-29T10:00:00.000Z") + seconds * 1_000;
+
+  it("finds the chat by the nonce, then follows it and its hooks under VS Code's own id", async () => {
+    const h = await harness();
+    await h.service.registerBinding({
+      ...observeRequest,
+      selectedCli: "vscode",
+      boundAt: "2026-08-29T10:00:00.000Z",
+      exchange: { revision: 1, digest: "abcd1234", sessionId: minted },
+      steps: [{ id: "fix", name: "Fix" }],
+    });
+
+    const dir = join(h.vscodeUserDir, "workspaceStorage", "h1", "chatSessions");
+    await mkdir(dir, { recursive: true });
+    const terminal = (command: string, seconds: number) => ({
+      kind: "toolInvocationSerialized", toolId: "run_in_terminal", toolCallId: `call_${seconds}`, isConfirmed: { type: 1 },
+      toolSpecificData: { kind: "terminal", commandLine: { original: command }, terminalCommandState: { exitCode: 0, timestamp: at(seconds) } },
+    });
+    await writeFile(join(dir, `${chat}.jsonl`), [
+      { kind: 0, v: { version: 3, sessionId: chat, creationDate: at(-30), requests: [] } },
+      { kind: 2, k: ["requests"], v: [{ requestId: "request_1", timestamp: at(-20), message: { text: "/anthill:workflow watch fix it" }, response: [], modelState: { value: 0 } }] },
+      { kind: 2, k: ["requests", 0, "response"], v: [
+        terminal(`anthill run ${RUN_ID} ${NONCE}`, 2),
+        { value: "Fixing the crash now." },
+        terminal("npm test", 5),
+      ] },
+    ].map((line) => JSON.stringify(line)).join("\n") + "\n");
+
+    await mkdir(dirname(h.hookLogPath), { recursive: true });
+    await appendFile(h.hookLogPath, JSON.stringify({
+      source: "anthill-observation-hook", harness: "vscode", eventType: "PreToolUse", recordedAt: "2026-08-29T10:00:06.000Z",
+      data: { session_id: chat, hook_event_name: "PreToolUse", tool_name: "run_in_terminal", tool_use_id: "call_hook" },
+    }) + "\n");
+    // The same event through Claude Code's entries, which VS Code runs too
+    // when `chat.useClaudeHooks` is on. It is not this run's harness speaking.
+    await appendFile(h.hookLogPath, JSON.stringify({
+      source: "anthill-observation-hook", harness: "claude-code", eventType: "PreToolUse", recordedAt: "2026-08-29T10:00:06.000Z",
+      data: { session_id: chat, hook_event_name: "PreToolUse", tool_name: "run_in_terminal", tool_use_id: "call_twice" },
+    }) + "\n");
+
+    // The binding's own poll looked before the chat was saved; the next look
+    // is after the lookup interval.
+    h.setNow(new Date(at(8) + RECOVERY_POLL_MS).toISOString());
+    await h.service.poll();
+    await h.service.poll();
+    try {
+      expect(only(h.service.snapshot())).toMatchObject({
+        detectedSessionId: chat,
+        exchange: { sessionId: minted, resolvedSessionId: chat },
+      });
+      const events = await h.service.events(RUN_ID);
+      expect(events.filter((event) => event.channel === "exchange:session-resolution").map((event) => event.title)).toEqual(["VS Code chat found"]);
+      expect(events.some((event) => event.channel === "vscode:chat" && event.kind === "message")).toBe(true);
+      expect(events.some((event) => event.channel === "vscode:chat" && event.toolName === "run_in_terminal")).toBe(true);
+      expect(events.some((event) => event.source === "hook" && event.toolUseId === "call_hook")).toBe(true);
+      expect(events.some((event) => event.toolUseId === "call_twice")).toBe(false);
+      expect(events.filter((event) => event.channel === "exchange:session-mismatch")).toEqual([]);
+    } finally {
+      h.service.stop();
+    }
   });
 });

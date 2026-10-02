@@ -61,7 +61,12 @@ export type PendingRun = {
     revision: number;
     digest: string;
     sessionId?: string;
-    /** CLI identity explicitly resolved from Claude desktop's local session metadata. */
+    /**
+     * The harness's own id for the session, when the handover named another:
+     * the CLI session behind a Claude desktop id, from Claude's local metadata,
+     * or the VS Code chat behind the id the plugin made for it, found by the
+     * run's nonce in the chat.
+     */
     resolvedSessionId?: string;
   };
   promptVersion: string;
@@ -307,7 +312,7 @@ export function createPendingRun(input: NewRunInput): PendingRun {
 /** The original handover stays intact even when its desktop id resolves to a CLI id. */
 export function boundSessionId(run: PendingRun): string | undefined {
   if (!run.exchange?.sessionId) return undefined;
-  return (run.selectedCli === "claude-code" ? run.exchange.resolvedSessionId : undefined)
+  return (run.selectedCli === "claude-code" || run.selectedCli === "vscode" ? run.exchange.resolvedSessionId : undefined)
     ?? run.exchange.sessionId;
 }
 

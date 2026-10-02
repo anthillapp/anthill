@@ -316,28 +316,18 @@ export class VSCodeObserver implements LiveSessionObserver {
 
     const states = this.statesFor(run.anthillRunId);
     const marker: Marker = { runId: run.anthillRunId, nonce: run.correlationNonce };
+    // A plugin handover names its chat; the service resolves the name the
+    // plugin made up to VS Code's own id with `locate`, and until it has, no
+    // chat here is that one.
     const bound = boundSessionId(run);
-
-    for (const file of files) {
-      const state = states.get(file.path) ?? { mtimeMs: -1, size: -1, emitted: new Set<string>() };
-      states.set(file.path, state);
-      if (state.mtimeMs === file.mtimeMs && state.size === file.size) continue;
-      state.mtimeMs = file.mtimeMs;
-      state.size = file.size;
-      const text = await readFile(file.path, "utf8").catch(() => undefined);
-      const replayed = text === undefined ? undefined : replayChatLog(text);
-      if (!replayed) continue;
-      state.chat = readChat(replayed);
-      state.cwd ??= file.cwd;
-      state.from ??= startOf(state.chat, marker, bound !== undefined);
-    }
+    await this.refresh(files, states, marker, bound !== undefined);
 
     // One chat can be saved under more than one workspace folder; the newest
     // copy speaks for it.
     const newest = new Map<string, [string, FileState]>();
     for (const [path, state] of states) {
       const id = state.chat?.sessionId;
-      if (!id || !state.from) continue;
+      if (!id || !state.from || (bound !== undefined && id !== bound)) continue;
       const held = newest.get(id);
       if (!held || held[1].mtimeMs < state.mtimeMs) newest.set(id, [path, state]);
     }
@@ -359,9 +349,7 @@ export class VSCodeObserver implements LiveSessionObserver {
     if (!entry) return { events: [], evidence: [] };
     const [, state] = entry;
     const chat = state.chat!;
-    // A plugin binding named the session; the chat that carries its nonce is
-    // that session, under the id the binding gave it.
-    const sessionId = bound ?? chat.sessionId!;
+    const sessionId = chat.sessionId!;
 
     const all = eventsOf(chat, state.from!, marker, sessionId);
     const fresh = all.filter((event) => !state.emitted.has(event.key));
@@ -397,6 +385,44 @@ export class VSCodeObserver implements LiveSessionObserver {
     state.reportedActivityAt = lastAt;
     evidence.push(...standing(chat, state.from!, sessionId, run, now, lastAt));
     return { evidence, events };
+  }
+
+  /**
+   * VS Code's own id for the chat a plugin handover is working in.
+   *
+   * The plugin hands over under an id it made, because VS Code gives a chat
+   * none it can read. The chat is the one whose agent ran or was answered
+   * with this run's nonce after binding — one chat, or no answer.
+   */
+  async locate(run: PendingRun): Promise<string | undefined> {
+    const files = await this.candidates(run);
+    if (!files) return undefined;
+    const states = this.statesFor(run.anthillRunId);
+    await this.refresh(files, states, { runId: run.anthillRunId, nonce: run.correlationNonce }, true);
+    const found = new Set([...states.values()].filter((state) => state.from && state.chat?.sessionId).map((state) => state.chat!.sessionId!));
+    return found.size === 1 ? [...found][0] : undefined;
+  }
+
+  /** Replay every candidate that changed since it was last read. */
+  private async refresh(
+    files: { path: string; mtimeMs: number; size: number; cwd?: string }[],
+    states: Map<string, FileState>,
+    marker: Marker,
+    bound: boolean,
+  ): Promise<void> {
+    for (const file of files) {
+      const state = states.get(file.path) ?? { mtimeMs: -1, size: -1, emitted: new Set<string>() };
+      states.set(file.path, state);
+      if (state.mtimeMs === file.mtimeMs && state.size === file.size) continue;
+      state.mtimeMs = file.mtimeMs;
+      state.size = file.size;
+      const text = await readFile(file.path, "utf8").catch(() => undefined);
+      const replayed = text === undefined ? undefined : replayChatLog(text);
+      if (!replayed) continue;
+      state.chat = readChat(replayed);
+      state.cwd ??= file.cwd;
+      state.from ??= startOf(state.chat, marker, bound);
+    }
   }
 
   /** Chat files written since this run was created, with the folder each belongs to. */

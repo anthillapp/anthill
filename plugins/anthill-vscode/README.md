@@ -108,6 +108,26 @@ reports with `anthill step` arrive at once.
 A prompt copied from Anthill and pasted into a VS Code chat is found the same
 way, by the marker it carries.
 
+### Detailed progress
+
+Anthill can also install observation hooks for VS Code, from Settings ▸ Live
+observation or when it hands a prompt over. It writes one file of its own,
+`~/.copilot/hooks/anthill.json`, which VS Code's agent reads by default: every
+tool call and turn then reaches Anthill as it happens, instead of when VS Code
+next saves the chat. The hook records which event happened, which tool, and
+the file or pattern a tool was about, with anything that looks like a secret
+taken out; never a tool's output. It always exits without effect.
+
+VS Code runs hooks while `chat.useHooks` is on, which it is by default, and
+only in a trusted workspace. The Copilot CLI reads the same folder. Removing
+the file, or disabling the hooks in Anthill, turns them off again.
+
+Settings ▸ Plugins shows whether VS Code has the plugin, read from
+`chat.pluginLocations` and from `~/.vscode/agent-plugins/installed.json`, and
+the line to add to your settings when it does not. Whether a plugin is
+switched on VS Code keeps to itself, so an installed plugin is taken as on;
+the card turns green only when the installed plugin's server answers.
+
 That is the record VS Code keeps for its own agent (Agent mode, the Local
 harness). A chat run by another harness inside VS Code, such as the Copilot
 CLI, may keep its record elsewhere; Anthill then shows the reported steps

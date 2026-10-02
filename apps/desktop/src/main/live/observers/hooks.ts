@@ -251,6 +251,10 @@ export class HookLogObserver {
       const data = isRecord(row.data) ? minimalHookPayload(row.data) : undefined;
       if (!data) continue;
       if (str(data.session_id) !== run.detectedSessionId) continue;
+      // One session, one harness's hooks. VS Code can also run the entries
+      // Anthill wrote for Claude Code (`chat.useClaudeHooks`), and every event
+      // would then arrive twice, the second time under the wrong name.
+      if (str(row.harness) && str(row.harness) !== "unknown" && str(row.harness) !== run.selectedCli) continue;
       this.covered.add(run.anthillRunId);
 
       const name = str(data.hook_event_name) ?? str(row.eventType) ?? "";

@@ -73,11 +73,11 @@ export const LAUNCH_TOUR: TourStep[] = [
   {
     anchor: "launch-create",
     title: "Create a workflow",
-    text: "Start here: describe the work to Codex or Claude Code, or draw the workflow yourself.",
+    text: "Start here: describe the work to Codex, Claude Code or VS Code, or draw the workflow yourself.",
     kinds: {
       "first-run": {
         title: "Create your first workflow",
-        text: "Start here: describe the work to Codex or Claude Code and review it here, or draw it yourself.",
+        text: "Start here: describe the work to Codex, Claude Code or VS Code and review it here, or draw it yourself.",
       },
       create: {
         title: "Create a workflow",

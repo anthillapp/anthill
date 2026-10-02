@@ -686,7 +686,7 @@ function LaunchIntro({
           <LaunchAction
             glyph="⌘"
             title="From a Coding Session"
-            subtitle="Let Claude Code or Codex hand one over"
+            subtitle="Let Claude Code, Codex or VS Code hand one over"
             arrives
             onClick={onFromSession}
           />
@@ -751,7 +751,7 @@ function FirstRunCard({ onDescribe, onDraw }: { onDescribe: () => void; onDraw: 
         <button type="button" className="first-run-row" onClick={onDescribe}>
           <i aria-hidden="true">⌘</i>
           <span>
-            <strong>Describe it in Codex or Claude Code</strong>
+            <strong>Describe it in Codex, Claude Code or VS Code</strong>
             <span className={`first-run-note${ready.length > 0 ? " is-ready" : ""}`}>{note}</span>
           </span>
         </button>

@@ -33,11 +33,15 @@ export type FromSessionScreenProps = {
 
 type Surface = "app" | "terminal";
 
-/** Everything that differs between the two tools, in one place. */
+/** Everything that differs between the tools, in one place. */
 const TOOL: Record<
   Harness,
   {
     label: string;
+    /** Where the plugin is used: an app, a terminal, or both. */
+    surfaces: Surface[];
+    /** What the install step says about the one plugin. */
+    installNote: string;
     cli: string;
     welcome: string;
     /** The tool's own highlight colour in its composer. */
@@ -50,6 +54,8 @@ const TOOL: Record<
 > = {
   "claude-code": {
     label: "Claude Code",
+    surfaces: ["app", "terminal"],
+    installNote: "One plugin works in both the Claude Code app and its terminal version. Install it once.",
     cli: "claude",
     welcome: "✻ Welcome to Claude Code · ~/dev/shop",
     accent: "#d97757",
@@ -63,6 +69,8 @@ const TOOL: Record<
   },
   codex: {
     label: "Codex",
+    surfaces: ["app", "terminal"],
+    installNote: "One plugin works in both the Codex app and its terminal version. Install it once.",
     cli: "codex",
     welcome: ">_ OpenAI Codex · ~/dev/shop",
     accent: "#9aa4ff",
@@ -73,6 +81,21 @@ const TOOL: Record<
     },
     design: { app: "… @Anthill design", terminal: "… $anthill design" },
     watch: { app: "… @Anthill watch", terminal: "… $anthill watch" },
+  },
+  vscode: {
+    label: "VS Code",
+    surfaces: ["app"],
+    installNote: "VS Code takes plugins from its own settings. Settings ▸ Plugins has the line to add.",
+    cli: "code",
+    welcome: "GitHub Copilot · Agent",
+    accent: "#3794ff",
+    command: "/anthill:workflow",
+    say: {
+      app: "Open the chat in Agent mode, describe the task, then end with /anthill:workflow design or watch.",
+      terminal: "Open the chat in Agent mode, describe the task, then end with /anthill:workflow design or watch.",
+    },
+    design: { app: "… /anthill:workflow design", terminal: "… /anthill:workflow design" },
+    watch: { app: "… /anthill:workflow watch", terminal: "… /anthill:workflow watch" },
   },
 };
 
@@ -97,9 +120,11 @@ const TASK = "Build a checkout flow, test it, and fix failures.";
 
 export function FromSessionScreen({ onBack, onSettings }: FromSessionScreenProps) {
   const [tool, setTool] = useState<Harness>("claude-code");
-  const [surface, setSurface] = useState<Surface>("app");
+  const [picked, setSurface] = useState<Surface>("app");
   const plugins = usePluginConnections();
   const t = TOOL[tool];
+  // A tool used in one place only shows that one, whatever was picked for another.
+  const surface = t.surfaces.includes(picked) ? picked : t.surfaces[0]!;
 
   return (
     <div className="from-session-screen">
@@ -118,7 +143,7 @@ export function FromSessionScreen({ onBack, onSettings }: FromSessionScreenProps
           <div>
             <h1>Let a session hand you the workflow.</h1>
             <p className="from-session-lede">
-              Ask Claude Code or Codex for the work as you normally would. Add Anthill to your prompt
+              Ask Claude Code, Codex or VS Code's agent for the work as you normally would. Add Anthill to your prompt
               and it picks up the plan: review the workflow before work starts, or follow it live as
               your agent works.
             </p>
@@ -141,7 +166,7 @@ export function FromSessionScreen({ onBack, onSettings }: FromSessionScreenProps
           </div>
 
           <Section no="01" title="Install the plugin">
-            One plugin works in both the {t.label} app and its terminal version. Install it once.
+            {t.installNote}
           </Section>
           <PluginCard
             harness={tool}
@@ -154,22 +179,24 @@ export function FromSessionScreen({ onBack, onSettings }: FromSessionScreenProps
           />
 
           <Section no="02" title={`Use Anthill in ${t.label}`}>
-            Choose where you work. Each shows one complete request.
+            {t.surfaces.length > 1 ? "Choose where you work. Each shows one complete request." : "One complete request."}
           </Section>
 
           <div className="from-session-surface">
-            <div className="segmented" role="group" aria-label="Where you use it">
-              <button type="button" aria-pressed={surface === "app"} onClick={() => setSurface("app")}>
-                App
-              </button>
-              <button
-                type="button"
-                aria-pressed={surface === "terminal"}
-                onClick={() => setSurface("terminal")}
-              >
-                Terminal
-              </button>
-            </div>
+            {t.surfaces.length > 1 ? (
+              <div className="segmented" role="group" aria-label="Where you use it">
+                <button type="button" aria-pressed={surface === "app"} onClick={() => setSurface("app")}>
+                  App
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={surface === "terminal"}
+                  onClick={() => setSurface("terminal")}
+                >
+                  Terminal
+                </button>
+              </div>
+            ) : null}
             <span>{t.say[surface]}</span>
           </div>
 

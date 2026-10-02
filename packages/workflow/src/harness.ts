@@ -164,8 +164,8 @@ const VSCODE: HarnessProfile = {
   defaultModel: "the session's model",
   supportsReasoningEffort: false,
   supportsPerAgentModel: false,
-  // VS Code has hooks of its own; Anthill does not install them yet.
-  liveHooks: false,
+  // `~/.copilot/hooks/anthill.json`, which VS Code's agent reads by default.
+  liveHooks: true,
 };
 
 export const HARNESS_PROFILES: Record<HarnessTarget, HarnessProfile> = {

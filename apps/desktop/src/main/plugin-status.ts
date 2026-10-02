@@ -28,11 +28,13 @@
 import { existsSync } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { CHECKED_PLUGIN_HARNESSES, PLUGIN_HARNESS_INFO, type CheckedPluginHarness } from "@anthill/workflow";
 
 import type { PluginHarnessStatus, PluginServerStatus, PluginStatus } from "../shared/ipc.js";
+import { vscodeUserDir } from "./live/observers/vscode.js";
 
 type Json = Record<string, unknown>;
 
@@ -197,10 +199,146 @@ export async function codexStatus(home: string): Promise<PluginHarnessStatus> {
   };
 }
 
+/**
+ * Read a VS Code settings file, which is JSON with comments and trailing
+ * commas. Not a parser of its own: those two are taken out, outside strings,
+ * and what is left goes to `JSON.parse`. Anything it cannot read is no answer.
+ */
+export function readJsonc(text: string): unknown {
+  let out = "";
+  let inString = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (inString) {
+      out += char;
+      if (char === "\\") {
+        out += text[index + 1] ?? "";
+        index += 1;
+      } else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      out += char;
+    } else if (char === "/" && text[index + 1] === "/") {
+      while (index < text.length && text[index] !== "\n") index += 1;
+      out += "\n";
+    } else if (char === "/" && text[index + 1] === "*") {
+      const end = text.indexOf("*/", index + 2);
+      index = end < 0 ? text.length : end + 1;
+    } else if (char === ",") {
+      // A comma with nothing but space before the closing bracket is dropped.
+      let next = index + 1;
+      while (next < text.length && /\s/.test(text[next]!)) next += 1;
+      if (text[next] !== "}" && text[next] !== "]") out += char;
+    } else {
+      out += char;
+    }
+  }
+  try {
+    return JSON.parse(out);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Where VS Code has the plugin from: a folder it was pointed at, or a marketplace install. */
+type VSCodeInstall = { path: string; marketplace?: string; source: string; checkout?: string };
+
+function expandHome(path: string, home: string): string {
+  return path === "~" || path.startsWith("~/") ? join(home, path.slice(1)) : path;
+}
+
+/** A checkout's root, when a path is its `plugins/anthill-vscode`. */
+function checkoutOf(path: string): string | undefined {
+  const { folder } = PLUGIN_HARNESS_INFO.vscode;
+  const root = resolve(path, ...folder.split("/").map(() => ".."));
+  return resolve(root, folder) === resolve(path) && existsSync(join(root, ".github", "plugin", "marketplace.json"))
+    ? root
+    : undefined;
+}
+
+/** Whether a folder holds Anthill's VS Code plugin, rather than something else called anthill. */
+function isOurPlugin(path: string): boolean {
+  const { manifest } = PLUGIN_HARNESS_INFO.vscode;
+  return existsSync(join(path, manifest)) && existsSync(join(path, "bin", "anthill-mcp"));
+}
+
+/**
+ * Where VS Code finds Anthill's plugin, if it does.
+ *
+ * A folder in `chat.pluginLocations` switched on, which is read where it is;
+ * or an install from a marketplace, which VS Code clones into
+ * `~/.vscode/agent-plugins/` and lists in its `installed.json`
+ * (`{version, installed: [{pluginUri, marketplace, name?}]}`).
+ */
+export async function vscodeInstall(home: string, settings: unknown): Promise<VSCodeInstall | undefined> {
+  const locations = isRecord(settings) && isRecord(settings["chat.pluginLocations"]) ? settings["chat.pluginLocations"] : {};
+  for (const [raw, on] of Object.entries(locations)) {
+    if (on !== true) continue;
+    const path = expandHome(raw, home);
+    if (!isAbsolute(path) || !isOurPlugin(path)) continue;
+    const checkout = checkoutOf(path);
+    return { path, source: path, ...(checkout ? { checkout } : {}) };
+  }
+
+  const installed = await readJson(join(home, ".vscode", "agent-plugins", "installed.json"));
+  const entries = isRecord(installed) && Array.isArray(installed.installed) ? installed.installed : [];
+  for (const entry of entries) {
+    if (!isRecord(entry) || typeof entry.pluginUri !== "string" || !entry.pluginUri.startsWith("file:")) continue;
+    let path: string;
+    try {
+      path = fileURLToPath(entry.pluginUri);
+    } catch {
+      continue;
+    }
+    if (!isOurPlugin(path)) continue;
+    const marketplace = typeof entry.marketplace === "string" ? entry.marketplace : undefined;
+    return { path, source: marketplace ?? path, ...(marketplace ? { marketplace } : {}) };
+  }
+  return undefined;
+}
+
+/**
+ * Whether VS Code has Anthill's plugin, from what it keeps on disk.
+ *
+ * Whether a plugin is switched on VS Code keeps in its own state database,
+ * not in a file, so an installed plugin is taken as on. The card's check —
+ * starting the installed launcher and hearing the server answer — is what
+ * says it works.
+ */
+export async function vscodeStatus(home: string, userDir: string = vscodeUserDir(home)): Promise<PluginHarnessStatus> {
+  const base = unread("vscode", existsSync(userDir));
+  if (!base.toolFound) return base;
+
+  const settings = readJsonc(await readFile(join(userDir, "settings.json"), "utf8").catch(() => ""));
+  const install = await vscodeInstall(home, settings);
+  // A checkout offered as a marketplace, whether or not anything is installed
+  // from it yet: it is what the steps should name.
+  const offered = (isRecord(settings) && Array.isArray(settings["chat.plugins.marketplaces"]) ? settings["chat.plugins.marketplaces"] : [])
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => expandHome(value, home))
+    .find((value) => isAbsolute(value) && existsSync(join(value, ".github", "plugin", "marketplace.json")));
+  const checkout = install?.checkout ?? offered;
+  if (!install) return { ...base, ...(checkout ? { checkout } : {}) };
+
+  const manifest = await readJson(join(install.path, PLUGIN_HARNESS_INFO.vscode.manifest));
+  return {
+    ...base,
+    installed: true,
+    enabled: true,
+    ...(isRecord(manifest) && typeof manifest.version === "string" ? { installedVersion: manifest.version } : {}),
+    ...(install.marketplace ? { marketplace: install.marketplace } : {}),
+    source: install.source,
+    ...(checkout ? { checkout, availableVersion: await versionIn(checkout, "vscode") } : {}),
+  };
+}
+
 /** How each harness's own records are read. */
 const STATUS: Record<CheckedPluginHarness, (home: string) => Promise<PluginHarnessStatus>> = {
   "claude-code": claudeCodeStatus,
   codex: codexStatus,
+  vscode: (home) => vscodeStatus(home),
 };
 
 /** Whether the launcher both plugins ship can find the server it launches. */

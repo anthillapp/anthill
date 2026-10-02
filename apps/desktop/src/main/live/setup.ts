@@ -11,6 +11,7 @@ import { existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { readCodexHookStatus } from "./codex-hook-status.js";
+import { vscodeUserDir } from "./observers/vscode.js";
 import { hookFingerprint, hookPrompt, isDeclined } from "./hook-prompt.js";
 
 import { detectBinary, runProcess, type SpawnFn } from "@anthill/runtimes";
@@ -37,7 +38,12 @@ type HookHarnessDefinition = {
   cliCommand: string;
   configFile: () => string;
   /** The path option that stands in for `configFile`, for tests and other homes. */
-  configOption: "claudeConfigPath" | "codexConfigPath";
+  configOption: "claudeConfigPath" | "codexConfigPath" | "vscodeConfigPath";
+  /**
+   * Whether the tool is on this machine, when its CLI on the PATH is not the
+   * way to tell. Without it, the CLI is asked for its version.
+   */
+  present?: (paths: ObservationSetupPaths) => boolean;
   /**
    * The harness's own answer on whether it will run these hooks, for a
    * harness that asks its user to trust each hook first. Entries alone are not
@@ -90,6 +96,29 @@ const HARNESS = {
     boundary:
       "Anthill reads local hook events and Codex rollout/session metadata on this machine. It stores only observation state and correlation metadata needed for Live Session UI, never private reasoning.",
   },
+  /*
+   * VS Code's agent reads every `*.json` in `~/.copilot/hooks/` (its
+   * `chat.hookFilesLocations` default), in Claude Code's format, and runs
+   * them while `chat.useHooks` is on, which it is unless somebody turned it
+   * off — and only in a trusted workspace. There is no per-file approval to
+   * wait on. The file is Anthill's own, so nothing of anyone else's is merged.
+   * The Copilot CLI reads the same folder, which is why the handler must
+   * always exit 0: a failing hook there can deny the tool it was about.
+   * `matcher` is ignored, so none is written.
+   */
+  vscode: {
+    label: "VS Code",
+    cliCommand: "code",
+    configFile: () => join(homedir(), ".copilot", "hooks", "anthill.json"),
+    configOption: "vscodeConfigPath",
+    trust: undefined,
+    // `code` is often not on the PATH; VS Code's own user data folder is.
+    present: (paths) => existsSync(paths.vscodeUserDir ?? vscodeUserDir()),
+    events: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStop", "Stop"],
+    matcherEvents: new Set<string>(),
+    boundary:
+      "Anthill reads local hook events and the chat sessions VS Code saves on this machine. It stores only observation state and correlation metadata needed for Live Session UI, never private reasoning.",
+  },
 } as const satisfies Record<string, HookHarnessDefinition>;
 
 type HookHarness = keyof typeof HARNESS;
@@ -111,6 +140,9 @@ export type ObservationSetupPaths = {
   hookLogPath?: string;
   claudeConfigPath?: string;
   codexConfigPath?: string;
+  vscodeConfigPath?: string;
+  /** VS Code's user data folder, whose presence says VS Code has been used here. */
+  vscodeUserDir?: string;
   hookHandlerPath?: string;
   /**
    * The interpreter the installed hook command names.
@@ -349,11 +381,15 @@ export class ObservationSetupService {
   private async describeHarness(id: HookHarness, prefs: SetupPrefs, cwd: string, sessionId?: string): Promise<ObservationHarnessSetup> {
     const def = HARNESS[id];
     const installedAt = prefs?.harnesses?.[id]?.installedAt;
-    const detection = await detectBinary({
-      command: def.cliCommand,
-      notFoundReason: `${def.label} was not found on your PATH.`,
-      spawnFn: this.spawnFn,
-    });
+    const detection = "present" in def && def.present
+      ? (def.present(this.paths)
+        ? { available: true }
+        : { available: false, reason: `${def.label} has not been used on this machine.` })
+      : await detectBinary({
+        command: def.cliCommand,
+        notFoundReason: `${def.label} was not found on your PATH.`,
+        spawnFn: this.spawnFn,
+      });
     const configPath = this.configPath(id);
     const config = await this.readJsonObject(configPath).catch(() => ({}));
     const hookHandlerPath = this.hookHandlerPath();

@@ -111,6 +111,8 @@ export type ObservationRoots = {
 
 export class LiveSessionService {
   private readonly observers: Record<MarkerCli, LiveSessionObserver>;
+  /** Also asked, by itself, which chat a plugin handover is working in. */
+  private readonly vscode: VSCodeObserver;
   private readonly hooks: HookLogObserver;
   private readonly reports: CliReportObserver;
   private readonly journal: ObservationJournal;
@@ -155,13 +157,14 @@ export class LiveSessionService {
   ) {
     // An injected transcript root must never fall through to the user's metadata.
     this.claudeDesktopRoot = roots.claudeDesktopRoot ?? (roots.claudeRoot ? undefined : claudeDesktopSessionsRoot());
+    this.vscode = roots.vscodeUserDir ? new VSCodeObserver(roots.vscodeUserDir) : new VSCodeObserver();
     this.observers = {
       "claude-code": roots.claudeRoot
         ? new ClaudeCodeObserver(roots.claudeRoot)
         : new ClaudeCodeObserver(),
       codex: roots.codexRoot ? new CodexObserver(roots.codexRoot) : new CodexObserver(),
       pi: roots.piRoot ? new PiObserver(roots.piRoot) : new PiObserver(),
-      vscode: roots.vscodeUserDir ? new VSCodeObserver(roots.vscodeUserDir) : new VSCodeObserver(),
+      vscode: this.vscode,
     };
     this.hooks = roots.hookLogPath ? new HookLogObserver(roots.hookLogPath) : new HookLogObserver();
     this.reports = roots.reportLogPath
@@ -463,15 +466,44 @@ export class LiveSessionService {
     return next;
   }
 
-  /** Repair a host-id handover only through Claude's explicit local mapping. */
+  /**
+   * The harness's own id for a session the handover named by another.
+   *
+   * Claude desktop hands over its host id, and Claude's own local metadata maps
+   * it to the CLI session. VS Code gives a chat no id the plugin can read, so
+   * the plugin makes one up, and the chat is found by the run's nonce in it.
+   * Nothing else is guessed at.
+   */
+  private async lookUpSession(run: PendingRun, sessionId: string): Promise<{ id: string; title: string; detail: string } | undefined> {
+    if (run.selectedCli === "claude-code" && this.claudeDesktopRoot) {
+      const id = await resolveClaudeSession(this.claudeDesktopRoot, sessionId);
+      return id ? {
+        id,
+        title: "Claude desktop session resolved to its CLI session",
+        detail: `Claude's local session metadata maps ${sessionId} to ${id}. The original handover is unchanged; Anthill observes the CLI session's records.`,
+      } : undefined;
+    }
+    if (run.selectedCli === "vscode") {
+      const id = await this.vscode.locate(run);
+      return id ? {
+        id,
+        title: "VS Code chat found",
+        detail: `The handover named this chat ${sessionId}, an id its plugin made because VS Code gives a chat none it can read. The chat that ran this run is ${id} in VS Code's own records; Anthill observes that chat and its hooks.`,
+      } : undefined;
+    }
+    return undefined;
+  }
+
+  /** Repair a handover's session id, only through what the harness itself recorded. */
   private async resolveSession(run: PendingRun, now: string): Promise<PendingRun> {
-    if (run.selectedCli !== "claude-code" || !run.exchange?.sessionId ||
-        run.exchange.resolvedSessionId || !this.claudeDesktopRoot) return run;
+    if (!run.exchange?.sessionId || run.exchange.resolvedSessionId) return run;
+    if (run.selectedCli !== "claude-code" && run.selectedCli !== "vscode") return run;
     const last = this.sessionLookups.get(run.anthillRunId);
     if (last !== undefined && Date.parse(now) - last < RECOVERY_POLL_MS) return run;
     this.sessionLookups.set(run.anthillRunId, Date.parse(now));
-    const resolved = await resolveClaudeSession(this.claudeDesktopRoot, run.exchange.sessionId);
-    if (!resolved || resolved === run.exchange.sessionId) return run;
+    const found = await this.lookUpSession(run, run.exchange.sessionId);
+    const resolved = found?.id;
+    if (!found || !resolved || resolved === run.exchange.sessionId) return run;
     // Re-read hooks/transcripts skipped under the old id, but do not replay
     // reported steps or reset the user's notification history.
     for (const observer of Object.values(this.observers)) observer.forget(run.anthillRunId);
@@ -485,8 +517,8 @@ export class LiveSessionService {
     await this.record(next, [{
       at: now, cli: run.selectedCli, source: "anthill", kind: "notification",
       channel: "exchange:session-resolution", sessionId: resolved,
-      title: "Claude desktop session resolved to its CLI session",
-      detail: `Claude's local session metadata maps ${run.exchange.sessionId} to ${resolved}. The original handover is unchanged; Anthill observes the CLI session's records.`,
+      title: found.title,
+      detail: found.detail,
     }]);
     return next;
   }

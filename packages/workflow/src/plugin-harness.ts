@@ -18,14 +18,11 @@ export const PLUGIN_HARNESSES = ["claude-code", "codex", "vscode"] as const;
 export type PluginHarness = (typeof PLUGIN_HARNESSES)[number];
 
 /**
- * The plugin harnesses Anthill reads the install records of, and offers to
- * install into: a card each in Settings ▸ Plugins and in onboarding.
- *
- * VS Code is not one yet. Its plugin ships, but Anthill does not read where
- * VS Code records an install, and VS Code has no command to install one with,
- * so a card for it could only guess (ANT-255, stage 3).
+ * The plugin harnesses Anthill reads the install records of: a card each in
+ * Settings ▸ Plugins and in onboarding. Every plugin harness today; kept
+ * apart so that a plugin can ship before Anthill can say where it stands.
  */
-export const CHECKED_PLUGIN_HARNESSES = ["claude-code", "codex"] as const satisfies readonly PluginHarness[];
+export const CHECKED_PLUGIN_HARNESSES = ["claude-code", "codex", "vscode"] as const satisfies readonly PluginHarness[];
 
 export type CheckedPluginHarness = (typeof CHECKED_PLUGIN_HARNESSES)[number];
 
@@ -45,6 +42,11 @@ export type PluginHarnessInfo = {
   marketplace: string;
   /** Whether the tool's CLI can switch a disabled plugin back on. */
   enablesFromCli: boolean;
+  /**
+   * Whether Anthill can install the plugin by running the tool's own
+   * commands. Without them, the card shows the steps instead.
+   */
+  installsFromAnthill: boolean;
   /** The page the tool's own makers keep for installing it. */
   installGuide: string;
 };
@@ -59,6 +61,7 @@ export const PLUGIN_HARNESS_INFO: Record<PluginHarness, PluginHarnessInfo> = {
     plugin: "anthill",
     marketplace: "anthill",
     enablesFromCli: true,
+    installsFromAnthill: true,
     installGuide: "https://code.claude.com/docs/en/setup",
   },
   codex: {
@@ -71,6 +74,7 @@ export const PLUGIN_HARNESS_INFO: Record<PluginHarness, PluginHarnessInfo> = {
     marketplace: "anthill-local",
     // Codex keeps the switch in its own settings.
     enablesFromCli: false,
+    installsFromAnthill: true,
     installGuide: "https://developers.openai.com/codex/cli",
   },
   vscode: {
@@ -86,8 +90,10 @@ export const PLUGIN_HARNESS_INFO: Record<PluginHarness, PluginHarnessInfo> = {
     // that file before `.claude-plugin/marketplace.json`; Claude Code never
     // reads it, so the two plugins named `anthill` do not collide.
     marketplace: "anthill",
-    // VS Code has no command line for plugins at all.
+    // VS Code has no command line for plugins at all: both ways in are its
+    // settings, which are the user's to edit.
     enablesFromCli: false,
+    installsFromAnthill: false,
     installGuide: "https://code.visualstudio.com/download",
   },
 };

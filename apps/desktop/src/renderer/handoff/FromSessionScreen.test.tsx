@@ -55,10 +55,10 @@ const show = () => {
 const card = () => screen.getByRole("group", { name: /plugin$/ });
 
 describe("the tools", () => {
-  it("offers exactly Claude Code and Codex, and calls Codex Codex", () => {
+  it("offers exactly Claude Code, Codex and VS Code, and calls Codex Codex", () => {
     show();
     const tabs = within(screen.getByRole("group", { name: "Coding tool" })).getAllByRole("button");
-    expect(tabs.map((tab) => tab.textContent)).toEqual(["Claude Code", "Codex"]);
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["Claude Code", "Codex", "VS Code"]);
     expect(document.body.textContent).not.toMatch(/OpenAI Codex CLI|Any other tool/);
   });
 
@@ -70,6 +70,15 @@ describe("the tools", () => {
     expect(within(card()).getByText("Not found")).toBeTruthy();
     fireEvent.click(within(card()).getByRole("button", { name: /Open install guide/ }));
     expect(api.pluginGuide).toHaveBeenCalledWith("codex");
+  });
+
+  // VS Code's agent lives in the editor: there is no terminal version to pick.
+  it("shows VS Code in its app only, with the command its chat takes", () => {
+    show();
+    fireEvent.click(screen.getByRole("button", { name: "VS Code" }));
+    expect(screen.getByText("Use Anthill in VS Code")).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Where you use it" })).toBeNull();
+    expect(screen.getByText(/Agent mode, describe the task, then end with \/anthill:workflow design or watch/)).toBeTruthy();
   });
 });
 

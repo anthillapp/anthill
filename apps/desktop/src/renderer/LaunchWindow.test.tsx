@@ -438,7 +438,7 @@ describe("a workflow from a coding session", () => {
     const row = await screen.findByRole("button", { name: /From a Coding Session/ });
 
     expect(screen.getByText("Design a workflow, hand it to your agent, and follow its progress.")).toBeTruthy();
-    expect(row.textContent).toContain("Let Claude Code or Codex hand one over");
+    expect(row.textContent).toContain("Let Claude Code, Codex or VS Code hand one over");
     expect(row.classList.contains("is-arriving")).toBe(true);
     fireEvent.click(row);
     expect(onFromSession).toHaveBeenCalled();
@@ -489,7 +489,7 @@ describe("the first run", () => {
     expect(screen.queryByRole("button", { name: /Open Existing Workflow/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /From a Coding Session/ })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /Describe it in Codex or Claude Code/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Describe it in Codex, Claude Code or VS Code/ }));
     expect(props.onFromSession).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /Draw it yourself/ }));
     expect(props.onNewWorkflow).toHaveBeenCalled();

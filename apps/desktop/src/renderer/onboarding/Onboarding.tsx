@@ -34,6 +34,7 @@ export type OnboardingProps = {
 const TOOLS: { id: Harness; label: string }[] = [
   { id: "codex", label: "Codex" },
   { id: "claude-code", label: "Claude Code" },
+  { id: "vscode", label: "VS Code" },
 ];
 
 export function Onboarding({ onFinish, onSettings }: OnboardingProps) {
@@ -210,10 +211,10 @@ function Connect({
       <div className="ob-connect-inner">
         <span className="ob-kicker">Optional</span>
         <h1 ref={heading} tabIndex={-1}>
-          Connect Codex or Claude Code
+          Connect Codex, Claude Code or VS Code
         </h1>
         <p className="ob-connect-lede">
-          Describe a task in Codex or Claude Code, then review it here as a workflow. The plugin
+          Describe a task in Codex, Claude Code or VS Code, then review it here as a workflow. The plugin
           carries that handover – you can skip it and draw workflows yourself.
         </p>
 
@@ -246,8 +247,8 @@ function Connect({
         </div>
 
         <p className="ob-foot">
-          Codex or Claude Code may ask you to confirm the install. You can add either one later from
-          Settings ▸ Plugins.
+          Codex or Claude Code may ask you to confirm the install; VS Code takes it from its own
+          settings. You can add any of them later from Settings ▸ Plugins.
         </p>
 
         <div className="ob-actions">

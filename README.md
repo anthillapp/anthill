@@ -53,17 +53,37 @@ codex plugin marketplace add nstr/anthill
 codex plugin add anthill@anthill-local
 ```
 
-**VS Code (beta):** VS Code has no command for plugins. Add this repository
-as a plugin marketplace in your user `settings.json`:
+Then start a new session.
 
-```json
-"chat.plugins.marketplaces": ["nstr/anthill"]
-```
+**VS Code (beta):** VS Code has no command for plugins. To install it, you
+first add Anthill's marketplace to VS Code's settings, then install the plugin
+from that marketplace:
 
-Then open **Agent Customizations ▸ Plugins ▸ Browse Marketplace**, choose
-**anthill** and **Install**. VS Code asks you to trust `nstr/anthill` first.
+1. Open the Command Palette (**⇧⌘P** on macOS, **Ctrl+Shift+P** on Windows
+   and Linux) and run **Preferences: Open User Settings (JSON)**. Add this line
+   inside the braces, with a comma after the line before it, and save:
 
-Then start a new session. More in the [Claude Code](plugins/anthill-claude/README.md),
+   ```json
+   "chat.plugins.marketplaces": ["nstr/anthill"]
+   ```
+
+2. Open the Agents window: run **Open Agents Window** from the Command
+   Palette, or press **⇧⌥⌘A** on macOS, **Ctrl+Shift+Alt+A** on Windows and
+   Linux.
+3. Choose **Customizations** at the top left, then **Plugins**, then **Browse
+   Marketplace** next to Available.
+4. Type `anthill` in the search box, choose **Install** on **anthill**, then
+   **Trust** when VS Code asks about `nstr/anthill`.
+5. **Back to Installed** now lists anthill with "1 skill · 1 MCP server". Start
+   a new session (**New**: **⌘N** on macOS, **Ctrl+N** on Windows and Linux)
+   and try `/anthill:workflow watch <your task>`.
+
+When VS Code asks for permission, allow Anthill's tools (`exchange: …`) with
+**Allow in this Session**. For terminal commands, choose **Allow Once** from
+the button's arrow menu: **Allow in this Session** on a terminal command offers
+to auto-approve every command.
+
+More in the [Claude Code](plugins/anthill-claude/README.md),
 [Codex](plugins/anthill-codex/README.md) and [VS Code](plugins/anthill-vscode/README.md)
 plugin guides.
 

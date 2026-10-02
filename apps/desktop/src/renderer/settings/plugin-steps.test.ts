@@ -148,14 +148,42 @@ describe("VS Code, which has no command for plugins", () => {
     const steps = pluginSteps(vscode({ checkout: "/Users/me/anthill" }));
     expect(steps[0]?.says).toContain("Preferences: Open User Settings (JSON)");
     expect(steps[0]?.command).toBe('"chat.pluginLocations": { "/Users/me/anthill/plugins/anthill-vscode": true }');
-    expect(steps.at(-1)?.says).toContain("Start a new chat");
+    expect(steps.at(-1)?.says).toContain("Start a new session in the Agents window");
   });
 
   it("adds the GitHub marketplace when there is no checkout, and runs nothing in a terminal", () => {
-    const steps = pluginSteps(vscode());
     expect(commands(vscode())).toEqual([`"chat.plugins.marketplaces": ["${GITHUB_SOURCE}"]`]);
-    expect(steps.map((step) => step.says).join(" ")).toContain("Install anthill from the agent plugins VS Code then offers");
     expect(commands(vscode()).some((command) => /^(claude|codex|code) /.test(command))).toBe(false);
+  });
+
+  /*
+    "Install anthill from the agent plugins VS Code then offers" left people
+    looking for it: the marketplace comes first, and the plugin is behind
+    Customizations ▸ Plugins ▸ Browse Marketplace in the Agents window.
+  */
+  it("walks from the marketplace setting to Install, step by step", () => {
+    const says = pluginSteps(vscode(), "darwin").map((step) => step.says);
+    expect(says[0]).toMatch(/^To install the plugin, first add Anthill's marketplace to VS Code's settings/);
+    expect(says[1]).toContain("Customizations ▸ Plugins ▸ Browse Marketplace");
+    expect(says[2]).toBe("Search for anthill, choose Install, and Trust nstr/anthill when VS Code asks.");
+    expect(says).toHaveLength(4);
+  });
+
+  it("names the shortcuts of the system Anthill runs on, and both when it cannot tell", () => {
+    const text = (platform?: string) => pluginSteps(vscode(), platform).map((step) => step.says).join(" ");
+    expect(text("darwin")).toContain("(⇧⌘P)");
+    expect(text("darwin")).toContain("⇧⌥⌘A");
+    expect(text("darwin")).not.toContain("Ctrl");
+    expect(text("win32")).toContain("(Ctrl+Shift+P)");
+    expect(text("win32")).toContain("Ctrl+Shift+Alt+A");
+    expect(text("win32")).not.toContain("⌘");
+    expect(text("linux")).toContain("Ctrl+Shift+Alt+A");
+    expect(text()).toContain("⇧⌘P / Ctrl+Shift+P");
+  });
+
+  it("switches a turned-off plugin back on where VS Code keeps the switch", () => {
+    const [step] = pluginSteps(vscode({ installed: true, enabled: false }), "darwin");
+    expect(step?.says).toContain("Customizations ▸ Plugins");
   });
 
   it("does not send someone to the Coding tools page for VS Code", () => {

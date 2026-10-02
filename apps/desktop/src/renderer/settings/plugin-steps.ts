@@ -57,9 +57,9 @@ function shellPath(path: string): string {
  * which are the author's to edit, so its steps are lines to paste there.
  */
 type ToolSteps = {
-  missing(status: PluginHarnessStatus, source: string, id: string): PluginStep[];
+  missing(status: PluginHarnessStatus, source: string, id: string, keys: Keys): PluginStep[];
   /** What switches a disabled plugin back on. */
-  enable(id: string): PluginStep[];
+  enable(id: string, keys: Keys): PluginStep[];
   /** What installs the newer version a marketplace now offers. */
   update(status: PluginHarnessStatus, marketplace: string, id: string): PluginStep[];
   /** What a running session has to do before it sees the change. */
@@ -87,6 +87,19 @@ const newSession = (status: PluginHarnessStatus): PluginStep => ({
 
 /** Where VS Code's own settings are opened from, said the way its Command Palette says it. */
 const VSCODE_SETTINGS = "Preferences: Open User Settings (JSON)";
+
+/**
+ * VS Code's shortcuts for the steps, on the system Anthill runs on. VS Code
+ * 1.140 binds Open Agents Window to CtrlCmd+Shift+Alt+A from an editor window.
+ * Both are given when the system is not known.
+ */
+type Keys = { palette: string; agents: string };
+
+export function vscodeKeys(platform: string | undefined): Keys {
+  if (platform === "darwin") return { palette: "⇧⌘P", agents: "⇧⌥⌘A" };
+  if (platform === "win32" || platform === "linux") return { palette: "Ctrl+Shift+P", agents: "Ctrl+Shift+Alt+A" };
+  return { palette: "⇧⌘P / Ctrl+Shift+P", agents: "⇧⌥⌘A / Ctrl+Shift+Alt+A" };
+}
 
 const STEPS: Record<CheckedPluginHarness, ToolSteps> = {
   "claude-code": {
@@ -116,33 +129,48 @@ const STEPS: Record<CheckedPluginHarness, ToolSteps> = {
   },
   vscode: {
     // Pointing VS Code at a checkout's folder is the whole install; VS Code
-    // runs it from a copy it keeps in its own data folder.
-    missing: (status) =>
+    // runs it from a copy it keeps in its own data folder. From GitHub it is
+    // two moves in VS Code itself: the marketplace in its settings, then the
+    // plugin from that marketplace, which is where people got lost.
+    missing: (status, _source, _id, keys) =>
       status.checkout
         ? [
             {
-              says: `Point VS Code at this checkout's plugin folder: add this line to your user settings (${VSCODE_SETTINGS} in the Command Palette).`,
+              says: `Point VS Code at this checkout's plugin folder: open the Command Palette (${keys.palette}), run ${VSCODE_SETTINGS} and add this line.`,
               command: `"chat.pluginLocations": { ${JSON.stringify(`${status.checkout}/${PLUGIN_HARNESS_INFO.vscode.folder}`)}: true }`,
             },
           ]
         : [
             {
-              says: `Add Anthill's repository as a plugin marketplace: add this line to your user settings (${VSCODE_SETTINGS} in the Command Palette).`,
+              says: `To install the plugin, first add Anthill's marketplace to VS Code's settings: open the Command Palette (${keys.palette}), run ${VSCODE_SETTINGS} and add this line.`,
               command: `"chat.plugins.marketplaces": [${JSON.stringify(GITHUB_SOURCE)}]`,
             },
-            { says: `Install ${status.plugin} from the agent plugins VS Code then offers.` },
+            {
+              says: `Then install the plugin from that marketplace. Open the Agents window (Open Agents Window in the Command Palette, or ${keys.agents}), then Customizations ▸ Plugins ▸ Browse Marketplace.`,
+            },
+            { says: `Search for ${status.plugin}, choose Install, and Trust ${GITHUB_SOURCE} when VS Code asks.` },
           ],
-    enable: () => [{ says: "Switch it back on in VS Code's list of agent plugins." }],
+    enable: (_id, keys) => [
+      {
+        says: `Switch it back on with the switch next to anthill in Customizations ▸ Plugins, in the Agents window (${keys.agents}).`,
+      },
+    ],
     update: (status) => [
       { says: `Update it in VS Code's list of agent plugins, which now offers ${status.availableVersion}.` },
     ],
-    restart: () => ({ says: "Start a new chat. VS Code loads plugins when a chat starts, so one already open will not see it." }),
+    restart: () => ({
+      says: "Start a new session in the Agents window. VS Code loads plugins when a session starts, so one already open will not see it.",
+    }),
     noTool: { says: "VS Code has not been used on this machine yet. Install it and sign in to GitHub Copilot, then come back here." },
   },
 };
 
 /** The steps that move a tool from where it is to a working plugin. */
-export function pluginSteps(status: PluginHarnessStatus): PluginStep[] {
+/**
+ * `platform` is the system Anthill runs on (`process.platform`), for the
+ * shortcuts a step names; unknown, a step names both.
+ */
+export function pluginSteps(status: PluginHarnessStatus, platform?: string): PluginStep[] {
   const verdict = pluginVerdict(status);
   // A checkout on this disk is offered as the source, for working on Anthill;
   // otherwise the repository on GitHub, which is what everyone else installs.
@@ -150,6 +178,7 @@ export function pluginSteps(status: PluginHarnessStatus): PluginStep[] {
   const steps = STEPS[status.harness];
   const marketplace = status.marketplace ?? PLUGIN_HARNESS_INFO[status.harness].marketplace;
   const id = `${status.plugin}@${marketplace}`;
+  const keys = vscodeKeys(platform);
 
   switch (verdict) {
     case "no-tool":
@@ -160,10 +189,10 @@ export function pluginSteps(status: PluginHarnessStatus): PluginStep[] {
       ];
 
     case "missing":
-      return [...steps.missing(status, source, id), steps.restart(status)];
+      return [...steps.missing(status, source, id, keys), steps.restart(status)];
 
     case "off":
-      return [...steps.enable(id), steps.restart(status)];
+      return [...steps.enable(id, keys), steps.restart(status)];
 
     case "update":
       return [...steps.update(status, marketplace, id), steps.restart(status)];

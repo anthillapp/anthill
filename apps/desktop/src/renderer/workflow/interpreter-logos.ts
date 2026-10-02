@@ -16,11 +16,14 @@
  * Without it Pi's mark renders about a fifth smaller than its neighbours and
  * reads as unfinished, which is the complaint this was fixing.
  *
- * Not every CLI has an official mark in this app. Where there is none, the
- * lookup returns a neutral placeholder — a plain disc, which is not an
- * approximation of anything — rather than a broken image or a redrawn mark.
- * Every CLI Anthill offers today has one; VS Code, a harness without a CLI of
- * its own here, has the placeholder until its mark is added the same way.
+ * `vscode.svg` is VS Code's own `code-icon.svg`, byte for byte, as VS Code
+ * ships it (`out/media/code-icon.svg` in the app, from
+ * `src/vs/workbench/browser/media/` in its repository): the mark is already
+ * drawn edge to edge, so nothing needed tightening.
+ *
+ * A harness without an official mark here gets a neutral placeholder — a
+ * plain disc, which is not an approximation of anything — rather than a broken
+ * image or a redrawn mark. Every harness Anthill offers today has one.
  */
 
 import type { HarnessTarget } from "@anthill/workflow-schema";
@@ -28,11 +31,13 @@ import type { HarnessTarget } from "@anthill/workflow-schema";
 import claudeCode from "../assets/claude-code.webp";
 import codex from "../assets/codex.webp";
 import pi from "../assets/pi.svg";
+import vscode from "../assets/vscode.svg";
 
 export const INTERPRETER_LOGOS: Partial<Record<HarnessTarget, string>> = {
   "claude-code": claudeCode,
   codex,
   pi,
+  vscode,
 };
 
 /**

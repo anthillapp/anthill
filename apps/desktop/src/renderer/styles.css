@@ -8163,6 +8163,14 @@ button.presence-chip {
 .harness-chip.is-quiet { background: #f7ecd0; color: #8a6a08; }
 .harness-chip.is-off   { background: #f3f2f2; color: var(--ink-quiet); }
 
+/* Codex's word on its hooks sits under the row, indented as the row is, not
+   flush against the card's edge. */
+.harness-row > .hint,
+.harness-row > .state-panel {
+  margin: -4px 16px 15px;
+  max-width: 70ch;
+}
+
 /* Amber, not red: hooks that never fired are not a failure. */
 .harness-warning {
   margin: 0 16px 15px;

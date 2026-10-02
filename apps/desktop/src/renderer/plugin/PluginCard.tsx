@@ -8,7 +8,7 @@
  * one would read as a way to install that nobody could follow.
  */
 
-import { interpreterLogo } from "../workflow/interpreter-logos.js";
+import { interpreterLogoBackground } from "../workflow/interpreter-logos.js";
 
 import type { PluginCardView } from "./plugin-card.js";
 import type { Harness } from "./usePluginConnections.js";
@@ -38,7 +38,7 @@ export function PluginCard({ harness, label, view, onInstall, onCheck, onGuide, 
         <i
           className="plugin-card-logo"
           aria-hidden="true"
-          style={{ backgroundImage: `url(${interpreterLogo(harness)})` }}
+          style={{ backgroundImage: interpreterLogoBackground(harness) }}
         />
         <span className="plugin-card-name">{label}</span>
         <span className={`plugin-badge is-${view.state}`} role="status">

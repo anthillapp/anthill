@@ -21,7 +21,7 @@
 import { useState, type ReactNode } from "react";
 
 import { AnthillMark } from "../AnthillMark.js";
-import { interpreterLogo } from "../workflow/interpreter-logos.js";
+import { interpreterLogoBackground } from "../workflow/interpreter-logos.js";
 import { UnsupportedWindowsChip } from "../windows/unsupported-windows.js";
 import { PluginCard } from "../plugin/PluginCard.js";
 import { HARNESSES, usePluginConnections, type Harness } from "../plugin/usePluginConnections.js";
@@ -291,7 +291,7 @@ function Demo({ tool, surface }: { tool: Harness; surface: Surface }) {
   return (
     <div className="fs-demo fs-whole" aria-hidden="true">
       <div className="fs-demo-head">
-        <i style={{ backgroundImage: `url(${interpreterLogo(tool)})` }} />
+        <i style={{ backgroundImage: interpreterLogoBackground(tool) }} />
         <span>{surface === "terminal" ? "Terminal" : `${t.label} app`}</span>
         <span className="spacer" />
         <span className="fs-demo-meta">{surface === "terminal" ? "zsh" : "your session"}</span>

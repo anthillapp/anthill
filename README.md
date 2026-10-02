@@ -59,12 +59,17 @@ Then start a new session.
 first add Anthill's marketplace to VS Code's settings, then install the plugin
 from that marketplace:
 
-1. Open the Command Palette (**⇧⌘P** on macOS, **Ctrl+Shift+P** on Windows
-   and Linux) and run **Preferences: Open User Settings (JSON)**. Add this line
-   inside the braces, with a comma after the line before it, and save:
+1. Open Settings (**⌘,** on macOS, **Ctrl+,** on Windows and Linux) and search
+   for `chat.plugins.marketplaces`. Under **Chat › Plugins: Marketplaces**,
+   choose **Add Item**, enter `nstr/anthill` and choose **OK**. The marketplace
+   that is already there stays.
+
+   Or in `settings.json` (**Preferences: Open User Settings (JSON)** in the
+   Command Palette, **⇧⌘P** / **Ctrl+Shift+P**). The setting replaces VS
+   Code's list, so keep its own marketplace in it:
 
    ```json
-   "chat.plugins.marketplaces": ["nstr/anthill"]
+   "chat.plugins.marketplaces": ["github/awesome-copilot#marketplace", "nstr/anthill"]
    ```
 
 2. Open the Agents window: run **Open Agents Window** from the Command

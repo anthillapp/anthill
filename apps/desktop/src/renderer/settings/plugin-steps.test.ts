@@ -152,7 +152,8 @@ describe("VS Code, which has no command for plugins", () => {
   });
 
   it("adds the GitHub marketplace when there is no checkout, and runs nothing in a terminal", () => {
-    expect(commands(vscode())).toEqual([`"chat.plugins.marketplaces": ["${GITHUB_SOURCE}"]`]);
+    // VS Code's own marketplace stays: the setting replaces the whole list.
+    expect(commands(vscode())).toEqual([`"chat.plugins.marketplaces": ["github/awesome-copilot#marketplace", "${GITHUB_SOURCE}"]`]);
     expect(commands(vscode()).some((command) => /^(claude|codex|code) /.test(command))).toBe(false);
   });
 
@@ -164,6 +165,7 @@ describe("VS Code, which has no command for plugins", () => {
   it("walks from the marketplace setting to Install, step by step", () => {
     const says = pluginSteps(vscode(), "darwin").map((step) => step.says);
     expect(says[0]).toMatch(/^To install the plugin, first add Anthill's marketplace to VS Code's settings/);
+    expect(says[0]).toContain("choose Add Item under Chat › Plugins: Marketplaces, enter nstr/anthill");
     expect(says[1]).toContain("Customizations ▸ Plugins ▸ Browse Marketplace");
     expect(says[2]).toBe("Search for anthill, choose Install, and Trust nstr/anthill when VS Code asks.");
     expect(says).toHaveLength(4);
@@ -171,9 +173,11 @@ describe("VS Code, which has no command for plugins", () => {
 
   it("names the shortcuts of the system Anthill runs on, and both when it cannot tell", () => {
     const text = (platform?: string) => pluginSteps(vscode(), platform).map((step) => step.says).join(" ");
+    expect(text("darwin")).toContain("(⌘,)");
     expect(text("darwin")).toContain("(⇧⌘P)");
     expect(text("darwin")).toContain("⇧⌥⌘A");
     expect(text("darwin")).not.toContain("Ctrl");
+    expect(text("win32")).toContain("(Ctrl+,)");
     expect(text("win32")).toContain("(Ctrl+Shift+P)");
     expect(text("win32")).toContain("Ctrl+Shift+Alt+A");
     expect(text("win32")).not.toContain("⌘");

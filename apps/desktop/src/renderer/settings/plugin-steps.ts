@@ -93,13 +93,22 @@ const VSCODE_SETTINGS = "Preferences: Open User Settings (JSON)";
  * 1.140 binds Open Agents Window to CtrlCmd+Shift+Alt+A from an editor window.
  * Both are given when the system is not known.
  */
-type Keys = { palette: string; agents: string };
+type Keys = { settings: string; palette: string; agents: string };
 
 export function vscodeKeys(platform: string | undefined): Keys {
-  if (platform === "darwin") return { palette: "⇧⌘P", agents: "⇧⌥⌘A" };
-  if (platform === "win32" || platform === "linux") return { palette: "Ctrl+Shift+P", agents: "Ctrl+Shift+Alt+A" };
-  return { palette: "⇧⌘P / Ctrl+Shift+P", agents: "⇧⌥⌘A / Ctrl+Shift+Alt+A" };
+  if (platform === "darwin") return { settings: "⌘,", palette: "⇧⌘P", agents: "⇧⌥⌘A" };
+  if (platform === "win32" || platform === "linux") {
+    return { settings: "Ctrl+,", palette: "Ctrl+Shift+P", agents: "Ctrl+Shift+Alt+A" };
+  }
+  return { settings: "⌘, / Ctrl+,", palette: "⇧⌘P / Ctrl+Shift+P", agents: "⇧⌥⌘A / Ctrl+Shift+Alt+A" };
 }
+
+/**
+ * The marketplace VS Code offers by default (1.140). Setting
+ * `chat.plugins.marketplaces` in settings.json replaces the list, so a line
+ * naming only Anthill's took VS Code's own away; Settings ▸ Add Item keeps it.
+ */
+const VSCODE_DEFAULT_MARKETPLACE = "github/awesome-copilot#marketplace";
 
 const STEPS: Record<CheckedPluginHarness, ToolSteps> = {
   "claude-code": {
@@ -142,8 +151,8 @@ const STEPS: Record<CheckedPluginHarness, ToolSteps> = {
           ]
         : [
             {
-              says: `To install the plugin, first add Anthill's marketplace to VS Code's settings: open the Command Palette (${keys.palette}), run ${VSCODE_SETTINGS} and add this line.`,
-              command: `"chat.plugins.marketplaces": [${JSON.stringify(GITHUB_SOURCE)}]`,
+              says: `To install the plugin, first add Anthill's marketplace to VS Code's settings: open Settings (${keys.settings}), search for chat.plugins.marketplaces, choose Add Item under Chat › Plugins: Marketplaces, enter ${GITHUB_SOURCE} and choose OK. Or add this line with ${VSCODE_SETTINGS} in the Command Palette (${keys.palette}); it keeps VS Code's own marketplace.`,
+              command: `"chat.plugins.marketplaces": [${JSON.stringify(VSCODE_DEFAULT_MARKETPLACE)}, ${JSON.stringify(GITHUB_SOURCE)}]`,
             },
             {
               says: `Then install the plugin from that marketplace. Open the Agents window (Open Agents Window in the Command Palette, or ${keys.agents}), then Customizations ▸ Plugins ▸ Browse Marketplace.`,

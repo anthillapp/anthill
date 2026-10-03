@@ -1252,6 +1252,58 @@ describe("the Anthill a chat reaches", () => {
     expect((refused.content[0] as { text: string }).text).toContain("This chat's handovers go to Anthill (dev build).");
   });
 
+  // ANT-273: refused before it reached any exchange — a `brief.report` that is
+  // a string rather than a list — the first result named nothing, and only the
+  // corrected second call said which Anthill. A call that stores nothing does
+  // not pin the chat, but it names where it would have gone.
+  it("names the target when the chat's first handover is malformed, without pinning the chat", async () => {
+    const { handlers, targets } = await throughTargets();
+    const malformed = completeWorkflow();
+    (malformed.brief as unknown as Record<string, unknown>).report = "SUMMARY.md";
+    const refused = await handlers.createWorkflowDraft(draftInput({ open: false, build: "dev", workflow: malformed }));
+
+    const answer = refused.structuredContent as { outcome: string; problems: { code: string }[]; target?: { id: string; label: string } };
+    expect(answer.outcome).toBe("invalid");
+    expect(answer.problems.map((problem) => problem.code)).toContain("WORKFLOW_MALFORMED");
+    expect(answer.target).toEqual({ id: "electron-dev", label: "Anthill (dev build)" });
+    expect((refused.content[0] as { text: string }).text).toContain("This chat's handovers go to Anthill (dev build).");
+    expect(targets.target).toBeUndefined();
+
+    const corrected = await handlers.createWorkflowDraft(draftInput({ open: false, build: "dev" }));
+    expect((corrected.structuredContent as { target?: { id: string } }).target?.id).toBe("electron-dev");
+    expect(targets.target?.target).toBe("electron-dev");
+  });
+
+  it("names the target when the chat's first handover is too large to read", async () => {
+    const { handlers, targets } = await throughTargets();
+    const refused = await handlers.createWorkflowDraft(
+      draftInput({ workflow: completeWorkflow({ description: "x".repeat(MAX_SUBMISSION_BYTES + 1) }) }),
+    );
+    const answer = refused.structuredContent as { problems: { code: string }[]; target?: { id: string } };
+    expect(answer.problems.map((problem) => problem.code)).toEqual([MCP_PROBLEM_CODES.SUBMISSION_TOO_LARGE]);
+    expect(answer.target?.id).toBe("app");
+    expect(targets.target).toBeUndefined();
+  });
+
+  it("names the pinned target on a malformed handover later in the chat", async () => {
+    const { handlers } = await throughTargets();
+    await handlers.createWorkflowDraft(draftInput());
+    const refused = await handlers.createWorkflowDraft(draftInput({ idempotencyKey: "handover-8", mode: "nonsense" }));
+    expect((refused.structuredContent as { target?: { id: string } }).target?.id).toBe("app");
+  });
+
+  it("refuses a malformed handover's build that the chat is not pinned to along with the rest", async () => {
+    const { handlers } = await throughTargets();
+    await handlers.createWorkflowDraft(draftInput());
+    const refused = await handlers.createWorkflowDraft(
+      draftInput({ idempotencyKey: "handover-8", build: "dev", mode: "nonsense" }),
+    );
+    const answer = refused.structuredContent as { problems: { field?: string; message: string }[] };
+    expect(answer.problems.map((problem) => problem.field)).toEqual(expect.arrayContaining(["mode", "build"]));
+    // The refusal names the Anthill the chat is on in so many words.
+    expect((refused.content[0] as { text: string }).text).toContain("already go to Anthill (installed app)");
+  });
+
   // ANT-238: before the web shell runs there is no port or token to link to,
   // and anthill:// opens nothing on Linux and Windows: no link at all.
   it("gives a web chat no anthill:// link while the web shell is not running", async () => {

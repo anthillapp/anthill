@@ -297,13 +297,26 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         workflow: input.workflow,
       };
 
-      const oversize = checkSize(submitted);
-      if (oversize) return result(draftText, invalidDraft([oversize]));
-
+      /*
+        Refused before it reaches an exchange, a chat's first handover still
+        has to say which Anthill the chat's handovers go to: a draft refused
+        as malformed named none, and only the corrected one did (ANT-273).
+        Looked up without pinning, because nothing was stored to decide it by.
+      */
       const build = readBuild(input.build);
+      const bound = "problem" in build ? undefined : targets.peek(build.request);
+      const refusedEarly = (problems: readonly ExchangeProblem[]) =>
+        result(draftText, {
+          ...invalidDraft([...problems, ...(bound && "problem" in bound ? [bound.problem] : [])]),
+          ...(bound && !("problem" in bound) ? targetField(bound) : {}),
+        });
+
+      const oversize = checkSize(submitted);
+      if (oversize) return refusedEarly([oversize]);
+
       const read = readSubmission(submitted);
       if (!read.ok || "problem" in build) {
-        return result(draftText, invalidDraft([...(read.ok ? [] : read.problems), ...("problem" in build ? [build.problem] : [])]));
+        return refusedEarly([...(read.ok ? [] : read.problems), ...("problem" in build ? [build.problem] : [])]);
       }
 
       const submission = read.submission;
@@ -330,7 +343,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
           workflowId: created.workflowId,
           // The chat is pinned all the same, and a taken id is taken in this
           // Anthill's exchange: the refusal says which one.
-          ...(reach.resolved ? { target: { id: reach.resolved.target, label: reach.resolved.label } } : {}),
+          ...targetField(reach),
         });
       }
 
@@ -364,7 +377,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
           // Asked next, before open_workflow: the same command a report would
           // use, so it works on a machine with no `anthill` (ANT-249).
           observationCommand: `${(reach.resolved ? invocation(reach.resolved) : {}).command ?? "anthill"} observation status`,
-          ...(reach.resolved ? { target: { id: reach.resolved.target, label: reach.resolved.label } } : {}),
+          ...targetField(reach),
           ...(problems.length > 0 ? { problems, questions: questionsFrom(problems, submission.workflow) } : {}),
         });
       }
@@ -843,8 +856,15 @@ type Reached = {
  * refusal here would be a fault; the build request that can be refused is
  * answered where it is read.
  */
+/** The Anthill a result names, where the call knows it. */
+function targetField(reach: Reached): Pick<DraftAnswer, "target"> {
+  return reach.resolved ? { target: { id: reach.resolved.target, label: reach.resolved.label } } : {};
+}
+
 function targetAccess(dependencies: HandlerDependencies): {
   handover(request: TargetRequest): Reached | { problem: ExchangeProblem };
+  /** What `handover` would answer, without pinning the chat. */
+  peek(request: TargetRequest): Reached | { problem: ExchangeProblem };
   read(request?: TargetRequest): Reached | { problem: ExchangeProblem };
 } {
   const { targets, store } = dependencies;
@@ -855,12 +875,13 @@ function targetAccess(dependencies: HandlerDependencies): {
   if (targets) {
     return {
       handover: (request) => answered(targets.handover(request)),
+      peek: (request) => answered(targets.peek(request)),
       read: (request = {}) => answered(targets.read(request)),
     };
   }
   if (!store) throw new Error("createHandlers needs either targets or a store.");
   const fixed: Reached = { store, launch: dependencies.launch ?? openUrl, link: workflowUrl };
-  return { handover: () => fixed, read: () => fixed };
+  return { handover: () => fixed, peek: () => fixed, read: () => fixed };
 }
 
 /**

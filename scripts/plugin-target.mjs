@@ -4,7 +4,7 @@
  *
  *   npm run plugin:target                    what it is now, and what is running
  *   npm run plugin:target -- app             the default: the installed app, or --dev in the chat
- *   npm run plugin:target -- electron-dev    build the server, serve `npm run dev:desktop`
+ *   npm run plugin:target -- electron-dev    build the server and the CLI, serve `npm run dev:desktop`
  *   npm run plugin:target -- web             build the server and the CLI, serve the web shell
  *   … --no-build                             skip the build
  *   … --json                                 the status as JSON, for scripts and tests
@@ -53,10 +53,14 @@ const SERVER = join(ROOT, "apps", "mcp", "dist", "server.js");
 const SPELLINGS = { app: "app", installed: "app", "electron-dev": "electron-dev", dev: "electron-dev", web: "web" };
 const USAGE = "Usage: npm run plugin:target -- [app | electron-dev | web] [--no-build] [--json]";
 
-/** What each target needs built before its server can serve it. */
+/**
+ * What each target needs built before its server can serve it. The CLI for
+ * both checkout targets: with no `anthill` on the PATH, their chats report
+ * through the checkout's own cli.js, which nothing else builds (ANT-274).
+ */
 const BUILDS = {
   app: [],
-  "electron-dev": [["run", "build:deps"], ["run", "build", "--workspace=@anthill/mcp"]],
+  "electron-dev": [["run", "build:deps"], ["run", "build", "--workspace=@anthill/mcp"], ["run", "build", "--workspace=@anthill/cli"]],
   web: [["run", "build:deps"], ["run", "build", "--workspace=@anthill/mcp"], ["run", "build", "--workspace=@anthill/cli"]],
 };
 

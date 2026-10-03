@@ -163,10 +163,15 @@ anthill step <run-id> <nonce> <step-id>
 anthill done <run-id> <nonce>
 ```
 
-For the web shell, when `anthill` is not on the harness's PATH (a checkout that
-never ran `npm link`), the commands run the checkout's CLI with node instead —
-this server's own, or on Windows the `node` on the PATH when there is one — `node …/apps/cli/out/cli/src/cli.js run …` — and carry
-`--data-dir` when the web shell's data is not in `~/.anthill/cli` (ANT-232).
+When `anthill` is not on the harness's PATH (a checkout that never ran
+`npm link`) and this server was built in a checkout, the commands run the
+checkout's CLI with node instead — this server's own, or on Windows the `node`
+on the PATH when there is one — `node …/apps/cli/out/cli/src/cli.js run …` — and,
+for the web shell, carry `--data-dir` when its data is not in `~/.anthill/cli`
+(ANT-232). `npm run plugin:target -- electron-dev` and `-- web` build that CLI.
+When it has not been built, the result says so, with the command that builds
+it (`npm run build -w @anthill/cli`, in the checkout), rather than handing out
+commands that cannot run.
 
 They are run by the harness as it works. The `anthill` CLI appends a line per
 call to `~/.anthill/cli/harness-reports.jsonl`, which the desktop reads. This

@@ -345,9 +345,12 @@ describe("what plugin:target builds", () => {
     };
   }
 
+  // electron-dev builds the CLI too (ANT-274): with no `anthill` on the PATH,
+  // its chats report through the checkout's own cli.js, and in a fresh
+  // checkout nothing else builds it.
   it.each([
     ["app", []],
-    ["electron-dev", [["run", "build:deps"], ["run", "build", "--workspace=@anthill/mcp"]]],
+    ["electron-dev", [["run", "build:deps"], ["run", "build", "--workspace=@anthill/mcp"], ["run", "build", "--workspace=@anthill/cli"]]],
     ["web", [["run", "build:deps"], ["run", "build", "--workspace=@anthill/mcp"], ["run", "build", "--workspace=@anthill/cli"]]],
   ])("%s runs %j in the checkout, keeping --json's output to the status", async (target, steps) => {
     const { environment, home: root, settings } = await home();

@@ -98,7 +98,7 @@ for every chat instead:
 
 ```bash
 npm run plugin:target                   # what it is now, and what is running
-npm run plugin:target -- electron-dev   # builds the server, then serves the dev build
+npm run plugin:target -- electron-dev   # builds the server and the CLI, serves the dev build
 npm run plugin:target -- web            # builds the server and the CLI, serves the web shell
 npm run plugin:target -- app            # back to the default: the installed app, or --dev
 ```

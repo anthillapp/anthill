@@ -1385,6 +1385,55 @@ describe("the Anthill a chat reaches", () => {
     });
   });
 
+  /*
+    ANT-274: a fresh checkout set up for the dev build (build:deps, the MCP
+    server, plugin:target) never built its CLI, and with no `anthill` on the
+    PATH bind_run handed out `node …/apps/cli/out/cli/src/cli.js`, which was
+    not there: every report failed, and nothing said so.
+  */
+  describe("a dev-build chat whose checkout never built its CLI", () => {
+    async function bindOnDev(built: boolean) {
+      const checkout = await mkdtemp(join(tmpdir(), "anthill-checkout-"));
+      roots.push(checkout);
+      if (built) {
+        await mkdir(join(checkout, "apps", "cli", "out", "cli", "src"), { recursive: true });
+        await writeFile(join(checkout, "apps", "cli", "out", "cli", "src", "cli.js"), "");
+      }
+      const empty = await mkdtemp(join(tmpdir(), "anthill-mcp-bin-"));
+      roots.push(empty);
+      const { handlers } = await throughTargets({ env: { PATH: empty }, checkout });
+      const drafted = await handlers.createWorkflowDraft(draftInput({ open: false, build: "dev" }));
+      const ready = (await handlers.getReadyRevision({ workflowId: "workflow-1" })).structuredContent as { revision: number; digest: string };
+      const bound = await handlers.bindRun({ workflowId: "workflow-1", revision: ready.revision, digest: ready.digest, idempotencyKey: "bind-1" });
+      return { checkout, drafted, bound };
+    }
+    const textOf = (result: { content: unknown[] }) => (result.content[0] as { text: string }).text;
+
+    it("says so in bind_run's result, with the command that builds it", async () => {
+      const { checkout, bound } = await bindOnDev(false);
+      const cli = join(checkout, "apps", "cli", "out", "cli", "src", "cli.js");
+      expect(bound.structuredContent).toMatchObject({
+        outcome: "bound",
+        cliUnbuilt: { cli, checkout, build: "npm run build -w @anthill/cli" },
+      });
+      expect(textOf(bound)).toContain(`${cli} does not exist`);
+      expect(textOf(bound)).toContain(`\`npm run build -w @anthill/cli\` in ${checkout}`);
+    });
+
+    it("says so beside the progress check of a handover stored without opening", async () => {
+      const { drafted } = await bindOnDev(false);
+      expect(drafted.structuredContent).toHaveProperty("cliUnbuilt");
+      expect(textOf(drafted)).toContain("npm run build -w @anthill/cli");
+    });
+
+    it("says nothing about it once the CLI is built", async () => {
+      const { bound, drafted } = await bindOnDev(true);
+      expect(bound.structuredContent).not.toHaveProperty("cliUnbuilt");
+      expect(drafted.structuredContent).not.toHaveProperty("cliUnbuilt");
+      expect(textOf(bound)).not.toContain("has not been built");
+    });
+  });
+
   it("prefers the link a launcher reports, which knows the port of a shell it just started", async () => {
     const home = await mkdtemp(join(tmpdir(), "anthill-mcp-home-"));
     roots.push(home);

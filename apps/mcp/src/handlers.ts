@@ -39,7 +39,7 @@ import {
   type EligibilityRefusal,
   type ExchangeWorkflow,
 } from "@anthill/exchange-store";
-import { MARKER_VERSION, cliInstruction, newNonce, newRunId, workflowSteps, type CliInvocation } from "@anthill/live";
+import { MARKER_VERSION, cliInstruction, newNonce, newRunId, workflowSteps } from "@anthill/live";
 import {
   EXCHANGE_PROBLEM_CODES,
   EXCHANGE_VERSION,
@@ -72,7 +72,7 @@ import {
 } from "./text.js";
 import { openUrl, type LaunchReport, type Launcher } from "./launch.js";
 import { currentEnvironment, type ResolvedTarget, type TargetRequest, type TargetSession } from "./target.js";
-import { invocationDeps, reportingInvocation } from "./report-command.js";
+import { invocationDeps, reportingInvocation, type ReportingInvocation } from "./report-command.js";
 import { workflowUrl } from "./url.js";
 
 /**
@@ -137,7 +137,7 @@ export type HandlerDependencies = {
    * `anthill`, or this node on the checkout's CLI when `anthill` is not on the
    * PATH. Injected so a test fixes the PATH; defaults to the real machine.
    */
-  invocation?: (resolved: ResolvedTarget) => CliInvocation;
+  invocation?: (resolved: ResolvedTarget) => ReportingInvocation;
 };
 
 /**
@@ -365,6 +365,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       // would put Anthill in front of the answer (ANT-138). `open_workflow`
       // does the rest when it is time.
       if (input.open === false) {
+        const reporting: ReportingInvocation = reach.resolved ? invocation(reach.resolved) : {};
         return result(draftText, {
           outcome: problems.length > 0 ? "incomplete" : created.outcome,
           workflowId: created.workflowId,
@@ -376,7 +377,8 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
           openDeferred: true,
           // Asked next, before open_workflow: the same command a report would
           // use, so it works on a machine with no `anthill` (ANT-249).
-          observationCommand: `${(reach.resolved ? invocation(reach.resolved) : {}).command ?? "anthill"} observation status`,
+          observationCommand: `${reporting.command ?? "anthill"} observation status`,
+          ...(reporting.unbuilt ? { cliUnbuilt: reporting.unbuilt } : {}),
           ...targetField(reach),
           ...(problems.length > 0 ? { problems, questions: questionsFrom(problems, submission.workflow) } : {}),
         });
@@ -797,6 +799,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         throw new Error("The bound snapshot cannot be verified. No running state is implied.");
       }
       const steps = workflowSteps(snapshot.workflow);
+      const reporting: ReportingInvocation = reach.resolved ? invocation(reach.resolved) : {};
       const reportingCommands = cliInstruction(
         {
           runId: binding.runId,
@@ -807,7 +810,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
           issuedAt: binding.at,
         },
         steps,
-        reach.resolved ? invocation(reach.resolved) : {},
+        reporting,
       );
 
       // The one place the app being up is not a convenience: nothing but a
@@ -828,6 +831,8 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         registrationRequested: drop.outcome !== "conflict",
         app,
         reportingCommands,
+        // Said rather than handed out as a path that is not there (ANT-274).
+        ...(reporting.unbuilt ? { cliUnbuilt: reporting.unbuilt } : {}),
         steps,
         ...problemFields(drop.problems),
       });

@@ -31,7 +31,7 @@ export type PluginStep = {
 export const CHECKOUT_PLACEHOLDER = "/path/to/anthill";
 
 /** Anthill's repository, which both tools accept as a marketplace source. */
-export const GITHUB_SOURCE = "nstr/anthill";
+export const GITHUB_SOURCE = "anthillapp/anthill";
 
 export function pluginVerdict(status: PluginHarnessStatus): PluginVerdict {
   if (!status.toolFound) return "no-tool";

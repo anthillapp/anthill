@@ -5,8 +5,8 @@
   "author": {
     "name": "Nick Nesterov"
   },
-  "homepage": "https://github.com/nstr/anthill",
-  "repository": "https://github.com/nstr/anthill",
+  "homepage": "https://github.com/anthillapp/anthill",
+  "repository": "https://github.com/anthillapp/anthill",
   "license": "MIT",
   "keywords": [
     "workflow",

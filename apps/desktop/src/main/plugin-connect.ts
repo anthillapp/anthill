@@ -11,7 +11,7 @@
  *   The one file Anthill writes is its own, `~/.anthill/plugin.json`, which
  *   says where the server is — and only when installing from a checkout.
  * - **From GitHub, unless there is a checkout.** Both tools take Anthill's
- *   repository as a marketplace (`nstr/anthill`), and each plugin carries its
+ *   repository as a marketplace (`anthillapp/anthill`), and each plugin carries its
  *   own copy of the server, so that is what an installed app installs from,
  *   with nothing to build. A local checkout of this repository — one either
  *   tool already knows about, the one the server path points into, or the one
@@ -52,7 +52,9 @@ const COMMAND_TIMEOUT_MS = 90_000;
 const CLONE_TIMEOUT_MS = 300_000;
 
 /** Anthill's repository, which both tools accept as a marketplace source. */
-export const GITHUB_SOURCE = "nstr/anthill";
+export const GITHUB_SOURCE = "anthillapp/anthill";
+/** Where the repository lived before it moved; GitHub still redirects there. */
+const FORMER_GITHUB_SOURCES = ["nstr/anthill"];
 
 /** Where the checkout keeps the built server. */
 const SERVER_IN_CHECKOUT = join("apps", "mcp", "dist", "server.js");
@@ -190,7 +192,7 @@ const TOOLS: Record<CheckedPluginHarness, Tool> = {
     async marketplaceKnown(home) {
       const settings = await vscodeSettings(home);
       const marketplaces = isRecord(settings) && Array.isArray(settings["chat.plugins.marketplaces"]) ? settings["chat.plugins.marketplaces"] : [];
-      return marketplaces.includes(GITHUB_SOURCE);
+      return [GITHUB_SOURCE, ...FORMER_GITHUB_SOURCES].some((source) => marketplaces.includes(source));
     },
     // VS Code has no command for it. The card shows the steps instead, and
     // `installPlugin` refuses before it would run nothing and call it done.

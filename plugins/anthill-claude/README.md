@@ -19,11 +19,11 @@ Verified against **Claude Code 2.1.261** (desktop app 2.2553.1) and **Anthill
 
 ## Installing
 
-You need [Anthill](https://github.com/nstr/anthill) itself, and Node.js on your
+You need [Anthill](https://github.com/anthillapp/anthill) itself, and Node.js on your
 `PATH` (the plugin's server is a Node program).
 
 ```bash
-claude plugin marketplace add nstr/anthill
+claude plugin marketplace add anthillapp/anthill
 claude plugin install anthill@anthill --scope user
 ```
 

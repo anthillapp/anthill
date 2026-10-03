@@ -15,11 +15,11 @@ unsupported.
 
 ## Install
 
-You need [Anthill](https://github.com/nstr/anthill) itself, and Node.js on your
+You need [Anthill](https://github.com/anthillapp/anthill) itself, and Node.js on your
 `PATH` (the plugin's server is a Node program).
 
 ```bash
-codex plugin marketplace add nstr/anthill
+codex plugin marketplace add anthillapp/anthill
 codex plugin add anthill@anthill-local
 ```
 

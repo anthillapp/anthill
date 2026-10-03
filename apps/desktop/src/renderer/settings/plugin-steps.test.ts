@@ -165,9 +165,9 @@ describe("VS Code, which has no command for plugins", () => {
   it("walks from the marketplace setting to Install, step by step", () => {
     const says = pluginSteps(vscode(), "darwin").map((step) => step.says);
     expect(says[0]).toMatch(/^To install the plugin, first add Anthill's marketplace to VS Code's settings/);
-    expect(says[0]).toContain("choose Add Item under Chat › Plugins: Marketplaces, enter nstr/anthill");
+    expect(says[0]).toContain("choose Add Item under Chat › Plugins: Marketplaces, enter anthillapp/anthill");
     expect(says[1]).toContain("Customizations ▸ Plugins ▸ Browse Marketplace");
-    expect(says[2]).toBe("Search for anthill, choose Install, and Trust nstr/anthill when VS Code asks.");
+    expect(says[2]).toBe("Search for anthill, choose Install, and Trust anthillapp/anthill when VS Code asks.");
     expect(says).toHaveLength(4);
   });
 

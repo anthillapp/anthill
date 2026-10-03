@@ -15,7 +15,7 @@ where the session actually is.
 ## Install
 
 **macOS (Apple Silicon):** download the `.dmg` from
-[Releases](https://github.com/nstr/anthill/releases), open it and drag Anthill
+[Releases](https://github.com/anthillapp/anthill/releases), open it and drag Anthill
 to Applications.
 
 **Linux:** Anthill runs as a local web app, built from source:
@@ -42,14 +42,14 @@ It needs Node.js on your `PATH`.
 **Claude Code:**
 
 ```bash
-claude plugin marketplace add nstr/anthill
+claude plugin marketplace add anthillapp/anthill
 claude plugin install anthill@anthill
 ```
 
 **Codex:**
 
 ```bash
-codex plugin marketplace add nstr/anthill
+codex plugin marketplace add anthillapp/anthill
 codex plugin add anthill@anthill-local
 ```
 
@@ -61,7 +61,7 @@ from that marketplace:
 
 1. Open Settings (**⌘,** on macOS, **Ctrl+,** on Windows and Linux) and search
    for `chat.plugins.marketplaces`. Under **Chat › Plugins: Marketplaces**,
-   choose **Add Item**, enter `nstr/anthill` and choose **OK**. The marketplace
+   choose **Add Item**, enter `anthillapp/anthill` and choose **OK**. The marketplace
    that is already there stays.
 
    Or in `settings.json` (**Preferences: Open User Settings (JSON)** in the
@@ -69,7 +69,7 @@ from that marketplace:
    Code's list, so keep its own marketplace in it:
 
    ```json
-   "chat.plugins.marketplaces": ["github/awesome-copilot#marketplace", "nstr/anthill"]
+   "chat.plugins.marketplaces": ["github/awesome-copilot#marketplace", "anthillapp/anthill"]
    ```
 
 2. Open the Agents window: run **Open Agents Window** from the Command
@@ -78,7 +78,7 @@ from that marketplace:
 3. Choose **Customizations** at the top left, then **Plugins**, then **Browse
    Marketplace** next to Available.
 4. Type `anthill` in the search box, choose **Install** on **anthill**, then
-   **Trust** when VS Code asks about `nstr/anthill`.
+   **Trust** when VS Code asks about `anthillapp/anthill`.
 5. **Back to Installed** now lists anthill with "1 skill · 1 MCP server". Start
    a new session (**New**: **⌘N** on macOS, **Ctrl+N** on Windows and Linux)
    and try `/anthill:workflow watch <your task>`.
@@ -158,7 +158,7 @@ unless you turn them off. Nothing else leaves your machine. Details are in
 [Website](https://getanthill.ai) ·
 [r/AnthillApp](https://www.reddit.com/r/AnthillApp/) ·
 [Buy me a coffee](https://buymeacoffee.com/anthill) ·
-[Report an issue](https://github.com/nstr/anthill/issues) ·
+[Report an issue](https://github.com/anthillapp/anthill/issues) ·
 [Build from source and contribute](CONTRIBUTING.md)
 
 MIT licensed. See [LICENSE](LICENSE).

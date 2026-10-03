@@ -59,7 +59,7 @@ officially supported and some features may not work.**
   carries on. Anything verified not to work is turned off where it is, with its
   own explanation. Nothing guarantees compatibility, data safety or support.
   WSL is optional experimentation, never a requirement or the advertised path.
-  [Report a Windows issue](https://github.com/nstr/anthill/issues/new?template=windows.yml)
+  [Report a Windows issue](https://github.com/anthillapp/anthill/issues/new?template=windows.yml)
   — reports are welcome, a response is not guaranteed while Windows is
   unsupported.
 
@@ -74,7 +74,7 @@ Windows artifact. Until then the paths in this README are macOS paths.
 ### From a release
 
 Download the `.dmg` from
-[Releases](https://github.com/nstr/anthill/releases), open it, and drag Anthill
+[Releases](https://github.com/anthillapp/anthill/releases), open it, and drag Anthill
 to Applications. macOS on Apple Silicon only.
 
 A release built with the signing secrets in place is **signed with an Apple
@@ -406,10 +406,10 @@ packages/
 ## Issues
 
 Report bugs and request features in
-[GitHub Issues](https://github.com/nstr/anthill/issues). For anything about a
+[GitHub Issues](https://github.com/anthillapp/anthill/issues). For anything about a
 session Anthill misread, say which CLI and whether hooks were installed — those
 two facts decide almost every observation question. Windows problems have their
-own [form](https://github.com/nstr/anthill/issues/new?template=windows.yml).
+own [form](https://github.com/anthillapp/anthill/issues/new?template=windows.yml).
 
 Note that `docs/` is git-ignored: it is a scratch directory for generated
 reports, not project documentation.

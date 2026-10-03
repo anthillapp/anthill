@@ -1,7 +1,7 @@
 blank_issues_enabled: true
 contact_links:
   - name: Report a security vulnerability
-    url: https://github.com/nstr/anthill/security/advisories/new
+    url: https://github.com/anthillapp/anthill/security/advisories/new
     about: Privately, not in a public issue. See SECURITY.md.
   - name: Ask a question or share a workflow
     url: https://www.reddit.com/r/AnthillApp/

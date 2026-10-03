@@ -4,7 +4,7 @@
 
 Please report security problems privately, not in a public issue:
 open the repository's **Security** tab and choose **Report a vulnerability**
-([direct link](https://github.com/nstr/anthill/security/advisories/new)).
+([direct link](https://github.com/anthillapp/anthill/security/advisories/new)).
 
 Include what you found, how to reproduce it, and the Anthill version
 (**Settings → About**). Anthill is maintained by one person, so there is no

@@ -617,7 +617,7 @@ export type PluginConnection = {
   status: PluginHarnessStatus;
   /**
    * Where Anthill installs the plugin from: a local Anthill checkout when
-   * there is one, otherwise the repository on GitHub (`nstr/anthill`).
+   * there is one, otherwise the repository on GitHub (`anthillapp/anthill`).
    * Optional for older main processes, which left it out without a checkout;
    * the card then sends the author to Settings ▸ Plugins instead.
    */

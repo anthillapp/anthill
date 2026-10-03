@@ -26,7 +26,7 @@ window. What is still rough:
 
 ## Installing
 
-You need [Anthill](https://github.com/nstr/anthill) itself, and Node.js on your
+You need [Anthill](https://github.com/anthillapp/anthill) itself, and Node.js on your
 `PATH` (the plugin's server is a Node program).
 
 VS Code has no command line for plugins; both ways in are settings.
@@ -36,7 +36,7 @@ VS Code's settings, then install the plugin from that marketplace:
 
 1. Open Settings (**⌘,** on macOS, **Ctrl+,** on Windows and Linux) and search
    for `chat.plugins.marketplaces`. Under **Chat › Plugins: Marketplaces**,
-   choose **Add Item**, enter `nstr/anthill` and choose **OK**. The marketplace
+   choose **Add Item**, enter `anthillapp/anthill` and choose **OK**. The marketplace
    that is already there stays.
 
    Or in `settings.json` (**Preferences: Open User Settings (JSON)** in the
@@ -44,7 +44,7 @@ VS Code's settings, then install the plugin from that marketplace:
    Code's list, so keep its own marketplace in it:
 
    ```json
-   "chat.plugins.marketplaces": ["github/awesome-copilot#marketplace", "nstr/anthill"]
+   "chat.plugins.marketplaces": ["github/awesome-copilot#marketplace", "anthillapp/anthill"]
    ```
 
 2. Open the Agents window: run **Open Agents Window** from the Command
@@ -53,7 +53,7 @@ VS Code's settings, then install the plugin from that marketplace:
 3. Choose **Customizations** at the top left, then **Plugins**, then **Browse
    Marketplace** next to Available.
 4. Type `anthill` in the search box, choose **Install** on **anthill**, then
-   **Trust** when VS Code asks about `nstr/anthill`.
+   **Trust** when VS Code asks about `anthillapp/anthill`.
 5. **Back to Installed** now lists anthill with "1 skill · 1 MCP server". Start
    a new session (**New**: **⌘N** on macOS, **Ctrl+N** on Windows and Linux)
    and try `/anthill:workflow watch <your task>`.

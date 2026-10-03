@@ -252,8 +252,8 @@ function Connect({
         </div>
 
         <p className="ob-foot">
-          Codex or Claude Code may ask you to confirm the install; VS Code takes it from its own
-          settings. You can add any of them later from Settings ▸ Plugins.
+          Codex or Claude Code may ask you to confirm the install; VS Code asks twice, in its own
+          window. You can add any of them later from Settings ▸ Plugins.
         </p>
 
         <div className="ob-actions">

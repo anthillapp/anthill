@@ -1372,7 +1372,11 @@ function registerIpcHandlers(): void {
   // The plugin card: the records, plus the two things records cannot say —
   // whether the CLI runs, and whether the installed plugin's server answers.
   const appRoot = devCheckout(app.getAppPath(), app.isPackaged);
-  const connectDeps = () => ({ ...(appRoot ? { appRoot } : {}), interpreters: detectInterpreters });
+  const connectDeps = () => ({
+    ...(appRoot ? { appRoot } : {}),
+    interpreters: detectInterpreters,
+    openUrl: (url: string) => shell.openExternal(url),
+  });
   handle(IpcChannel.pluginConnections, async () => {
     await userPath;
     return pluginConnections(connectDeps());

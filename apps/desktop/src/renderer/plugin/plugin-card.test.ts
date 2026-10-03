@@ -124,16 +124,34 @@ describe("Ready", () => {
   });
 });
 
-describe("a tool Anthill cannot install into", () => {
-  it("offers the steps rather than a button that could only fail", () => {
-    const view = pluginCard(
-      connection({ harness: "vscode", label: "VS Code", cli: { available: true }, status: { harness: "vscode", label: "VS Code" } }),
-      idle,
+describe("a tool installed through its own links", () => {
+  const vscode = (status: Partial<PluginHarnessStatus> = {}) =>
+    connection({ harness: "vscode", label: "VS Code", cli: { available: true }, status: { harness: "vscode", label: "VS Code", ...status } });
+
+  it("offers Install, and says VS Code asks to confirm", () => {
+    const view = pluginCard(vscode(), idle, "VS Code");
+    expect(view.state).toBe("available");
+    expect(view.action).toEqual({ kind: "install", label: "Install for VS Code" });
+    expect(view.note).toContain("VS Code asks you to confirm");
+  });
+
+  it("waits on VS Code's prompts rather than claiming an install, and offers the links again", () => {
+    const view = pluginCard(vscode(), { kind: "confirming" }, "VS Code");
+    expect(view.state).toBe("confirm");
+    expect(view.badge).toBe("Confirm in VS Code");
+    expect(view.note).toContain("Confirm both there");
+    expect(view.action).toEqual({ kind: "install", label: "Open the links again", outlined: true });
+  });
+
+  it("reads a plugin that turned up while waiting as one just installed", () => {
+    const view = pluginCard(vscode({ installed: true, enabled: true }), { kind: "confirming" }, "VS Code");
+    expect(view.state).not.toBe("confirm");
+    const answered = pluginCard(
+      { ...vscode({ installed: true, enabled: true }), serverAnswers: true },
+      { kind: "confirming" },
       "VS Code",
     );
-    expect(view.state).toBe("available");
-    expect(view.action).toEqual({ kind: "settings", label: "Show the steps", outlined: true });
-    expect(view.note).toContain("its own settings");
+    expect(answered.state).toBe("reload");
   });
 
   it("still turns green only when the installed plugin's server answers", () => {

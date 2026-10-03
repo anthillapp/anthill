@@ -639,7 +639,11 @@ export type PluginConnection = {
 
 /** What an install did. `changed` says whether anything moved on disk before it stopped. */
 export type PluginInstallResult =
-  | { ok: true }
+  /**
+   * `confirm`: the tool's own install links were opened, and the tool asks the
+   * person before it installs anything. Nothing is installed until they say so.
+   */
+  | { ok: true; confirm?: boolean }
   | { ok: false; error: string; changed: boolean };
 
 export type CodexModelCatalog = {

@@ -29,10 +29,35 @@ window. What is still rough:
 You need [Anthill](https://github.com/anthillapp/anthill) itself, and Node.js on your
 `PATH` (the plugin's server is a Node program).
 
-VS Code has no command line for plugins; both ways in are settings.
+VS Code has no command line for plugins. From GitHub, two links of its own do
+the install; from a checkout, its settings do.
 
-**From GitHub.** To install the plugin, you first add Anthill's marketplace to
-VS Code's settings, then install the plugin from that marketplace:
+**From GitHub.** Open these two links, and confirm each in VS Code: the first
+adds Anthill's marketplace, the second installs the plugin from it.
+
+macOS:
+
+```bash
+open "vscode://chat-plugin/add-marketplace?ref=anthillapp/anthill"
+open "vscode://chat-plugin/install?source=anthillapp/anthill&plugin=anthill"
+```
+
+Windows (PowerShell):
+
+```powershell
+Start-Process "vscode://chat-plugin/add-marketplace?ref=anthillapp/anthill"
+Start-Process "vscode://chat-plugin/install?source=anthillapp/anthill&plugin=anthill"
+```
+
+Linux: the same links with `xdg-open`.
+
+Then start a new session in the Agents window (**New**: **⌘N** on macOS,
+**Ctrl+N** on Windows and Linux) and try `/anthill:workflow watch <your task>`.
+If you installed the plugin from `nstr/anthill` before the repository moved,
+uninstall that one in **Customizations ▸ Plugins** first, or you will have two.
+
+**By hand**, if the links do not open VS Code: first add Anthill's marketplace
+to VS Code's settings, then install the plugin from that marketplace.
 
 1. Open Settings (**⌘,** on macOS, **Ctrl+,** on Windows and Linux) and search
    for `chat.plugins.marketplaces`. Under **Chat › Plugins: Marketplaces**,

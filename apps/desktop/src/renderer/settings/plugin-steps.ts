@@ -57,7 +57,7 @@ function shellPath(path: string): string {
  * which are the author's to edit, so its steps are lines to paste there.
  */
 type ToolSteps = {
-  missing(status: PluginHarnessStatus, source: string, id: string, keys: Keys): PluginStep[];
+  missing(status: PluginHarnessStatus, source: string, id: string, keys: Keys, platform?: string): PluginStep[];
   /** What switches a disabled plugin back on. */
   enable(id: string, keys: Keys): PluginStep[];
   /** What installs the newer version a marketplace now offers. */
@@ -104,11 +104,20 @@ export function vscodeKeys(platform: string | undefined): Keys {
 }
 
 /**
- * The marketplace VS Code offers by default (1.140). Setting
- * `chat.plugins.marketplaces` in settings.json replaces the list, so a line
- * naming only Anthill's took VS Code's own away; Settings ▸ Add Item keeps it.
+ * VS Code's own links for adding a marketplace and installing a plugin from
+ * one (its `chat-plugin` URL handler, 1.140). Each asks for confirmation in
+ * VS Code; the marketplace one adds to the list rather than replacing it, so
+ * VS Code's own marketplace stays.
  */
-const VSCODE_DEFAULT_MARKETPLACE = "github/awesome-copilot#marketplace";
+export const VSCODE_ADD_MARKETPLACE = `vscode://chat-plugin/add-marketplace?ref=${GITHUB_SOURCE}`;
+export const VSCODE_INSTALL_PLUGIN = `vscode://chat-plugin/install?source=${GITHUB_SOURCE}&plugin=anthill`;
+
+/** How a link is opened from a terminal on each system: PowerShell on Windows. */
+export function openLink(platform: string | undefined, url: string): string {
+  if (platform === "win32") return `Start-Process "${url}"`;
+  if (platform === "linux") return `xdg-open "${url}"`;
+  return `open "${url}"`;
+}
 
 const STEPS: Record<CheckedPluginHarness, ToolSteps> = {
   "claude-code": {
@@ -139,9 +148,9 @@ const STEPS: Record<CheckedPluginHarness, ToolSteps> = {
   vscode: {
     // Pointing VS Code at a checkout's folder is the whole install; VS Code
     // runs it from a copy it keeps in its own data folder. From GitHub it is
-    // two moves in VS Code itself: the marketplace in its settings, then the
-    // plugin from that marketplace, which is where people got lost.
-    missing: (status, _source, _id, keys) =>
+    // VS Code's own two links, each confirmed in VS Code, and the same two
+    // moves by hand when a link does not open it.
+    missing: (status, _source, _id, keys, platform) =>
       status.checkout
         ? [
             {
@@ -151,13 +160,16 @@ const STEPS: Record<CheckedPluginHarness, ToolSteps> = {
           ]
         : [
             {
-              says: `To install the plugin, first add Anthill's marketplace to VS Code's settings: open Settings (${keys.settings}), search for chat.plugins.marketplaces, choose Add Item under Chat › Plugins: Marketplaces, enter ${GITHUB_SOURCE} and choose OK. Or add this line with ${VSCODE_SETTINGS} in the Command Palette (${keys.palette}); it keeps VS Code's own marketplace.`,
-              command: `"chat.plugins.marketplaces": [${JSON.stringify(VSCODE_DEFAULT_MARKETPLACE)}, ${JSON.stringify(GITHUB_SOURCE)}]`,
+              says: "Add Anthill's marketplace to VS Code. VS Code asks you to confirm.",
+              command: openLink(platform, VSCODE_ADD_MARKETPLACE),
             },
             {
-              says: `Then install the plugin from that marketplace. Open the Agents window (Open Agents Window in the Command Palette, or ${keys.agents}), then Customizations ▸ Plugins ▸ Browse Marketplace.`,
+              says: `Install the ${status.plugin} plugin from it. VS Code asks you to confirm again.`,
+              command: openLink(platform, VSCODE_INSTALL_PLUGIN),
             },
-            { says: `Search for ${status.plugin}, choose Install, and Trust ${GITHUB_SOURCE} when VS Code asks.` },
+            {
+              says: `If VS Code does not open, do the same by hand: in Settings (${keys.settings}), add ${GITHUB_SOURCE} under Chat › Plugins: Marketplaces with Add Item; then in the Agents window (${keys.agents}), Customizations ▸ Plugins ▸ Browse Marketplace, and Install ${status.plugin}.`,
+            },
           ],
     enable: (_id, keys) => [
       {
@@ -198,7 +210,7 @@ export function pluginSteps(status: PluginHarnessStatus, platform?: string): Plu
       ];
 
     case "missing":
-      return [...steps.missing(status, source, id, keys), steps.restart(status)];
+      return [...steps.missing(status, source, id, keys, platform), steps.restart(status)];
 
     case "off":
       return [...steps.enable(id, keys), steps.restart(status)];

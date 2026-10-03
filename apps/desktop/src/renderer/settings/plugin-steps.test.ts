@@ -28,7 +28,7 @@ const codex = (over: Partial<PluginHarnessStatus> = {}): PluginHarnessStatus => 
   ...over,
 });
 
-const commands = (status: PluginHarnessStatus) => pluginSteps(status).flatMap((step) => (step.command ? [step.command] : []));
+const commands = (status: PluginHarnessStatus, platform?: string) => pluginSteps(status, platform).flatMap((step) => (step.command ? [step.command] : []));
 
 describe("what the page claims", () => {
   it("tells each state apart", () => {
@@ -151,38 +151,38 @@ describe("VS Code, which has no command for plugins", () => {
     expect(steps.at(-1)?.says).toContain("Start a new session in the Agents window");
   });
 
-  it("adds the GitHub marketplace when there is no checkout, and runs nothing in a terminal", () => {
-    // VS Code's own marketplace stays: the setting replaces the whole list.
-    expect(commands(vscode())).toEqual([`"chat.plugins.marketplaces": ["github/awesome-copilot#marketplace", "${GITHUB_SOURCE}"]`]);
-    expect(commands(vscode()).some((command) => /^(claude|codex|code) /.test(command))).toBe(false);
-  });
-
   /*
-    "Install anthill from the agent plugins VS Code then offers" left people
-    looking for it: the marketplace comes first, and the plugin is behind
-    Customizations ▸ Plugins ▸ Browse Marketplace in the Agents window.
+    VS Code's own links do the whole install from GitHub, each confirmed in
+    VS Code: the marketplace first, then the plugin from it. Typing the
+    marketplace into settings.json had replaced VS Code's own list.
   */
-  it("walks from the marketplace setting to Install, step by step", () => {
+  it("installs from GitHub with VS Code's two links, marketplace first", () => {
+    expect(commands(vscode(), "darwin")).toEqual([
+      'open "vscode://chat-plugin/add-marketplace?ref=anthillapp/anthill"',
+      'open "vscode://chat-plugin/install?source=anthillapp/anthill&plugin=anthill"',
+    ]);
     const says = pluginSteps(vscode(), "darwin").map((step) => step.says);
-    expect(says[0]).toMatch(/^To install the plugin, first add Anthill's marketplace to VS Code's settings/);
-    expect(says[0]).toContain("choose Add Item under Chat › Plugins: Marketplaces, enter anthillapp/anthill");
-    expect(says[1]).toContain("Customizations ▸ Plugins ▸ Browse Marketplace");
-    expect(says[2]).toBe("Search for anthill, choose Install, and Trust anthillapp/anthill when VS Code asks.");
+    expect(says[0]).toBe("Add Anthill's marketplace to VS Code. VS Code asks you to confirm.");
+    expect(says[1]).toBe("Install the anthill plugin from it. VS Code asks you to confirm again.");
     expect(says).toHaveLength(4);
   });
 
-  it("names the shortcuts of the system Anthill runs on, and both when it cannot tell", () => {
-    const text = (platform?: string) => pluginSteps(vscode(), platform).map((step) => step.says).join(" ");
-    expect(text("darwin")).toContain("(⌘,)");
-    expect(text("darwin")).toContain("(⇧⌘P)");
-    expect(text("darwin")).toContain("⇧⌥⌘A");
-    expect(text("darwin")).not.toContain("Ctrl");
-    expect(text("win32")).toContain("(Ctrl+,)");
-    expect(text("win32")).toContain("(Ctrl+Shift+P)");
-    expect(text("win32")).toContain("Ctrl+Shift+Alt+A");
-    expect(text("win32")).not.toContain("⌘");
-    expect(text("linux")).toContain("Ctrl+Shift+Alt+A");
-    expect(text()).toContain("⇧⌘P / Ctrl+Shift+P");
+  it("opens the links the way each system's terminal does", () => {
+    expect(commands(vscode(), "win32")[0]).toBe('Start-Process "vscode://chat-plugin/add-marketplace?ref=anthillapp/anthill"');
+    expect(commands(vscode(), "linux")[1]).toBe('xdg-open "vscode://chat-plugin/install?source=anthillapp/anthill&plugin=anthill"');
+    expect(commands(vscode())[0]).toMatch(/^open "/);
+  });
+
+  it("keeps the same two moves by hand, with the system's shortcuts, for when a link does not open VS Code", () => {
+    const byHand = (platform?: string) => pluginSteps(vscode(), platform)[2]?.says ?? "";
+    expect(byHand("darwin")).toContain("Settings (⌘,)");
+    expect(byHand("darwin")).toContain("Chat › Plugins: Marketplaces with Add Item");
+    expect(byHand("darwin")).toContain("Agents window (⇧⌥⌘A), Customizations ▸ Plugins ▸ Browse Marketplace");
+    expect(byHand("darwin")).not.toContain("Ctrl");
+    expect(byHand("win32")).toContain("Settings (Ctrl+,)");
+    expect(byHand("win32")).toContain("Ctrl+Shift+Alt+A");
+    expect(byHand("win32")).not.toContain("⌘");
+    expect(byHand()).toContain("⌘, / Ctrl+,");
   });
 
   it("switches a turned-off plugin back on where VS Code keeps the switch", () => {

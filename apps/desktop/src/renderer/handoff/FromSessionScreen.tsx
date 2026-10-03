@@ -85,7 +85,7 @@ const TOOL: Record<
   vscode: {
     label: "VS Code",
     surfaces: ["app"],
-    installNote: "VS Code takes plugins from its own settings and marketplace. Settings ▸ Plugins walks you through it.",
+    installNote: "VS Code installs it from two links it asks you to confirm. Settings ▸ Plugins has them.",
     cli: "code",
     welcome: "GitHub Copilot · Agent",
     accent: "#3794ff",

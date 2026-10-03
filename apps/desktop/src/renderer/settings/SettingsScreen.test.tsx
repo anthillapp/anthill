@@ -187,7 +187,7 @@ describe("the About page", () => {
     show();
     fireEvent.click(page("About"));
     for (const [text, name] of [
-      ["github.com/nstr/anthill", "source"],
+      ["github.com/anthillapp/anthill", "source"],
       ["r/AnthillApp", "community"],
       ["getanthill.ai", "website"],
       ["Buy me a coffee", "support"],

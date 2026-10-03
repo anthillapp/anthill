@@ -831,7 +831,7 @@ function AboutPage() {
         label="Source"
         note="Anthill designs workflows and watches the session you start yourself. It never runs one."
       >
-        <AboutLink name="source">github.com/nstr/anthill</AboutLink>
+        <AboutLink name="source">github.com/anthillapp/anthill</AboutLink>
       </SettingRow>
       <SettingDivider />
       <SettingRow label="Community" note="Questions, ideas and workflows from other people using Anthill.">

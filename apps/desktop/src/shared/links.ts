@@ -4,14 +4,14 @@
  * else.
  */
 export const EXTERNAL_LINKS = {
-  source: "https://github.com/nstr/anthill",
+  source: "https://github.com/anthillapp/anthill",
   community: "https://www.reddit.com/r/AnthillApp/",
   website: "https://getanthill.ai/",
   support: "https://buymeacoffee.com/anthill",
   /** What diagnostics send and how to turn them off, in the public README (ANT-156). */
-  privacy: "https://github.com/nstr/anthill#where-anthill-keeps-things",
+  privacy: "https://github.com/anthillapp/anthill#where-anthill-keeps-things",
   /** The Windows issue form: what an experimental Windows build reports through (ANT-154). */
-  windowsIssue: "https://github.com/nstr/anthill/issues/new?template=windows.yml",
+  windowsIssue: "https://github.com/anthillapp/anthill/issues/new?template=windows.yml",
 } as const;
 
 /**

@@ -58,7 +58,7 @@ for (const bundle of BUNDLES) {
     banner: {
       js: [
         `// Anthill ${bundle.title} ${version}, built by scripts/build-plugin-server.mjs`,
-        "// from https://github.com/nstr/anthill. Do not edit: run",
+        "// from https://github.com/anthillapp/anthill. Do not edit: run",
         "// `npm run plugin:bundle` to write it again. MIT licensed.",
         'import { createRequire as __anthillCreateRequire } from "node:module";',
         "const require = __anthillCreateRequire(import.meta.url);",

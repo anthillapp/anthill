@@ -17,7 +17,7 @@
       },
       "source": "./plugins/anthill-claude",
       "category": "productivity",
-      "homepage": "https://github.com/nstr/anthill",
+      "homepage": "https://github.com/anthillapp/anthill",
       "tags": ["workflow", "planning", "observability", "anthill"]
     }
   ]

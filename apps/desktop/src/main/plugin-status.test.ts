@@ -229,12 +229,12 @@ describe("VS Code", () => {
 
   it("finds a marketplace install in VS Code's installed.json, and ignores a folder switched off", async () => {
     const dir = await home();
-    const clone = await vscodePlugin(join(dir, ".vscode/agent-plugins/github.com/nstr/anthill/plugins/anthill-vscode"));
+    const clone = await vscodePlugin(join(dir, ".vscode/agent-plugins/github.com/anthillapp/anthill/plugins/anthill-vscode"));
     await put(join(dir, ".vscode/agent-plugins/installed.json"), {
       version: 1,
       installed: [
         { pluginUri: pathToFileURL(join(dir, "elsewhere")).href, marketplace: "someone/else", name: "anthill" },
-        { pluginUri: pathToFileURL(clone).href, marketplace: "nstr/anthill", name: "anthill" },
+        { pluginUri: pathToFileURL(clone).href, marketplace: "anthillapp/anthill", name: "anthill" },
       ],
     });
     const user = join(dir, "Code", "User");
@@ -242,8 +242,8 @@ describe("VS Code", () => {
 
     expect(await vscodeStatus(dir, user)).toMatchObject({
       installed: true,
-      marketplace: "nstr/anthill",
-      source: "nstr/anthill",
+      marketplace: "anthillapp/anthill",
+      source: "anthillapp/anthill",
       installedVersion: "0.8.7",
     });
   });

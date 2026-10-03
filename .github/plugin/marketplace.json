@@ -13,7 +13,7 @@
       "version": "0.8.8",
       "source": "./plugins/anthill-vscode",
       "category": "productivity",
-      "homepage": "https://github.com/nstr/anthill",
+      "homepage": "https://github.com/anthillapp/anthill",
       "tags": ["workflow", "planning", "observability", "anthill"]
     }
   ]

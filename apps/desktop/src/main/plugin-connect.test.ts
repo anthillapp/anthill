@@ -13,7 +13,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SpawnFn } from "@anthill/runtimes";
 
@@ -29,6 +29,7 @@ import type { PluginHarnessStatus, PluginStatus } from "../shared/ipc.js";
 
 const homes: string[] = [];
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(homes.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -300,6 +301,8 @@ describe("checking the server answers", () => {
     const plugin = join(dir, "anthill/plugins/anthill-vscode");
     await put(join(plugin, "plugin.json"), { name: "anthill", version: "0.8.7" });
     await put(join(plugin, "bin/anthill-mcp"), ANSWERS);
+    // Linux reads $XDG_CONFIG_HOME first, and CI runners set it to the real one.
+    vi.stubEnv("XDG_CONFIG_HOME", join(dir, ".config"));
     const user = process.platform === "darwin"
       ? join(dir, "Library/Application Support/Code/User")
       : join(dir, ".config/Code/User");

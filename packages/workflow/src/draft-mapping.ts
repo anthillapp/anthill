@@ -30,7 +30,7 @@ import { WORKFLOW_FORMAT_VERSION } from "./format.js";
 import { harnessProfile, type HarnessProfile } from "./harness.js";
 import type { InterpreterId } from "./interpreters.js";
 import type { DraftQuestion, DraftWarning, WorkflowDraft } from "./draft.js";
-import { validateWorkflow } from "./workflow.js";
+import { findCycles, validateWorkflow } from "./workflow.js";
 import type { ValidationResult } from "@anthill/workflow-schema";
 
 export type DraftSource = {
@@ -456,9 +456,49 @@ export function mapDraftToWorkflow(
     });
   }
 
+  /*
+    A step on a loop with no pass limit takes the loop's limit.
+
+    The instruction asks for "maxIterations" on every step of a loop, and an
+    interpreter that sets it on four of five has said what the bound is and
+    forgotten to repeat it. Left alone, the draft opens with an error on the one
+    step it missed (ANT-262). The largest limit already on that loop is the one
+    the interpreter chose, so it is copied rather than invented, and a loop with
+    no limit anywhere is left for the author to decide.
+  */
+  const limitFor = new Map<string, number>();
+  const draftIdOf = new Map([...nodeIdOf].map(([draftId, nodeId]) => [nodeId, draftId]));
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  for (const group of findCycles({ ...shell, nodes, edges })) {
+    const limits = group
+      .map((id) => (nodeById.get(id)?.config as { maxIterations?: number } | undefined)?.maxIterations)
+      .filter((limit): limit is number => typeof limit === "number");
+    if (limits.length === 0) continue;
+    const limit = Math.max(...limits);
+    for (const id of group) {
+      const node = nodeById.get(id);
+      if (node?.type !== "agent") continue;
+      if ((node.config as { maxIterations?: number }).maxIterations !== undefined) continue;
+      limitFor.set(id, limit);
+      warn({
+        where: `step "${draftIdOf.get(id) ?? id}"`,
+        message: `It is on a loop but had no pass limit; it takes the loop's limit of ${String(limit)}.`,
+      });
+    }
+  }
+
   const withPending = nodes.map((node) => {
     const pending = pendingByNode.get(node.id);
-    return pending ? { ...node, config: { ...node.config, pendingOutputs: pending } } : node;
+    const limit = limitFor.get(node.id);
+    if (!pending && limit === undefined) return node;
+    return {
+      ...node,
+      config: {
+        ...node.config,
+        ...(limit !== undefined ? { maxIterations: limit } : {}),
+        ...(pending ? { pendingOutputs: pending } : {}),
+      },
+    };
   });
 
   const source: DraftSource = {

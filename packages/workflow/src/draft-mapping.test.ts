@@ -90,6 +90,43 @@ describe("mapping a draft onto a workflow", () => {
     expect(validateWorkflow(workflow).errors).toEqual([]);
   });
 
+  it("gives a loop step the interpreter left unbounded the loop's limit (ANT-262)", () => {
+    const base = draft();
+    const steps = base.steps.map((step) =>
+      step.id === "verify" ? { ...step, maxIterations: undefined } : step,
+    );
+    const { workflow, warnings } = mapDraftToWorkflow({ ...base, steps }, OPTIONS);
+    const verify = workflow.nodes.find((node) => node.name === "Run tests");
+    expect(agentConfig(verify!).maxIterations).toBe(3);
+    expect(validateWorkflow(workflow).errors).toEqual([]);
+    expect(warnings.some((w) => w.where === 'step "verify"' && /pass limit/.test(w.message))).toBe(true);
+  });
+
+  it("leaves a loop with no limit anywhere for the author to bound", () => {
+    const base = draft();
+    const steps = base.steps.map((step) => ({ ...step, maxIterations: undefined }));
+    const { workflow } = mapDraftToWorkflow({ ...base, steps }, OPTIONS);
+    expect(workflow.nodes.every((node) => agentConfig(node).maxIterations === undefined)).toBe(true);
+  });
+
+  it("accepts agents named in a non-Latin script (ANT-262)", () => {
+    const base = draft();
+    const agents = [
+      { id: "dev", name: "Основной агент" },
+      { id: "qa", name: "Аналитик" },
+    ];
+    // Conditions name the agent by draft id; mapping rewrites them to the slug.
+    const steps = base.steps.map((step) => ({
+      ...step,
+      outputs: step.outputs?.map((output) =>
+        output.condition ? { ...output, condition: 'qa.decision == "failed"' } : output,
+      ),
+    }));
+    const { workflow } = mapDraftToWorkflow({ ...base, agents, steps }, OPTIONS);
+    expect(validateWorkflow(workflow).errors).toEqual([]);
+    expect(() => compile(workflow)).not.toThrow();
+  });
+
   it("produces a workflow that compiles", () => {
     const { workflow } = mapDraftToWorkflow(draft(), OPTIONS);
     expect(() => compile(workflow)).not.toThrow();

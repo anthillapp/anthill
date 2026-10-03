@@ -35728,7 +35728,7 @@ function validateWorkflow(workflow) {
   const harness = harnessProfile(target);
   for (const { profile, slug, stepIds } of assignedAgents(workflow)) {
     const where = { nodeId: stepIds[0] };
-    if (slugify2(profile.name).length === 0) {
+    if (!/[\p{L}\p{N}]/u.test(profile.name)) {
       push(WORKFLOWNER_VALIDATION_CODES.AGENT_MISSING_NAME, "The agent doing this step has no name. Give it one containing letters or numbers \u2013 it becomes the generated file name.", where);
       continue;
     }

@@ -109,7 +109,7 @@ has been told who built it.
 ### From source
 
 From a clean checkout. master is the latest release; to work on the next one,
-check out its release branch first (see *Pull requests* below).
+check out the next-release branch first (see *Pull requests* below).
 
 ```bash
 npm install
@@ -345,8 +345,8 @@ verified release became ([AGENTS.md](AGENTS.md#branches-and-releases)).
 runs the tests, builds the image on a macOS runner and attaches it to the
 release. The tag is the trigger, because publishing is a decision somebody
 makes rather than something every push should do. `workflow_dispatch` builds
-the same image without publishing, for checking that a release branch still
-packages.
+the same image without publishing, for checking that the next-release branch
+still packages.
 
 **Signing it properly.** The packaging is already configured for it — hardened
 runtime, the entitlements Electron needs under it, and notarisation are all in
@@ -405,15 +405,16 @@ packages/
 
 master holds the latest release and nothing newer: Linux and Windows build it
 from source, and plugins installed from GitHub run it. The next release
-collects in its own branch, `release/<version>`, and that is where pull
-requests go:
+collects in a branch named after the release it follows — `0.8.8-next` while
+master is 0.8.8, since its own number is chosen only when it is frozen — and
+that is where pull requests go:
 
 ```bash
-npm run release -- status    # names the active release branch
-git switch -c my-change origin/release/<version>
+npm run release -- status    # names the next-release branch
+git switch -c my-change origin/<version>-next
 ```
 
-Open the pull request against `release/<version>`, not master; a pull request
+Open the pull request against `<version>-next`, not master; a pull request
 into master from any other branch fails the `release-gate` check. The whole
 process, from the freeze to the tag and hotfixes, is in
 [AGENTS.md](AGENTS.md#branches-and-releases).

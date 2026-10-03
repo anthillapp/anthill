@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The branch model's facts, computed rather than remembered (RELEASING.md).
+ * The branch model's facts, computed rather than remembered (AGENTS.md).
  *
  *   npm run release -- status         where new work branches from and which PRs go where
  *   npm run release -- gate           CI: may this pull request merge into master?
@@ -8,16 +8,19 @@
  *   npm run release -- tagged         release workflow: is the pushed tag a released master commit?
  *
  * master is the stable channel: Linux and Windows build it from source, and a
- * plugin installed from GitHub runs the server committed there. So master
- * receives only a release branch or a hotfix branch, and only the exact commit
- * that was verified. The squash merge makes a new commit; what has to match is
- * its tree, and `gate` checks that before the merge, `landed` after it.
+ * plugin installed from GitHub runs the server committed there. The next
+ * release collects in `<master's version>-next` — named after the release it
+ * follows, because which number comes next (patch, minor, major) is decided
+ * only at the freeze. master receives only that branch or a hotfix branch, and
+ * only the exact commit that was verified. The squash merge makes a new
+ * commit; what has to match is its tree, and `gate` checks that before the
+ * merge, `landed` after it.
  */
 
 import { execFileSync } from "node:child_process";
 
 const SHA = /^[0-9a-f]{40}$/;
-const RELEASE = /^release\/(\d+\.\d+\.\d+)$/;
+const NEXT = /^(\d+\.\d+\.\d+)-next$/;
 const HOTFIX = /^hotfix\/[0-9A-Za-z._-]+$/;
 const VERIFIED = /^Verified commit:\s*`?([0-9a-f]{40})`?\s*$/im;
 
@@ -31,6 +34,10 @@ function tryGit(...args) {
   } catch {
     return undefined;
   }
+}
+
+function has(rev) {
+  return tryGit("cat-file", "-e", `${rev}^{commit}`) !== undefined;
 }
 
 function die(message) {
@@ -58,15 +65,10 @@ function tree(rev) {
   return git("rev-parse", `${rev}^{tree}`);
 }
 
-function nextPatch(version) {
-  const [a, b, c] = parse(version);
-  return `${a}.${b}.${c + 1}`;
-}
-
 // ------------------------------------------------------------------ status
 
 function status() {
-  git("fetch", "--quiet", "--prune", "origin", "+refs/heads/master:refs/remotes/origin/master", "+refs/heads/release/*:refs/remotes/origin/release/*");
+  git("fetch", "--quiet", "--prune", "origin", "+refs/heads/master:refs/remotes/origin/master", "+refs/heads/*-next:refs/remotes/origin/*-next");
   const stable = versionAt("origin/master");
   const tag = `v${stable}`;
   const tagTree = tryGit("rev-parse", `${tag}^{tree}`);
@@ -75,32 +77,31 @@ function status() {
   else if (tagTree === tree("origin/master")) lines.push(`                identical to ${tag}`);
   else lines.push(`                NOT identical to ${tag}: master holds changes no release verified`);
 
-  const branches = git("for-each-ref", "--format=%(refname:strip=3)", "refs/remotes/origin/release/")
+  const branch = `${stable}-next`;
+  const others = git("for-each-ref", "--format=%(refname:strip=3)", "refs/remotes/origin/")
     .split("\n")
-    .map((name) => RELEASE.exec(name)?.[1])
-    .filter((v) => v && compare(v, stable) > 0)
-    .sort(compare);
+    .filter((name) => NEXT.test(name) && name !== branch);
 
-  if (branches.length === 0) {
-    const next = nextPatch(stable);
-    lines.push(
-      "active release  none",
-      "",
-      `Create it from master before branching anything:`,
-      `  git push origin origin/master:refs/heads/release/${next}`,
-    );
+  if (!tryGit("rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`)) {
+    lines.push("next release    none");
+    if (others.length) {
+      // A hotfix moved master's version on; the branch keeps its work under its old name.
+      lines.push("", `${others.join(", ")} predates master's ${stable}. Rename it (GitHub retargets its pull requests):`);
+      for (const old of others) lines.push(`  gh api -X POST repos/{owner}/{repo}/branches/${old}/rename -f new_name=${branch}`);
+    } else {
+      lines.push("", "Create it from master before branching anything:", `  git push origin origin/master:refs/heads/${branch}`);
+    }
   } else {
-    if (branches.length > 1) lines.push(`WARNING: more than one release branch is ahead of master: ${branches.map((v) => `release/${v}`).join(", ")}`);
-    const active = branches[0];
-    const branch = `release/${active}`;
-    const frozen = versionAt(`origin/${branch}`) === active;
+    const version = versionAt(`origin/${branch}`);
+    const frozen = compare(version, stable) > 0;
     lines.push(
-      `active release  ${branch} (${frozen ? `frozen: version is ${active}, only fixes for this release` : `open: version still ${versionAt(`origin/${branch}`)}, features and fixes`})`,
+      `next release    ${branch} (${frozen ? `frozen at ${version}: only fixes for this release` : "open: features and fixes"})`,
       `                tip ${git("rev-parse", `origin/${branch}`)}`,
       "",
       `New work:  git switch -c <branch> origin/${branch}`,
       `PR base:   ${branch}`,
     );
+    if (others.length) lines.push(`WARNING: stale next branches: ${others.join(", ")}`);
   }
   process.stdout.write(`${lines.join("\n")}\n`);
 }
@@ -109,9 +110,10 @@ function status() {
 
 /**
  * Run by .github/workflows/release-gate.yml on every pull request into master.
- * A pull request into master must come from this repository's release/<v> or
- * hotfix/<name> branch, carry a higher version than master, name the verified
- * commit in its description, and squash into exactly that commit's tree.
+ * A pull request into master must come from this repository's
+ * `<master's version>-next` or `hotfix/<name>` branch, carry a higher version
+ * than master, name the verified commit in its description, and squash into
+ * exactly that commit's tree.
  */
 function gate() {
   const { BASE_REF, HEAD_REF, HEAD_SHA, HEAD_REPO, BASE_REPO, PR_BODY = "" } = process.env;
@@ -122,31 +124,31 @@ function gate() {
   }
   const problems = [];
   const fromFork = HEAD_REPO && BASE_REPO && HEAD_REPO !== BASE_REPO;
-  const release = RELEASE.exec(HEAD_REF);
-  if (fromFork || !(release || HOTFIX.test(HEAD_REF))) {
+  const next = NEXT.exec(HEAD_REF);
+  if (fromFork || !(next || HOTFIX.test(HEAD_REF))) {
     die(
       `${fromFork ? `${HEAD_REPO}:` : ""}${HEAD_REF} cannot merge into master.\n` +
-        "master receives only release/<version> and hotfix/<name> branches of this repository.\n" +
-        "Retarget this pull request to the active release branch (npm run release -- status; RELEASING.md).",
+        "master receives only the <version>-next branch and hotfix/<name> branches of this repository.\n" +
+        "Retarget this pull request to the next-release branch (npm run release -- status; AGENTS.md).",
     );
   }
 
   git("fetch", "--quiet", "--no-tags", "origin", "+refs/heads/master:refs/remotes/origin/master");
-  if (!tryGit("cat-file", "-e", `${HEAD_SHA}^{commit}`)) git("fetch", "--quiet", "--no-tags", "origin", HEAD_SHA);
+  if (!has(HEAD_SHA)) git("fetch", "--quiet", "--no-tags", "origin", HEAD_SHA);
   const stable = versionAt("origin/master");
   const version = versionAt(HEAD_SHA);
-  if (release && version !== release[1]) {
-    problems.push(`package.json on ${HEAD_REF} says ${version}; the branch is not frozen at ${release[1]} (npm run version:set -- ${release[1]}).`);
+  if (next && next[1] !== stable) {
+    problems.push(`${HEAD_REF} follows ${next[1]}, but master is ${stable}: rename it to ${stable}-next and verify it against master.`);
   }
   if (!parse(version) || compare(version, stable) <= 0) {
-    problems.push(`The version (${version}) must be higher than master's (${stable}).`);
+    problems.push(`The version (${version}) must be higher than master's (${stable}): freeze the branch first (npm run version:set -- <version>).`);
   }
 
   const verified = VERIFIED.exec(PR_BODY)?.[1];
   if (!verified) {
     problems.push("The description has no `Verified commit: <40-character sha>` line.");
   } else if (verified !== HEAD_SHA) {
-    problems.push(`The verified commit is ${verified}, but the branch is at ${HEAD_SHA}. A change after verification is verified again (RELEASING.md).`);
+    problems.push(`The verified commit is ${verified}, but the branch is at ${HEAD_SHA}. A change after verification is verified again (AGENTS.md).`);
   }
 
   const merged = tryGit("merge-tree", "--write-tree", "origin/master", HEAD_SHA);
@@ -169,7 +171,7 @@ function landed(sha) {
   if (!SHA.test(sha ?? "")) die("usage: npm run release -- landed <verified 40-character sha>");
   git("fetch", "--quiet", "--tags", "origin", "+refs/heads/master:refs/remotes/origin/master");
   const head = git("rev-parse", "origin/master");
-  if (!tryGit("cat-file", "-e", `${sha}^{commit}`)) die(`${sha} is not in this clone; fetch the release branch first.`);
+  if (!has(sha)) die(`${sha} is not in this clone; fetch the release branch first.`);
   if (tree(head) !== tree(sha)) die(`master (${head}) is not the verified commit's tree. Do not tag; find what differs: git diff ${sha} ${head}`);
   const version = versionAt(head);
   const tag = `v${version}`;
@@ -193,7 +195,7 @@ function tagged() {
   git("fetch", "--quiet", "--no-tags", "origin", "+refs/heads/master:refs/remotes/origin/master");
   const problems = [];
   if (tryGit("merge-base", "--is-ancestor", "HEAD", "origin/master") === undefined) {
-    problems.push(`${tag} is not on master. Tags go on the master commit a verified release or hotfix became (RELEASING.md).`);
+    problems.push(`${tag} is not on master. Tags go on the master commit a verified release or hotfix became (AGENTS.md).`);
   }
   const version = versionAt("HEAD");
   if (tag !== `v${version}`) problems.push(`${tag} does not match package.json's version ${version}.`);

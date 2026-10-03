@@ -5,8 +5,8 @@
 # caught on its pull request instead of on its tag. It builds no app and uses
 # no secrets: `pull_request` from a fork gets none, and none are needed.
 #
-# A push to master or a release branch runs it again on the exact commit, which
-# is the commit a release verifies (RELEASING.md). That run, and a pull request
+# A push to master or the next-release branch (`<version>-next`) runs it again
+# on the exact commit, which is the commit a release verifies (AGENTS.md). That run, and a pull request
 # into master, also builds from source on Linux and Windows the way the README
 # tells people to. A green Linux or Windows job means the tree installs, builds,
 # passes its tests (Linux) and the CLI starts and serves its page there. It is
@@ -16,7 +16,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [master, "release/**"]
+    branches: [master, "*-next"]
   workflow_dispatch:
 
 permissions:

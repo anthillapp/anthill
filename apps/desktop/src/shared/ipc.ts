@@ -44,6 +44,7 @@ export const IpcChannel = {
   piModels: "pi:models",
   promptDraft: "prompt:draft",
   promptDraftCancel: "prompt:draft-cancel",
+  promptFolderChoose: "prompt:folder-choose",
   liveObserve: "live:observe",
   liveSnapshot: "live:snapshot",
   liveCancel: "live:cancel",
@@ -540,6 +541,8 @@ export type InterpreterInfo = {
   label: string;
   command: string;
   boundary: string;
+  /** What it can and cannot do once it is given a project folder to read. */
+  folderBoundary: string;
   available: boolean;
   /**
    * Whether the CLI says somebody is signed in. Absent when the question could
@@ -734,6 +737,19 @@ export type PromptDraftRequest = {
   interpreterId: InterpreterId;
   /** The full drafting instruction, built in the renderer from the author's prompt. */
   instruction: string;
+  /**
+   * A project folder the CLI may read, read-only (ANT-67). Main runs it there
+   * only if its own folder picker returned this path in this session.
+   */
+  folder?: string;
+};
+
+/** A project folder the author picked for drafting, and how to show it. */
+export type DraftFolder = {
+  /** Absolute and real, as main resolved it. */
+  path: string;
+  /** With the home directory shown as `~`. */
+  displayPath: string;
 };
 
 /**
@@ -767,6 +783,11 @@ export type PromptDraftResponse =
        * change.
        */
       signedOut?: InterpreterId;
+      /**
+       * The project folder is gone, so nothing was run. The fix is in the
+       * folder block, not in the prompt, so the screen sends the author there.
+       */
+      folderMissing?: true;
     }
   /** The author cancelled. Not an error, and not shown as one. */
   | { ok: false; cancelled: true; command: string; error?: undefined };
@@ -1048,9 +1069,15 @@ export interface AnthillApi {
    */
   piModels(): Promise<PiModelCatalog | undefined>;
   /**
+   * Pick a project folder for a drafting run to read (ANT-67). Opens the
+   * native folder picker; `null` when the author cancels it.
+   */
+  chooseDraftFolder(): Promise<DraftFolder | null>;
+  /**
    * Run one drafting pass through a local CLI. Interpretation only: the process
-   * gets no tools and an empty working directory, and nothing it says is
-   * persisted until the author accepts the preview.
+   * gets no tools and an empty working directory — or, given a project folder,
+   * read-only tools in that folder — and nothing it says is persisted until the
+   * author accepts the preview.
    */
   draftFromPrompt(request: PromptDraftRequest): Promise<PromptDraftResponse>;
   /** Stop the drafting run in progress. Safe to call when none is. */

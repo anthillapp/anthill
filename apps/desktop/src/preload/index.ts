@@ -80,6 +80,7 @@ const api: AnthillApi = {
   draftFromPrompt: (request: PromptDraftRequest) =>
     ipcRenderer.invoke(IpcChannel.promptDraft, request),
   cancelPromptDraft: () => ipcRenderer.invoke(IpcChannel.promptDraftCancel),
+  chooseDraftFolder: () => ipcRenderer.invoke(IpcChannel.promptFolderChoose),
   onPromptDraftStage: (listener: (stage: PromptDraftStage) => void) => {
     const handler = (_event: unknown, stage: PromptDraftStage) => listener(stage);
     ipcRenderer.on(PROMPT_DRAFT_STAGE_CHANNEL, handler);

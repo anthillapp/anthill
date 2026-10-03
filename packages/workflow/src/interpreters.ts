@@ -8,7 +8,9 @@
  * into promising one thing and doing another.
  *
  * Every argument here exists to take something away. There is no flag in this
- * file that grants access; if one ever appears, it is a bug.
+ * file that grants access; if one ever appears, it is a bug. A project folder
+ * (ANT-67) does not change that: it narrows the tool list to the read-only
+ * ones instead of to none, and never past what the CLI allows by default.
  */
 
 import type { HarnessTarget } from "@anthill/workflow-schema";
@@ -29,6 +31,19 @@ export function isInterpreterId(value: unknown): value is InterpreterId {
   return typeof value === "string" && (INTERPRETER_IDS as readonly string[]).includes(value);
 }
 
+/**
+ * Where one drafting run happens.
+ *
+ * `workDir` is the folder the CLI is started in. Without a project folder it is
+ * an empty temporary one; with one (ANT-67) it is the author's folder, and
+ * `readsWorkDir` says the CLI may read it.
+ */
+export type DraftRun = {
+  workDir: string;
+  replyFile: string;
+  readsWorkDir: boolean;
+};
+
 export type InterpreterDefinition = {
   id: InterpreterId;
   label: string;
@@ -36,6 +51,8 @@ export type InterpreterDefinition = {
   command: string;
   /** What this invocation can and cannot do, for the author to read. */
   boundary: string;
+  /** The same, when the author has given it a project folder to read. */
+  folderBoundary: string;
   /**
    * Where the final answer is read from. Codex prints a progress log and writes
    * its last message to a file, which is far more reliable than sifting the
@@ -43,11 +60,11 @@ export type InterpreterDefinition = {
    */
   replyFrom: "stdout" | "file";
   /**
-   * The arguments, given the scratch directory the run happens in and the file
-   * Codex is told to write its answer to. A function rather than a constant
-   * because both paths are made fresh for each run.
+   * The arguments, given the folder the run happens in and the file Codex is
+   * told to write its answer to. A function rather than a constant because
+   * both paths are made fresh for each run.
    */
-  args: (workDir: string, replyFile: string) => string[];
+  args: (run: DraftRun) => string[];
   /**
    * What the author runs to sign in again, when this CLI says it is not.
    *
@@ -84,7 +101,9 @@ export const INTERPRETERS: InterpreterDefinition[] = [
     label: "Claude Code",
     command: "claude",
     boundary:
-      "Runs with every tool disabled and no MCP servers, in an empty temporary folder. It can read your prompt and answer; it cannot open, change or run anything.",
+      "Reads the prompt with no tools and an empty working directory. It cannot open, change or run anything in your project.",
+    folderBoundary:
+      "Reads the prompt and, read-only, the folder you chose. It cannot change or run anything in it.",
     replyFrom: "stdout",
     signIn: "claude auth login",
     statusArgs: ["auth", "status"],
@@ -98,14 +117,19 @@ export const INTERPRETERS: InterpreterDefinition[] = [
         return undefined;
       }
     },
-    args: () => [
+    args: ({ readsWorkDir }) => [
       "-p",
       "--output-format",
       "text",
       // The whole boundary in one flag: with no tools there is nothing to
-      // permit, nothing to sandbox, and nothing to ask about.
+      // permit, nothing to sandbox, and nothing to ask about. With a project
+      // folder, the three tools that only look.
       "--tools",
-      "",
+      readsWorkDir ? "Read,Glob,Grep" : "",
+      // Keeps those tools inside the folder: a Read of a path outside the
+      // working directory is refused (checked on 2.1.284). It also ignores the
+      // folder's own .claude settings, so a project's hooks do not run here.
+      ...(readsWorkDir ? ["--restricted"] : []),
       // Without this, MCP servers configured elsewhere on the machine would be
       // loaded into a run that has no use for them.
       "--strict-mcp-config",
@@ -116,7 +140,9 @@ export const INTERPRETERS: InterpreterDefinition[] = [
     label: "Codex CLI",
     command: "codex",
     boundary:
-      "Runs in Codex's read-only sandbox in an empty temporary folder, with your Codex config, MCP servers and rule files ignored. It can read your prompt and answer; it cannot change anything.",
+      "Runs read-only in a scratch directory. It answers with a proposed workflow and touches nothing else.",
+    folderBoundary:
+      "Runs read-only in the folder you chose. It answers with a proposed workflow and touches nothing else.",
     replyFrom: "file",
     signIn: "codex login",
     statusArgs: ["login", "status"],
@@ -128,12 +154,14 @@ export const INTERPRETERS: InterpreterDefinition[] = [
       // only a clean exit is worth reading as a yes.
       return exitCode === 0 ? undefined : false;
     },
-    args: (workDir, replyFile) => [
+    // The same with a project folder: the sandbox is already read-only, and
+    // `-C` is where it stands either way.
+    args: ({ workDir, replyFile }) => [
       "exec",
       "--sandbox",
       "read-only",
-      // The scratch folder is not a repository, and Codex refuses to start
-      // outside one unless told that is fine.
+      // The scratch folder is not a repository, nor need a project folder be,
+      // and Codex refuses to start outside one unless told that is fine.
       "--skip-git-repo-check",
       // No session files left behind by a run not worth resuming.
       "--ephemeral",
@@ -153,7 +181,11 @@ export const INTERPRETERS: InterpreterDefinition[] = [
     label: "Pi",
     command: "pi",
     boundary:
-      "Runs with every tool disabled in an empty temporary folder. It can read your prompt and answer; it cannot open, change or run anything.",
+      "Reads the prompt with no tools and an empty working directory. It cannot open, change or run anything in your project.",
+    // pi does not confine its tools to a folder, so this says what it is
+    // given and not where it must stay.
+    folderBoundary:
+      "Reads the prompt and the folder you chose, with read-only tools only. It cannot change or run anything.",
     replyFrom: "stdout",
     // pi signs in through its own interactive prompt (run `pi`, then `/login`)
     // or a key it already holds; there is no one-shot non-interactive login
@@ -165,13 +197,14 @@ export const INTERPRETERS: InterpreterDefinition[] = [
     // sign-out.
     statusArgs: undefined,
     readStatus: () => undefined,
-    args: () => [
+    args: ({ readsWorkDir }) => [
       // `-p` prints the answer and exits; a piped prompt is merged into the
       // initial prompt, which is how the drafting instruction reaches it.
       "-p",
       // The whole boundary in one flag: with no tools there is nothing to
-      // permit, nothing to sandbox, and nothing to ask about.
-      "--no-tools",
+      // permit, nothing to sandbox, and nothing to ask about. With a project
+      // folder, an allowlist of pi's read-only tools and nothing else.
+      ...(readsWorkDir ? ["--tools", "read,grep,find,ls"] : ["--no-tools"]),
     ],
   },
 ];
@@ -182,17 +215,36 @@ export function interpreterDefinition(id: InterpreterId): InterpreterDefinition 
   return found;
 }
 
-/** The invocation as the author is shown it, and as it is actually run. */
-export function describeInterpreterCommand(id: InterpreterId): string {
+/**
+ * A folder as a shell word: quoted when it has to be, with a leading `~/`
+ * left outside the quotes so the shell still expands it.
+ */
+function shellPath(path: string): string {
+  const home = path.startsWith("~/") ? "~/" : "";
+  const rest = path.slice(home.length);
+  return /^[\w@%+=:,./-]*$/.test(rest) ? path : `${home}'${rest.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * The invocation as the author is shown it, and as it is actually run.
+ *
+ * With a project folder (ANT-67), `folder` is the path as it should be shown —
+ * absolute in the record of what ran, `~`-shortened on screen.
+ */
+export function describeInterpreterCommand(id: InterpreterId, folder?: string): string {
   const item = interpreterDefinition(id);
-  return [
+  const workDir = folder ?? "<temp folder>";
+  const args = item.args({ workDir, replyFile: "<reply file>", readsWorkDir: folder !== undefined });
+  const line = [
     item.command,
-    ...item
-      .args("<temp folder>", "<reply file>")
+    ...args
       // An empty argument is real and load-bearing; printing nothing there
       // would show a command the author could not reproduce.
-      .map((arg) => (arg === "" ? '""' : arg)),
+      .map((arg) => (arg === "" ? '""' : folder !== undefined && arg === folder ? shellPath(folder) : arg)),
   ].join(" ");
+  // Claude Code and pi take the folder from where they are started, not from
+  // an argument. Leaving that out would show a command run somewhere else.
+  return folder !== undefined && !args.includes(folder) ? `cd ${shellPath(folder)} && ${line}` : line;
 }
 
 /** The interpreter Anthill reaches for when the author has expressed no preference. */

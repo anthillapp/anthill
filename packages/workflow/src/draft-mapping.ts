@@ -40,6 +40,11 @@ export type DraftSource = {
   interpreter: InterpreterId;
   /** The exact command that was run, so the record matches what happened. */
   command: string;
+  /**
+   * The project folder the interpreter was let read (ANT-67), absolute.
+   * Absent when the draft was made from the prompt alone.
+   */
+  folder?: string;
   draftedAt: string;
   draftVersion: number;
   /**
@@ -55,6 +60,8 @@ export type MapDraftOptions = {
   prompt: string;
   interpreter: InterpreterId;
   command: string;
+  /** The project folder the interpreter read, when it was given one. */
+  folder?: string;
   /** Harness the workflow targets. Decides which suggested models are usable. */
   target?: Workflow["target"];
   /** Injectable so mapping stays pure and its output is testable. */
@@ -506,6 +513,7 @@ export function mapDraftToWorkflow(
     prompt: options.prompt,
     interpreter: options.interpreter,
     command: options.command,
+    ...(options.folder ? { folder: options.folder } : {}),
     draftedAt: now.toISOString(),
     draftVersion: draft.draftVersion,
     questions: draft.questions,

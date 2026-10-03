@@ -22,10 +22,15 @@
  * 3. No configuration of the author's that could widen either. MCP servers and
  *    local hook/rule files are excluded, so a drafting run cannot pick up
  *    capabilities from an unrelated setup.
+ *
+ * A project folder (ANT-67) changes the first two and nothing else: the CLI is
+ * started in the author's folder instead of an empty one, with read-only tools
+ * instead of none. Main runs it there only when its own folder picker returned
+ * that folder in this session, so no path the renderer makes up is read.
  */
 
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { detectBinary, runProcess, type SpawnFn } from "@anthill/runtimes";
@@ -36,7 +41,8 @@ import {
   type InterpreterId,
 } from "@anthill/workflow";
 
-import type { InterpreterInfo, PromptDraftResponse } from "../shared/ipc.js";
+import type { InterpreterInfo, PromptDraftRequest, PromptDraftResponse } from "../shared/ipc.js";
+import type { FolderGrants } from "./safe-write.js";
 
 /*
  * A drafting run has no time limit of its own (ANT-261).
@@ -118,6 +124,7 @@ export async function detectInterpreters(spawnFn?: SpawnFn): Promise<Interpreter
         label: item.label,
         command: describeInterpreterCommand(item.id),
         boundary: item.boundary,
+        folderBoundary: item.folderBoundary,
         available: detection.available,
         ...(detection.available && detection.version
           ? { version: trimVersion(detection.version) }
@@ -163,6 +170,11 @@ export type DraftStage = "preparing" | "analyzing" | "replying";
 export type DraftRunOptions = {
   interpreterId: InterpreterId;
   instruction: string;
+  /**
+   * The author's project folder, already checked against the folders main's
+   * picker returned. The CLI is started there with read-only tools.
+   */
+  folder?: string;
   onStage?: (stage: DraftStage) => void;
   /** Aborts the run. The CLI is signalled and the scratch folder cleaned up. */
   signal?: AbortSignal;
@@ -198,12 +210,60 @@ function looksLikeSignedOut(detail: string): boolean {
   );
 }
 
+/** What the folder block says when the folder has gone. */
+export const FOLDER_MISSING = "This folder can't be found. Choose it again or remove it.";
+
+async function isDirectory(path: string): Promise<boolean> {
+  return stat(path).then((info) => info.isDirectory(), () => false);
+}
+
+/** A path with the home directory shown as `~`, the way the screen shows it. */
+export function shortenHome(path: string, home = homedir()): string {
+  return home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path;
+}
+
+/**
+ * The project folder a drafting request may use, or the response refusing it.
+ *
+ * The folder arrives from the renderer, so it is believed only when main's
+ * own picker returned it: a path the renderer made up is refused, not read.
+ * A folder that has gone since is said plainly, before anything runs.
+ */
+export async function grantedDraftFolder(
+  request: PromptDraftRequest,
+  grants: FolderGrants,
+): Promise<{ folder?: string; refused?: undefined } | { refused: PromptDraftResponse }> {
+  if (request.folder === undefined) return {};
+  const command = describeInterpreterCommand(request.interpreterId, request.folder);
+  if (typeof request.folder !== "string" || !(await isDirectory(request.folder))) {
+    return { refused: { ok: false, folderMissing: true, error: FOLDER_MISSING, command } };
+  }
+  const folder = await grants.resolveGranted(request.folder);
+  if (!folder) {
+    return {
+      refused: {
+        ok: false,
+        error: "Anthill did not open that folder in this session, so the CLI was not run there. Choose it again.",
+        command,
+      },
+    };
+  }
+  return { folder };
+}
+
 export async function runDraft(options: DraftRunOptions): Promise<PromptDraftResponse> {
   const item = interpreterDefinition(options.interpreterId);
-  const command = describeInterpreterCommand(options.interpreterId);
+  const command = describeInterpreterCommand(options.interpreterId, options.folder);
 
   options.onStage?.("preparing");
   if (options.signal?.aborted) return { ok: false, cancelled: true, command };
+
+  // Asked again here as well as at the door: a folder can go between the two,
+  // and a CLI started in a folder that is not there fails with a spawn error
+  // that names neither the folder nor the fix.
+  if (options.folder !== undefined && !(await isDirectory(options.folder))) {
+    return { ok: false, folderMissing: true, error: FOLDER_MISSING, command };
+  }
 
   const detection = await detectBinary({
     command: item.command,
@@ -217,11 +277,14 @@ export async function runDraft(options: DraftRunOptions): Promise<PromptDraftRes
   }
 
   // An empty folder, so the interpreter has none of the author's work in reach.
-  const workDir = await mkdtemp(join(tmpdir(), "anthill-draft-"));
-  const replyFile = join(workDir, "reply.txt");
+  // With a project folder it is only where Codex's reply file goes: the reply
+  // must not be written into the author's project.
+  const scratch = await mkdtemp(join(tmpdir(), "anthill-draft-"));
+  const workDir = options.folder ?? scratch;
+  const replyFile = join(scratch, "reply.txt");
 
   try {
-    const args = item.args(workDir, replyFile);
+    const args = item.args({ workDir, replyFile, readsWorkDir: options.folder !== undefined });
     options.onStage?.("analyzing");
     let replying = false;
     const outcome = await runProcess({
@@ -298,8 +361,8 @@ export async function runDraft(options: DraftRunOptions): Promise<PromptDraftRes
     }
     return { ok: true, reply, command };
   } finally {
-    // The folder was only ever a place to stand.
-    await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+    // The folder was only ever a place to stand. Never the author's own.
+    await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 

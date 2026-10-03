@@ -223,6 +223,7 @@ export function installWebBridge(): Promise<AnthillApi> {
       draftFromPrompt: (request: PromptDraftRequest) =>
         invoke(IpcChannel.promptDraft, request),
       cancelPromptDraft: () => invoke(IpcChannel.promptDraftCancel),
+      chooseDraftFolder: () => invoke(IpcChannel.promptFolderChoose),
       onPromptDraftStage: (listener: (stage: PromptDraftStage) => void) =>
         onChannel(PROMPT_DRAFT_STAGE_CHANNEL, (payload) =>
           listener(payload as PromptDraftStage),

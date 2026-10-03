@@ -62,6 +62,7 @@ function bothConnected(): InterpreterInfo[] {
       label: "Claude Code",
       command: "claude …",
       boundary: "",
+      folderBoundary: "",
       available: true,
       signedIn: true,
       version: "2.1.0",
@@ -71,6 +72,7 @@ function bothConnected(): InterpreterInfo[] {
       label: "OpenAI Codex CLI",
       command: "codex …",
       boundary: "",
+      folderBoundary: "",
       available: true,
       signedIn: true,
       version: "0.9.0",
@@ -80,6 +82,7 @@ function bothConnected(): InterpreterInfo[] {
       label: "Pi",
       command: "pi -p --no-tools",
       boundary: "",
+      folderBoundary: "",
       available: true,
       version: "0.85.1",
     },
@@ -93,6 +96,7 @@ function neitherConnected(): InterpreterInfo[] {
     label: item.label,
     command: item.command,
     boundary: item.boundary,
+    folderBoundary: item.folderBoundary,
     available: false,
     reason: `${item.label} was not found on your PATH.`,
   }));
@@ -716,7 +720,7 @@ describe("choosing a model before a tool is connected", () => {
   it("still offers the other tool a way in when one is connected", async () => {
     const half = bothConnected().map((item) =>
       item.id === "codex"
-        ? { id: item.id, label: item.label, command: item.command, boundary: "", available: false }
+        ? { id: item.id, label: item.label, command: item.command, boundary: "", folderBoundary: "", available: false }
         : item,
     );
     stub([profile()], [], half);

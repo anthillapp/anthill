@@ -285,7 +285,7 @@ describe("checking the server answers", () => {
     const connections = await pluginConnections({
       home: dir,
       interpreters: async () => [
-        { id: "claude-code", label: "Claude Code", command: "claude", boundary: "", available: true, version: "2.1.278" },
+        { id: "claude-code", label: "Claude Code", command: "claude", boundary: "", folderBoundary: "", available: true, version: "2.1.278" },
       ],
     });
     expect(connections[0]).toMatchObject({ harness: "claude-code", cli: { available: true, version: "2.1.278" }, serverAnswers: true });

@@ -174,7 +174,9 @@ Both should pass on a clean checkout.
 1. **Create one.** In the launcher, *Create New Workflow…* starts from a
    template or blank. *Workflow from a Prompt…* describes the work in your own
    words and asks a local CLI to draft a workflow — that run is locked down: no
-   tools, an empty temporary folder, and none of your MCP servers.
+   tools, an empty temporary folder, and none of your MCP servers. Attach a
+   project folder and the CLI may read it, read-only, so the draft fits your
+   stack, scripts and tests; it still cannot change or run anything there.
 2. **Design it.** Drag steps from the palette, connect them, and give each step
    an agent. A connection can carry a condition; a loop needs a pass limit and
    done criteria. The Problems list says what is unfinished and takes you to the

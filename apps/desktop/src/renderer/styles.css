@@ -2085,9 +2085,16 @@ ul.plain {
   padding-top: 2px;
 }
 
+.prompt-recap .recap-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* Two lines of it: enough to recognise, not enough to re-read. */
 .prompt-recap .recap-text {
-  flex: 1;
   font-size: 13px;
   line-height: 1.55;
   color: var(--ink-2);
@@ -2097,12 +2104,131 @@ ul.plain {
   overflow: hidden;
 }
 
+/* The folder the draft will be made with, under the prompt it goes with. */
+.prompt-recap .recap-folder {
+  font-size: 12px;
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-recap .recap-path {
+  font-family: var(--mono);
+  color: var(--ink-2);
+}
+
 .prompt-recap .recap-edit {
   font-size: 12.5px;
   font-weight: 600;
   white-space: nowrap;
   color: var(--accent-700);
   padding-top: 2px;
+}
+
+/* ---------------- project folder (ANT-67) ---------------- */
+
+.folder-block {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-slab);
+  background: var(--surface);
+}
+
+.folder-icon {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--chip);
+  color: var(--ink-3);
+}
+
+.folder-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.folder-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.folder-title b {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.folder-title span {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.folder-desc {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #7d7979;
+  text-wrap: pretty;
+}
+
+.folder-kicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.folder-path {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-error {
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--accent-700);
+}
+
+.folder-button {
+  flex: none;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.folder-button.strong {
+  padding: 7px 13px;
+  font-weight: 600;
+}
+
+.folder-button.ghost {
+  padding: 7px 10px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-dim);
+}
+
+.folder-button.ghost:hover:not(:where(:disabled)) {
+  background: transparent;
+  color: var(--ink-2);
 }
 
 .interpreter-grid {

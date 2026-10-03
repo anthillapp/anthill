@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { INTERPRETERS, isSignedOutFailure } from "./interpreters.js";
+import { INTERPRETERS, describeInterpreterCommand, isSignedOutFailure } from "./interpreters.js";
 
 /**
  * Telling "not signed in" apart from every other failure.
@@ -49,6 +49,61 @@ describe("recognising a signed-out CLI", () => {
       expect(item.signIn.length).toBeGreaterThan(0);
       // It has to be that CLI's own command, or the advice is wrong again.
       expect(item.signIn.startsWith(item.command)).toBe(true);
+    }
+  });
+});
+
+/**
+ * A project folder (ANT-67): read-only tools in the author's folder, and a
+ * command on screen that is still the one that runs.
+ */
+describe("drafting with a project folder", () => {
+  it("gives Claude Code the three tools that only look, kept inside the folder", () => {
+    expect(describeInterpreterCommand("claude-code", "~/code/acme-web")).toBe(
+      "cd ~/code/acme-web && claude -p --output-format text --tools Read,Glob,Grep --restricted --strict-mcp-config",
+    );
+  });
+
+  it("keeps Codex in its read-only sandbox, standing in the folder", () => {
+    const codex = describeInterpreterCommand("codex", "/Users/me/code/acme-web");
+    expect(codex).toContain("--sandbox read-only");
+    expect(codex).toContain("-C /Users/me/code/acme-web");
+    // `-C` already says where it runs, so there is no `cd` in front.
+    expect(codex.startsWith("codex exec")).toBe(true);
+  });
+
+  it("gives pi an allowlist of its read-only tools instead of none", () => {
+    expect(describeInterpreterCommand("pi", "~/code/acme-web")).toBe(
+      "cd ~/code/acme-web && pi -p --tools read,grep,find,ls",
+    );
+  });
+
+  it("leaves the commands without a folder exactly as they were", () => {
+    expect(describeInterpreterCommand("claude-code")).toBe(
+      'claude -p --output-format text --tools "" --strict-mcp-config',
+    );
+    expect(describeInterpreterCommand("pi")).toBe("pi -p --no-tools");
+  });
+
+  it("quotes a folder the shell would split, and still expands its ~", () => {
+    expect(describeInterpreterCommand("pi", "~/My Projects/it's here")).toBe(
+      "cd ~/'My Projects/it'\\''s here' && pi -p --tools read,grep,find,ls",
+    );
+  });
+
+  it("never grants writing, a shell or a bypass", () => {
+    for (const item of INTERPRETERS) {
+      const args = item.args({ workDir: "/p", replyFile: "/r", readsWorkDir: true }).join(" ");
+      for (const banned of ["Bash", "Edit", "Write", "bash", "edit", "write", "workspace-write", "dangerously", "bypass", "--add-dir"]) {
+        expect(args).not.toContain(banned);
+      }
+    }
+  });
+
+  it("says what each CLI may do with the folder", () => {
+    for (const item of INTERPRETERS) {
+      expect(item.folderBoundary).toContain("folder you chose");
+      expect(item.folderBoundary).toMatch(/cannot change or run anything|touches nothing else/);
     }
   });
 });

@@ -20,6 +20,11 @@
  * - The CLI is reading, not working. The exact command is on screen, with what
  *   it can and cannot do, before anything runs.
  * - Nothing is created until the author says so.
+ *
+ * A project folder is optional (ANT-67). Given one, the CLI may read it,
+ * read-only, so the draft names the project's real commands and checks; the
+ * command and the boundary on screen change with it, so they still say exactly
+ * what will run.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -27,6 +32,7 @@ import type { Workflow } from "@anthill/workflow-schema";
 import {
   applyAnswers,
   buildDraftInstruction,
+  describeInterpreterCommand,
   interpreterDefinition,
   isSignedOutFailure,
   needsClarification,
@@ -39,7 +45,7 @@ import {
 } from "@anthill/workflow";
 import { withLayout } from "@anthill/builder";
 
-import type { InterpreterInfo, PromptDraftStage } from "../../shared/ipc.js";
+import type { DraftFolder, InterpreterInfo, PromptDraftStage } from "../../shared/ipc.js";
 import { interpreterLogo } from "./interpreter-logos.js";
 import { DraftClarify } from "./DraftClarify.js";
 import {
@@ -138,6 +144,9 @@ type Phase =
 
 export function PromptToWorkflowSheet({ onAccept, onCancel, workflowName }: PromptToWorkflowSheetProps) {
   const [prompt, setPrompt] = useState("");
+  // Lives here, not in the step, so it survives Back and Edit like the prompt.
+  const [folder, setFolder] = useState<DraftFolder | undefined>();
+  const [folderError, setFolderError] = useState<string | undefined>();
   const [interpreters, setInterpreters] = useState<InterpreterInfo[] | null>(null);
   const [chosen, setChosen] = useState<InterpreterId | undefined>(readSetting);
   const [phase, setPhase] = useState<Phase>({ kind: "compose" });
@@ -195,6 +204,19 @@ export function PromptToWorkflowSheet({ onAccept, onCancel, workflowName }: Prom
     writeSetting(id);
   }, []);
 
+  // Cancelling the picker leaves whatever was there.
+  const chooseFolder = useCallback(async () => {
+    const picked = await window.anthill.chooseDraftFolder();
+    if (!picked) return;
+    setFolder(picked);
+    setFolderError(undefined);
+  }, []);
+
+  const removeFolder = useCallback(() => {
+    setFolder(undefined);
+    setFolderError(undefined);
+  }, []);
+
   // Stage reports arrive on a push channel while the run is in flight.
   useEffect(() => {
     return window.anthill.onPromptDraftStage((stage: PromptDraftStage) => {
@@ -217,8 +239,17 @@ export function PromptToWorkflowSheet({ onAccept, onCancel, workflowName }: Prom
 
     const response = await window.anthill.draftFromPrompt({
       interpreterId: chosen,
-      instruction: buildDraftInstruction(prompt),
+      instruction: buildDraftInstruction(prompt, { folder: folder !== undefined }),
+      ...(folder ? { folder: folder.path } : {}),
     });
+
+    // Nothing was run. The way out is in the folder block, so that is where
+    // the author is taken, and where it is said.
+    if (!response.ok && !response.cancelled && response.folderMissing) {
+      setFolderError(response.error);
+      setPhase({ kind: "compose" });
+      return;
+    }
 
     if (!response.ok) {
       // Cancelling is the author's decision, not a failure to report at them.
@@ -254,6 +285,7 @@ export function PromptToWorkflowSheet({ onAccept, onCancel, workflowName }: Prom
       prompt,
       interpreter: chosen,
       command: response.command,
+      ...(folder ? { folder: folder.path } : {}),
     });
 
     // A draft with nothing open must not make the author confirm a screen they
@@ -270,7 +302,7 @@ export function PromptToWorkflowSheet({ onAccept, onCancel, workflowName }: Prom
       command: response.command,
       interpreterLabel: selected?.label ?? "The interpreter",
     });
-  }, [chosen, prompt, selected, open]);
+  }, [chosen, prompt, folder, selected, open]);
 
   const cancel = useCallback(() => {
     void window.anthill.cancelPromptDraft();
@@ -285,10 +317,11 @@ export function PromptToWorkflowSheet({ onAccept, onCancel, workflowName }: Prom
         prompt,
         interpreter: chosen,
         command: phase.command,
+        ...(folder ? { folder: folder.path } : {}),
       });
       open(draft, review);
     },
-    [phase, chosen, prompt, open],
+    [phase, chosen, prompt, folder, open],
   );
 
   const step: (typeof WIZARD)[number]["id"] =
@@ -351,6 +384,10 @@ export function PromptToWorkflowSheet({ onAccept, onCancel, workflowName }: Prom
             <Compose
               prompt={prompt}
               onPrompt={setPrompt}
+              folder={folder}
+              folderError={folderError}
+              onChooseFolder={() => void chooseFolder()}
+              onRemoveFolder={removeFolder}
               installed={installed.length}
               failure={phase.kind === "failed" ? phase : undefined}
               onContinue={() => setPhase({ kind: "interpreter" })}
@@ -362,6 +399,7 @@ export function PromptToWorkflowSheet({ onAccept, onCancel, workflowName }: Prom
               looking={looking}
               onLookAgain={() => void look()}
               prompt={prompt}
+              folder={folder}
               interpreters={interpreters}
               selected={selected}
               onChoose={choose}
@@ -465,15 +503,111 @@ function SignedOut({
   );
 }
 
+/** Lucide's `folder`, drawn the way the design does. */
+function FolderIcon() {
+  return (
+    <svg
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+    </svg>
+  );
+}
+
+/**
+ * The optional project folder (ANT-67).
+ *
+ * Below the prompt, not beside it: the prompt is the thing to write, and the
+ * folder is a way to make what comes back fit. Never required — Continue
+ * still waits only on the prompt.
+ *
+ * Exported for its tests.
+ */
+export function FolderBlock({
+  folder,
+  error,
+  onChoose,
+  onRemove,
+}: {
+  folder: DraftFolder | undefined;
+  error?: string;
+  onChoose: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="folder-block">
+      <i className="folder-icon">
+        <FolderIcon />
+      </i>
+      <div className="folder-text">
+        {folder ? (
+          <>
+            <span className="folder-kicker">Project folder · read-only</span>
+            <span className="folder-path" title={folder.path}>
+              {folder.displayPath}
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="folder-title">
+              <b>Project folder</b>
+              <span>Optional</span>
+            </span>
+            <span className="folder-desc">
+              Let the CLI read a folder, so the draft matches your stack, scripts
+              and tests. Read-only.
+            </span>
+          </>
+        )}
+        {error ? (
+          <span className="folder-error" role="alert">
+            {error}
+          </span>
+        ) : null}
+      </div>
+      {folder ? (
+        <>
+          <button type="button" className="folder-button" onClick={onChoose}>
+            Change
+          </button>
+          <button type="button" className="folder-button ghost" onClick={onRemove}>
+            Remove
+          </button>
+        </>
+      ) : (
+        <button type="button" className="folder-button strong" onClick={onChoose}>
+          Choose folder…
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Compose({
   prompt,
   onPrompt,
+  folder,
+  folderError,
+  onChooseFolder,
+  onRemoveFolder,
   installed,
   failure,
   onContinue,
 }: {
   prompt: string;
   onPrompt: (value: string) => void;
+  folder: DraftFolder | undefined;
+  folderError?: string;
+  onChooseFolder: () => void;
+  onRemoveFolder: () => void;
   installed: number;
   failure?: { error: string; command: string; reply?: string; interpreterId: InterpreterId };
   onContinue: () => void;
@@ -506,6 +640,13 @@ function Compose({
           <span className="count">{words} {words === 1 ? "word" : "words"}</span>
         </div>
       </div>
+
+      <FolderBlock
+        folder={folder}
+        error={folderError}
+        onChoose={onChooseFolder}
+        onRemove={onRemoveFolder}
+      />
 
       {failure ? (
         <div className="slab">
@@ -558,6 +699,7 @@ function Compose({
 
 function ChooseInterpreter({
   prompt,
+  folder,
   interpreters,
   selected,
   looking,
@@ -567,6 +709,7 @@ function ChooseInterpreter({
   onLookAgain,
 }: {
   prompt: string;
+  folder: DraftFolder | undefined;
   interpreters: InterpreterInfo[] | null;
   selected: InterpreterInfo | undefined;
   looking: boolean;
@@ -607,7 +750,14 @@ function ChooseInterpreter({
           button below, and the arrow in the sub-bar. */}
       <button className="prompt-recap" onClick={onEditPrompt}>
         <span className="kicker">Your prompt</span>
-        <span className="recap-text">{prompt}</span>
+        <span className="recap-body">
+          <span className="recap-text">{prompt}</span>
+          {folder ? (
+            <span className="recap-folder">
+              Folder: <span className="recap-path">{folder.displayPath}</span>
+            </span>
+          ) : null}
+        </span>
         <span className="recap-edit">Edit</span>
       </button>
 
@@ -633,7 +783,9 @@ function ChooseInterpreter({
                   <span className="spacer" />
                   {only ? null : <i className={`radio${active ? " on" : ""}`} />}
                 </span>
-                <span className="interpreter-why">{item.boundary}</span>
+                <span className="interpreter-why">
+                  {folder ? item.folderBoundary : item.boundary}
+                </span>
               </button>
             );
           })}
@@ -671,12 +823,23 @@ function ChooseInterpreter({
       {selected?.available ? (
         <div className="slab">
           <span className="field-label">What Anthill will run</span>
-          <pre className="command-line">{selected.command}</pre>
-          <p className="hint">
-            It reads the prompt and answers. It does not carry out the work, and
-            it is not given access to your project – Anthill runs it on this
-            machine with your own sign-in, so there is no API key to enter.
-          </p>
+          <pre className="command-line">
+            {folder ? describeInterpreterCommand(selected.id, folder.displayPath) : selected.command}
+          </pre>
+          {folder ? (
+            <p className="hint">
+              It reads the prompt and may read files in {folder.displayPath} to
+              fit the draft to your project. It cannot change or run anything
+              there. Anthill runs it on this machine with your own sign-in, so
+              there is no API key to enter.
+            </p>
+          ) : (
+            <p className="hint">
+              It reads the prompt and answers. It does not carry out the work, and
+              it is not given access to your project – Anthill runs it on this
+              machine with your own sign-in, so there is no API key to enter.
+            </p>
+          )}
         </div>
       ) : null}
 

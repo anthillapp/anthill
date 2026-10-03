@@ -4,11 +4,15 @@ import type { ChildProcessLike, SpawnFn } from "@anthill/runtimes";
 import { INTERPRETERS } from "@anthill/workflow";
 
 import {
+  FOLDER_MISSING,
   describeCommand,
   detectInterpreters,
+  grantedDraftFolder,
   runDraft,
+  shortenHome,
   signInToInterpreter,
 } from "./interpreters.js";
+import { FolderGrants } from "./safe-write.js";
 
 type Script = { stdout?: string; stderr?: string; exitCode?: number; error?: NodeJS.ErrnoException };
 
@@ -481,5 +485,95 @@ describe("a CLI whose sign-in has expired", () => {
     // No status call: a failure that does not look like one is not worth a
     // second process.
     expect(calls).toHaveLength(2);
+  });
+});
+
+/**
+ * A project folder (ANT-67). The CLI stands in the author's folder with
+ * read-only tools, and main believes a folder only when its picker chose it.
+ */
+describe("drafting with a project folder", () => {
+  const instruction = "Draft a workflow from this.";
+
+  async function project(): Promise<string> {
+    const { mkdtemp, writeFile, realpath } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "anthill-project-")));
+    await writeFile(join(dir, "package.json"), "{}");
+    return dir;
+  }
+
+  it("runs Claude Code in the folder, with only the tools that look", async () => {
+    const folder = await project();
+    const { spawnFn, calls } = fakeSpawn([{ stdout: "1.0" }, { stdout: "{}" }]);
+    const result = await runDraft({ interpreterId: "claude-code", instruction, folder, spawnFn });
+    expect(calls[1].cwd).toBe(folder);
+    expect(calls[1].args).toEqual([
+      "-p", "--output-format", "text", "--tools", "Read,Glob,Grep", "--restricted", "--strict-mcp-config",
+    ]);
+    // The record of what ran names the folder.
+    expect(result.command).toBe(`cd ${folder} && claude -p --output-format text --tools Read,Glob,Grep --restricted --strict-mcp-config`);
+  });
+
+  it("writes Codex's reply outside the author's folder, and leaves the folder alone", async () => {
+    const folder = await project();
+    const { spawnFn, calls } = fakeSpawn([{ stdout: "1.0" }, { stdout: "{}" }]);
+    await runDraft({ interpreterId: "codex", instruction, folder, spawnFn });
+    const args = calls[1].args;
+    expect(args[args.indexOf("-C") + 1]).toBe(folder);
+    expect(args[args.indexOf("-o") + 1].startsWith(folder)).toBe(false);
+    const { readdir } = await import("node:fs/promises");
+    // Still there, and nothing added: cleaning up is for the scratch folder only.
+    expect(await readdir(folder)).toEqual(["package.json"]);
+  });
+
+  it("says the folder has gone, and runs nothing", async () => {
+    const { spawnFn, calls } = fakeSpawn([{ stdout: "1.0" }, { stdout: "{}" }]);
+    const result = await runDraft({
+      interpreterId: "claude-code",
+      instruction,
+      folder: "/nowhere/anthill-gone",
+      spawnFn,
+    });
+    expect(result).toMatchObject({ ok: false, folderMissing: true, error: FOLDER_MISSING });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("believes a folder only when the picker returned it", async () => {
+    const folder = await project();
+    const grants = new FolderGrants();
+    const request = { interpreterId: "claude-code" as const, instruction, folder };
+
+    const refused = await grantedDraftFolder(request, grants);
+    expect(refused.refused).toMatchObject({ ok: false });
+    expect(refused.refused?.ok === false && refused.refused.error).toContain("did not open that folder");
+
+    await grants.grant(folder);
+    expect(await grantedDraftFolder(request, grants)).toEqual({ folder });
+  });
+
+  it("tells a missing folder apart from one never chosen", async () => {
+    const result = await grantedDraftFolder(
+      { interpreterId: "codex", instruction, folder: "/nowhere/anthill-gone" },
+      new FolderGrants(),
+    );
+    expect(result.refused).toMatchObject({ ok: false, folderMissing: true, error: FOLDER_MISSING });
+  });
+
+  it("lets a request with no folder through untouched", async () => {
+    expect(await grantedDraftFolder({ interpreterId: "pi", instruction }, new FolderGrants())).toEqual({});
+  });
+
+  it("shows the home directory as ~, and nothing else", () => {
+    expect(shortenHome("/Users/me/code/acme-web", "/Users/me")).toBe("~/code/acme-web");
+    expect(shortenHome("/Users/meadow/x", "/Users/me")).toBe("/Users/meadow/x");
+    expect(shortenHome("/opt/x", "/Users/me")).toBe("/opt/x");
+  });
+
+  it("carries each CLI's folder boundary to the screen", async () => {
+    const { spawnFn } = fakeSpawn([{ stdout: "1.0.0" }]);
+    const found = await detectInterpreters(spawnFn);
+    for (const item of found) expect(item.folderBoundary).toContain("folder you chose");
   });
 });

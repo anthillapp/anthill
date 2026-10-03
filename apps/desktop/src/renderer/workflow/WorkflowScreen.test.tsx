@@ -698,12 +698,12 @@ describe("the gate on the handover", () => {
 });
 
 describe("revealing the saved workflow JSON", () => {
-  const reveal = () => screen.getByRole("button", { name: "Reveal in Folder" }) as HTMLButtonElement;
   const api = () => window.anthill as unknown as ReturnType<typeof stubApi>;
 
   it("is unavailable before a successful save, including through the menu", async () => {
     await blank();
-    expect(reveal().disabled).toBe(true);
+    // File ▸ Reveal in Folder is the only way in: the toolbar has no button for it.
+    expect(screen.queryByRole("button", { name: "Reveal in Folder" })).toBeNull();
     expect(api().setWorkflowRevealable).toHaveBeenLastCalledWith(false);
     act(() => menuReveal?.());
     expect(api().revealPath).not.toHaveBeenCalled();
@@ -711,18 +711,17 @@ describe("revealing the saved workflow JSON", () => {
     fireEvent.change(screen.getByDisplayValue("Untitled workflow"), { target: { value: "Keep my edits" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByText(/Disk full/);
-    expect(reveal().disabled).toBe(true);
+    expect(api().setWorkflowRevealable).toHaveBeenLastCalledWith(false);
     expect(screen.getByDisplayValue("Keep my edits")).toBeTruthy();
     expect(api().setWorkflowDirty).toHaveBeenLastCalledWith(true);
   });
 
-  it("reveals the actual path returned by the latest save from both button and menu", async () => {
+  it("reveals the actual path returned by the latest save", async () => {
     await workflow();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByText("Saved");
-    expect(reveal().disabled).toBe(false);
     expect(api().setWorkflowRevealable).toHaveBeenLastCalledWith(true);
-    fireEvent.click(reveal());
+    act(() => menuReveal?.());
     expect(api().revealPath).toHaveBeenLastCalledWith("/tmp/w.workflow.json");
     api().saveWorkflow.mockResolvedValue({ kind: "saved", path: "/configured/Renamed-abcdef01.workflow.json" });
     fireEvent.change(screen.getByDisplayValue(/Implement, test, fix/), { target: { value: "Renamed" } });
@@ -737,7 +736,7 @@ describe("revealing the saved workflow JSON", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByText("Saved");
     api().revealPath.mockResolvedValue(false);
-    fireEvent.click(reveal());
+    act(() => menuReveal?.());
     expect((await screen.findByRole("alert")).textContent).toContain("could not be found");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
@@ -1042,7 +1041,7 @@ describe("a handover being saved", () => {
     await screen.findByDisplayValue("Handed over");
     // The delivery is acknowledged for the handover it was made for.
     await waitFor(() => expect(window.anthill.workflowOpened).toHaveBeenLastCalledWith(PATH, undefined));
-    fireEvent.click(screen.getByRole("button", { name: "Reveal in Folder" }));
+    act(() => menuReveal?.());
     expect(window.anthill.revealPath).toHaveBeenLastCalledWith(exported);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.saveWorkflow).toHaveBeenLastCalledWith(expect.objectContaining({ path: exported, exchangePath: PATH })));
@@ -1055,7 +1054,7 @@ describe("a handover being saved", () => {
     });
     render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} start={{ kind: "open", path: PATH }} />);
     await screen.findByDisplayValue("Handed over");
-    expect((screen.getByRole("button", { name: "Reveal in Folder" }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(window.anthill.setWorkflowRevealable).toHaveBeenLastCalledWith(false));
   });
 
   it("reveals exported JSON while keeping the handover context for the next save", async () => {
@@ -1065,11 +1064,14 @@ describe("a handover being saved", () => {
     await screen.findByDisplayValue("Handed over");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByText(exported);
-    fireEvent.click(screen.getByRole("button", { name: "Reveal in Folder" }));
+    act(() => menuReveal?.());
     expect(window.anthill.revealPath).toHaveBeenLastCalledWith(exported);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.saveWorkflow).toHaveBeenLastCalledWith(expect.objectContaining({ path: exported, exchangePath: PATH })));
-    expect(screen.queryByRole("button", { name: "Prompt" })).toBeNull();
+    // Still a handover: Prompt exports, and never opens the Hand-over (ANT-265).
+    fireEvent.click(screen.getByRole("button", { name: "Prompt" }));
+    expect(screen.getByRole("dialog", { name: "Export this workflow" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Hand over the prompt" })).toBeNull();
     expect(window.anthill.workflowOpened).toHaveBeenLastCalledWith(PATH, undefined);
   });
 

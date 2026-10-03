@@ -47,6 +47,7 @@ import { PromptToWorkflowSheet } from "./PromptToWorkflowSheet.js";
 import { TemplatePicker } from "./TemplatePicker.js";
 import { blankWorkflow, UNTITLED_WORKFLOW } from "./sample-workflow.js";
 import { PromptModal } from "./PromptModal.js";
+import { ExportModal } from "./ExportModal.js";
 import { DescribeChangeAssistant } from "./DescribeChangeAssistant.js";
 import {
   canStepBack,
@@ -172,6 +173,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    * the sidebar is for editing the workflow, and this is the handover.
    */
   const [showPrompt, setShowPrompt] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [describing, setDescribing] = useState(false);
   /** Blocks the author pointed at for the assistant, as ids. */
   const [mentions, setMentions] = useState<string[]>([]);
@@ -889,6 +891,8 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         />
       ) : null}
 
+      {showExport ? <ExportModal workflow={workflow} onClose={() => setShowExport(false)} /> : null}
+
       <WorkflowToolbar
         workflow={workflow}
         onExit={exit}
@@ -905,9 +909,8 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         canStepForward={canStepForward(history)}
         onStep={step}
         onSave={() => void save()}
-        canReveal={Boolean(path)}
-        onReveal={() => void reveal()}
         onPrompt={() => setShowPrompt(true)}
+        onExport={() => setShowExport(true)}
         {...(handover ? { handover } : {})}
       />
 

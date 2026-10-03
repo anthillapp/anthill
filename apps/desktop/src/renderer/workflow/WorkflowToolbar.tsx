@@ -3,23 +3,22 @@
  *
  * Most workflows are not handovers, and for those this bar is what it has
  * always been: back, mark, the screen name, the workflow's name, the save
- * indicator, the validation pill, the harness picker, undo/redo,
- * New/Open/Save and the red `Prompt`. Nothing new appears and nothing moves.
+ * indicator, the validation pill, undo/redo, Save, the tool plaque and the red
+ * `Prompt`. Nothing new appears and nothing moves.
  *
  * A handover changes exactly three things, and the rest of the bar is left
  * alone:
  *
- *   - **the primary slot becomes contextual.** `Prompt` is not merely
- *     redundant on a handover: it mints a fresh run id and registers a
- *     *second, unrelated* run from the same workflow, so two runs appear for
- *     one piece of work. Where there is a decision to make it holds that
- *     decision instead; where there is not, it holds nothing.
- *   - **the harness picker locks.** The exchange validates that a workflow
+ *   - **`Prompt` exports instead of handing over.** The Hand-over mints a
+ *     fresh run id and registers a *second, unrelated* run from the same
+ *     workflow, so two runs would appear for one piece of work. The workflow
+ *     is still worth keeping, so `Prompt` writes it out as agent files and a
+ *     marker-free Prompt.md, and starts nothing (ANT-265).
+ *   - **the tool plaque locks.** The exchange validates that a workflow
  *     targets the tool that handed it over, so switching saves happily and the
  *     revision silently becomes one that can never be bound. In a handover the
  *     tool and the origin are the same fact, so one control carries both: it
- *     names the source, wears the lock, and opens the original task. A
- *     separate locked `HARNESS · Claude Code` beside it said so twice.
+ *     names the source, wears the lock, and opens the original task.
  *   - **a second pill appears.** "Does the graph compile" and "where does this
  *     stand with the agent" are different questions that disagree regularly —
  *     a valid graph waiting for approval, a broken graph whose earlier
@@ -43,6 +42,7 @@ import { isFailure, saveMessage, type SaveStatus } from "./save-status.js";
 import { ProvenancePopover } from "./ProvenancePopover.js";
 import { UnsupportedWindowsChip } from "../windows/unsupported-windows.js";
 import type { HandoverModel } from "./handover.js";
+import { ExportIcon } from "./ExportModal.js";
 
 /**
  * One step of the undo history, drawn rather than typeset.
@@ -142,10 +142,10 @@ export type WorkflowToolbarProps = {
   onSave: () => void;
   /** The title field was left or confirmed with Enter. */
   onRenameDone?: () => void;
-  canReveal: boolean;
-  onReveal: () => void;
-  /** Open the prompt. Absent on a handover, where a second run is not wanted. */
+  /** Open the Hand-over. Not offered on a handover, where a second run is not wanted. */
   onPrompt: () => void;
+  /** Open the Export: what Prompt does on a handover. */
+  onExport?: () => void;
   handover?: ToolbarHandover;
 };
 
@@ -225,70 +225,6 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
         </span>
       ) : null}
 
-      {handover ? (
-        /* The source and the lock are one control because they are one fact:
-           this came from Claude Code and is for Claude Code. It occupies the
-           harness picker's slot, so the two states swap in place rather than
-           reshuffling the bar around them. */
-        <button
-          type="button"
-          className="wf-source"
-          ref={sourceButton}
-          aria-expanded={showSource}
-          onClick={() => setShowSource((open) => !open)}
-          title={`This workflow came from ${HARNESS_PROFILES[handover.source.harness].displayName} and is for ${HARNESS_PROFILES[handover.source.harness].displayName} – the harness cannot be changed, because the revision could then never be bound. Opens the original task.`}
-        >
-          <span
-            className="logo"
-            aria-hidden="true"
-            style={{ backgroundImage: interpreterLogoBackground(handover.source.harness) }}
-          />
-          From {HARNESS_PROFILES[handover.source.harness].displayName}
-          {/* Drawn, not typed: the emoji padlock renders as a colour glyph the
-              font decides, so it ignored the button's colour and weight and sat
-              at a different size on every machine. The stroked icon is the one
-              in the design, and it inherits currentColor like the rest of the
-              toolbar's icons. */}
-          <svg
-            className="lock"
-            width="11"
-            height="11"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.1"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <rect x="4" y="11" width="16" height="9" rx="2" />
-            <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-          </svg>
-        </button>
-      ) : (
-        /* It compiles into the prompt and decides which harness the prompt
-           targets, so it belongs beside the button that hands it over — not
-           on the far side of the bar next to the workflow's name. */
-        <label className="harness harness-picker">
-          <span>Harness</span>
-          {/* The picker is the control; the select inside it is not. */}
-          <select
-            value={workflow.target ?? ""}
-            onChange={(event) => props.onTarget(event.target.value as HarnessTarget)}
-          >
-            <option value="" disabled>
-              Choose…
-            </option>
-            {HARNESS_TARGETS.map((target) => (
-              <option key={target} value={target}>
-                {HARNESS_PROFILES[target].displayName}
-                {isPluginHarness(target) && PLUGIN_HARNESS_INFO[target].beta ? " (beta)" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-
       <span className="divider" />
       {/* Beside the document actions, because that is what a step is: the
           whole workflow moving, not something inside it changing. */}
@@ -324,8 +260,8 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
         }}
         aria-disabled={saveBlocked ? true : undefined}
         className={saveBlocked ? "is-blocked" : undefined}
-        // On a handover, Save is the next step: there is no Prompt, and saving
-        // is what the session is waiting for.
+        // On a handover, Save is the next step: saving is what the session is
+        // waiting for, and Prompt there only exports.
         {...(handover ? { "data-tour": "next-step", "data-tour-kind": "save" } : {})}
         title={
           saveBlocked
@@ -336,20 +272,112 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
       >
         Save
       </button>
-      <button
-        onClick={props.onReveal}
-        disabled={!props.canReveal}
-        title={props.canReveal ? "Show the saved JSON in its folder" : "Save this workflow first"}
-      >
-        Reveal in Folder
-      </button>
+
+      {/* The tool plaque: one fixed-width slot beside Prompt, locked or
+          selectable, so the two states swap in place and the bar never
+          shifts (ANT-265). */}
+      <span className="divider" />
+      {handover ? (
+        /* The source and the lock are one control because they are one fact:
+           this came from Claude Code and is for Claude Code. */
+        <button
+          type="button"
+          className="tool-plaque is-locked"
+          ref={sourceButton}
+          aria-expanded={showSource}
+          onClick={() => setShowSource((open) => !open)}
+          title={`This workflow came from ${HARNESS_PROFILES[handover.source.harness].displayName} and is for ${HARNESS_PROFILES[handover.source.harness].displayName} – the harness cannot be changed, because the revision could then never be bound. Opens the original task.`}
+        >
+          <span
+            className="logo"
+            aria-hidden="true"
+            style={{ backgroundImage: interpreterLogoBackground(handover.source.harness) }}
+          />
+          <span className="label">From {HARNESS_PROFILES[handover.source.harness].displayName}</span>
+          {/* Drawn, not typed: the emoji padlock renders as a colour glyph the
+              font decides, so it ignored the button's colour and weight and sat
+              at a different size on every machine. */}
+          <svg
+            className="icon lock"
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.1"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="4" y="11" width="16" height="9" rx="2" />
+            <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+          </svg>
+        </button>
+      ) : (
+        /* It compiles into the prompt and decides which tool the prompt is
+           written for, so it sits beside the button that hands it over. The
+           select is the control, laid invisibly over the plaque. */
+        <label className="tool-plaque is-selectable" title="The coding tool this prompt is written for">
+          {workflow.target ? (
+            <span
+              className="logo"
+              aria-hidden="true"
+              style={{ backgroundImage: interpreterLogoBackground(workflow.target) }}
+            />
+          ) : null}
+          <span className="label">
+            {workflow.target ? `For ${HARNESS_PROFILES[workflow.target].displayName}` : "Choose a tool…"}
+          </span>
+          <svg
+            className="icon"
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.1"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+          <select
+            aria-label="Coding tool this prompt is for"
+            value={workflow.target ?? ""}
+            onChange={(event) => props.onTarget(event.target.value as HarnessTarget)}
+          >
+            <option value="" disabled>
+              Choose…
+            </option>
+            {HARNESS_TARGETS.map((target) => (
+              <option key={target} value={target}>
+                {HARNESS_PROFILES[target].displayName}
+                {isPluginHarness(target) && PLUGIN_HARNESS_INFO[target].beta ? " (beta)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       {handover ? (
-        /* Nothing. A handover's primary slot held `Ready for agent`, which
-           recorded a decision the user had already given the session in
-           conversation and could not hold any work back. The pill reports
-           where the handover stands; there is nothing here to press. */
-        null
+        /* A handover keeps a Prompt, as an export rather than a start: it
+           writes the agent files and Prompt.md so the workflow can be reused,
+           and binds, starts and approves nothing. Opening the Hand-over here
+           would mint a second, unrelated run for the session's work. */
+        <button
+          className={`primary${clean ? "" : " is-blocked"}`}
+          aria-disabled={!clean}
+          onClick={() => (clean ? props.onExport?.() : props.onToggleProblems())}
+          title={
+            clean
+              ? "Export the workflow as agent files and Prompt.md, so it can be reused"
+              : "Fix the problems first"
+          }
+        >
+          <ExportIcon size={13} />
+          Prompt
+        </button>
       ) : (
         /* Not `disabled`: a button that cannot be clicked cannot say where to
            go instead. It looks unavailable and takes the author to the

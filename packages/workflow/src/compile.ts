@@ -43,6 +43,8 @@ export type GeneratedFile = {
   /** Repository-relative path, e.g. `.claude/agents/reviewer.md`. */
   path: string;
   content: string;
+  /** How many of the workflow's steps the agent in this file owns. */
+  steps?: number;
 };
 
 export type CompileOptions = {
@@ -295,7 +297,7 @@ function buildAgentFile(
       chosen ? { key: "model", value: chosen } : undefined,
       effort ? { key: "model_reasoning_effort", value: effort } : undefined,
     ])}\n`;
-    return { path: `${harness.agentDir}/${slug}.toml`, content };
+    return { path: `${harness.agentDir}/${slug}.toml`, content, steps: steps.length };
   }
 
   const content = [
@@ -309,7 +311,7 @@ function buildAgentFile(
     "",
   ].join("\n");
 
-  return { path: `${harness.agentDir}/${slug}.md`, content };
+  return { path: `${harness.agentDir}/${slug}.md`, content, steps: steps.length };
 }
 
 /* ------------------------------------------------------------------ */

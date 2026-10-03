@@ -1443,7 +1443,7 @@ function registerIpcHandlers(): void {
       liveSetupService().disable(harness),
   );
 
-  // File ▸ Reveal in Folder follows the editor's own button.
+  // File ▸ Reveal in Folder is enabled while the editor has a saved JSON to show.
   handle(IpcChannel.workflowSetRevealable, async (event, revealable: boolean) => {
     if (event.sender !== mainWindow?.webContents) return;
     const reveal = Menu.getApplicationMenu()?.getMenuItemById("reveal-workflow");

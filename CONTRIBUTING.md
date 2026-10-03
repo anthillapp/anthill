@@ -108,7 +108,8 @@ has been told who built it.
 
 ### From source
 
-From a clean checkout:
+From a clean checkout. master is the latest release; to work on the next one,
+check out its release branch first (see *Pull requests* below).
 
 ```bash
 npm install
@@ -338,17 +339,14 @@ Writes `apps/desktop/release/Anthill-<version>-arm64.dmg`. Signed with whatever
 Developer ID certificate the machine has, and ad-hoc signed when it has none —
 which is the same build, minus Apple having been told who made it.
 
-CI does the same on a tag:
-
-```bash
-git tag v0.1.0 && git push origin v0.1.0
-```
-
-`.github/workflows/release.yml` typechecks, runs the tests, builds the image on
-a macOS runner and attaches it to the release. The tag is the trigger, because
-publishing is a decision somebody makes rather than something every push should
-do. `workflow_dispatch` builds the same image without publishing, for checking
-that the build still works.
+CI does the same on a `v<version>` tag, which goes only on the master commit a
+verified release became ([AGENTS.md](AGENTS.md#branches-and-releases)).
+`.github/workflows/release.yml` refuses a tag anywhere else, then typechecks,
+runs the tests, builds the image on a macOS runner and attaches it to the
+release. The tag is the trigger, because publishing is a decision somebody
+makes rather than something every push should do. `workflow_dispatch` builds
+the same image without publishing, for checking that a release branch still
+packages.
 
 **Signing it properly.** The packaging is already configured for it — hardened
 runtime, the entitlements Electron needs under it, and notarisation are all in
@@ -402,6 +400,23 @@ packages/
   workspace/         repository and isolation management
   run-store/         run persistence
 ```
+
+## Pull requests
+
+master holds the latest release and nothing newer: Linux and Windows build it
+from source, and plugins installed from GitHub run it. The next release
+collects in its own branch, `release/<version>`, and that is where pull
+requests go:
+
+```bash
+npm run release -- status    # names the active release branch
+git switch -c my-change origin/release/<version>
+```
+
+Open the pull request against `release/<version>`, not master; a pull request
+into master from any other branch fails the `release-gate` check. The whole
+process, from the freeze to the tag and hotfixes, is in
+[AGENTS.md](AGENTS.md#branches-and-releases).
 
 ## Issues
 

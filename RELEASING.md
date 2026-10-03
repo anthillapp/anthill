@@ -1,6 +1,14 @@
 # Releasing Anthill
 
-1. Set the version everywhere at once:
+The branch model and the release flow — where work goes, the freeze, the
+verified commit, final QA on each platform, moving a release into master,
+the tag and hotfixes — are in [AGENTS.md](AGENTS.md#branches-and-releases).
+It is written for coding agents and people alike, and it is the only copy.
+This file holds the mechanics it points to. `npm run release -- status` says
+which release branch is active.
+
+1. Set the version everywhere at once. This is the freeze: it happens in a pull
+   request into the release branch, `release/<version>`, never on master:
 
    ```bash
    npm run version:set -- 0.7.9
@@ -20,7 +28,10 @@
    is committed with the release. The same test fails when it is still last
    release's.
 
-2. Open the release PR, squash-merge it, tag `v<version>`.
+2. Verify the frozen branch's tip, move it into master and tag the master commit
+   it became, as AGENTS.md describes. `npm run release -- landed <verified sha>`
+   prints the tag command once master is that commit's tree. The Release
+   workflow refuses a tag that is not on master or does not match the version.
 
 3. Refresh the installed plugins. A plugin installed from a directory is a
    copy, not a live mount — nothing refreshes it on its own (ANT-120):

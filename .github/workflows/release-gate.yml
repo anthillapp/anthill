@@ -1,0 +1,45 @@
+# Keep master the stable channel: only a verified release or hotfix gets in.
+#
+# Linux and Windows build Anthill from source on master, and a plugin installed
+# from GitHub runs the server committed there, so nothing reaches master that
+# a release did not verify. Ordinary work goes into the active release branch
+# instead (RELEASING.md). This check is required on master; it fails a pull
+# request from any other branch, one whose version is not higher than master's,
+# one whose description does not name the verified commit as its head, and one
+# whose squash would not be exactly that commit's tree.
+#
+# Separate from CI because it reruns when the description is edited, which is
+# how a re-verified commit is recorded, and that should not rebuild everything.
+name: Release gate
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  release-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Full history: the check merges the branch into master to compare trees.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: node scripts/release.mjs gate
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}

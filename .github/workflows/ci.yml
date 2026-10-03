@@ -4,10 +4,19 @@
 # runner (`macos-14`, Apple Silicon), so a change that would break a release is
 # caught on its pull request instead of on its tag. It builds no app and uses
 # no secrets: `pull_request` from a fork gets none, and none are needed.
+#
+# A push to master or a release branch runs it again on the exact commit, which
+# is the commit a release verifies (RELEASING.md). That run, and a pull request
+# into master, also builds from source on Linux and Windows the way the README
+# tells people to. A green Linux or Windows job means the tree installs, builds,
+# passes its tests (Linux) and the CLI starts and serves its page there. It is
+# not E2E on that platform, and macOS passing proves nothing about either.
 name: CI
 
 on:
   pull_request:
+  push:
+    branches: [master, "release/**"]
   workflow_dispatch:
 
 permissions:
@@ -37,3 +46,44 @@ jobs:
 
       - run: npm run typecheck
       - run: npm test
+
+  # Linux is supported for the CLI, built from source on master.
+  linux-source:
+    if: github.event_name != 'pull_request' || github.base_ref == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: node apps/desktop/scripts/fetch-electron-sqlite.mjs
+      - run: npm test
+
+      # The README's Linux install, then one start of the CLI.
+      - run: npm run build
+      - run: npm install --global ./apps/cli
+      - run: node scripts/smoke-cli.mjs
+
+  # Windows is experimental: no release, no support. This only says whether the
+  # README's from-source steps still build and start; its tests are not run.
+  windows-source:
+    if: github.event_name != 'pull_request' || github.base_ref == 'master'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm install --global ./apps/cli
+      - run: node scripts/smoke-cli.mjs

@@ -528,7 +528,10 @@ export function validateWorkflow(workflow: Workflow): ValidationResult {
     // the author somewhere they can act.
     const where = { nodeId: stepIds[0] };
 
-    if (slugify(profile.name).length === 0) {
+    // A name in any script is a name. "Аналитик" slugs to nothing, but the
+    // generated file falls back to the agent's id (`agentSlug`), so only a name
+    // with no letter or digit at all is missing (ANT-262).
+    if (!/[\p{L}\p{N}]/u.test(profile.name)) {
       push(
         WORKFLOWNER_VALIDATION_CODES.AGENT_MISSING_NAME,
         "The agent doing this step has no name. Give it one containing letters or numbers – it becomes the generated file name.",

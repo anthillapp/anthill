@@ -296,6 +296,33 @@ describe("validateWorkflow", () => {
     expect(codesIn(workflow)).toContain(WORKFLOWNER_VALIDATION_CODES.AGENT_MISSING_NAME);
   });
 
+  it("takes a name in any script as a name (ANT-262)", () => {
+    // "Аналитик" slugs to nothing, but its file falls back to the agent's id.
+    const workflow = makeWorkflow(
+      [
+        node("s", "start", "Start"),
+        step("a", "Implement", { agentId: "agent-dev" }),
+        node("e", "end", "Done"),
+      ],
+      [edge("e1", "s", "a"), edge("e2", "a", "e")],
+      [{ id: "agent-dev", name: "Аналитик" }],
+    );
+    expect(codesIn(workflow)).not.toContain(WORKFLOWNER_VALIDATION_CODES.AGENT_MISSING_NAME);
+  });
+
+  it("still wants a name with a letter or digit in it", () => {
+    const workflow = makeWorkflow(
+      [
+        node("s", "start", "Start"),
+        step("a", "Implement", { agentId: "agent-dev" }),
+        node("e", "end", "Done"),
+      ],
+      [edge("e1", "s", "a"), edge("e2", "a", "e")],
+      [{ id: "agent-dev", name: " — !" }],
+    );
+    expect(codesIn(workflow)).toContain(WORKFLOWNER_VALIDATION_CODES.AGENT_MISSING_NAME);
+  });
+
   it("points a nameless agent at a step using it, so the problem is actionable", () => {
     const workflow = makeWorkflow(
       [

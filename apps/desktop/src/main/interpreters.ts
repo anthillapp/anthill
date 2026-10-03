@@ -38,8 +38,14 @@ import {
 
 import type { InterpreterInfo, PromptDraftResponse } from "../shared/ipc.js";
 
-/** How long a drafting run may take before it is given up on. */
-const DRAFT_TIMEOUT_MS = 180_000;
+/*
+ * A drafting run has no time limit of its own (ANT-261).
+ *
+ * It used to be cut off at 180 seconds. A long, careful prompt can take Codex
+ * longer than that to think through, and the cut-off threw away a draft that
+ * was on its way while the author watched a spinner that had a Cancel button
+ * the whole time. The author decides when a draft has taken too long.
+ */
 
 /** The command as the author will see it, and as it is actually run. */
 export function describeCommand(id: InterpreterId): string {
@@ -161,6 +167,7 @@ export type DraftRunOptions = {
   /** Aborts the run. The CLI is signalled and the scratch folder cleaned up. */
   signal?: AbortSignal;
   spawnFn?: SpawnFn;
+  /** A limit for tests. Absent, the run waits until it ends or is cancelled. */
   timeoutMs?: number;
 };
 
@@ -222,7 +229,7 @@ export async function runDraft(options: DraftRunOptions): Promise<PromptDraftRes
       args,
       stdinPayload: options.instruction,
       cwd: workDir,
-      timeoutMs: options.timeoutMs ?? DRAFT_TIMEOUT_MS,
+      timeoutMs: options.timeoutMs ?? 0,
       signal: options.signal,
       spawnFn: options.spawnFn,
       // The one evidence-driven stage: the first stdout byte means the answer
@@ -245,7 +252,7 @@ export async function runDraft(options: DraftRunOptions): Promise<PromptDraftRes
     if (outcome.timedOut) {
       return {
         ok: false,
-        error: `${item.label} did not answer within ${Math.round((options.timeoutMs ?? DRAFT_TIMEOUT_MS) / 1000)}s.`,
+        error: `${item.label} did not answer within ${Math.round((options.timeoutMs ?? 0) / 1000)}s.`,
         command,
       };
     }

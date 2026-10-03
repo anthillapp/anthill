@@ -1352,6 +1352,22 @@ describe("a handover the user asked to watch", () => {
     fireEvent.click(live);
     await screen.findByText("Anthill is observing, not running");
   });
+
+  it("offers a finished session from the tab, as the chip does", async () => {
+    // Reopened after a restart: nothing is open in the tab, and the chip on
+    // the canvas already says the session finished.
+    open("design", [{ ...run, anthillRunId: "ANT-26726702", state: "completed" }]);
+    await screen.findByRole("button", { name: "Save" });
+
+    const live = tab("Live session");
+    expect(live.getAttribute("aria-disabled")).toBeNull();
+    expect(live.getAttribute("title")).toBe("The workflow stays open in its own tab");
+    // Finished, so no red dot claiming it is running.
+    expect(live.querySelector(".ws-tab-dot.is-live")).toBeNull();
+
+    fireEvent.click(live);
+    expect(livePage()?.hidden).toBe(false);
+  });
 });
 
 /**

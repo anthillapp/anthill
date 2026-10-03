@@ -1,6 +1,7 @@
 import { observationRuntime } from "./observation-runtime.js";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -302,6 +303,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     channels: [...registered],
     shell: "cli",
     platform: process.platform,
+    home: homedir(),
     errorReports: diagnostics?.errorReportsAtLaunch ?? false,
   }));
 

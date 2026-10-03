@@ -48,6 +48,7 @@ import { TemplatePicker } from "./TemplatePicker.js";
 import { blankWorkflow, UNTITLED_WORKFLOW } from "./sample-workflow.js";
 import { PromptModal } from "./PromptModal.js";
 import { ExportModal } from "./ExportModal.js";
+import { fileName, RevealPath } from "./RevealPath.js";
 import { DescribeChangeAssistant } from "./DescribeChangeAssistant.js";
 import {
   canStepBack,
@@ -100,6 +101,9 @@ function typingInAField(): boolean {
   );
 }
 
+/** Long enough to read a sentence; it is about one click, so it does not stay. */
+const REVEAL_ERROR_MS = 4000;
+
 export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProps) {
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   /**
@@ -115,7 +119,22 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   const [linking, setLinking] = useState<LinkingState>(null);
   const [path, setPath] = useState<string | undefined>();
   const [exchangePath, setExchangePath] = useState<string | undefined>();
+  /** What went wrong with the last Reveal, said briefly above the status bar. */
   const [revealError, setRevealError] = useState<string | null>(null);
+  /** The shell's system and home: the reveal's wording, and `~` in the path. */
+  const [host, setHost] = useState<{ platform?: string; home?: string }>({});
+  useEffect(() => {
+    let live = true;
+    void Promise.resolve()
+      .then(() => window.anthill.capabilities())
+      .then(({ platform, home }) => {
+        if (live) setHost({ platform, home });
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
   const [dirty, setDirty] = useState(false);
   const currentWorkflow = useRef(workflow);
   currentWorkflow.current = workflow;
@@ -512,12 +531,22 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     setRevealError(null);
     try {
       if (!await window.anthill.revealPath(path)) {
-        setRevealError("The saved JSON could not be found. Save again to create it in your workflow folder.");
+        // Moved or deleted since it was written. The path stays on show,
+        // because it is where the file was; the file manager is not opened on
+        // a folder that no longer holds it.
+        setRevealError(`${fileName(path)} is no longer at this path`);
       }
     } catch (error) {
-      setRevealError(`Could not reveal the saved JSON: ${error instanceof Error ? error.message : String(error)}`);
+      setRevealError(`Could not show ${fileName(path)}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }, [path]);
+
+  // Said once, briefly: it is about the click, not the workflow.
+  useEffect(() => {
+    if (!revealError) return;
+    const timer = setTimeout(() => setRevealError(null), REVEAL_ERROR_MS);
+    return () => clearTimeout(timer);
+  }, [revealError]);
 
   const revealNow = useRef(reveal);
   revealNow.current = reveal;
@@ -931,8 +960,6 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         </div>
       ) : null}
 
-      {revealError ? <div className="banner" role="alert">{revealError}</div> : null}
-
       <div className="body">
         <WorkflowLibraries
           onSettings={onSettings}
@@ -1167,7 +1194,13 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
       </div>
 
       <footer className="statusbar">
-        <span className="path">{path ?? "Not saved yet"}</span>
+        {path ? (
+          <RevealPath path={path} platform={host.platform} home={host.home} onReveal={() => void reveal()} />
+        ) : (
+          // Only a blank workflow gets here, until it is named or saved:
+          // everything else has its JSON in the folder from the start.
+          <span className="path">Not saved yet</span>
+        )}
         <span className="spacer" />
         <span>
           {workflow.target ? HARNESS_PROFILES[workflow.target].displayName : "No harness"}
@@ -1181,6 +1214,12 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
             : `${cycles.length} ${cycles.length === 1 ? "loop" : "loops"}`}
         </span>
       </footer>
+
+      {revealError ? (
+        <div className="reveal-toast" role="alert">
+          {revealError}
+        </div>
+      ) : null}
 
       {/* The canvas tour (ANT-141): only once there is a canvas to point at,
           and only while it is due — after onboarding, or from Show tips. */}

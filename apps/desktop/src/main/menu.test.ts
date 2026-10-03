@@ -35,9 +35,9 @@ describe("Save in the File menu", () => {
     expect(fileMenu).toContain("SAVE_WORKFLOW_CHANNEL");
   });
 
-  it("offers Reveal in Folder, initially unavailable, through the active window", () => {
+  it("offers Reveal in Finder (Show in Folder off macOS), initially unavailable, through the active window", () => {
     const reveal = fileMenu.slice(fileMenu.indexOf('id: "reveal-workflow"'));
-    expect(reveal).toContain('label: "Reveal in Folder"');
+    expect(reveal).toContain('label: process.platform === "darwin" ? "Reveal in Finder" : "Show in Folder"');
     expect(reveal).toContain("enabled: false");
     expect(reveal).toContain("REVEAL_WORKFLOW_CHANNEL");
     expect(reveal).toContain("BrowserWindow.getFocusedWindow()");

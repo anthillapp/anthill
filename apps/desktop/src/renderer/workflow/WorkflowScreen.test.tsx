@@ -697,13 +697,16 @@ describe("the gate on the handover", () => {
   });
 });
 
-describe("revealing the saved workflow JSON", () => {
+describe("revealing the saved workflow JSON from the status bar", () => {
+  // The stub shell names no platform, so the control reads as it does off macOS.
+  const reveal = () => screen.getByRole("button", { name: /^Show .+ in its folder$/ }) as HTMLButtonElement;
+  const revealControl = () => screen.queryByRole("button", { name: /in its folder$/ });
   const api = () => window.anthill as unknown as ReturnType<typeof stubApi>;
 
-  it("is unavailable before a successful save, including through the menu", async () => {
+  it("is not offered for a blank workflow before it has a file, including through the menu", async () => {
     await blank();
-    // File ▸ Reveal in Folder is the only way in: the toolbar has no button for it.
-    expect(screen.queryByRole("button", { name: "Reveal in Folder" })).toBeNull();
+    expect(revealControl()).toBeNull();
+    expect(document.querySelector(".statusbar")?.textContent).toContain("Not saved yet");
     expect(api().setWorkflowRevealable).toHaveBeenLastCalledWith(false);
     act(() => menuReveal?.());
     expect(api().revealPath).not.toHaveBeenCalled();
@@ -711,41 +714,42 @@ describe("revealing the saved workflow JSON", () => {
     fireEvent.change(screen.getByDisplayValue("Untitled workflow"), { target: { value: "Keep my edits" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByText(/Disk full/);
-    expect(api().setWorkflowRevealable).toHaveBeenLastCalledWith(false);
+    expect(revealControl()).toBeNull();
     expect(screen.getByDisplayValue("Keep my edits")).toBeTruthy();
     expect(api().setWorkflowDirty).toHaveBeenLastCalledWith(true);
   });
 
-  it("reveals the actual path returned by the latest save", async () => {
+  it("is the path itself for a template, whose JSON is written as it opens", async () => {
     await workflow();
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await screen.findByText("Saved");
+    const control = await waitFor(reveal);
+    expect(control.textContent).toContain("/tmp/w.workflow.json");
+    expect(control.textContent).toContain("· Show in folder");
+    expect(control.getAttribute("type")).toBe("button");
     expect(api().setWorkflowRevealable).toHaveBeenLastCalledWith(true);
-    act(() => menuReveal?.());
-    expect(api().revealPath).toHaveBeenLastCalledWith("/tmp/w.workflow.json");
-    api().saveWorkflow.mockResolvedValue({ kind: "saved", path: "/configured/Renamed-abcdef01.workflow.json" });
-    fireEvent.change(screen.getByDisplayValue(/Implement, test, fix/), { target: { value: "Renamed" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await screen.findByText("/configured/Renamed-abcdef01.workflow.json");
-    act(() => menuReveal?.());
-    expect(api().revealPath).toHaveBeenLastCalledWith("/configured/Renamed-abcdef01.workflow.json");
   });
 
-  it("reports a missing JSON and clears the warning after a successful save", async () => {
+  it("reveals the actual path returned by the latest save from both the path and the menu", async () => {
     await workflow();
+    fireEvent.click(await waitFor(reveal));
+    expect(api().revealPath).toHaveBeenLastCalledWith("/tmp/w.workflow.json");
+    api().saveWorkflow.mockResolvedValue({ kind: "saved", path: "/configured/Renamed.workflow.json" });
+    fireEvent.change(screen.getByDisplayValue(/Implement, test, fix/), { target: { value: "Renamed" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await screen.findByText("Saved");
-    api().revealPath.mockResolvedValue(false);
+    await waitFor(() => expect(reveal().textContent).toContain("/configured/Renamed.workflow.json"));
     act(() => menuReveal?.());
-    expect((await screen.findByRole("alert")).textContent).toContain("could not be found");
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(api().revealPath).toHaveBeenLastCalledWith("/configured/Renamed.workflow.json");
+  });
+
+  it("says briefly that a moved or deleted JSON is no longer there, and keeps its path", async () => {
+    await workflow();
+    api().revealPath.mockResolvedValue(false);
+    fireEvent.click(await waitFor(reveal));
+    expect((await screen.findByRole("alert")).textContent).toBe("w.workflow.json is no longer at this path");
+    expect(reveal().textContent).toContain("/tmp/w.workflow.json");
   });
 
   it("reports shell failures without discarding edits or changing save status", async () => {
     await workflow();
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await screen.findByText("Saved");
     fireEvent.change(screen.getByDisplayValue(/Implement, test, fix/), { target: { value: "Unsaved edit" } });
     api().revealPath.mockRejectedValue(new Error("Finder unavailable"));
     act(() => menuReveal?.());
@@ -1042,6 +1046,7 @@ describe("a handover being saved", () => {
     // The delivery is acknowledged for the handover it was made for.
     await waitFor(() => expect(window.anthill.workflowOpened).toHaveBeenLastCalledWith(PATH, undefined));
     act(() => menuReveal?.());
+    fireEvent.click(screen.getByRole("button", { name: /^Show .+ in its folder$/ }));
     expect(window.anthill.revealPath).toHaveBeenLastCalledWith(exported);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.saveWorkflow).toHaveBeenLastCalledWith(expect.objectContaining({ path: exported, exchangePath: PATH })));
@@ -1054,7 +1059,7 @@ describe("a handover being saved", () => {
     });
     render(<WorkflowScreen onExit={() => undefined} onSettings={() => undefined} start={{ kind: "open", path: PATH }} />);
     await screen.findByDisplayValue("Handed over");
-    await waitFor(() => expect(window.anthill.setWorkflowRevealable).toHaveBeenLastCalledWith(false));
+    expect(screen.queryByRole("button", { name: /in its folder$/ })).toBeNull();
   });
 
   it("reveals exported JSON while keeping the handover context for the next save", async () => {
@@ -1064,7 +1069,7 @@ describe("a handover being saved", () => {
     await screen.findByDisplayValue("Handed over");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByText(exported);
-    act(() => menuReveal?.());
+    fireEvent.click(screen.getByRole("button", { name: /^Show .+ in its folder$/ }));
     expect(window.anthill.revealPath).toHaveBeenLastCalledWith(exported);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.saveWorkflow).toHaveBeenLastCalledWith(expect.objectContaining({ path: exported, exchangePath: PATH })));

@@ -2,7 +2,8 @@
  * The workflow toolbar, once a workflow can arrive from a coding session.
  *
  * Most workflows are not handovers, and for those this bar is what it has
- * always been: back, mark, the screen name, the workflow's name, the save
+ * always been: back, mark, the Workflow / Live session switcher, the
+ * workflow's name, the save
  * indicator, the validation pill, undo/redo, Save, the tool plaque and the red
  * `Prompt`. Nothing new appears and nothing moves.
  *
@@ -31,7 +32,7 @@
  * are shared with the text the MCP server reads out to the agent.
  */
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { HARNESS_PROFILES, PLUGIN_HARNESS_INFO, isPluginHarness } from "@anthill/workflow";
 import { HARNESS_TARGETS, type HarnessTarget } from "@anthill/workflow-schema";
 import type { Workflow } from "@anthill/workflow-schema";
@@ -147,6 +148,8 @@ export type WorkflowToolbarProps = {
   /** Open the Export: what Prompt does on a handover. */
   onExport?: () => void;
   handover?: ToolbarHandover;
+  /** The Workflow / Live session switcher, which stands where the screen's name was (ANT-267). */
+  tabs?: ReactNode;
 };
 
 export function WorkflowToolbar(props: WorkflowToolbarProps) {
@@ -163,11 +166,11 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
 
   return (
     <header className={`topbar wf-toolbar${handover ? " is-handover" : ""}`}>
-      <button className="icon-button" onClick={props.onExit} title="Back to mode selection">
+      <button className="icon-button" onClick={props.onExit} title="Back to the launch window">
         ←
       </button>
-      <AnthillMark className="logo-mark" size={22} />
-      <span className="screen-name">Workflow</span>
+      <AnthillMark className="logo-mark" size={18} />
+      {props.tabs}
 
       <input
         className="title-input on-dark"

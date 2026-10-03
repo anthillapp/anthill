@@ -59,7 +59,9 @@ import { createServices, type RunServices } from "../../desktop/src/main/service
 import { destinationInside, FileGrants, FolderGrants, writeAllOrNothing } from "../../desktop/src/main/safe-write.js";
 import {
   detectInterpreters,
+  grantedDraftFolder,
   runDraft,
+  shortenHome,
   type DraftRunOptions,
 } from "../../desktop/src/main/interpreters.js";
 import { readCodexModels } from "../../desktop/src/main/codex-models.js";
@@ -207,6 +209,9 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     });
   }
   const exportGrants = new FolderGrants();
+  // Folders a drafting CLI may read (ANT-67): only ever the workspace, once
+  // the page has asked for it. Apart from the export grants, as on desktop.
+  const draftFolders = new FolderGrants();
   const workflowFiles = new FileGrants();
   // A workspace that is not there is not a reason to refuse to start. The
   // server is already listening and the instance lock already taken by the
@@ -720,13 +725,24 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     return await readPiModels();
   });
 
+  // There is no folder picker in a browser tab, so the project folder is the
+  // workspace the CLI was started with, as it is for the run folder.
+  register(IpcChannel.promptFolderChoose, async () => {
+    if (!workspace) return null;
+    const path = await draftFolders.grant(resolve(workspace)).catch(() => undefined);
+    return path ? { path, displayPath: shortenHome(path) } : null;
+  });
+
   register(IpcChannel.promptDraft, async (args) => {
     const request = args[0] as PromptDraftRequest;
+    const granted = await grantedDraftFolder(request, draftFolders);
+    if (granted.refused) return granted.refused;
     draftAbort?.abort();
     draftAbort = new AbortController();
     const options: DraftRunOptions = {
       interpreterId: request.interpreterId,
       instruction: request.instruction,
+      ...(granted.folder ? { folder: granted.folder } : {}),
       signal: draftAbort.signal,
       onStage: (stage) => push(PROMPT_DRAFT_STAGE_CHANNEL, stage),
     };
@@ -997,6 +1013,7 @@ export async function createBridge(options: BridgeOptions): Promise<Bridge> {
     draftFromPrompt: (request: PromptDraftRequest) =>
       handle(IpcChannel.promptDraft, request),
     cancelPromptDraft: () => handle(IpcChannel.promptDraftCancel),
+    chooseDraftFolder: () => handle(IpcChannel.promptFolderChoose),
     onPromptDraftStage: (listener) => on(PROMPT_DRAFT_STAGE_CHANNEL, listener),
     liveObserve: (request: LiveObserveRequest) =>
       handle(IpcChannel.liveObserve, request),

@@ -345,3 +345,32 @@ describe("the drafting instruction", () => {
     );
   });
 });
+
+describe("the drafting instruction with a project folder (ANT-67)", () => {
+  const plain = buildDraftInstruction("Build me a login page.");
+  const withFolder = buildDraftInstruction("Build me a login page.", { folder: true });
+
+  it("says what in the folder is worth reading, before the fenced prompt", () => {
+    expect(withFolder).toContain("## Project context");
+    expect(withFolder.indexOf("## Project context")).toBeLessThan(withFolder.indexOf(PROMPT_OPEN));
+  });
+
+  it("drops the rules against reading anything, and keeps the rest", () => {
+    expect(withFolder).not.toContain("Do not read the repository");
+    expect(withFolder).not.toContain("Do not use tools.");
+    for (const rule of [
+      "DO NOT DO THE WORK",
+      "Do not edit, create or delete any file",
+      "Do not run any command",
+      "Read only. Do not create, edit or delete files, and do not run commands.",
+      "Do not copy secrets, keys or .env contents into the workflow.",
+    ]) {
+      expect(withFolder).toContain(rule);
+    }
+  });
+
+  it("is the same instruction as before when there is no folder", () => {
+    expect(buildDraftInstruction("Build me a login page.", {})).toBe(plain);
+    expect(plain).not.toContain("Project context");
+  });
+});

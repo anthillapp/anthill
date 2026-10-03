@@ -40,25 +40,28 @@ stable code is one release.
 
 ### Freeze and the release candidate
 
-1. **Freeze** when the maintainer says the release's content is complete and
-   has chosen its number X.Y.Z: a pull request `chore: release X.Y.Z` into
-   `<V>-next` that sets the version and rebuilds the plugin bundle
+1. **Ask for the version.** An agent never picks the release's number. When the
+   maintainer says the release's content is complete, ask which version
+   `<V>-next` becomes (for example `0.8.7-next` = `0.8.8`) and wait for the
+   answer before the freeze and before any pull request into master.
+2. **Freeze**: a pull request `chore: release X.Y.Z` into `<V>-next` that sets
+   that version and rebuilds the plugin bundle
    (RELEASING.md, step 1). The version, the bundle and the release notes are all
    done here, before the release goes anywhere near master.
-2. **The release candidate is one commit**: the branch's tip after the freeze
+3. **The release candidate is one commit**: the branch's tip after the freeze
    merged, named by its full 40-character SHA. Every check below is about that
    commit and nothing else; anything run by hand runs on a clean checkout where
    `git rev-parse HEAD` prints that SHA.
-3. **Automated checks** run by themselves on every push to the branch, on that
+4. **Automated checks** run by themselves on every push to the branch, on that
    exact commit: `check`, `linux-source`, `windows-source` (CI). For macOS
    packaging, also run the Release workflow by hand on the branch
    (`gh workflow run release.yml --ref <V>-next`): it builds the disk image and
    publishes nothing. These are what verifies a candidate.
-4. **A bug the checks find** is fixed by a pull request into the branch. The new
+5. **A bug the checks find** is fixed by a pull request into the branch. The new
    tip is a new candidate and the automated checks run again by themselves.
    Anything else that was run on the old candidate and touches the changed code
    is run again, and the record says what was rerun.
-5. **Anything that changes the branch after verification** — a fix, a hotfix
+6. **Anything that changes the branch after verification** — a fix, a hotfix
    brought in from master, a conflict resolution — makes a new candidate that
    is verified again before it can go to master. The gate enforces this: the
    commit named as verified must be the branch's head.
@@ -87,8 +90,9 @@ as tested end to end.
 ### Moving a release into master
 
 1. Open one pull request from `<V>-next` into `master`, titled
-   `chore: release X.Y.Z`. Its description has a line
-   `` Verified commit: `<40-character SHA>` `` and the evidence table above.
+   `chore: release X.Y.Z (<V>-next)`, with the version the maintainer gave.
+   Its description starts with the line `` `<V>-next` = X.Y.Z ``, then has a
+   line `` Verified commit: `<40-character SHA>` `` and the evidence table above.
    Public text only: no links to internal trackers or plans.
 2. `release-gate` checks that the head is `<master's version>-next` or a hotfix
    branch of this repository, that its version is higher than master's, that
@@ -117,8 +121,8 @@ as tested end to end.
 For a released version that cannot wait for the next release:
 
 1. Branch `hotfix/<topic>` from `origin/master`. Commit the fix with its test,
-   then set the version to the next patch after master's and rebuild the plugin
-   bundle (RELEASING.md).
+   then set the version and rebuild the plugin bundle (RELEASING.md). Ask the
+   maintainer for the version here too (usually the next patch after master's).
 2. Verify the hotfix branch's tip like a candidate: the automated checks
    above, on that exact commit.
 3. Pull request into master as in *Moving a release into master*, with its
@@ -134,4 +138,4 @@ For a released version that cannot wait for the next release:
    (rerun `npm run plugin:bundle` if it is frozen), and open a pull request into
    the branch that is merged with **Create a merge commit**, never squash. The
    merge commit is what lets the release later squash into master without
-   conflicts. On a frozen branch this is a new candidate (*Freeze and the release candidate*, step 5).
+   conflicts. On a frozen branch this is a new candidate (*Freeze and the release candidate*, step 6).

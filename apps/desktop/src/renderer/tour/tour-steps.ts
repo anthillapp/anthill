@@ -57,7 +57,7 @@ export const CANVAS_TOUR: TourStep[] = [
       },
       save: {
         title: "Save",
-        text: "When the workflow is ready, save it, then tell the coding session that handed it over to go.",
+        text: "When the workflow is ready, save it, then tell the coding session that handed it over to go. Prompt next to it exports the workflow so it can be reused.",
       },
     },
   },

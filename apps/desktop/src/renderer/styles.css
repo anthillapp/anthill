@@ -4327,6 +4327,333 @@ button.state-chip {
 }
 
 /* ------------------------------------------------------------------ */
+/* Export: a handed-over workflow written out for reuse (ANT-265)      */
+/*                                                                     */
+/* Built like the Hand-over, and quieter: it starts nothing, so there  */
+/* is no sequence to show — two choices, a folder, and a receipt.      */
+/* ------------------------------------------------------------------ */
+
+.export-scrim {
+  background: rgba(32, 30, 29, 0.42);
+  padding: 36px;
+}
+
+.export-modal {
+  width: min(580px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 20px 48px rgba(32, 30, 29, 0.34);
+  outline: none;
+}
+
+.export-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid #efeded;
+}
+
+.export-top .spacer { flex: 1; }
+
+.export-tile {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--chip);
+  color: var(--ink);
+}
+
+.export-titles { min-width: 0; }
+
+.export-titles h4 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.export-titles p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-dim);
+}
+
+.export-close {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  border: 1px solid #e2dfdf;
+  border-radius: 7px;
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.export-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: #f8f7f7;
+}
+
+.export-intro {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--ink-2);
+}
+
+.export-mono {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.export-options {
+  background: var(--surface);
+  border: 1px solid #d7d3d3;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.export-toggle {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+.export-toggle:hover:not(:disabled) { background: #fbfafa; }
+
+.export-box {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  border: 1px solid var(--ink-quiet);
+  background: var(--surface);
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+.export-box.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.export-toggle-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.export-toggle-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.export-toggle-head .export-mono { color: var(--ink-dim); }
+
+.export-toggle-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.export-toggle-desc {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+
+.export-files,
+.export-written ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.export-files { padding: 0 16px 14px 45px; }
+
+.export-files li,
+.export-written li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid #efeded;
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink-2);
+}
+.export-files .spacer { flex: 1; }
+.export-files .steps {
+  flex: none;
+  font-size: 11.5px;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+
+.export-rule { height: 1px; background: #efeded; }
+
+.export-folder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid #d7d3d3;
+}
+
+.export-folder .label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+
+.export-folder .value {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.export-folder button {
+  flex: none;
+  padding: 5px 11px;
+  border: 1px solid #d7d3d3;
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+.export-folder button:hover:not(:disabled) { border-color: #7d7979; background: var(--surface); }
+
+.export-written {
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: #f6faf7;
+  border: 1px solid #cfe6d8;
+}
+
+.export-written-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 11px;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.export-written-head i {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.export-written li { border-color: #e3efe7; }
+.export-written .tick { flex: none; font-size: 11px; color: #2f8f5f; }
+
+.export-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+
+.export-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid #efeded;
+  background: var(--surface);
+}
+.export-foot .spacer { flex: 1; }
+
+.export-primary {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 16px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #fff;
+}
+.export-primary:hover:not(:disabled) { background: var(--accent-600); }
+
+/* Blocked rather than disabled, like the toolbar's Prompt. */
+.export-primary.is-blocked,
+.export-primary.is-blocked:hover:not(:disabled) {
+  background: #e6e3e3;
+  color: #a19c9b;
+  cursor: not-allowed;
+}
+
+.export-cancel {
+  padding: 9px 13px;
+  border: 1px solid #d7d3d3;
+  border-radius: 7px;
+  background: var(--surface);
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+
+.export-count {
+  font-size: 11.5px;
+  white-space: nowrap;
+  color: var(--ink-quiet);
+}
+
+/* ------------------------------------------------------------------ */
 /* Local observation setup                                             */
 /* ------------------------------------------------------------------ */
 
@@ -8345,37 +8672,6 @@ button.presence-chip {
 }
 .icon-btn[aria-disabled="true"]:hover { background: transparent; }
 
-.harness-picker {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  height: 32px;
-  flex: none;
-  padding: 0 4px 0 11px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 7px;
-}
-
-.harness-picker > span {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  color: var(--ink-dim);
-}
-
-.harness-picker select {
-  width: auto;
-  height: 26px;
-  padding: 0 4px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  font-size: 13px;
-  color: #f8f4f4;
-}
-
 /*
  * The accent focus ring is tuned for the light canvas. On the dark chrome it
  * reads as an error on the control you just picked — but removing it would
@@ -8410,7 +8706,7 @@ button.presence-chip {
  */
 .settings-search:focus-within,
 .library .search:focus-within,
-.harness-picker:focus-within {
+.tool-plaque.is-selectable:focus-within {
   outline: 2px solid rgba(255, 255, 255, 0.72);
   outline-offset: 2px;
 }
@@ -8422,8 +8718,8 @@ button.presence-chip {
 .settings-search input:focus-visible,
 .library .search input:focus,
 .library .search input:focus-visible,
-.harness-picker select:focus,
-.harness-picker select:focus-visible {
+.tool-plaque select:focus,
+.tool-plaque select:focus-visible {
   outline: none;
   box-shadow: none;
   border-color: transparent;
@@ -8487,41 +8783,73 @@ button.presence-chip {
   min-width: 120px;
 }
 
-/* One slot holds the harness picker OR the source button, so the two states
-   swap in place rather than reshuffling the bar around them. The lock is not
+/* The tool plaque: one slot, one geometry, locked or selectable, so the two
+   states swap in place and the bar never shifts (ANT-265). The lock is not
    decoration: the exchange validates that a workflow targets the tool that
    handed it over, so switching saves fine and the revision silently becomes
    one that can never be bound. */
-.wf-toolbar .wf-source {
+.wf-toolbar .tool-plaque {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  flex: none;
+  box-sizing: border-box;
+  width: 184px;
   height: 32px;
+  flex: none;
   padding: 0 11px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: var(--radius-control);
-  background: var(--dark-inset);
   font: inherit;
   font-size: 12.5px;
   white-space: nowrap;
-  color: var(--ink-quiet);
+  text-align: left;
   cursor: pointer;
 }
-.wf-toolbar .wf-source:hover { background: rgba(255, 255, 255, 0.09); }
 
-.wf-toolbar .wf-source .logo {
+.wf-toolbar .tool-plaque .logo {
   width: 13px;
   height: 13px;
   flex: none;
   display: block;
   border-radius: 3px;
-  background-size: contain;
-  background-repeat: no-repeat;
-  background-position: center;
+  background: center / contain no-repeat;
 }
 
-.wf-toolbar .wf-source .lock { flex: none; opacity: 0.75; }
+.wf-toolbar .tool-plaque .label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wf-toolbar .tool-plaque .icon { flex: none; opacity: 0.75; }
+
+/* Handed over: the lighter ground, because it is a fact rather than a choice. */
+.wf-toolbar .tool-plaque.is-locked,
+.wf-toolbar .tool-plaque.is-locked:hover:not(:disabled) {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--ink-quiet);
+}
+
+/* Made here: transparent, like Save beside it. The select is the control,
+   laid invisibly over the plaque so the native picker opens from it. */
+.wf-toolbar .tool-plaque.is-selectable {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: transparent;
+  color: #e6e2e2;
+}
+.wf-toolbar .tool-plaque.is-selectable:hover { background: rgba(255, 255, 255, 0.08); }
+
+.wf-toolbar .tool-plaque select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 13px;
+}
 
 /* Two pills, never one. "Does the graph compile" and "where does this stand
    with the agent" are different facts that disagree regularly — a valid graph

@@ -1069,7 +1069,10 @@ describe("a handover being saved", () => {
     expect(window.anthill.revealPath).toHaveBeenLastCalledWith(exported);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.saveWorkflow).toHaveBeenLastCalledWith(expect.objectContaining({ path: exported, exchangePath: PATH })));
-    expect(screen.queryByRole("button", { name: "Prompt" })).toBeNull();
+    // Still a handover: Prompt exports, and never opens the Hand-over (ANT-265).
+    fireEvent.click(screen.getByRole("button", { name: "Prompt" }));
+    expect(screen.getByRole("dialog", { name: "Export this workflow" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Hand over the prompt" })).toBeNull();
     expect(window.anthill.workflowOpened).toHaveBeenLastCalledWith(PATH, undefined);
   });
 

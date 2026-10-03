@@ -51,30 +51,55 @@ function handover(model: Partial<HandoverModel> = {}): ToolbarHandover {
   };
 }
 
-it("leaves a workflow nobody handed over exactly as it was", () => {
+it("hands a workflow made here over from Prompt, beside a selectable tool plaque", () => {
   const { onPrompt } = draw();
   fireEvent.click(screen.getByRole("button", { name: /Prompt/ }));
   expect(onPrompt).toHaveBeenCalled();
-  expect(screen.getByText("Harness")).toBeTruthy();
+  expect(screen.getByText("For Claude Code")).toBeTruthy();
+  expect(screen.queryByText("Harness")).toBeNull();
+  expect(screen.getByRole("combobox", { name: "Coding tool this prompt is for" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: /^From / })).toBeNull();
   expect(screen.queryByText("Waiting for you")).toBeNull();
   // The one rename: the graph's pill is about the graph.
   expect(screen.getByText("No problems")).toBeTruthy();
 });
 
+it("changes the tool from the plaque", () => {
+  const onTarget = vi.fn();
+  draw({ onTarget });
+  fireEvent.change(screen.getByRole("combobox", { name: "Coding tool this prompt is for" }), {
+    target: { value: "codex" },
+  });
+  expect(onTarget).toHaveBeenCalledWith("codex");
+});
+
 /*
- * Prompt on a handover mints a fresh run id and registers a second, unrelated
- * run from the same workflow — two runs for one piece of work. It is removed
- * rather than demoted, because side by side with the approval the two read as
- * alternatives.
+ * The Hand-over on a handover would mint a fresh run id and register a second,
+ * unrelated run from the same workflow. Prompt stays, as an export: it writes
+ * the workflow out for reuse and starts nothing (ANT-265).
  */
-it("offers no Prompt and no harness picker on a handover", () => {
-  draw({ handover: handover() });
-  expect(screen.queryByRole("button", { name: /Prompt/ })).toBeNull();
-  expect(screen.queryByText("Harness")).toBeNull();
+it("turns Prompt into an export on a handover, beside a locked plaque", () => {
+  const onExport = vi.fn();
+  const { onPrompt } = draw({ handover: handover(), onExport });
+  const prompt = screen.getByRole("button", { name: /Prompt/ });
+  expect(prompt.getAttribute("title")).toContain("Export the workflow");
+  fireEvent.click(prompt);
+  expect(onExport).toHaveBeenCalledTimes(1);
+  expect(onPrompt).not.toHaveBeenCalled();
   expect(screen.queryByRole("combobox")).toBeNull();
   const source = screen.getByRole("button", { name: /From Claude Code/ });
   expect(source.getAttribute("title")).toContain("harness cannot be changed");
+});
+
+it("sends a broken handover's Prompt to the problems, not the export", () => {
+  const onExport = vi.fn();
+  const onToggleProblems = vi.fn();
+  draw({ handover: handover(), onExport, onToggleProblems, problemCount: 1 });
+  const prompt = screen.getByRole("button", { name: /Prompt/ });
+  expect(prompt.getAttribute("aria-disabled")).toBe("true");
+  fireEvent.click(prompt);
+  expect(onExport).not.toHaveBeenCalled();
+  expect(onToggleProblems).toHaveBeenCalled();
 });
 
 /*
@@ -92,14 +117,12 @@ it("draws the handover's lock instead of typing an emoji", () => {
 });
 
 /**
- * The primary slot is empty on a handover, in every state.
+ * No approval button on a handover, in any state.
  *
- * It held `Ready for agent`, which recorded a decision the user had already
- * given the session in conversation and could hold no work back. `Prompt` is
- * not there either, and for a different reason: it mints a fresh run id, so a
- * handover would end up with two unrelated runs for one piece of work.
+ * `Ready for agent` recorded a decision the user had already given the
+ * session in conversation and could hold no work back.
  */
-it("holds nothing in the primary slot, whatever the handover is doing", () => {
+it("offers no approval, whatever the handover is doing", () => {
   for (const model of [
     {},
     { pill: { label: "Bound to revision 1", tone: "bound" as const, title: "t" } },
@@ -108,7 +131,6 @@ it("holds nothing in the primary slot, whatever the handover is doing", () => {
     cleanup();
     draw({ handover: handover(model) });
     expect(screen.queryByRole("button", { name: /Ready for agent/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /Prompt/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Approve/i })).toBeNull();
     if (model.pill) expect(screen.getByText(model.pill.label)).toBeTruthy();
   }

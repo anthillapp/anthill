@@ -16,6 +16,7 @@
     "pretypecheck": "npm run build:deps",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "version:set": "node scripts/set-version.mjs",
+    "release": "node scripts/release.mjs",
     "plugin:target": "node scripts/plugin-target.mjs",
     "plugin:bundle": "npm run build:deps && npm run build --workspace=@anthill/mcp && node scripts/build-plugin-server.mjs"
   },

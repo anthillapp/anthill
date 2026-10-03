@@ -25,12 +25,19 @@ jobs:
   macos:
     runs-on: macos-14
     steps:
+      # Full history, so the tag can be checked against master.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+
+      # A tag is the master commit a verified release or hotfix became, with
+      # that version (RELEASING.md). One anywhere else publishes nothing.
+      - run: node scripts/release.mjs tagged
 
       - run: npm ci
 

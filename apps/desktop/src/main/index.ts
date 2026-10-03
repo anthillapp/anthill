@@ -1028,6 +1028,7 @@ function registerIpcHandlers(): void {
       channels: [...registered],
       shell: "desktop",
       platform: process.platform,
+      home: homedir(),
     }),
   );
 
@@ -1443,7 +1444,7 @@ function registerIpcHandlers(): void {
       liveSetupService().disable(harness),
   );
 
-  // File ▸ Reveal in Folder is enabled while the editor has a saved JSON to show.
+  // File ▸ Reveal in Finder follows the path in the editor's status bar.
   handle(IpcChannel.workflowSetRevealable, async (event, revealable: boolean) => {
     if (event.sender !== mainWindow?.webContents) return;
     const reveal = Menu.getApplicationMenu()?.getMenuItemById("reveal-workflow");
@@ -1701,7 +1702,8 @@ function applyMenu(): void {
           },
           {
             id: "reveal-workflow",
-            label: "Reveal in Folder",
+            // As the status bar says it (ANT-206): Finder by name on macOS.
+            label: process.platform === "darwin" ? "Reveal in Finder" : "Show in Folder",
             enabled: false,
             click: (_item, window) => {
               const target = window instanceof BrowserWindow ? window : BrowserWindow.getFocusedWindow();

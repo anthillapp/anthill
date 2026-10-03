@@ -150,6 +150,12 @@ export type IpcCapabilities = {
    */
   platform?: string;
   /**
+   * The home directory of the user the shell runs as, so the renderer can
+   * show a path as `~/…` (ANT-206). Absent from an older shell, whose paths
+   * are shown in full.
+   */
+  home?: string;
+  /**
    * Whether this shell started with error reporting on. The CLI's page reads
    * it to decide whether to catch its own errors; the desktop tells its
    * renderer through the preload instead.
@@ -960,7 +966,7 @@ export interface AnthillApi {
   saveWorkflow(request: SaveWorkflowRequest): Promise<SaveWorkflowResult>;
   /** File ▸ Save, or ⌘S. Returns the unsubscribe. */
   onSaveWorkflow(listener: () => void): () => void;
-  /** File ▸ Reveal in Folder. Desktop only; returns the unsubscribe. */
+  /** File ▸ Reveal in Finder (Show in Folder off macOS). Desktop only; returns the unsubscribe. */
   onRevealWorkflow?(listener: () => void): () => void;
   /**
    * Edit ▸ Undo or Redo, or ⌘Z / ⇧⌘Z (ANT-192). Absent where there is no
@@ -990,7 +996,7 @@ export interface AnthillApi {
    * window close on its own.
    */
   setWorkflowDirty(dirty: boolean): Promise<void>;
-  /** Whether File ▸ Reveal in Folder has a saved JSON to show. Desktop only. */
+  /** Whether File ▸ Reveal in Finder has a saved JSON to show. Desktop only. */
   setWorkflowRevealable?(revealable: boolean): Promise<void>;
   /** Workflows opened recently, newest first. Ones that have gone are left out. */
   listRecentPlans(): Promise<RecentWorkflow[]>;

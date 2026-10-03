@@ -132,6 +132,7 @@ body {
   background: var(--chrome-deep);
   color: var(--on-dark-dim);
   font-size: 11.5px;
+  white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -147,6 +148,68 @@ body {
 
 .statusbar .spacer {
   flex: 1;
+}
+
+/* The workflow's JSON, and the way to it (ANT-206). The path is the control:
+   icon, path and action are one button with no button chrome, lit together
+   on hover. The path gives way when the bar runs short; the action does not. */
+.statusbar .reveal-path {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  font: inherit;
+  font-size: 11.5px;
+  white-space: nowrap;
+  color: var(--on-dark-dim);
+  cursor: pointer;
+}
+
+.statusbar .reveal-path:hover {
+  color: var(--on-dark-2);
+}
+
+.statusbar .reveal-path:focus-visible {
+  outline-offset: 3px;
+}
+
+.reveal-path-icon {
+  flex: none;
+}
+
+.reveal-path-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+}
+
+.reveal-path-action {
+  flex: none;
+  color: var(--ink-quiet);
+}
+
+.statusbar .reveal-path:hover .reveal-path-action {
+  color: inherit;
+}
+
+/* What went wrong with a Reveal, above the path it is about. Brief: it goes by itself. */
+.reveal-toast {
+  position: fixed;
+  left: 14px;
+  bottom: 36px;
+  z-index: 30;
+  max-width: min(420px, calc(100vw - 28px));
+  padding: 7px 11px;
+  border-radius: var(--radius-control);
+  background: var(--chrome-deep);
+  color: var(--on-dark-2);
+  font-size: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
 }
 
 /* ---------------- buttons ---------------- */

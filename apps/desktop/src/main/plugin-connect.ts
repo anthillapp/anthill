@@ -276,7 +276,12 @@ export type ConnectDeps = {
   spawnFn?: SpawnFn;
   /** The interpreters, detected once for the window elsewhere; asked here when absent. */
   interpreters: () => Promise<InterpreterInfo[]>;
+  /** Opens a tool's own install link with the system, for a tool installed that way. */
+  openUrl?: (url: string) => Promise<void>;
 };
+
+/** Long enough for the tool to take the first link before the second arrives. */
+const BETWEEN_LINKS_MS = 800;
 
 export async function pluginConnections(deps: ConnectDeps): Promise<PluginConnection[]> {
   const home = deps.home ?? homedir();
@@ -331,6 +336,25 @@ function reason(outcome: { stderr: string; stdout: string; timedOut: boolean }, 
 
 export async function installPlugin(harness: CheckedPluginHarness, deps: ConnectDeps): Promise<PluginInstallResult> {
   const home = deps.home ?? homedir();
+  const links = PLUGIN_HARNESS_INFO[harness].installLinks;
+  if (links) {
+    // The tool installs it, after asking; Anthill only opens its links, which
+    // are fixed in the table and never come from the renderer.
+    if (!deps.openUrl) return { ok: false, changed: false, error: "This build of Anthill can't open links." };
+    try {
+      for (const [index, link] of links.entries()) {
+        if (index > 0) await new Promise((resolve) => setTimeout(resolve, BETWEEN_LINKS_MS));
+        await deps.openUrl(link);
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        changed: false,
+        error: `${PLUGIN_HARNESS_INFO[harness].label} didn't open: ${(error as Error)?.message ?? String(error)}`,
+      };
+    }
+    return { ok: true, confirm: true };
+  }
   if (!PLUGIN_HARNESS_INFO[harness].installsFromAnthill) {
     return {
       ok: false,

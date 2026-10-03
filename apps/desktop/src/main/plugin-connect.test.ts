@@ -153,6 +153,44 @@ describe("installing", () => {
     expect(existsSync(join(dir, ".anthill/plugin.json"))).toBe(false);
   });
 
+  /*
+    VS Code has no command for plugins, but its own links install one, each
+    after it asks. Anthill opens them in order, and only those: the renderer
+    names the tool, never an address.
+  */
+  it("installs VS Code's plugin by opening VS Code's own two links, and runs nothing", async () => {
+    const dir = await home();
+    const { calls, spawnFn } = tools();
+    const opened: string[] = [];
+    const result = await installPlugin("vscode", {
+      home: dir,
+      spawnFn,
+      interpreters: async () => [],
+      openUrl: async (url) => {
+        opened.push(url);
+      },
+    });
+    expect(result).toEqual({ ok: true, confirm: true });
+    expect(opened).toEqual([
+      "vscode://chat-plugin/add-marketplace?ref=anthillapp/anthill",
+      "vscode://chat-plugin/install?source=anthillapp/anthill&plugin=anthill",
+    ]);
+    expect(calls).toEqual([]);
+  });
+
+  it("says so when VS Code's links cannot be opened", async () => {
+    const dir = await home();
+    const failed = await installPlugin("vscode", {
+      home: dir,
+      interpreters: async () => [],
+      openUrl: async () => {
+        throw new Error("no handler for vscode://");
+      },
+    });
+    expect(failed).toEqual({ ok: false, changed: false, error: "VS Code didn't open: no handler for vscode://" });
+    expect((await installPlugin("vscode", { home: dir, interpreters: async () => [] })).ok).toBe(false);
+  });
+
   it("installs Codex's plugin from GitHub the same way", async () => {
     const dir = await home();
     const { calls, spawnFn } = tools();

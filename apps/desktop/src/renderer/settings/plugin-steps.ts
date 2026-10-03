@@ -105,12 +105,9 @@ export function vscodeKeys(platform: string | undefined): Keys {
 
 /**
  * VS Code's own links for adding a marketplace and installing a plugin from
- * one (its `chat-plugin` URL handler, 1.140). Each asks for confirmation in
- * VS Code; the marketplace one adds to the list rather than replacing it, so
- * VS Code's own marketplace stays.
+ * it, from the plugin table: the same ones the card's Install button opens.
  */
-export const VSCODE_ADD_MARKETPLACE = `vscode://chat-plugin/add-marketplace?ref=${GITHUB_SOURCE}`;
-export const VSCODE_INSTALL_PLUGIN = `vscode://chat-plugin/install?source=${GITHUB_SOURCE}&plugin=anthill`;
+const [VSCODE_ADD_MARKETPLACE = "", VSCODE_INSTALL_PLUGIN = ""] = PLUGIN_HARNESS_INFO.vscode.installLinks ?? [];
 
 /** How a link is opened from a terminal on each system: PowerShell on Windows. */
 export function openLink(platform: string | undefined, url: string): string {

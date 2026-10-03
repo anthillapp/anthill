@@ -43,10 +43,16 @@ export type PluginHarnessInfo = {
   /** Whether the tool's CLI can switch a disabled plugin back on. */
   enablesFromCli: boolean;
   /**
-   * Whether Anthill can install the plugin by running the tool's own
-   * commands. Without them, the card shows the steps instead.
+   * Whether Anthill can install the plugin: by running the tool's own
+   * commands, or by opening the tool's own install links. Without either, the
+   * card shows the steps instead.
    */
   installsFromAnthill: boolean;
+  /**
+   * The tool's own links that install the plugin, opened in order, each
+   * confirmed in the tool. Only for a tool with no command for it.
+   */
+  installLinks?: readonly string[];
   /** The page the tool's own makers keep for installing it. */
   installGuide: string;
   /**
@@ -97,10 +103,16 @@ export const PLUGIN_HARNESS_INFO: Record<PluginHarness, PluginHarnessInfo> = {
     // that file before `.claude-plugin/marketplace.json`; Claude Code never
     // reads it, so the two plugins named `anthill` do not collide.
     marketplace: "anthill",
-    // VS Code has no command line for plugins at all: both ways in are its
-    // settings, which are the user's to edit.
+    // VS Code has no command line for plugins. Its own links do the install
+    // (its `chat-plugin` URL handler, 1.140, checked by hand): the first adds
+    // Anthill's marketplace to the list, keeping VS Code's own; the second
+    // installs the plugin from it. VS Code asks before each.
     enablesFromCli: false,
-    installsFromAnthill: false,
+    installsFromAnthill: true,
+    installLinks: [
+      "vscode://chat-plugin/add-marketplace?ref=anthillapp/anthill",
+      "vscode://chat-plugin/install?source=anthillapp/anthill&plugin=anthill",
+    ],
     installGuide: "https://code.visualstudio.com/download",
     // Tool calls reach Anthill from VS Code's session record, not its hooks,
     // and the plugin is installed from VS Code's settings, not from Anthill.

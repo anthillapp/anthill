@@ -79,8 +79,8 @@ describe("the connect page", () => {
     await waitFor(() => expect(within(card("Claude Code")).getByRole("button", { name: "Install for Claude Code" })).toBeTruthy());
     expect(within(card("Codex")).getByText("Not found")).toBeTruthy();
     expect(screen.getByText(/You can add any of them later from Settings ▸ Plugins/)).toBeTruthy();
-    // No command installs into VS Code; its card points at the steps.
-    expect(within(card("VS Code")).getByRole("button", { name: "Show the steps" })).toBeTruthy();
+    // VS Code installs from its own links, which the card opens.
+    expect(within(card("VS Code")).getByRole("button", { name: "Install for VS Code" })).toBeTruthy();
   });
 
   it("installs through the card", async () => {

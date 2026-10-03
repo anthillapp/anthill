@@ -23,6 +23,7 @@ export type CardState =
   | "missing"
   | "available"
   | "installing"
+  | "confirm"
   | "reload"
   | "ready"
   | "failed"
@@ -32,6 +33,8 @@ export type CardState =
 export type LocalCardState =
   | { kind: "idle" }
   | { kind: "installing" }
+  /** The tool's own install links were opened; the tool asks before it installs. */
+  | { kind: "confirming" }
   | { kind: "installed" }
   | { kind: "failed"; result: Extract<PluginInstallResult, { ok: false }> };
 
@@ -52,6 +55,7 @@ export const BADGE: Record<CardState, string> = {
   missing: "Not found",
   available: "Plugin not installed",
   installing: "Installing…",
+  confirm: "Confirm in the tool",
   reload: "Restart needed",
   ready: "Ready",
   failed: "Install failed",
@@ -80,6 +84,17 @@ export function pluginCard(connection: PluginConnection | undefined, local: Loca
   if (!connection) return view("checking", `Looking for ${label} on this Mac…`);
 
   const { cli, status } = connection;
+
+  // Waiting on the tool's own prompts. Once the plugin turns up, it is read
+  // like any install that just finished.
+  if (local.kind === "confirming" && !status.installed) {
+    return view(
+      "confirm",
+      `${label} asks twice: to add Anthill's marketplace, then to install the plugin. Confirm both there; Anthill checks again when you come back.`,
+      { badge: `Confirm in ${label}`, action: { kind: "install", label: "Open the links again", outlined: true } },
+    );
+  }
+  const justInstalled = local.kind === "installed" || local.kind === "confirming";
   if (!cli.available) {
     return view("missing", `${label} isn't on this Mac yet. Its install guide opens in your browser.`, {
       action: { kind: "guide", label: "Open install guide ↗", outlined: true },
@@ -93,7 +108,7 @@ export function pluginCard(connection: PluginConnection | undefined, local: Loca
       // Just installed: whatever answered, a session already open has not
       // loaded it. Saying Ready here would send someone back to a session
       // that cannot see the plugin.
-      if (local.kind === "installed") {
+      if (justInstalled) {
         return view("reload", `Installed. Start a new ${label} session so it loads the plugin.`, {
           action: { kind: "check", label: "Check again" },
         });
@@ -115,6 +130,12 @@ export function pluginCard(connection: PluginConnection | undefined, local: Loca
       : view("available", `The plugin is installed but switched off. Turn it on in ${label}'s plugin settings.`, {
           action: { kind: "settings", label: "Show the steps", outlined: true },
         });
+  }
+
+  if (PLUGIN_HARNESS_INFO[status.harness].installLinks) {
+    return view("available", `${tool} is here. Anthill opens ${label}'s own install links, and ${label} asks you to confirm.`, {
+      action: { kind: "install", label: `Install for ${label}` },
+    });
   }
 
   if (!PLUGIN_HARNESS_INFO[status.harness].installsFromAnthill) {

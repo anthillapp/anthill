@@ -68,7 +68,10 @@ export function usePluginConnections(): PluginConnections {
         .pluginInstall(harness)
         .catch((error: unknown) => ({ ok: false as const, changed: false, error: String((error as Error)?.message ?? error) }));
       if (!alive.current) return;
-      setLocal((prev) => ({ ...prev, [harness]: result.ok ? { kind: "installed" } : { kind: "failed", result } }));
+      setLocal((prev) => ({
+        ...prev,
+        [harness]: result.ok ? (result.confirm ? { kind: "confirming" } : { kind: "installed" }) : { kind: "failed", result },
+      }));
       check();
     },
     [check],
@@ -77,7 +80,7 @@ export function usePluginConnections(): PluginConnections {
   // "Check again" is the author saying they restarted the session: from here
   // on the card goes by what the check finds.
   const checkAgain = useCallback(() => {
-    setLocal((prev) => perHarness((id) => (prev[id].kind === "installed" ? IDLE : prev[id])));
+    setLocal((prev) => perHarness((id) => (prev[id].kind === "installed" || prev[id].kind === "confirming" ? IDLE : prev[id])));
     check();
   }, [check]);
 

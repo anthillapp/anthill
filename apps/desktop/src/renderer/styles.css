@@ -8799,7 +8799,8 @@ button.presence-chip {
 .plugin-badge > i { width: 6px; height: 6px; flex: none; display: block; border-radius: 50%; background: currentColor; }
 .plugin-badge.is-missing,
 .plugin-badge.is-checking { color: var(--ink-dim); }
-.plugin-badge.is-installing { background: #eaf4fb; color: #2f6d99; }
+.plugin-badge.is-installing,
+.plugin-badge.is-confirm { background: #eaf4fb; color: #2f6d99; }
 .plugin-badge.is-reload { background: #f7ecd0; color: #8a6a08; }
 .plugin-badge.is-ready { background: #e6f3ec; color: #2f6b48; }
 .plugin-badge.is-failed,

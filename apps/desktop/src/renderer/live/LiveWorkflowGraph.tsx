@@ -658,6 +658,9 @@ export function LiveWorkflowGraph({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!event.metaKey && !event.ctrlKey) return;
+      // A diagram in a tab that is not showing keeps its view for when it
+      // is: ⌘0 measured at nothing would reset it (ANT-267).
+      if (surface.current?.closest("[hidden]")) return;
       const active = document.activeElement;
       const tag = active?.tagName;
       if (

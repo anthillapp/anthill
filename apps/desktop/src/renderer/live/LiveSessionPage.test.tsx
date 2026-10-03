@@ -14,6 +14,7 @@ import type { ObservationEvent, PendingRun } from "@anthill/live";
 
 import { IPC_CONTRACT, LIVE_SESSION_CHANNELS } from "../../shared/ipc.js";
 import { LiveSessionPage } from "./LiveSessionPage.js";
+import { WorkspaceTabs } from "../workflow/WorkspaceTabs.js";
 
 const workflow: Workflow = {
   id: "workflow-1",
@@ -117,7 +118,7 @@ function stub(events: ObservationEvent[], over: Record<string, unknown> = {}) {
 it("draws the bound revision, not later editor changes with the same workflow id", async () => {
   stub([], { liveWorkflow: vi.fn(async () => ({ ok: true, workflow, revision: 1, digest: "abc" })) });
   const edited = { ...workflow, nodes: workflow.nodes.map((node) => ({ ...node, name: "NEW EDIT" })) };
-  render(<LiveSessionPage workflow={edited} run={run({ exchange: { revision: 1, digest: "abc" } })} onBack={() => undefined} onStopObserving={() => undefined} />);
+  render(<LiveSessionPage workflow={edited} run={run({ exchange: { revision: 1, digest: "abc" } })} onExit={() => undefined} tabs={null} onStopObserving={() => undefined} />);
   await screen.findByText("Bound revision");
   expect(document.body.textContent).toContain("Make the change");
   expect(document.body.textContent).not.toContain("NEW EDIT");
@@ -137,7 +138,7 @@ it("draws an ordinary run from the snapshot it started from, not the open canvas
   stub([], { getRun: vi.fn(async () => ({ snapshot: started })) });
   const edited = { ...workflow, nodes: workflow.nodes.map((node) => ({ ...node, name: "EDITED SINCE" })) };
 
-  render(<LiveSessionPage workflow={edited} run={run()} onBack={() => undefined} onStopObserving={() => undefined} />);
+  render(<LiveSessionPage workflow={edited} run={run()} onExit={() => undefined} tabs={null} onStopObserving={() => undefined} />);
 
   await screen.findAllByText("AS IT RAN");
   expect(document.body.textContent).not.toContain("EDITED SINCE");
@@ -151,14 +152,14 @@ it("draws an ordinary run from the snapshot it started from, not the open canvas
 it("falls back to the open workflow only while the run has no stored snapshot", async () => {
   stub([], { getRun: vi.fn(async () => undefined) });
 
-  render(<LiveSessionPage workflow={workflow} run={run()} onBack={() => undefined} onStopObserving={() => undefined} />);
+  render(<LiveSessionPage workflow={workflow} run={run()} onExit={() => undefined} tabs={null} onStopObserving={() => undefined} />);
 
   await screen.findByText("Make the change");
 });
 
 it("never substitutes an edited graph when the immutable revision cannot be read", async () => {
   stub([], { liveWorkflow: vi.fn(async () => ({ ok: false, error: "Snapshot corrupt" })) });
-  render(<LiveSessionPage workflow={workflow} run={run({ exchange: { revision: 1, digest: "abc" } })} onBack={() => undefined} onStopObserving={() => undefined} />);
+  render(<LiveSessionPage workflow={workflow} run={run({ exchange: { revision: 1, digest: "abc" } })} onExit={() => undefined} tabs={null} onStopObserving={() => undefined} />);
   expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Snapshot corrupt");
   expect(document.querySelector(".live-graph")).toBeNull();
   expect(screen.queryByText("Make the change")).toBeNull();
@@ -170,14 +171,15 @@ async function show(
   options: { api?: Record<string, unknown>; observation?: { available: boolean; note: string }; workflow?: Workflow } = {},
 ) {
   const api = stub(events, options.api ?? {});
-  const onBack = vi.fn();
+  const onExit = vi.fn();
   const onStop = vi.fn();
   render(
     <LiveSessionPage
       workflow={options.workflow ?? workflow}
       run={pending}
       {...(options.observation ? { observation: options.observation } : {})}
-      onBack={onBack}
+      onExit={onExit}
+      tabs={<WorkspaceTabs active="live" liveEnabled liveNow={pending.state === "detected_live"} onSelect={() => undefined} />}
       onStopObserving={onStop}
     />,
   );
@@ -187,7 +189,7 @@ async function show(
   if (!options.api?.capabilities) {
     await waitFor(() => expect(api.liveEvents).toHaveBeenCalled());
   }
-  return { api, onBack, onStop };
+  return { api, onExit, onStop };
 }
 
 afterEach(() => {
@@ -289,10 +291,12 @@ describe("the page's read-only boundary", () => {
     expect(screen.getByText(/actually following the workflow/)).toBeTruthy();
   });
 
-  it("goes back to the workflow", async () => {
-    const { onBack } = await show([]);
+  // The workflow is a tab beside this page now; Back leaves both (ANT-267).
+  it("goes back to the launch window", async () => {
+    const { onExit } = await show([]);
     fireEvent.click(screen.getByRole("button", { name: "←" }));
-    expect(onBack).toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "←" }).getAttribute("title")).toBe("Back to the launch window");
+    expect(onExit).toHaveBeenCalled();
   });
 });
 
@@ -300,7 +304,8 @@ describe("the session header", () => {
   it("carries the workflow, CLI, state, run id, session id, evidence and confidence", async () => {
     await show([step("implement")]);
     expect(screen.getAllByText("Implement, test, fix").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Live session").length).toBeGreaterThan(0);
+    // Named by the switcher, which stands where the page's title was (ANT-267).
+    expect(screen.getByRole("tab", { name: "Live session", selected: true })).toBeTruthy();
     // The CLI is named by the presence chip, which reads "Live · Claude Code"
     // as one phrase rather than as a separate label beside a state.
     expect((document.querySelector(".presence-label") as HTMLElement).textContent).toContain(
@@ -495,6 +500,8 @@ describe("the activity feed", () => {
  * it and offers the block itself, as designed and as it ran.
  */
 describe("the activity panel scoped to a block", () => {
+  // The top bar has its own tablist, Workflow and Live session (ANT-267).
+  const BLOCK_SWITCH = "What to show for this block";
   const pick = (name: string) => {
     const graph = document.querySelector(".live-graph") as unknown as HTMLElement;
     fireEvent.click(within(graph).getByText(name).closest("g") as Element);
@@ -502,7 +509,7 @@ describe("the activity panel scoped to a block", () => {
 
   it("offers Activity and Block only while a block is selected", async () => {
     await show([step("implement"), step("test")]);
-    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.queryByRole("tablist", { name: BLOCK_SWITCH })).toBeNull();
     expect(screen.getByText("Whole session")).toBeTruthy();
 
     pick("Run tests");
@@ -519,7 +526,7 @@ describe("the activity panel scoped to a block", () => {
     expect(block.querySelector("input, textarea, select")).toBeNull();
 
     fireEvent.click(within(document.querySelector(".scope-chip") as HTMLElement).getByRole("button"));
-    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.queryByRole("tablist", { name: BLOCK_SWITCH })).toBeNull();
     expect(screen.queryByRole("tabpanel")).toBeNull();
   });
 

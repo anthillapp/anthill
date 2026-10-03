@@ -18,7 +18,7 @@
  *   and usually dodges.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Workflow } from "@anthill/workflow-schema";
 import {
   CLI_LABEL,
@@ -47,12 +47,22 @@ import { UsagePanel } from "./UsagePanel.js";
 import { RUN_STATE } from "./run-state.js";
 import { UnsupportedWindowsChip } from "../windows/unsupported-windows.js";
 import { interpreterLogoBackground } from "../workflow/interpreter-logos.js";
+import { AnthillMark } from "../AnthillMark.js";
 
 export type LiveSessionPageProps = {
   storageError?: string;
   workflow: Workflow;
   run: PendingRun;
-  onBack: () => void;
+  /**
+   * Back to the launch window. Not back to the workflow any more: that is a
+   * tab beside this one now, and leaving it does not stop the observation
+   * (ANT-267).
+   */
+  onExit: () => void;
+  /** The Workflow / Live session switcher, shared with the Workflow screen's bar. */
+  tabs: ReactNode;
+  /** Kept mounted while the Workflow tab is showing, so the feed keeps running. */
+  hidden?: boolean;
   /** Stops Anthill observing. Never touches the external session. */
   onStopObserving: (runId: string) => void;
   /** What the CLI this run belongs to can expose, when it is known. */
@@ -115,8 +125,8 @@ export function LiveSessionPage(props: LiveSessionPageProps) {
   }, [run.anthillRunId, run.exchange?.revision, retry]);
   const result = snapshot?.runId === run.anthillRunId ? snapshot.result : undefined;
   if (!result?.ok) return (
-    <div className="app live-page">
-      <header className="topbar"><button onClick={props.onBack}>Back to workflow</button><span>Live session</span></header>
+    <div className="app live-page" hidden={props.hidden}>
+      <LiveTopbar onExit={props.onExit} tabs={props.tabs} workflowName={run.workflowName ?? props.workflow.name} />
       <p role={result ? "alert" : "status"}>{result ? result.error : "Reading the workflow this run started from..."}</p>
       {result ? <button onClick={() => setRetry((value) => value + 1)}>Retry reading it</button> : null}
     </div>
@@ -124,10 +134,36 @@ export function LiveSessionPage(props: LiveSessionPageProps) {
   return <LiveSessionContent {...props} workflow={result.workflow} />;
 }
 
+/**
+ * Back to the launch window, the mark, the switcher and the workflow's name: the
+ * same start as the Workflow screen's bar, so switching tabs does not move the
+ * switcher under the pointer.
+ */
+function LiveTopbar({
+  onExit,
+  tabs,
+  workflowName,
+  children,
+}: Pick<LiveSessionPageProps, "onExit" | "tabs"> & { workflowName: string; children?: ReactNode }) {
+  return (
+    <header className="topbar">
+      <button className="icon-button" onClick={onExit} title="Back to the launch window">
+        ←
+      </button>
+      <AnthillMark className="logo-mark" size={18} />
+      {tabs}
+      <span className="live-page-workflow">{workflowName}</span>
+      {children}
+    </header>
+  );
+}
+
 function LiveSessionContent({
   workflow,
   run,
-  onBack,
+  onExit,
+  tabs,
+  hidden,
   onStopObserving,
   observation,
   storageError,
@@ -425,14 +461,8 @@ function LiveSessionContent({
   );
 
   return (
-    <div className="app live-page">
-      <header className="topbar">
-        <button className="icon-button" onClick={onBack} title="Back to the workflow">
-          ←
-        </button>
-        <span className="live-page-title">Live session</span>
-        <span className="live-page-workflow">{run.workflowName ?? workflow.name}</span>
-
+    <div className="app live-page" hidden={hidden}>
+      <LiveTopbar onExit={onExit} tabs={tabs} workflowName={run.workflowName ?? workflow.name}>
         <span className="spacer" />
         {/* The boundary sentence is doing real work on this page, so it changes
             tense rather than disappearing with the button. */}
@@ -456,7 +486,7 @@ function LiveSessionContent({
           </button>
         ) : null}
         <UnsupportedWindowsChip skin="on-dark" />
-      </header>
+      </LiveTopbar>
 
       <div className="live-page-body">
         <aside className="live-rail">

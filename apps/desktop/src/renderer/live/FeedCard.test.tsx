@@ -12,6 +12,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -44,7 +45,15 @@ const TAIL = "PARTHIAN";
 const words = (length: number) =>
   `${"word ".repeat(Math.ceil(length / 5)).slice(0, Math.max(0, length - TAIL.length))}${TAIL}`;
 
-const show = (detail: string) => render(<FeedCardView card={message(detail)} />);
+const cli = { label: "Claude Code", logo: "none" };
+
+/** The bubble keeps its own expanded state, the way the panel does for it. */
+function Expandable({ card }: { card: FeedCard }) {
+  const [expanded, setExpanded] = useState(false);
+  return <FeedCardView card={card} cli={cli} expanded={expanded} onExpand={() => setExpanded((on) => !on)} />;
+}
+
+const show = (detail: string) => render(<Expandable card={message(detail)} />);
 
 describe("clamping a message card", () => {
   it("shows a short message whole, with nothing to press", () => {
@@ -90,6 +99,7 @@ describe("clamping a message card", () => {
     // about the record, not the agent's.
     render(
       <FeedCardView
+        cli={cli}
         card={{ ...message(words(600)), kind: "tool", title: "File Operator" }}
       />,
     );
@@ -112,7 +122,7 @@ describe("the arrival animation's selector", () => {
   const css = readFileSync(resolve("src/renderer/styles.css"), "utf8");
 
   it("names the class the card actually renders", () => {
-    render(<FeedCardView card={{ ...message("Landed."), kind: "tool" }} isNew />);
+    render(<FeedCardView card={{ ...message("Landed."), kind: "tool" }} cli={cli} isNew />);
     const card = document.querySelector(".feed-card") as HTMLElement;
     const marker = [...card.classList].find((name) => name !== "feed-card" && name.includes("new"));
     expect(marker).toBeTruthy();

@@ -88,7 +88,8 @@ export function wasDrag(from: { x: number; y: number }, to: { x: number; y: numb
 /** Pan and zoom, the same shape the Workflow canvas uses. */
 type Viewport = { x: number; y: number; scale: number };
 
-function kicker(node: Workflow["nodes"][number]): string {
+/** A block's kind as its card names it; the Activity panel's Block tab uses the same words. */
+export function kicker(node: Workflow["nodes"][number]): string {
   if (node.type === "start") return "START";
   if (node.type === "end") return "END";
   if (node.type === "approval") return "APPROVAL";

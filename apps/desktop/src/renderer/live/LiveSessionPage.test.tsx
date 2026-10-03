@@ -372,19 +372,25 @@ describe("the activity feed", () => {
       event({ kind: "tool.end", title: "Tool finished", toolUseId: "t1", durationMs: 2400 }),
     ]);
     expect(document.querySelectorAll(".feed-card").length).toBe(1);
-    expect(screen.getByText("Completed · 2.4s")).toBeTruthy();
+    // A finished call shows how long it took; the tick beside it says it finished.
+    expect(screen.getByText("2.4s")).toBeTruthy();
   });
 
   it("states its confidence as a word, never as a colour alone", async () => {
-    await show([step("implement"), event({ kind: "tool.start", title: "Bash", toolName: "Bash" })]);
-    expect(document.querySelectorAll(".feed-card").length).toBe(2);
-    expect(screen.getByText("Confirmed · Make the change")).toBeTruthy();
-    expect(screen.getByText("Likely · Make the change")).toBeTruthy();
+    await show([
+      step("implement"),
+      event({ kind: "message", title: "m", detail: "On it.", author: { kind: "subagent", name: "dev" } }),
+      event({ kind: "tool.start", title: "Bash", toolName: "Bash" }),
+    ]);
+    const chips = [...document.querySelectorAll(".feed-chip")].map((chip) => chip.getAttribute("title"));
+    expect(chips.some((title) => title?.startsWith("Likely · Make the change"))).toBe(true);
   });
 
   it("says plainly when nothing tied a card to a step", async () => {
     await show([event({ kind: "tool.start", title: "Read", toolName: "Read" })]);
-    expect(screen.getByText("Not mapped to a workflow step")).toBeTruthy();
+    const card = document.querySelector(".feed-card.kind-tool") as HTMLElement;
+    expect(card.className).toContain("is-unmapped");
+    expect(card.querySelector(".feed-chip")?.getAttribute("title")).toBe("Not mapped to a workflow step");
   });
 
   it("gives the runtime's own name for an agent rather than inventing one", async () => {
@@ -393,31 +399,36 @@ describe("the activity feed", () => {
     ]);
     // The runtime's own word appears once, on its own line — the card is
     // titled by what the record said happened, not by the same string twice.
-    expect(screen.getByText("test-runner")).toBeTruthy();
-    expect(screen.getByText(/Runtime:/)).toBeTruthy();
-    // The card is titled with the step's own agent profile, so the runtime's
-    // word is printed once, on the Runtime line, and never as the title too.
-    expect(document.querySelector(".feed-card-title")?.textContent).toBe("Test Runner");
+    expect(screen.getByText("Runtime: test-runner")).toBeTruthy();
+    // The card is signed with the step's own agent profile, so the runtime's
+    // word is printed once, on the Runtime line, and never as the name too.
+    expect(document.querySelector(".feed-name")?.textContent).toBe("Test Runner");
   });
 
-  it("opens a card to show the record it came from", async () => {
+  it("opens a session divider to show the record it came from", async () => {
     await show([
-      event({
-        kind: "tool.end",
-        title: "Bash",
-        toolName: "Bash",
-        toolUseId: "call-9",
-        durationMs: 2400,
-        source: "hook",
-        channel: "claude-code:hook",
-      }),
+      event({ kind: "session.start", title: "Session started", source: "hook", channel: "claude-code:hook" }),
     ]);
     fireEvent.click(screen.getByRole("button", { name: "Evidence" }));
     expect(screen.getByText("claude-code:hook")).toBeTruthy();
-    expect(screen.getByText("call-9")).toBeTruthy();
-    expect(screen.getByText("tool.end")).toBeTruthy();
+    expect(screen.getByText("session.start")).toBeTruthy();
     // The mapping is stated in words, so a guess can never pass as a fact.
     expect(screen.getByText("nothing in the record names a step")).toBeTruthy();
+  });
+
+  it("opens a tool call to its output, never to evidence rows", async () => {
+    await show([
+      event({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "t1", detail: "npm test" }),
+      event({ kind: "tool.end", title: "Tool finished", toolUseId: "t1", ok: false, durationMs: 900 }),
+    ]);
+    expect(screen.queryByRole("button", { name: "Evidence" })).toBeNull();
+    const box = document.querySelector(".feed-tool") as HTMLElement;
+    expect(box.textContent).toContain("Failed · 900ms");
+    fireEvent.click(box);
+    expect(box.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("No output recorded.")).toBeTruthy();
+    fireEvent.click(box);
+    expect(screen.queryByText("No output recorded.")).toBeNull();
   });
 
   it("has a useful empty state before anything is observed", async () => {
@@ -445,23 +456,29 @@ describe("the activity feed", () => {
     expect(cards[0].textContent).toContain("Run tests");
   });
 
-  it("filters by kind from chips, and says how much of the scope is showing", async () => {
+  it("filters by kind from chips, and counts what is showing", async () => {
     await show([
       step("implement"),
       event({ kind: "tool.start", title: "Bash", toolName: "Bash" }),
       event({ kind: "session.start", title: "Session started" }),
+      event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "x", toolUseId: "a1" }),
     ]);
-    expect(screen.getByText("3 cards")).toBeTruthy();
+    const count = () => document.querySelector(".scope-whole .scope-count")?.textContent;
+    expect(count()).toBe("4");
 
     fireEvent.click(screen.getByRole("button", { name: "Tools" }));
-    expect(screen.getByText("1 of 3")).toBeTruthy();
+    expect(count()).toBe("1");
     expect(document.querySelectorAll(".feed-card").length).toBe(1);
+
+    // Handing a subagent its task is something said, so Messages takes it.
+    fireEvent.click(screen.getByRole("button", { name: "Messages" }));
+    expect(document.querySelectorAll(".feed-card.kind-agent").length).toBe(1);
   });
 
   it("separates nothing matching a filter from nothing having happened", async () => {
     await show([event({ kind: "session.start", title: "Session started" })]);
     fireEvent.click(screen.getByRole("button", { name: "Tools" }));
-    expect(screen.getByText("Nothing matches this filter.")).toBeTruthy();
+    expect(screen.getByText("Nothing matches this filter")).toBeTruthy();
     expect(screen.queryByText(/Nothing recorded yet/)).toBeNull();
   });
 
@@ -470,6 +487,96 @@ describe("the activity feed", () => {
     const graph = document.querySelector(".live-graph") as unknown as HTMLElement;
     fireEvent.click(within(graph).getByText("Run tests").closest("g") as Element);
     expect(screen.getByText(/Nothing mapped to this step/)).toBeTruthy();
+  });
+});
+
+/**
+ * The panel scoped to a block (ANT-268): clicking a block narrows the feed to
+ * it and offers the block itself, as designed and as it ran.
+ */
+describe("the activity panel scoped to a block", () => {
+  const pick = (name: string) => {
+    const graph = document.querySelector(".live-graph") as unknown as HTMLElement;
+    fireEvent.click(within(graph).getByText(name).closest("g") as Element);
+  };
+
+  it("offers Activity and Block only while a block is selected", async () => {
+    await show([step("implement"), step("test")]);
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.getByText("Whole session")).toBeTruthy();
+
+    pick("Run tests");
+    expect(screen.getByRole("tab", { name: "Activity" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("tab", { name: "Block" }));
+
+    const block = screen.getByRole("tabpanel");
+    expect(within(block).getByRole("heading", { name: "Run tests" })).toBeTruthy();
+    expect(within(block).getByText("Run them")).toBeTruthy();
+    expect(within(block).getByText("→ Done")).toBeTruthy();
+    expect(block.textContent).toContain("Agent Test Runner");
+    expect(within(block).getByText(/Editing happens in the workflow/)).toBeTruthy();
+    // Read-only: nothing on it edits the block.
+    expect(block.querySelector("input, textarea, select")).toBeNull();
+
+    fireEvent.click(within(document.querySelector(".scope-chip") as HTMLElement).getByRole("button"));
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.queryByRole("tabpanel")).toBeNull();
+  });
+
+  it("starts a newly selected block on its activity", async () => {
+    await show([step("implement"), step("test")]);
+    pick("Run tests");
+    fireEvent.click(screen.getByRole("tab", { name: "Block" }));
+    pick("Make the change");
+    expect(screen.getByRole("tab", { name: "Activity" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByRole("tabpanel")).toBeNull();
+  });
+
+  it("goes back to the block's events from how it ran", async () => {
+    await show([step("test"), event({ kind: "tool.start", title: "Bash", toolName: "Bash" })]);
+    pick("Run tests");
+    fireEvent.click(screen.getByRole("tab", { name: "Block" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show its 2 events" }));
+    expect(screen.getByRole("tab", { name: "Activity" }).getAttribute("aria-selected")).toBe("true");
+    expect(document.querySelectorAll(".feed-card").length).toBe(2);
+  });
+
+  it("says a step a running session has not reached has not started, not that it never will", async () => {
+    await show([step("implement")]);
+    pick("Run tests");
+    fireEvent.click(screen.getByRole("tab", { name: "Block" }));
+    expect(screen.getByText(/has not started yet/)).toBeTruthy();
+  });
+});
+
+describe("who each item says acted", () => {
+  it("signs the session's own words with the CLI, never with a block", async () => {
+    await show([step("implement"), event({ kind: "message", title: "m", detail: "Next I update the tests.", author: { kind: "main" } })]);
+    const item = document.querySelector(".feed-card.kind-message") as HTMLElement;
+    expect(item.querySelector(".feed-name")?.textContent).toBe("Claude Code");
+    expect(item.querySelector(".feed-verb")?.textContent).toBe("said in");
+    expect(item.querySelector(".feed-chip")?.textContent).toBe("Orchestration layer");
+  });
+
+  it("signs a subagent's call with the subagent and the block it ran in", async () => {
+    await show([
+      step("test"),
+      event({ kind: "subagent.start", title: "Delegated to a subagent", agentName: "general-purpose", toolUseId: "a1", blockId: "test" }),
+      event({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "t1", parentToolUseId: "a1", detail: "npm test" }),
+    ]);
+    const call = document.querySelector(".feed-card.kind-tool") as HTMLElement;
+    expect(call.querySelector(".feed-name")?.textContent).toBe("Test Runner");
+    expect(call.querySelector(".feed-verb")?.textContent).toBe("called in");
+    expect(call.querySelector(".feed-avatar")?.textContent).toBe("T");
+  });
+
+  it("calls a finished session's open call No result, not Running", async () => {
+    await show(
+      [step("implement"), event({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "t1" })],
+      run({ state: "completed" }),
+    );
+    expect(screen.queryByText("Running")).toBeNull();
+    expect(screen.getByText("No result")).toBeTruthy();
   });
 });
 
@@ -1058,8 +1165,9 @@ describe("an ended session's report", () => {
     await show(looped(), run({ state: "completed", lastObservedAt: at(10) }));
     openReport();
     fireEvent.click(within(report()).getByRole("button", { name: "Run tests ran 2 passes" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Block" }));
     const ran = screen.getByRole("region", { name: "How Run tests ran" });
-    expect(ran.textContent).toContain("2 passes");
+    expect(within(ran).getByText("passes").previousElementSibling?.textContent).toBe("2");
     expect(ran.querySelectorAll("li")).toHaveLength(2);
     expect(document.querySelector(".scope-chip")?.textContent).toContain("Run tests");
   });
@@ -1075,6 +1183,7 @@ describe("an ended session's report", () => {
     await show([marker("implement", at(1))], run({ state: "failed", lastObservedAt: at(2) }));
     openReport();
     fireEvent.click(within(report()).getByRole("button", { name: "1 not reached" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Block" }));
     expect(screen.getByText(/never reached this step, so there is nothing recorded for it/)).toBeTruthy();
   });
 

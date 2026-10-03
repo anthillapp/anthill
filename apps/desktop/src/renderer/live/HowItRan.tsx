@@ -1,59 +1,100 @@
 /**
- * One step of an ended session, before its events (ANT-142).
+ * How one step ran, at the top of its Block tab (ANT-142, ANT-268).
  *
- * Where it ended, how long it took, what was recorded inside it, and — when it
- * looped — each pass on its own line. A step the session never reached says
+ * How long it took, the tokens presumed for it, and how many passes — each
+ * pass on its own line when it looped. A step the session never reached says
  * exactly that instead of showing a row of zeros, which would read as a step
- * that ran and did nothing. Only for an ended session: while the session runs,
- * the step's card on the graph is the live answer.
+ * that ran and did nothing; one a running session has not reached yet says it
+ * has not started, because it still may.
  */
 
+import type { BlockRunState } from "@anthill/live";
+
 import { readDuration } from "./feed.js";
-import { tokenLine, type BlockUsage } from "./report.js";
+import { compact, type BlockUsage, type PassUsage } from "./report.js";
+import { RUN_STATE } from "./run-state.js";
 
-const STATUS = {
-  done: "Finished",
-  failed: "Ended with an error",
-  unknown: "Outcome unknown",
-  notReached: "Not reached",
-  waiting: "Waiting on you",
-} as const;
+const tokens = (value: PassUsage["tokens"]) => (value ? `~${compact(value.in + value.out)}` : undefined);
 
-export function HowItRan({ block, events }: { block: BlockUsage; events: number }) {
-  const reached = block.passes.length > 0;
-  return (
-    <section className={`how-it-ran is-${block.outcome}`} aria-label={`How ${block.name} ran`}>
-      <span className="kicker">How it ran · {STATUS[block.outcome]}</span>
-      {reached ? (
-        <>
-          <p className="how-it-ran-total">
-            {block.durationMs !== undefined ? readDuration(block.durationMs) : "no end marker"}
-            {" · "}
-            {tokenLine(block.tokens, true)}
-            {" · "}
-            {block.passes.length} pass{block.passes.length === 1 ? "" : "es"}
-          </p>
-          {block.passes.length > 1 ? (
-            <ol className="how-it-ran-passes">
-              {block.passes.map((pass) => (
-                <li key={pass.pass}>
-                  Pass {pass.pass} · {pass.durationMs !== undefined ? readDuration(pass.durationMs) : "no end marker"} ·{" "}
-                  {tokenLine(pass.tokens, true)}
-                </li>
-              ))}
-            </ol>
-          ) : null}
-          <p className="how-it-ran-note">
-            {events} event{events === 1 ? "" : "s"} below. Time runs from this step&rsquo;s start
-            until the session moved on and its subagents were back, so it can include waiting; ~
-            marks tokens presumed from the step they were recorded for.
-          </p>
-        </>
-      ) : (
-        <p className="how-it-ran-total">
-          The session never reached this step, so there is nothing recorded for it.
+export function HowItRan({
+  block,
+  state,
+  ended,
+  events,
+  onShowEvents,
+}: {
+  block: BlockUsage | undefined;
+  state: BlockRunState;
+  /** Whether the session is over, which decides what "not reached" means. */
+  ended: boolean;
+  /** How many feed items this step has, for the link back to them. */
+  events: number;
+  onShowEvents: () => void;
+}) {
+  const passes = block?.passes ?? [];
+  const style = RUN_STATE[state];
+  const name = block?.name ?? "this step";
+
+  if (passes.length === 0) {
+    return (
+      <section className="how-it-ran is-empty" aria-label={`How ${name} ran`}>
+        <span className="block-label">How it ran</span>
+        <p className="how-it-ran-none">
+          {ended
+            ? "The session never reached this step, so there is nothing recorded for it."
+            : "This step has not started yet, so there is nothing recorded for it."}
         </p>
-      )}
+      </section>
+    );
+  }
+
+  const total = block?.durationMs !== undefined ? readDuration(block.durationMs) : undefined;
+  const presumed = tokens(block?.tokens);
+  return (
+    <section
+      className="how-it-ran"
+      style={{ borderLeftColor: style.line }}
+      aria-label={`How ${name} ran`}
+    >
+      <div className="how-it-ran-top">
+        <span className="block-label">How it ran</span>
+        <span className="how-it-ran-status" style={{ color: style.ink }}>
+          {style.kicker}
+        </span>
+      </div>
+      <div className="how-it-ran-figures">
+        <div>
+          <b className={total ? undefined : "is-none"}>{total ?? "no end marker"}</b>
+          <span>total time</span>
+        </div>
+        <div>
+          <b className={presumed ? undefined : "is-none"}>{presumed ?? "no data"}</b>
+          <span>tokens, presumed</span>
+        </div>
+        <div>
+          <b>{passes.length}</b>
+          <span>{passes.length === 1 ? "pass" : "passes"}</span>
+        </div>
+      </div>
+      {passes.length > 1 ? (
+        <ol className="how-it-ran-passes">
+          {passes.map((pass) => (
+            <li key={pass.pass}>
+              <span className="n">Pass {pass.pass}</span>
+              <span className="t">{pass.durationMs !== undefined ? readDuration(pass.durationMs) : "no end"}</span>
+              <span>{tokens(pass.tokens) ? `${tokens(pass.tokens)} tokens` : "no token data"}</span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      <div className="how-it-ran-foot">
+        <button type="button" className="block-link" onClick={onShowEvents} disabled={events === 0}>
+          {events === 0 ? "No events recorded" : `Show its ${events} event${events === 1 ? "" : "s"}`}
+        </button>
+        <span className="block-note">
+          Time runs from this step&rsquo;s start to the next, so it can include waiting.
+        </span>
+      </div>
     </section>
   );
 }

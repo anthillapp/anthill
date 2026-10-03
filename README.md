@@ -31,7 +31,7 @@ You can build Anthill from source to try it, the same way as on Linux, with
 Node.js 22 and Git:
 
 ```powershell
-git clone https://github.com/nstr/anthill.git
+git clone https://github.com/anthillapp/anthill.git
 cd anthill
 npm install
 npm run build
@@ -44,7 +44,7 @@ local storage may not work, and there is no compatibility, data-safety or
 support guarantee. Anthill says so once when it first starts, keeps an
 *Unsupported Windows build* chip in view, and turns off anything known not to
 work, saying why. If something breaks,
-[report a Windows issue](https://github.com/nstr/anthill/issues/new?template=windows.yml).
+[report a Windows issue](https://github.com/anthillapp/anthill/issues/new?template=windows.yml).
 
 macOS: desktop app and CLI. Linux: CLI. Windows support is coming soon – building from source is possible for experimentation, but Windows is not yet officially supported and some features may not work.
 

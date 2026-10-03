@@ -21,6 +21,8 @@ function draw(over: Partial<Parameters<typeof WorkflowToolbar>[0]> = {}) {
   const onPrompt = vi.fn();
   render(
     <WorkflowToolbar
+      canReveal={false}
+      onReveal={vi.fn()}
       workflow={workflow}
       onExit={vi.fn()}
       onRename={vi.fn()}

@@ -145,9 +145,7 @@ describe("the page owns itself", () => {
 });
 
 /**
- * General: the folder a first save opens in. It is only a starting place for
- * the save dialog, and the note says exactly that — nothing already saved
- * moves.
+ * General: desktop Save writes into the configured folder automatically.
  */
 describe("the General page", () => {
   it("shows the default folder, and keeps the one chosen in the dialog", async () => {
@@ -155,7 +153,7 @@ describe("the General page", () => {
     api.chooseWorkflowFolder = vi.fn(async () => ({ workflowFolder: "/Users/me/work/flows" }));
     show();
     expect(await screen.findByText("~/Documents/Anthill")).toBeTruthy();
-    expect(screen.getByText(/moves nothing that is already saved/)).toBeTruthy();
+    expect(screen.getByText(/saved here as soon as it has a name/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Change…" }));
     expect(await screen.findByText("/Users/me/work/flows")).toBeTruthy();
     expect(api.chooseWorkflowFolder).toHaveBeenCalledTimes(1);

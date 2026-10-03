@@ -29,6 +29,7 @@ import {
   OPEN_SETTINGS_CHANNEL,
   OPEN_WORKFLOW_CHANNEL,
   SAVE_WORKFLOW_CHANNEL,
+  REVEAL_WORKFLOW_CHANNEL,
   EDIT_HISTORY_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
   type AppSettings,
@@ -54,12 +55,7 @@ import { readPiModels } from "./pi-models.js";
 import { readCodexAgentSupport } from "./codex-capability.js";
 import { adoptUserPath } from "./user-path.js";
 import { isRealLoadFailure, loadFailureUrl } from "./load-failure.js";
-import {
-  freePath,
-  nameInSavedFile,
-  saveDestination,
-  type SavedRecord,
-} from "./save-destination.js";
+import { WorkflowSaver, type ExternalSaveChoice } from "./workflow-save.js";
 import { dataDirectoryRefusal, desktopUserDataPath, desktopDataDirectory } from "./user-data.js";
 import {
   ExchangeInbox,
@@ -67,10 +63,9 @@ import {
   WindowOperations,
   WorkflowDelivery,
   boundWorkflow,
-  exchangeDestination,
   linksFromArgv,
   readExchangeView,
-  saveExchangeCopy,
+  exchangeDestination,
   workflowIdFromLink,
   writeWorkingCopy,
   type OpenOutcome,
@@ -758,6 +753,25 @@ function createWindow(): void {
  * on it — a link resolves through the store, which knows every handover rather
  * than the last twelve files — so this is a convenience, not a route.
  */
+/**
+ * The first save of a workflow opened from outside the workflow folder: write
+ * back into that file, or put a copy in the folder and keep saving there.
+ */
+async function askAboutExternalSave(path: string): Promise<ExternalSaveChoice> {
+  const options: Electron.MessageBoxOptions = {
+    type: "question",
+    message: `Save over “${basename(path)}”?`,
+    detail: `This workflow was opened from ${dirname(path)}, outside your workflow folder. Overwrite that file, or save a new copy in the workflow folder from Settings.`,
+    buttons: ["Overwrite", "Save Copy in Folder", "Cancel"],
+    defaultId: 0,
+    cancelId: 2,
+  };
+  const { response } = mainWindow && !mainWindow.isDestroyed()
+    ? await dialog.showMessageBox(mainWindow, options)
+    : await dialog.showMessageBox(options);
+  return response === 0 ? "overwrite" : response === 1 ? "copy" : "cancel";
+}
+
 async function openWorkflowAt(path: string): Promise<OpenWorkflowResult> {
   try {
     const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
@@ -995,6 +1009,13 @@ function handle(
 }
 
 function registerIpcHandlers(): void {
+  const workflowSaver = new WorkflowSaver({
+    folder: async () => workflowFolderPath(await settings().read(), homedir()),
+    files: workflowFiles,
+    exchange,
+    ask: askAboutExternalSave,
+    linksPath: join(app.getPath("userData"), "workflow-save-links.json"),
+  });
   // Legacy history is read-only. Removing the runner must not remove the
   // snapshot lookup used by the manual copy-paste Live Session page.
   handle(IpcChannel.runList, async () => (await historyIfReadable())?.store.listRuns() ?? []);
@@ -1049,7 +1070,9 @@ function registerIpcHandlers(): void {
     IpcChannel.workflowOpen,
     async (_event, requested?: string): Promise<OpenWorkflowResult> => {
       if (requested && (await workflowFiles.has(requested) ||
-          (await listRecents()).some((item) => item.path === requested))) return openWorkflowAt(requested);
+          (await listRecents()).some((item) => item.path === requested))) {
+        return withSavedJson(await openWorkflowAt(requested));
+      }
 
       const result = await dialog.showOpenDialog({
         title: "Open workflow",
@@ -1064,9 +1087,39 @@ function registerIpcHandlers(): void {
         return { ok: false, cancelled: true };
       }
 
-      return openWorkflowAt(result.filePaths[0]);
+      return withSavedJson(await openWorkflowAt(result.filePaths[0]));
     },
   );
+
+  /**
+   * A handover's JSON is in the workflow folder from the moment it opens, so
+   * Reveal always has a file of the author's to show, never the exchange's
+   * working copy. An exported JSON reopened later gets its handover back.
+   */
+  async function withSavedJson(result: OpenWorkflowResult): Promise<OpenWorkflowResult> {
+    if (!result.ok) return result;
+    const { path, workflow } = result.opened;
+    try {
+      if (await exchangeDestination(exchange(), path, workflow.id)) {
+        const exported = await workflowSaver.exportHandover(path, workflow);
+        return { ok: true, opened: { ...result.opened, path: exported, exchangePath: path } };
+      }
+      const linked = await workflowSaver.linkedExchangePath(path, workflow.id);
+      return linked ? { ok: true, opened: { ...result.opened, exchangePath: linked } } : result;
+    } catch (error) {
+      // The workflow is still worth showing; Save will try the JSON again.
+      const reason = `Its JSON could not be written to the workflow folder: ${error instanceof Error ? error.message : String(error)}`;
+      const isHandover = await exchangeDestination(exchange(), path, workflow.id).catch(() => false);
+      return {
+        ok: true,
+        opened: {
+          ...result.opened,
+          ...(isHandover ? { exchangePath: path } : {}),
+          notice: [result.opened.notice, reason].filter(Boolean).join(" "),
+        },
+      };
+    }
+  }
 
   // Keep the readiness handshake, but deliver every request through the same
   // acknowledged channel, including requests that arrived before this page.
@@ -1078,7 +1131,8 @@ function registerIpcHandlers(): void {
   handle(IpcChannel.workflowOpened, async (event, path: string, id?: number, outcome?: "shown" | "declined" | "confirming" | "opening") => {
     if (rendererListening && event.sender === mainWindow?.webContents) workflowDelivery.acknowledge(path, id, outcome);
   });
-  handle(IpcChannel.exchangeRead, async (_event, path: string, id: string) => readExchangeView(exchange(), path, id));
+  handle(IpcChannel.exchangeRead, async (_event, path: string, id: string) =>
+    readExchangeView(exchange(), await workflowSaver.linkedExchangePath(path, id) ?? path, id));
   handle(IpcChannel.liveWorkflow, async (_event, runId: string) => {
     await liveService().start();
     return boundWorkflow(exchange(), liveService().registered(runId));
@@ -1087,91 +1141,12 @@ function registerIpcHandlers(): void {
   handle(
     IpcChannel.workflowSave,
     async (_event, request: SaveWorkflowRequest): Promise<SaveWorkflowResult> => {
-      // A renderer-provided path is not consent to overwrite an arbitrary
-      // file. Unknown destinations must go through the native save dialog.
-      if (request.path && !await workflowFiles.has(request.path)) request = { ...request, path: undefined };
-      // What the last successful save left behind, read from the file itself
-      // rather than tracked alongside it — see ./save-destination.ts.
-      const saved: SavedRecord = request.path
-        ? await readFile(request.path, "utf8").then(
-            (contents) => {
-              const name = nameInSavedFile(contents);
-              return name === undefined
-                ? ({ kind: "unreadable" } as const)
-                : ({ kind: "named", name } as const);
-            },
-            // Gone is a fact worth acting on; unreadable for any other reason
-            // — permissions, a volume playing up — is not evidence that they
-            // deleted anything, so it must not provoke a dialog.
-            (error: NodeJS.ErrnoException) =>
-              error?.code === "ENOENT"
-                ? ({ kind: "missing" } as const)
-                : ({ kind: "unreadable" } as const),
-          )
-        : ({ kind: "missing" } as const);
-
-      let exchangeCopy = false;
-      try {
-        exchangeCopy = Boolean(request.path && await exchangeDestination(exchange(), request.path, request.workflow.id));
-      } catch (error) {
-        return { kind: "failed", error: String(error) };
-      }
-      // A first save opens in the workflow folder from Settings, made if it
-      // is not there yet. A failure to make it only costs the suggestion: the
-      // dialog then opens where the platform chooses.
-      let folder: string | undefined;
-      if (!request.path) {
-        const wanted = workflowFolderPath(await settings().read(), homedir());
-        folder = await mkdir(wanted, { recursive: true }).then(() => wanted, () => undefined);
-      }
-      const destination = exchangeCopy && request.path
-        ? { kind: "write" as const, path: request.path }
-        : saveDestination(request.workflow.name ?? "", request.path, saved, folder);
-      let path = request.path;
-      if (destination.kind === "ask" && request.quiet) {
-        // Nobody to ask: only a first save, into the workflow folder, and
-        // never over a file that is already there (ANT-177).
-        if (request.path || !folder) return { kind: "cancelled" };
-        path = freePath(destination.suggested, (candidate) => existsSync(candidate));
-      } else if (destination.kind === "ask") {
-        const result = await dialog.showSaveDialog({
-          title: "Save workflow",
-          // New saves get the ".workflow.json" suffix. The open side matches
-          // any ".json", so anything saved under an earlier convention keeps
-          // opening normally.
-          defaultPath: destination.suggested,
-          filters: [{ name: "Workflow JSON", extensions: ["json"] }],
-        });
-        if (result.canceled || !result.filePath) return { kind: "cancelled" };
-        path = result.filePath;
-      } else {
-        path = destination.path;
-      }
-      try {
-        if (await exchangeDestination(exchange(), path, request.workflow.id)) {
-          await saveExchangeCopy(exchange(), path, request.workflow);
-        } else {
-          const safe = await destinationInside(dirname(path), basename(path));
-          if (!safe.ok) throw new Error(safe.reason);
-          const written = await writeAllOrNothing([{ path: safe.path, relative: basename(path), content: `${JSON.stringify(request.workflow, null, 2)}\n` }]);
-          if (!written.ok) throw new Error(written.error);
-        }
-        await workflowFiles.grant(path);
-      } catch (error) {
-        // Reported rather than thrown, so the editor can say what went wrong
-        // and keep the unsaved work rather than losing the answer in a
-        // rejected IPC call (ANT-58).
-        return {
-          kind: "failed",
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
-      // Saving is how a workflow gets into the launch window's list in the first
-      // place: a workflow drafted from a prompt has never been opened from a file.
-      await rememberRecent(path);
+      const result = await workflowSaver.save(request);
+      if (result.kind !== "saved") return result;
+      // A recent-list failure must not turn a durable JSON save into a failure.
+      await rememberRecent(result.path).catch((error) => console.error("[anthill] remember saved workflow:", error));
       analytics.capture("workflow_saved");
-
-      return { kind: "saved", path };
+      return result;
     },
   );
 
@@ -1226,15 +1201,11 @@ function registerIpcHandlers(): void {
     withhold. `showItemInFolder` selects the item in Finder and executes
     nothing.
   */
-  // Naming a folder is not writing to it: the author picks here, sees what is
-  // about to be put there, and only the copy writes.
-  // Where a first save opens. Its own dialog, asking its own question, and
-  // no export grant: this folder is a starting place for the save dialog,
-  // not a root anything is written into on Anthill's own authority.
+  // Choose the destination for desktop Save. Export still has its own grants.
   handle(IpcChannel.workflowFolderChoose, async () => {
     const current = workflowFolderPath(await settings().read(), homedir());
     const result = await dialog.showOpenDialog({
-      title: "Choose where new workflows are saved",
+      title: "Choose where workflows are saved",
       defaultPath: current,
       properties: ["openDirectory", "createDirectory"],
     });
@@ -1467,6 +1438,13 @@ function registerIpcHandlers(): void {
     async (_event, harness: MarkerCli): Promise<ObservationSetupActionResult> =>
       liveSetupService().disable(harness),
   );
+
+  // File ▸ Reveal in Folder follows the editor's own button.
+  handle(IpcChannel.workflowSetRevealable, async (event, revealable: boolean) => {
+    if (event.sender !== mainWindow?.webContents) return;
+    const reveal = Menu.getApplicationMenu()?.getMenuItemById("reveal-workflow");
+    if (reveal) reveal.enabled = revealable === true;
+  });
 
   handle(IpcChannel.workflowSetDirty, async (_event, dirty: boolean) => {
     workflowDirty = Boolean(dirty);
@@ -1715,6 +1693,15 @@ function applyMenu(): void {
               const target =
                 window instanceof BrowserWindow ? window : BrowserWindow.getFocusedWindow();
               target?.webContents.send(SAVE_WORKFLOW_CHANNEL);
+            },
+          },
+          {
+            id: "reveal-workflow",
+            label: "Reveal in Folder",
+            enabled: false,
+            click: (_item, window) => {
+              const target = window instanceof BrowserWindow ? window : BrowserWindow.getFocusedWindow();
+              target?.webContents.send(REVEAL_WORKFLOW_CHANNEL);
             },
           },
           { type: "separator" },

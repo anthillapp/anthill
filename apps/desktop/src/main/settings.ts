@@ -65,10 +65,9 @@ export type Settings = {
   /** Anthill can no longer read the session. */
   observationLostNotifications: boolean;
   /**
-   * Where the save dialog opens for a workflow never saved before: an absolute
-   * path, or empty for `~/Documents/Anthill`. Only the starting folder of a
-   * first save — nothing already saved is moved, and a saved workflow keeps
-   * saving where it is.
+   * Where desktop Save writes workflow JSON automatically: an absolute path,
+   * or empty for `~/Documents/Anthill`. Changing it moves nothing; a file
+   * outside it asks on Save whether to overwrite it or copy it here.
    */
   workflowFolder: string;
 };
@@ -86,7 +85,7 @@ export const DEFAULT_SETTINGS: Settings = {
   workflowFolder: "",
 };
 
-/** The folder a first save opens in: the one chosen, or `~/Documents/Anthill`. */
+/** The desktop Save destination: the one chosen, or `~/Documents/Anthill`. */
 export function workflowFolderPath(settings: Pick<Settings, "workflowFolder">, home: string): string {
   return settings.workflowFolder && isAbsolute(settings.workflowFolder)
     ? settings.workflowFolder
@@ -175,7 +174,7 @@ export class SettingsStore {
    */
   async write(patch: Partial<Settings>): Promise<Settings> {
     // A folder has to be a real absolute path, or empty for the default; the
-    // renderer cannot set the save dialog loose on a relative one.
+    // renderer cannot direct workflow saves to a relative one.
     if (patch.workflowFolder !== undefined && patch.workflowFolder !== "" && !isAbsolute(patch.workflowFolder)) {
       throw new Error("The workflow folder has to be an absolute path.");
     }

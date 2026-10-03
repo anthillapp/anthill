@@ -36,6 +36,7 @@ export const IpcChannel = {
   runGet: "run:get",
   workflowExport: "workflow:export",
   workflowSetDirty: "workflow:set-dirty",
+  workflowSetRevealable: "workflow:set-revealable",
   recentsList: "recents:list",
   recentsForget: "recents:forget",
   interpretersDetect: "interpreters:detect",
@@ -195,6 +196,7 @@ export const OPEN_SETTINGS_CHANNEL = "app:open-settings";
  * which also settles ⌘S never reaching the browser's own Save Page (ANT-59).
  */
 export const SAVE_WORKFLOW_CHANNEL = "app:save-workflow";
+export const REVEAL_WORKFLOW_CHANNEL = "app:reveal-workflow";
 
 /**
  * Edit ▸ Undo or Redo, for the page to apply to what it is editing (ANT-192).
@@ -319,7 +321,10 @@ export type RuntimeInfo = {
 };
 
 export type OpenedWorkflow = {
+  /** The workflow's JSON: for a handover, its export in the workflow folder. */
   path: string;
+  /** Set for a handover: its exchange working copy, which Save also records. */
+  exchangePath?: string;
   workflow: Workflow;
   /** Set when the workflow loaded but predates this build's format. */
   notice?: string;
@@ -346,17 +351,17 @@ export type SaveWorkflowRequest = {
   /**
    * Where the last successful save went, if it went anywhere.
    *
-   * Not a promise to write there: the main process asks for a destination
-   * when that answer no longer holds — the file has gone, or the workflow has
-   * been renamed since (ANT-57).
+   * Desktop Save writes back into it when it is in the workflow folder. A
+   * file elsewhere is asked about once: overwrite it, or save a copy in the
+   * folder. The filename never follows a rename.
    */
   path?: string;
+  /** Granted exchange working copy, retained when desktop Save exports JSON. */
+  exchangePath?: string;
   /**
-   * Save without asking: a workflow never saved goes into the workflow folder
-   * under a name nothing occupies. For the saves Anthill makes on the author's
-   * behalf — copying a prompt from a workflow that was never saved, so the run
-   * it starts has somewhere to be found (ANT-177). A save that would have to
-   * ask is not made.
+   * A save Anthill makes on the author's behalf: a new workflow's first file
+   * as soon as it has a title, or one copied from the prompt (ANT-177). It
+   * never asks, so a save that would have to ask is not made.
    */
   quiet?: boolean;
 };
@@ -377,7 +382,7 @@ export type { BoundWorkflowResult, ExchangeView } from "@anthill/workflow-exchan
  * the author can act on is the whole point of reporting one.
  */
 export type SaveWorkflowResult =
-  | { kind: "saved"; path: string }
+  | { kind: "saved"; path: string; exchangePath?: string }
   | { kind: "cancelled" }
   | { kind: "failed"; error: string };
 
@@ -951,6 +956,8 @@ export interface AnthillApi {
   saveWorkflow(request: SaveWorkflowRequest): Promise<SaveWorkflowResult>;
   /** File ▸ Save, or ⌘S. Returns the unsubscribe. */
   onSaveWorkflow(listener: () => void): () => void;
+  /** File ▸ Reveal in Folder. Desktop only; returns the unsubscribe. */
+  onRevealWorkflow?(listener: () => void): () => void;
   /**
    * Edit ▸ Undo or Redo, or ⌘Z / ⇧⌘Z (ANT-192). Absent where there is no
    * application menu — the CLI's browser page — and the keys reach the page.
@@ -979,6 +986,8 @@ export interface AnthillApi {
    * window close on its own.
    */
   setWorkflowDirty(dirty: boolean): Promise<void>;
+  /** Whether File ▸ Reveal in Folder has a saved JSON to show. Desktop only. */
+  setWorkflowRevealable?(revealable: boolean): Promise<void>;
   /** Workflows opened recently, newest first. Ones that have gone are left out. */
   listRecentPlans(): Promise<RecentWorkflow[]>;
   /** Drop one from the list. The file itself is untouched. */

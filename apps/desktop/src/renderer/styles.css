@@ -8477,12 +8477,12 @@ button.presence-chip {
    something that reads as an error.
 */
 
-/* A handover adds a pill to a bar that neither wraps nor scrolls: `.topbar`
+/* Document actions and handover pills share a bar that neither wraps nor scrolls: `.topbar`
    clips, and it clips from the right, which is where the primary button is.
    The name is the element with slack — it is also in the window's own title —
    so it is the one that gives way, down to a floor where it is still a name
    rather than a sliver. */
-.wf-toolbar.is-handover .title-input {
+.wf-toolbar .title-input {
   flex: 0 1 auto;
   min-width: 120px;
 }

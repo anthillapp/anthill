@@ -9,10 +9,13 @@
 import type { Workflow } from "@anthill/workflow-schema";
 import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow";
 
+/** A blank workflow's name until the author gives it one. Not a title to file it under. */
+export const UNTITLED_WORKFLOW = "Untitled workflow";
+
 export function blankWorkflow(): Workflow {
   return {
     id: `workflow-${Date.now()}`,
-    name: "Untitled workflow",
+    name: UNTITLED_WORKFLOW,
     version: "0.1.0",
     target: "claude-code",
     metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION, agents: [] } },

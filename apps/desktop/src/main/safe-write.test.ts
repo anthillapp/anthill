@@ -191,6 +191,25 @@ describe("a run folder remembered from an earlier session", () => {
  * matching the prompt the user had just copied least of all.
  */
 describe("exporting all of the files or none of them", () => {
+  it("never replaces a new destination claimed after staging", async () => {
+    const { root } = await sandbox();
+    const path = join(root, "claimed.json");
+    const result = await writeAllOrNothing([{ path, relative: "claimed.json", content: "ours", createOnly: true }],
+      async () => { await writeFile(path, "someone else's"); });
+    expect(result).toMatchObject({ ok: false, rolledBack: true });
+    expect(await readFile(path, "utf8")).toBe("someone else's");
+  });
+
+  it("keeps the original intact when revision recording fails after staging", async () => {
+    const { root } = await sandbox();
+    const path = join(root, "saved.json");
+    await writeFile(path, "old JSON");
+    const result = await writeAllOrNothing([{ path, relative: "saved.json", content: "edited JSON" }],
+      async () => { throw new Error("revision refused"); });
+    expect(result).toMatchObject({ ok: false, rolledBack: true, error: "revision refused" });
+    expect(await readFile(path, "utf8")).toBe("old JSON");
+  });
+
   async function staged(root: string, names: string[]): Promise<StagedFile[]> {
     return names.map((name) => ({
       path: join(root, name),

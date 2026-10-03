@@ -18,6 +18,7 @@ import {
   OPEN_SETTINGS_CHANNEL,
   OPEN_WORKFLOW_CHANNEL,
   SAVE_WORKFLOW_CHANNEL,
+  REVEAL_WORKFLOW_CHANNEL,
   EDIT_HISTORY_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
   type AnthillApi,
@@ -63,6 +64,8 @@ const api: AnthillApi = {
     ipcRenderer.invoke(IpcChannel.workflowExport, request),
   setWorkflowDirty: (dirty: boolean) =>
     ipcRenderer.invoke(IpcChannel.workflowSetDirty, dirty),
+  setWorkflowRevealable: (revealable: boolean) =>
+    ipcRenderer.invoke(IpcChannel.workflowSetRevealable, revealable),
   listRecentPlans: () => ipcRenderer.invoke(IpcChannel.recentsList),
   forgetRecentWorkflow: (path: string) => ipcRenderer.invoke(IpcChannel.recentsForget, path),
   chooseRunFolder: () => ipcRenderer.invoke(IpcChannel.folderChoose),
@@ -133,6 +136,11 @@ const api: AnthillApi = {
     const handler = () => listener();
     ipcRenderer.on(SAVE_WORKFLOW_CHANNEL, handler);
     return () => ipcRenderer.removeListener(SAVE_WORKFLOW_CHANNEL, handler);
+  },
+  onRevealWorkflow: (listener: () => void) => {
+    const handler = () => listener();
+    ipcRenderer.on(REVEAL_WORKFLOW_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(REVEAL_WORKFLOW_CHANNEL, handler);
   },
   onEditHistory: (listener: (action: "undo" | "redo") => void) => {
     const handler = (_event: unknown, action: unknown) => {

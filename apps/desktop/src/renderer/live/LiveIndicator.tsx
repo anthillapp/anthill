@@ -17,7 +17,6 @@ import { createPortal } from "react-dom";
 import {
   CLI_LABEL,
   statusLabel,
-  type LiveSessionState,
   type PendingRun,
 } from "@anthill/live";
 import type { LiveSnapshot } from "../../shared/ipc.js";
@@ -25,18 +24,7 @@ import type { LiveSnapshot } from "../../shared/ipc.js";
 import { interpreterLogo } from "../workflow/interpreter-logos.js";
 import { relative, useNow } from "./elapsed.js";
 import { PresenceChip } from "./PresenceChip.js";
-import { mostRelevant, presenceKey, runsFor } from "./presence.js";
-
-/** How each state is drawn, and whether it may claim a live match. */
-const TONE: Record<LiveSessionState, "waiting" | "live" | "unsure" | "done" | "bad" | "none"> = {
-  idle: "none",
-  pending_after_copy: "waiting",
-  detected_live: "live",
-  ambiguous_match: "unsure",
-  observation_lost: "unsure",
-  completed: "done",
-  failed: "bad",
-};
+import { hasSessionPage, mostRelevant, presenceKey, runsFor } from "./presence.js";
 
 export type LiveIndicatorProps = {
   /**
@@ -167,11 +155,10 @@ export function LiveIndicator({ workflowId, onOpenSession }: LiveIndicatorProps 
 
   if (!run) return null;
 
-  const tone = TONE[run.state];
   /** Live splits into receiving and quiet, which the raw state cannot say. */
   const presence = presenceKey(run, now);
   /** Whether there is a session page worth opening for this run. */
-  const readable = (tone === "live" || tone === "done") && onOpenSession !== undefined;
+  const readable = hasSessionPage(run) && onOpenSession !== undefined;
   const capability = snapshot?.capabilities.find((item) => item.cli === run.selectedCli);
 
   return (

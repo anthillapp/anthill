@@ -61,7 +61,7 @@ import {
 } from "./workflow-history.js";
 import { LiveIndicator } from "../live/LiveIndicator.js";
 import { PresencePlaque } from "../live/PresenceChip.js";
-import { mostRelevant, presenceKey, runsFor } from "../live/presence.js";
+import { hasSessionPage, mostRelevant, presenceKey, runsFor } from "../live/presence.js";
 import {
   markAnnounced,
   SessionStartedDialog,
@@ -887,12 +887,13 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
 
   /*
    * What the Live session tab would show: the run open in it, or else the one
-   * a session has just been confirmed for. Anything less certain leaves the
-   * tab disabled — the chip is where a maybe is explained.
+   * the chip would open — a session confirmed live, or one that finished.
+   * Anything less certain leaves the tab disabled — the chip is where a maybe
+   * is explained.
    */
   const liveTarget = liveRun
     ? current(liveRun)
-    : watched?.state === "detected_live"
+    : watched && hasSessionPage(watched)
       ? watched
       : undefined;
   const tabs = (

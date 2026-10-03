@@ -180,6 +180,29 @@ function isDelegateRecord(event: ObservationEvent): boolean {
   return Boolean(event.parentToolUseId) || event.author?.kind === "subagent";
 }
 
+/** The call a Claude Code subagent makes to hand its result back to the session. */
+const HANDBACK_TOOL = "SubagentHandback";
+
+/** A subagent handing its result back, named by the call that started it. */
+export function isHandback(event: ObservationEvent): boolean {
+  return event.kind === "tool.start" && event.toolName === HANDBACK_TOOL && Boolean(event.parentToolUseId);
+}
+
+/**
+ * Whether this session's subagents hand back explicitly.
+ *
+ * Claude Code's subagents end with a SubagentHandback call. One sent off on
+ * its own can end its turn well before that — to wait on a command or a
+ * Monitor it started — and is woken again when that fires. Read as its end,
+ * the pause drew its step Done while it still worked, and a subagent stopped
+ * by hand a moment later stayed Done beside a card saying it was stopped
+ * (ANT-245). Where subagents hand back, only the handback ends one; a CLI
+ * whose subagents never do still ends one with its turn.
+ */
+export function handsBack(events: readonly ObservationEvent[]): boolean {
+  return events.some(isHandback);
+}
+
 /**
  * Whose end one of the hooks' SubagentStop records is.
  *
@@ -423,7 +446,14 @@ export function foldLiveSession(
    */
   const delegations = new Map<
     string,
-    { blockId: string; background: boolean; returned: boolean; delegateEnded: boolean }
+    {
+      blockId: string;
+      background: boolean;
+      /** Started in the background, as opposed to reused once it was back (ANT-245). */
+      sentOff?: boolean;
+      returned: boolean;
+      delegateEnded: boolean;
+    }
   >();
   /** The same, as attribution reads it: call id to step. */
   const delegatedFrom = new Map<string, string>();
@@ -704,6 +734,18 @@ export function foldLiveSession(
   const cutOffFor = new Set<string>();
   const cutOffWithSession = stoppedWithSession(events);
   const stopOf = subagentStops(events);
+  /** The delegations whose subagent has handed back since it was last at work. */
+  const handedBack = new Set<string>();
+  const explicitHandback = handsBack(events);
+  /**
+   * Whether a subagent's turn ending, or its SubagentStop, is its end. One in
+   * the foreground ends when its call returns, whatever its turn did; one
+   * started in the background, in a session whose subagents hand back, only
+   * once it has (ANT-245). One reused after it was back is left as it was:
+   * its replies have been seen to end without a handback.
+   */
+  const canEnd = (call: string) =>
+    !explicitHandback || !delegations.get(call)?.sentOff || handedBack.has(call);
   const STOPPED_NOTE = "A subagent working on this step was stopped by hand before it handed back.";
   const STOPPED_HERE_NOTE = "The session was stopped by hand on this step.";
 
@@ -787,6 +829,8 @@ export function foldLiveSession(
       reused.background = true;
       // Its next ending is a new one, to be paired with its own hook.
       endedByHook.delete(event.parentToolUseId as string);
+      // And it has to hand back again before that ending counts.
+      handedBack.delete(event.parentToolUseId as string);
       if (announced && blocks[announced] && reused.blockId !== announced) {
         reused.blockId = announced;
         delegatedFrom.set(event.parentToolUseId as string, announced);
@@ -841,7 +885,8 @@ export function foldLiveSession(
       : undefined;
     if (stop && typeof stop === "object") {
       const d = delegations.get(stop.call);
-      if (d && !d.delegateEnded) {
+      // A subagent that has not handed back stopped only to wait (ANT-245).
+      if (d && !d.delegateEnded && canEnd(stop.call)) {
         endedByHook.add(stop.call);
         d.delegateEnded = true;
         release(d.blockId, event.at);
@@ -857,7 +902,7 @@ export function foldLiveSession(
         let best: string | undefined;
         for (const [call, heard] of lastHeard) {
           const d = delegations.get(call);
-          if (!d || d.delegateEnded || Number.isNaN(at) || heard > at || at - heard > STOP_PAIRING_MS) continue;
+          if (!d || d.delegateEnded || !canEnd(call) || Number.isNaN(at) || heard > at || at - heard > STOP_PAIRING_MS) continue;
           // Last heard making a call: its reply comes before it can stop.
           if (lastCalling.has(call)) continue;
           if (best === undefined || heard > (lastHeard.get(best) ?? 0)) best = call;
@@ -879,7 +924,16 @@ export function foldLiveSession(
       else lastCalling.delete(event.parentToolUseId);
     }
     if (via || event.parentToolUseId || event.author?.kind === "subagent") {
-      if (via && event.kind === "turn.end") {
+      // Its result handed back: a subagent sent off on its own is done here,
+      // whatever its turn does next (ANT-245).
+      if (via && event.parentToolUseId && isHandback(event)) {
+        handedBack.add(event.parentToolUseId);
+        if (via.background && !via.delegateEnded) {
+          via.delegateEnded = true;
+          release(via.blockId, event.at);
+        }
+      }
+      if (via && event.kind === "turn.end" && canEnd(event.parentToolUseId ?? "")) {
         if (!via.delegateEnded && !endedByHook.has(event.parentToolUseId ?? "")) {
           hooksOwed += 1;
           owedBy.add(event.parentToolUseId ?? "");
@@ -995,6 +1049,7 @@ export function foldLiveSession(
         delegations.set(event.toolUseId, {
           blockId: target,
           background: event.background === true,
+          sentOff: event.background === true,
           returned: false,
           delegateEnded: false,
         });
@@ -1039,7 +1094,10 @@ export function foldLiveSession(
     if (returning) {
       returning.returned = true;
       // The receipt of a subagent sent off on its own: it is not back yet.
-      if (event.background) returning.background = true;
+      if (event.background) {
+        returning.background = true;
+        returning.sentOff = true;
+      }
       release(returning.blockId, event.at);
     }
 

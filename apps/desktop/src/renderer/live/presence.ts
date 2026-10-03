@@ -229,6 +229,16 @@ export function needsPlaque(key: PresenceKey): boolean {
 }
 
 /**
+ * Whether a run has a session page worth opening: one being observed now, or
+ * one that finished. The canvas chip opens these, and the Live session tab has
+ * to agree with it — a tab that called a finished session "no session yet"
+ * beside a chip that opened it was two answers to one question (ANT-267).
+ */
+export function hasSessionPage(run: PendingRun): boolean {
+  return run.state === "detected_live" || run.state === "completed";
+}
+
+/**
  * The order runs are shown in: whatever most deserves the header.
  *
  * A finished session sits above the two states that mean Anthill lost track of

@@ -17,7 +17,15 @@
  * screen.
  */
 
-import { stoppedWithSession, subagentStops, type AttributedEvent, type MappingConfidence, type ObservationEvent } from "@anthill/live";
+import {
+  handsBack,
+  isHandback,
+  stoppedWithSession,
+  subagentStops,
+  type AttributedEvent,
+  type MappingConfidence,
+  type ObservationEvent,
+} from "@anthill/live";
 
 /**
  * How many cards the feed draws.
@@ -153,6 +161,14 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
   const cutOff = stoppedWithSession(events);
   /** Whose end each SubagentStop is: a subagent's, or Claude Code's own helper's (ANT-242, ANT-245). */
   const stopOf = subagentStops(events);
+  /**
+   * Where subagents hand back, a background one's turn ending or its
+   * SubagentStop finishes its card only once it has: before that it stopped
+   * to wait on work of its own (ANT-245).
+   */
+  const explicitHandback = handsBack(events);
+  const handedBack = new Set<string>();
+  const ends = (call: string) => !explicitHandback || handedBack.has(call);
 
   /** Another channel's record of this card's action, folded in rather than drawn twice. */
   const fold = (card: FeedCard, event: AttributedEvent) => {
@@ -196,6 +212,18 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
       }
     }
 
+    // A subagent handing its result back: that is its card finished, whatever
+    // its turn does next (ANT-245). The call itself still gets its own card.
+    if (isHandback(event) && event.parentToolUseId) {
+      handedBack.add(event.parentToolUseId);
+      const card = dispatched.get(event.parentToolUseId);
+      if (card?.background && open.get(event.parentToolUseId) === card) {
+        card.state = "done";
+        card.durationMs = Date.parse(event.at) - Date.parse(card.at);
+        open.delete(event.parentToolUseId);
+      }
+    }
+
     /*
       A delegate's own turn ending, named by the call that started it. It is
       what finishes a subagent that was sent off on its own, whose launch
@@ -206,7 +234,7 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
       const card = dispatched.get(event.parentToolUseId);
       if (card) {
         lastDelegateEnd = { card, at: Date.parse(event.at) };
-        if (card.background && open.get(event.parentToolUseId) === card) {
+        if (card.background && open.get(event.parentToolUseId) === card && ends(event.parentToolUseId)) {
           card.state = "done";
           card.durationMs = Date.parse(event.at) - Date.parse(card.at);
           open.delete(event.parentToolUseId);
@@ -241,7 +269,7 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
     const stop = event.kind === "subagent.end" ? stopOf(event) : undefined;
     const stopped = stop && typeof stop === "object" ? dispatched.get(stop.call) : undefined;
     if (stop && typeof stop === "object" && stopped) {
-      if (stopped.background && open.get(stop.call) === stopped) {
+      if (stopped.background && open.get(stop.call) === stopped && ends(stop.call)) {
         stopped.state = "done";
         stopped.durationMs = Date.parse(event.at) - Date.parse(stopped.at);
         open.delete(stop.call);

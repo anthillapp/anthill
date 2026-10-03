@@ -623,6 +623,32 @@ describe("a SubagentStop that names its subagent, in the feed", () => {
     expect(cards.filter((card) => card.kind !== "agent" && card.events.includes("subagent.end"))).toEqual([]);
   });
 
+  /*
+    M5 of the 0.8.8-next QA: where subagents hand back, one sent off on its own
+    ended a turn to wait on a background command and was drawn Completed
+    while it still worked.
+  */
+  it("keeps a card working until its subagent hands back, where subagents do", () => {
+    const handback = (who: typeof byA, s: number) =>
+      event({ kind: "tool.start", title: "SubagentHandback", toolName: "SubagentHandback", toolUseId: `hb-${who.agentId}`, ...who, at: T(s), ...tx });
+    const paused = [
+      ...journal,
+      event({ kind: "turn.end", title: "The agent finished its turn", ...byA, at: T(31), ...tx }),
+      event({ kind: "subagent.end", title: "A subagent finished", agentId: "agent-a", at: T(31.2), ...hook }),
+      handback(byB, 32),
+    ];
+    const agents = (cards: ReturnType<typeof buildFeed>) =>
+      cards.filter((card) => card.kind === "agent").map((card) => [card.agentName, card.state]);
+    expect(agents(buildFeed(paused, false))).toEqual([
+      ["writer-a", "working"],
+      ["writer-b", "done"],
+    ]);
+    expect(agents(buildFeed([...paused, handback(byA, 60)], false))).toEqual([
+      ["writer-a", "done"],
+      ["writer-b", "done"],
+    ]);
+  });
+
   it("draws nothing for one naming an agent the session never started", () => {
     const cards = buildFeed(
       [...journal, event({ kind: "subagent.end", title: "A subagent finished", agentId: "helper-1", at: T(30.5), ...hook })],

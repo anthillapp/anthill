@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The branch model's facts, computed rather than remembered (AGENTS.md).
+ * The branch model's facts, computed rather than remembered (RELEASING.md).
  *
  *   npm run release -- status         where new work branches from and which PRs go where
  *   npm run release -- gate           CI: may this pull request merge into master?
@@ -129,7 +129,7 @@ function gate() {
     die(
       `${fromFork ? `${HEAD_REPO}:` : ""}${HEAD_REF} cannot merge into master.\n` +
         "master receives only the <version>-next branch and hotfix/<name> branches of this repository.\n" +
-        "Retarget this pull request to the next-release branch (npm run release -- status; AGENTS.md).",
+        "Retarget this pull request to the next-release branch (npm run release -- status; RELEASING.md).",
     );
   }
 
@@ -148,7 +148,7 @@ function gate() {
   if (!verified) {
     problems.push("The description has no `Verified commit: <40-character sha>` line.");
   } else if (verified !== HEAD_SHA) {
-    problems.push(`The verified commit is ${verified}, but the branch is at ${HEAD_SHA}. A change after verification is verified again (AGENTS.md).`);
+    problems.push(`The verified commit is ${verified}, but the branch is at ${HEAD_SHA}. A change after verification is verified again (RELEASING.md).`);
   }
 
   const merged = tryGit("merge-tree", "--write-tree", "origin/master", HEAD_SHA);
@@ -195,7 +195,7 @@ function tagged() {
   git("fetch", "--quiet", "--no-tags", "origin", "+refs/heads/master:refs/remotes/origin/master");
   const problems = [];
   if (tryGit("merge-base", "--is-ancestor", "HEAD", "origin/master") === undefined) {
-    problems.push(`${tag} is not on master. Tags go on the master commit a verified release or hotfix became (AGENTS.md).`);
+    problems.push(`${tag} is not on master. Tags go on the master commit a verified release or hotfix became (RELEASING.md).`);
   }
   const version = versionAt("HEAD");
   if (tag !== `v${version}`) problems.push(`${tag} does not match package.json's version ${version}.`);

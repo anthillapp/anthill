@@ -3,7 +3,7 @@
 # Linux and Windows build Anthill from source on master, and a plugin installed
 # from GitHub runs the server committed there, so nothing reaches master that
 # a release did not verify. Ordinary work goes into the next-release branch,
-# `<master's version>-next`, instead (AGENTS.md). This check is required on
+# `<master's version>-next`, instead (RELEASING.md). This check is required on
 # master; it fails a pull request from any branch but that one or a hotfix, one
 # whose version is not higher than master's,
 # one whose description does not name the verified commit as its head, and one

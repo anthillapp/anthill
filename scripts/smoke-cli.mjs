@@ -6,7 +6,7 @@
  * green job means: it installs, builds, starts and serves the app on
  * 127.0.0.1. It does not mean the app works there — no window is opened, no
  * workflow is handed over, no session is observed. That would be end-to-end
- * use, which only a person on that platform does (AGENTS.md, "What a check
+ * use, which only a person on that platform does (RELEASING.md, "What a check
  * proves").
  *
  * The run uses a throwaway data directory whose settings turn analytics and

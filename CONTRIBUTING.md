@@ -340,7 +340,7 @@ Developer ID certificate the machine has, and ad-hoc signed when it has none —
 which is the same build, minus Apple having been told who made it.
 
 CI does the same on a `v<version>` tag, which goes only on the master commit a
-verified release became ([AGENTS.md](AGENTS.md#branches-and-releases)).
+verified release became ([RELEASING.md](RELEASING.md)).
 `.github/workflows/release.yml` refuses a tag anywhere else, then typechecks,
 runs the tests, builds the image on a macOS runner and attaches it to the
 release. The tag is the trigger, because publishing is a decision somebody
@@ -417,7 +417,7 @@ git switch -c my-change origin/<version>-next
 Open the pull request against `<version>-next`, not master; a pull request
 into master from any other branch fails the `release-gate` check. The whole
 process, from the freeze to the tag and hotfixes, is in
-[AGENTS.md](AGENTS.md#branches-and-releases).
+[RELEASING.md](RELEASING.md).
 
 ## Issues
 

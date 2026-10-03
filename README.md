@@ -151,6 +151,8 @@ needs to know, drafts the workflow and stops. Edit it in Anthill, press
 $anthill design Add retry-once to the checkout flow              # Codex
 ```
 
+<img src="https://getanthill.ai/readme/anthill-design.svg" width="100%" alt="Design mode: the agent asks one question, drafts the workflow in Anthill and stops. You edit it, press Save, and tell the session to go.">
+
 **watch**: the agent plans and starts at once, and Anthill shows the work as
 it happens.
 
@@ -158,6 +160,8 @@ it happens.
 /anthill:workflow watch Rework the importer                      # Claude Code, VS Code
 $anthill watch Rework the importer                               # Codex
 ```
+
+<img src="https://getanthill.ai/readme/anthill-watch.svg" width="100%" alt="Watch mode: the agent plans and starts at once, and Anthill shows each step as it happens.">
 
 Without a plugin, build the workflow in Anthill, press **Copy prompt**, and
 paste it into your CLI. Anthill recognises the session and follows it the same

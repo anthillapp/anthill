@@ -606,6 +606,71 @@ describe("a loop back along its row, with nothing placed by hand", () => {
 });
 
 /*
+  ANT-272, the 0.8.8 QA: a drafted Analyst, Writer, Reviewer row whose
+  Reviewer switches between two Ends and "send back to Writer". That exit was
+  left out of ANT-196's loops, so it ran from the hub straight back along the
+  forward line into Writer's left side, and its label floated over the row.
+*/
+describe("a switcher's exit back along its row", () => {
+  const handover = withDisplayLayout({
+    id: "write-review",
+    name: "Write and review",
+    version: "1",
+    target: "codex",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "analyst", type: "agent", name: "Analyst", config: {} },
+      { id: "writer", type: "agent", name: "Writer", config: {} },
+      { id: "reviewer", type: "agent", name: "Reviewer", config: {} },
+      { id: "approved", type: "end", name: "Approved", config: {} },
+      { id: "needs-attention", type: "end", name: "Needs attention", config: {} },
+    ],
+    edges: [
+      { id: "e-start", source: "start", target: "analyst" },
+      { id: "e-analyst", source: "analyst", target: "writer" },
+      { id: "e-writer", source: "writer", target: "reviewer" },
+      { id: "approve", source: "reviewer", target: "approved", kind: "switch", label: "Approved", condition: 'reviewer.route == "approved"' },
+      { id: "rework", source: "reviewer", target: "writer", kind: "switch", label: "Review failed, send back to Writer", condition: 'reviewer.route == "rework"' },
+      { id: "otherwise", source: "reviewer", target: "needs-attention", kind: "switch", label: "Otherwise" },
+    ],
+  } as Workflow);
+  const model = buildCanvasModel(handover);
+  const rework = model.connected.find((path) => path.output.id === "rework")!;
+  const hub = model.switchers.find((shape) => shape.nodeId === "reviewer")!.hub;
+  const writer = model.rects.get("writer")!;
+  const reviewer = model.rects.get("reviewer")!;
+  const rowBottom = Math.max(writer.top + writer.h, reviewer.top + reviewer.h);
+
+  it("still leaves from the switcher's hub", () => {
+    expect(rework.switcher).toBe("reviewer");
+    expect(rework.geometry.from).toMatchObject({ x: hub.x, y: hub.y });
+  });
+
+  it("runs under the row and arrives at the bottom of the step it returns to", () => {
+    expect(rework.geometry.to.side).toBe("bottom");
+    expect(rework.geometry.to.y).toBe(writer.top + writer.h);
+    const points = pathPoints(rework.geometry.path);
+    // Never back along the forward line between the two steps.
+    const onRow = points.filter((point) => point.x > writer.left + writer.w && point.x < reviewer.left && point.y < rowBottom);
+    expect(onRow).toEqual([]);
+    expect(Math.max(...points.map((point) => point.y))).toBeGreaterThan(rowBottom);
+  });
+
+  it("is labelled by its run under the row, not above it", () => {
+    expect(rework.label.y).toBeGreaterThan(rowBottom);
+    expect(rework.label.x).toBeGreaterThan(writer.left);
+    expect(rework.label.x).toBeLessThan(reviewer.left + reviewer.w);
+  });
+
+  it("leaves the switcher's forward exits where they were", () => {
+    for (const id of ["approve", "otherwise"]) {
+      const finger = model.connected.find((path) => path.output.id === id)!;
+      expect(finger.geometry.from, id).toMatchObject({ x: hub.x, y: hub.y, side: "right" });
+    }
+  });
+});
+
+/*
   ANT-178 again, where connections meet rather than part: Claude Code's draft
   of W9 brings "mod1–mod2 done" down and "mod3–mod5 done" up into one step.
   By their direction of travel each label went to the side facing the other

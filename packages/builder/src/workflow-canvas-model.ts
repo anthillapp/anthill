@@ -408,28 +408,46 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
     Under the row is where the templates' own loops say they go (ANT-194).
     Several loops leaving or arriving at one step are spread along its
     bottom, nearest source innermost, so they nest rather than cross.
+
+    A switcher's exit back along the row is such a loop too. Left out, it
+    went from the hub straight back along the row to the left side of the
+    step it returns to: on the forward line, behind the card, its label
+    floating over the row (ANT-272). It still leaves from the hub, as every
+    exit of a switcher does, but drops from there and runs under the row
+    into the bottom of that step like any other loop.
   */
   const sameRow = (a: Rect, b: Rect) => a.top < b.top + b.h && b.top < a.top + a.h;
   const loopsUnder = new Map<string, { leave: number; arrive: number; depth: number }>();
   {
-    const loops: { key: string; source: string; target: string; reach: number; left: number; right: number; row: Rect }[] = [];
+    const loops: {
+      key: string;
+      source: string;
+      target: string;
+      finger: boolean;
+      reach: number;
+      left: number;
+      right: number;
+      row: Rect;
+    }[] = [];
     for (const node of workflow.nodes) {
       const rect = rects.get(node.id);
       if (!rect) continue;
       const outputs = outputsOf(workflow, node.id);
       const fingers = fingersOf(outputs);
       for (const output of outputs) {
-        if (output.target === null || output.port || output.anchor || fingers.has(output.id)) continue;
+        if (output.target === null || output.port || output.anchor) continue;
         const targetRect = rects.get(output.target);
         if (!targetRect || !sameRow(rect, targetRect)) continue;
         if (portSideToward(rect, targetRect) !== "left") continue;
+        const finger = fingers.has(output.id);
         loops.push({
           key: `${node.id}:${output.id}`,
           source: node.id,
           target: output.target,
+          finger,
           reach: rect.left - targetRect.left,
           left: targetRect.left,
-          right: rect.left + rect.w,
+          right: rect.left + rect.w + (finger ? SWITCH_STEM : 0),
           row: rect,
         });
       }
@@ -442,8 +460,9 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
         loopsUnder.set(loop.key, { ...current, [field]: at });
       });
     };
+    // A switcher's exits leave from its hub, so only the others share the bottom.
     for (const id of new Set(loops.map((loop) => loop.source))) {
-      spread(loops.filter((loop) => loop.source === id), 0.65, -1, "leave");
+      spread(loops.filter((loop) => loop.source === id && !loop.finger), 0.65, -1, "leave");
     }
     for (const id of new Set(loops.map((loop) => loop.target))) {
       spread(loops.filter((loop) => loop.target === id), 0.35, -1, "arrive");
@@ -528,7 +547,7 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
       const slot = slotOf(output, side, sharing);
       const finger = switcher && fingers.has(output.id) ? switcher : undefined;
       const port: PortPoint = finger
-        ? { ...finger.hub, side: "right" }
+        ? { ...finger.hub, side: loop ? "bottom" : "right" }
         : output.port
           ? portFromAnchor(rect, output.port)
           : loop
@@ -770,7 +789,9 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
       h: SWITCH_HUB_RADIUS * 2,
     }));
     connected.forEach((path, index) => {
-      if (!path.switcher || path.geometry.lane) return;
+      // A finger looping back under the row is labelled on its run under the
+      // row, as any loop is, not by the hub it drops from (ANT-272).
+      if (!path.switcher || path.geometry.lane || loopsUnder.has(`${path.nodeId}:${path.output.id}`)) return;
       const { halfW, halfH, handle } = placing[index];
       const own = lines[index];
       const others = lines.filter((_, other) => other !== index).flat();

@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { onPath, reportingInvocation, type InvocationDeps } from "./report-command.js";
+import { BUILD_CLI, onPath, reportingInvocation, type InvocationDeps } from "./report-command.js";
 import type { ResolvedTarget } from "./target.js";
 import { webShellCli } from "./web-launcher.js";
 
@@ -20,6 +20,8 @@ function machine(files: string[], over: Partial<InvocationDeps> = {}): Invocatio
     home: HOME,
     env: { PATH: "/usr/bin:/home/someone/.npm/bin" },
     executable: (path) => files.includes(path),
+    // The checkout's CLI is built unless a test says otherwise.
+    exists: () => true,
     node: NODE,
     ...over,
   };
@@ -94,6 +96,20 @@ describe("the reporting command", () => {
 
   it("falls back to anthill without a checkout, which is all there is to offer", () => {
     expect(reportingInvocation(target({ checkout: undefined }), machine([]))).toEqual({});
+  });
+
+  // ANT-274: a fresh checkout set up for the dev build never built its CLI,
+  // and the commands named a cli.js that was not there.
+  it.each(["app", "electron-dev", "web"] as const)("says when the checkout's CLI for %s was never built, and how to build it", (id) => {
+    const cli = webShellCli("/src/anthill");
+    expect(reportingInvocation(target({ target: id }), machine([], { exists: (path) => path !== cli }))).toEqual({
+      command: `${NODE} ${cli}`,
+      unbuilt: { cli, checkout: "/src/anthill", build: BUILD_CLI },
+    });
+  });
+
+  it("does not ask for the checkout's CLI when anthill is on the PATH", () => {
+    expect(reportingInvocation(target({ target: "electron-dev" }), machine(["/usr/bin/anthill"], { exists: () => false }))).toEqual({});
   });
 });
 

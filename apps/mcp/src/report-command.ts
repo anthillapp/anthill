@@ -17,9 +17,11 @@
  * reporter is what a plugin installed from GitHub or a directory carries
  * beside its server (scripts/build-plugin-server.mjs): someone with the
  * installed app and no CLI has no `anthill` at all. `node` is this process's
- * own, so the commands work whatever PATH the harness has. The PATH is the
- * harness's — this server inherits it — and it is searched here, with no
- * shell. All of them write the same report file, `~/.anthill/cli/harness-reports.jsonl`,
+ * own, so the commands work whatever PATH the harness has. A checkout's CLI
+ * that was never built is said to be (`unbuilt`), with the command that builds
+ * it, rather than handed out as a path that is not there (ANT-274). The PATH
+ * is the harness's — this server inherits it — and it is searched here, with
+ * no shell. All of them write the same report file, `~/.anthill/cli/harness-reports.jsonl`,
  * which every Anthill reads; `--data-dir` is added only for a web shell that
  * keeps its data somewhere else.
  */
@@ -37,6 +39,8 @@ import { webShellCli } from "./web-launcher.js";
 export type InvocationDeps = TargetEnvironment & {
   /** Whether an executable file is at this path. */
   executable: (path: string) => boolean;
+  /** Whether anything is at this path: the checkout's CLI, which need not be executable. */
+  exists: (path: string) => boolean;
   /** This process's `node`. */
   node: string;
   /** The reporter this server's plugin carries beside it, when it is in one. */
@@ -62,17 +66,37 @@ export function onPath(name: string, deps: InvocationDeps): string | undefined {
   return undefined;
 }
 
+/** The command that builds a checkout's CLI, run in that checkout. */
+export const BUILD_CLI = "npm run build -w @anthill/cli";
+
+/**
+ * A reporting command, and whether what it runs is there.
+ *
+ * `unbuilt` is set when the command runs a checkout's CLI that was never
+ * built: a fresh checkout set up for the dev build has none, and every report
+ * then failed with a path that does not exist, silently (ANT-274).
+ */
+export type ReportingInvocation = CliInvocation & { unbuilt?: UnbuiltCli };
+
+/** A checkout's CLI that the reporting commands run and nobody has built. */
+export type UnbuiltCli = { cli: string; checkout: string; build: string };
+
 /** How this chat's harness should run the CLI; `{}` is plain `anthill`. */
-export function reportingInvocation(resolved: ResolvedTarget, deps: InvocationDeps): CliInvocation {
+export function reportingInvocation(resolved: ResolvedTarget, deps: InvocationDeps): ReportingInvocation {
   const onThePath = onPath("anthill", deps) !== undefined;
   const reporter = deps.reporter ? { command: `${nodeFor(deps)} ${typedPath(deps.reporter, deps.platform)}` } : {};
+  const viaCheckout = (checkout: string): ReportingInvocation => {
+    const cli = webShellCli(checkout);
+    return {
+      command: `${nodeFor(deps)} ${typedPath(cli, deps.platform)}`,
+      ...(deps.exists(cli) ? {} : { unbuilt: { cli, checkout, build: BUILD_CLI } }),
+    };
+  };
   // A server built in a checkout has no reporter beside it, and with no
   // `anthill` on the PATH plain `anthill run …` cannot run: every report of a
   // chat sent to the dev build failed with "command not found" (ANT-249). The
   // checkout's own CLI reports the same way, so it stands in for the reporter.
-  const checkoutCli = !deps.reporter && resolved.checkout
-    ? { command: `${nodeFor(deps)} ${typedPath(webShellCli(resolved.checkout), deps.platform)}` }
-    : {};
+  const checkoutCli = !deps.reporter && resolved.checkout ? viaCheckout(resolved.checkout) : {};
   if (resolved.target !== "web") return onThePath ? {} : deps.reporter ? reporter : checkoutCli;
   const platform = { platform: deps.platform };
   const dataDir = resolve(resolved.dataDir) === resolve(targetDataDir("web", deps))
@@ -80,8 +104,7 @@ export function reportingInvocation(resolved: ResolvedTarget, deps: InvocationDe
     : { dataDir: resolve(resolved.dataDir), ...platform };
   if (onThePath) return dataDir;
   if (!resolved.checkout) return { ...reporter, ...dataDir };
-  const cli = typedPath(webShellCli(resolved.checkout), deps.platform);
-  return { command: `${nodeFor(deps)} ${cli}`, ...dataDir };
+  return { ...viaCheckout(resolved.checkout), ...dataDir };
 }
 
 /**
@@ -118,6 +141,7 @@ export function invocationDeps(environment: TargetEnvironment): InvocationDeps {
         return false;
       }
     },
+    exists: (path) => existsSync(path),
     node: process.execPath,
     ...(existsSync(besideThisServer) ? { reporter: besideThisServer } : {}),
   };

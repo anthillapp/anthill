@@ -34,14 +34,14 @@ decided only when it is frozen.
 %%{init: {"gitGraph": {"mainBranchName": "master"}}}%%
 gitGraph
   commit id: "v0.8.8"
-  branch 0.8.8-next
+  branch "0.8.8-next"
   commit id: "feature A"
   commit id: "fix B"
   commit id: "release 0.8.9 (freeze)"
   commit id: "fix found by checks"
   checkout master
-  merge 0.8.8-next id: "v0.8.9" tag: "v0.8.9"
-  branch 0.8.9-next
+  merge "0.8.8-next" id: "v0.8.9" tag: "v0.8.9"
+  branch "0.8.9-next"
   commit id: "feature C"
 ```
 

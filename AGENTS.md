@@ -11,8 +11,8 @@ disagrees with this file, this file is right; fix the other one.
 **master is the stable channel.** Linux and Windows users build Anthill from
 source on master, and a plugin installed from GitHub runs the MCP server
 committed there. macOS ships separately, as the disk image a `v<version>` tag
-builds. So master receives only a release that passed its final QA, or a
-hotfix, and the tag sits on exactly that master commit: every platform's
+builds. So master receives only a release whose exact commit was verified, or
+a hotfix, and the tag sits on exactly that master commit: every platform's
 stable code is one release.
 
 ### Where work goes
@@ -34,8 +34,8 @@ stable code is one release.
   done at once, so there is always a branch for new work.
 - **Open or frozen.** The branch is *open* while its `package.json` still
   carries master's version, and *frozen* once the version bump has merged into
-  it. A frozen branch takes only fixes for what this release's QA found, and
-  release chores. A feature that misses the freeze waits as a draft pull request
+  it. A frozen branch takes only fixes for what this release's checks found,
+  and release chores. A feature that misses the freeze waits as a draft pull request
   and moves to the next `-next` branch once that exists.
 
 ### Freeze and the release candidate
@@ -46,22 +46,19 @@ stable code is one release.
    (RELEASING.md, step 1). The version, the bundle and the release notes are all
    done here, before the release goes anywhere near master.
 2. **The release candidate is one commit**: the branch's tip after the freeze
-   merged, named by its full 40-character SHA. Final QA verifies that commit
-   and nothing else. Build the pre-release app from a clean checkout where
+   merged, named by its full 40-character SHA. Every check below is about that
+   commit and nothing else; anything run by hand runs on a clean checkout where
    `git rev-parse HEAD` prints that SHA.
 3. **Automated checks** run by themselves on every push to the branch, on that
    exact commit: `check`, `linux-source`, `windows-source` (CI). For macOS
    packaging, also run the Release workflow by hand on the branch
    (`gh workflow run release.yml --ref <V>-next`): it builds the disk image and
-   publishes nothing.
-4. **Final QA** is the pre-release end-to-end pass on that commit, run with the
-   maintainer's QA procedure.
-5. **A bug found in QA** is fixed by a pull request into the branch. The new tip
-   is a new candidate: the automated checks run again by themselves; rerun the
-   failed scenario, every scenario touching the changed code, and the whole pass
-   when the fix touches handover, observation, the plugins or the MCP server.
-   Write down what was rerun and why.
-6. **Anything that changes the branch after verification** — a fix, a hotfix
+   publishes nothing. These are what verifies a candidate.
+4. **A bug the checks find** is fixed by a pull request into the branch. The new
+   tip is a new candidate and the automated checks run again by themselves.
+   Anything else that was run on the old candidate and touches the changed code
+   is run again, and the record says what was rerun.
+5. **Anything that changes the branch after verification** — a fix, a hotfix
    brought in from master, a conflict resolution — makes a new candidate that
    is verified again before it can go to master. The gate enforces this: the
    commit named as verified must be the branch's head.
@@ -77,14 +74,15 @@ not show that Anthill works on Linux.
 | --- | --- | --- | --- |
 | Builds | Release workflow by hand on the branch (disk image) | `linux-source`: README steps, `npm run build` | `windows-source`: the same |
 | Automated tests | `check`: typecheck and tests on `macos-14` | `linux-source`: `npm test` | not run |
-| Starts | final QA | `linux-source`: the CLI serves its page | `windows-source`: the same |
-| End to end | final QA: desktop app with Codex and Claude Code | only on a real Linux machine | only on a real Windows machine |
+| Starts | not checked automatically | `linux-source`: the CLI serves its page | `windows-source`: the same |
+| End to end | only by hand: the desktop app with Codex and Claude Code | only by hand, on a Linux machine | only by hand, on a Windows machine |
 
 Record every cell for the candidate as **passed**, **failed** or **not run**.
-Never fill a cell from another one. macOS checks and final QA, and Linux
-build, tests and start, must pass. A Windows failure does not block on its own,
-but it is reported and the maintainer decides. A platform nobody used end to end
-is reported as not verified end to end.
+Never fill a cell from another one. The macOS checks and the Linux build,
+tests and start must pass. A Windows failure does not block on its own, but it
+is reported and the maintainer decides. End-to-end use is not a required step;
+when nobody ran it, the cell says **not run**, and the release is not described
+as tested end to end.
 
 ### Moving a release into master
 
@@ -121,8 +119,8 @@ For a released version that cannot wait for the next release:
 1. Branch `hotfix/<topic>` from `origin/master`. Commit the fix with its test,
    then set the version to the next patch after master's and rebuild the plugin
    bundle (RELEASING.md).
-2. Verify the hotfix branch's tip like a candidate, scoped to the fix: the
-   automated checks above, and end to end the flows the fix touches on macOS.
+2. Verify the hotfix branch's tip like a candidate: the automated checks
+   above, on that exact commit.
 3. Pull request into master as in *Moving a release into master*, with its
    own `Verified commit:` line; the gate, the squash, `landed` and the tag are
    the same.
@@ -136,4 +134,4 @@ For a released version that cannot wait for the next release:
    (rerun `npm run plugin:bundle` if it is frozen), and open a pull request into
    the branch that is merged with **Create a merge commit**, never squash. The
    merge commit is what lets the release later squash into master without
-   conflicts. On a frozen branch this is a new candidate (step 6 above).
+   conflicts. On a frozen branch this is a new candidate (*Freeze and the release candidate*, step 5).

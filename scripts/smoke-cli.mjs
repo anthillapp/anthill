@@ -5,8 +5,9 @@
  * CI runs it on Linux and Windows after the README's from-source steps, so a
  * green job means: it installs, builds, starts and serves the app on
  * 127.0.0.1. It does not mean the app works there — no window is opened, no
- * workflow is handed over, no session is observed. That is E2E, done by hand
- * (RELEASING.md, "What a check proves").
+ * workflow is handed over, no session is observed. That would be end-to-end
+ * use, which only a person on that platform does (AGENTS.md, "What a check
+ * proves").
  *
  * The run uses a throwaway data directory whose settings turn analytics and
  * error reporting off, so a CI runner never reports anything.

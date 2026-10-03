@@ -1,7 +1,7 @@
 # Releasing Anthill
 
 The branch model and the release flow — where work goes, the freeze, the
-verified commit, final QA on each platform, moving a release into master,
+verified commit, what each platform's checks prove, moving a release into master,
 the tag and hotfixes — are in [AGENTS.md](AGENTS.md#branches-and-releases).
 It is written for coding agents and people alike, and it is the only copy.
 This file holds the mechanics it points to. `npm run release -- status` names

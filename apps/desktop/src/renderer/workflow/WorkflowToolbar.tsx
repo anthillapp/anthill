@@ -142,8 +142,6 @@ export type WorkflowToolbarProps = {
   onSave: () => void;
   /** The title field was left or confirmed with Enter. */
   onRenameDone?: () => void;
-  canReveal: boolean;
-  onReveal: () => void;
   /** Open the Hand-over. Not offered on a handover, where a second run is not wanted. */
   onPrompt: () => void;
   /** Open the Export: what Prompt does on a handover. */
@@ -273,13 +271,6 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
         }
       >
         Save
-      </button>
-      <button
-        onClick={props.onReveal}
-        disabled={!props.canReveal}
-        title={props.canReveal ? "Show the saved JSON in its folder" : "Save this workflow first"}
-      >
-        Reveal in Folder
       </button>
 
       {/* The tool plaque: one fixed-width slot beside Prompt, locked or

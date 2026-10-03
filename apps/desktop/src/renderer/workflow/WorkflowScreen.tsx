@@ -909,8 +909,6 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         canStepForward={canStepForward(history)}
         onStep={step}
         onSave={() => void save()}
-        canReveal={Boolean(path)}
-        onReveal={() => void reveal()}
         onPrompt={() => setShowPrompt(true)}
         onExport={() => setShowExport(true)}
         {...(handover ? { handover } : {})}

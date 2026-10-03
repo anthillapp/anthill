@@ -32,9 +32,8 @@ You need [Anthill](https://github.com/anthillapp/anthill) itself, and Node.js on
 VS Code has no command line for plugins. From GitHub, two links of its own do
 the install; from a checkout, its settings do.
 
-**From GitHub.** VS Code has no command for plugins, but it opens two links that do the
-install, each after you confirm it in VS Code: the first adds Anthill's
-marketplace, the second installs the plugin from it.
+**From GitHub.** Open these two links, and confirm each in VS Code: the first
+adds Anthill's marketplace, the second installs the plugin from it.
 
 macOS:
 

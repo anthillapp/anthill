@@ -22,7 +22,7 @@
  * went elsewhere.
  */
 
-import { chmod, copyFile, lstat, mkdir, mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, constants, copyFile, link, lstat, mkdir, mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative as relativePath, resolve, sep } from "node:path";
 
 export type Destination =
@@ -176,7 +176,7 @@ export class FileGrants {
 }
 
 /** One generated file, already resolved to a real destination. */
-export type StagedFile = { path: string; content: string; relative: string };
+export type StagedFile = { path: string; content: string; relative: string; createOnly?: boolean };
 
 export type ExportOutcome =
   | { ok: true; written: string[] }
@@ -200,8 +200,8 @@ export type ExportOutcome =
  * restore. That is reported rather than hidden, because it is the one case
  * where the user has to go and look.
  */
-export async function writeAllOrNothing(files: readonly StagedFile[]): Promise<ExportOutcome> {
-  const result = exportQueue.then(() => exportFiles(files));
+export async function writeAllOrNothing(files: readonly StagedFile[], beforeCommit?: () => Promise<void>): Promise<ExportOutcome> {
+  const result = exportQueue.then(() => exportFiles(files, beforeCommit));
   exportQueue = result.then(() => undefined, () => undefined);
   return result;
 }
@@ -209,7 +209,7 @@ export async function writeAllOrNothing(files: readonly StagedFile[]): Promise<E
 // Two exports must not back up and restore over each other's writes.
 let exportQueue: Promise<void> = Promise.resolve();
 
-async function exportFiles(files: readonly StagedFile[]): Promise<ExportOutcome> {
+async function exportFiles(files: readonly StagedFile[], beforeCommit?: () => Promise<void>): Promise<ExportOutcome> {
   const staged: Array<{ file: StagedFile; directory: string; backup?: string; committed: boolean; preserve?: boolean }> = [];
 
   try {
@@ -220,6 +220,7 @@ async function exportFiles(files: readonly StagedFile[]): Promise<ExportOutcome>
         return undefined;
       });
       if (before && !before.isFile()) throw new Error(`${file.relative} is not a regular file`);
+      if (before && file.createOnly) throw new Error(`${file.relative} already exists. Save again to use another filename.`);
       const directory = await mkdtemp(join(dirname(file.path), ".anthill-export-"));
       const entry = { file, directory, backup: undefined as string | undefined, committed: false, preserve: false };
       staged.push(entry);
@@ -231,8 +232,12 @@ async function exportFiles(files: readonly StagedFile[]): Promise<ExportOutcome>
       await writeFile(join(directory, "new"), file.content, { encoding: "utf8", flag: "wx", mode: before ? before.mode & 0o777 : 0o600 });
       if (before) await chmod(join(directory, "new"), before.mode & 0o777);
     }
+    // Prepare the files before recording an exchange revision. A failed
+    // publication can still leave a recoverable revision, as exchange saves do.
+    await beforeCommit?.();
     for (const entry of staged) {
-      await rename(join(entry.directory, "new"), entry.file.path);
+      if (entry.file.createOnly) await createExclusive(join(entry.directory, "new"), entry.file.path);
+      else await rename(join(entry.directory, "new"), entry.file.path);
       entry.committed = true;
     }
     return { ok: true, written: files.map((file) => file.relative) };
@@ -256,5 +261,24 @@ async function exportFiles(files: readonly StagedFile[]): Promise<ExportOutcome>
     for (const entry of staged) {
       if (!entry.preserve) await rm(entry.directory, { recursive: true, force: true }).catch(() => undefined);
     }
+  }
+}
+
+/** Filesystems that refuse hard links: exFAT, SMB shares, some cloud folders. */
+const NO_HARD_LINKS = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV", "EMLINK"]);
+
+/**
+ * Publish a staged file at a name nothing occupies, never replacing one.
+ *
+ * A hard link appears whole or not at all. Where links are refused, an
+ * exclusive copy still never overwrites, at the cost of being visible
+ * while it is written.
+ */
+async function createExclusive(staged: string, destination: string): Promise<void> {
+  try {
+    await link(staged, destination);
+  } catch (error) {
+    if (!NO_HARD_LINKS.has((error as NodeJS.ErrnoException).code ?? "")) throw error;
+    await copyFile(staged, destination, constants.COPYFILE_EXCL);
   }
 }

@@ -225,12 +225,10 @@ const ALL_OFF: AppSettings = {
 /**
  * General: where new workflows are saved.
  *
- * The folder is where the save dialog opens for a workflow that has never
- * been saved. It is not a place Anthill moves files to, so the note says
- * exactly that: changing it moves nothing, a saved workflow keeps saving where
- * it is, and the old files stay under Recent. The CLI saves into the workspace
- * it was started with, so there the row says so instead of offering a change
- * it would ignore.
+ * Desktop Save writes JSON here automatically, from the moment a workflow
+ * has a name. A file outside this folder is the author's to decide about on
+ * its first save: overwrite it, or copy it here. The CLI keeps saving into
+ * its workspace.
  */
 export function GeneralPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -268,7 +266,7 @@ export function GeneralPage() {
       footer={
         cli
           ? "The Anthill CLI saves new workflows into the workspace it was started with."
-          : "Changing the folder moves nothing that is already saved. A new workflow opens its first save here; one saved before keeps saving where it is, and still shows under Recent."
+          : "Each workflow's JSON is saved here as soon as it has a name, and keeps that filename. A workflow opened from elsewhere asks on Save whether to overwrite its file or save a copy here. Changing the folder moves nothing already saved."
       }
     >
       <SettingRow

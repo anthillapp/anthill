@@ -45,7 +45,7 @@ import { ProblemsPopover, type ProblemTarget } from "./ProblemsPopover.js";
 import { OutputInspector } from "./OutputInspector.js";
 import { PromptToWorkflowSheet } from "./PromptToWorkflowSheet.js";
 import { TemplatePicker } from "./TemplatePicker.js";
-import { blankWorkflow } from "./sample-workflow.js";
+import { blankWorkflow, UNTITLED_WORKFLOW } from "./sample-workflow.js";
 import { PromptModal } from "./PromptModal.js";
 import { DescribeChangeAssistant } from "./DescribeChangeAssistant.js";
 import {
@@ -113,6 +113,8 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   const [selection, setSelection] = useState<WorkflowSelection>(NO_SELECTION);
   const [linking, setLinking] = useState<LinkingState>(null);
   const [path, setPath] = useState<string | undefined>();
+  const [exchangePath, setExchangePath] = useState<string | undefined>();
+  const [revealError, setRevealError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const currentWorkflow = useRef(workflow);
   currentWorkflow.current = workflow;
@@ -128,10 +130,11 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   const delivered = useRef(start?.kind === "open" ? start : undefined);
   useEffect(() => {
     if (!workflow) return;
-    const deliveryId = delivered.current?.path === path ? delivered.current?.deliveryId : undefined;
+    const openedPath = exchangePath ?? path;
+    const deliveryId = delivered.current?.path === openedPath ? delivered.current?.deliveryId : undefined;
     delivered.current = undefined;
-    void window.anthill.workflowOpened(path ?? "", deliveryId);
-  }, [path, workflow?.id]);
+    void window.anthill.workflowOpened(openedPath ?? "", deliveryId);
+  }, [path, exchangePath, workflow?.id]);
   useEffect(() => () => { void window.anthill.workflowOpened(""); }, []);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: "idle" });
   /** Held in a ref, not state: it gates the next call, it does not draw. */
@@ -403,12 +406,14 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   );
 
   const replaceWorkflow = useCallback(
-    (next: Workflow, nextPath?: string) => {
+    (next: Workflow, nextPath?: string, nextExchangePath?: string) => {
       setWorkflow(next);
       // A different workflow is a different history. Stepping back into the
       // one before it was opened would restore a file the author has left.
       setHistory(emptyHistory<Workflow>());
       setPath(nextPath);
+      setExchangePath(nextExchangePath);
+      setRevealError(null);
       setSelection(NO_SELECTION);
       setLinking(null);
       setSelectedAgent(undefined);
@@ -445,7 +450,10 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
       setNotice(result.error);
       return;
     }
-    replaceWorkflow(result.opened.workflow, result.opened.path);
+    const { exchangePath: handedOver, path: opened } = result.opened;
+    // A handover whose JSON could not be exported has no file of its own yet:
+    // the exchange working copy is not one to reveal.
+    replaceWorkflow(result.opened.workflow, opened === handedOver ? undefined : opened, handedOver);
     setNotice(result.opened.notice ?? null);
   }, [confirmDiscard, replaceWorkflow]);
 
@@ -470,10 +478,13 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
       const result = await window.anthill.saveWorkflow({
         workflow: stampWorkflowFormat(workflow),
         path,
+        ...(exchangePath ? { exchangePath } : {}),
         ...(options.quiet ? { quiet: true } : {}),
       });
       if (result.kind === "saved") {
         setPath(result.path);
+        setExchangePath(result.exchangePath);
+        setRevealError(null);
         // Edits made while the save was awaiting IPC are still unsaved.
         savedAs.current = workflow;
         if (currentWorkflow.current === workflow) markDirty(false);
@@ -492,7 +503,25 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     } finally {
       saving.current = false;
     }
-  }, [workflow, path, markDirty]);
+  }, [workflow, path, exchangePath, markDirty]);
+
+  const reveal = useCallback(async () => {
+    if (!path) return;
+    setRevealError(null);
+    try {
+      if (!await window.anthill.revealPath(path)) {
+        setRevealError("The saved JSON could not be found. Save again to create it in your workflow folder.");
+      }
+    } catch (error) {
+      setRevealError(`Could not reveal the saved JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [path]);
+
+  const revealNow = useRef(reveal);
+  revealNow.current = reveal;
+  useEffect(() => window.anthill.onRevealWorkflow?.(() => void revealNow.current()), []);
+  useEffect(() => { void window.anthill.setWorkflowRevealable?.(Boolean(path)); }, [path]);
+  useEffect(() => () => { void window.anthill.setWorkflowRevealable?.(false); }, []);
 
   /**
    * File ▸ Save and ⌘S, which are the same one thing.
@@ -527,6 +556,25 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     quietSave.current = false;
     void save();
   }, [workflow, save]);
+
+  /**
+   * A new workflow's JSON is in the workflow folder as soon as it has a title
+   * (ANT-206): a draft or a template at once, a blank one when the author has
+   * named it. The file keeps the name it was made with, so a blank workflow
+   * is not filed under its placeholder while the author is still typing.
+   */
+  const createFileIfTitled = useCallback(() => {
+    const name = workflow?.name.trim();
+    if (path || exchangePath || !name || name === UNTITLED_WORKFLOW) return;
+    void save({ quiet: true });
+  }, [workflow, path, exchangePath, save]);
+  /** Set by a new draft or template; `save` reads the workflow it closes over, so this waits for its render. */
+  const createFile = useRef(false);
+  useEffect(() => {
+    if (!createFile.current || !workflow) return;
+    createFile.current = false;
+    createFileIfTitled();
+  }, [workflow, createFileIfTitled]);
 
   // "Saved" is about the click, so it goes when the click stops being recent.
   // A failure stays until something else happens: it is the author's to read.
@@ -603,7 +651,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    * the early returns below, and read at all because the state changes outside
    * this app: another session binds a revision and nothing tells us.
    */
-  const exchange = useExchange(workflow?.id ?? "", path, dirty);
+  const exchange = useExchange(workflow?.id ?? "", exchangePath ?? path, dirty);
 
   /**
    * Whether this handover was made to be watched rather than edited (ANT-118).
@@ -665,6 +713,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
           onCancel={() => setFromPrompt(false)}
           onAccept={(drafted) => {
             setFromPrompt(false);
+            createFile.current = true;
             replaceWorkflow(drafted);
             // The accepted draft assembles on the canvas — the one time the
             // graph builds rather than appears, because this is the one time
@@ -681,7 +730,10 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     }
     return (
       <TemplatePicker
-        onPick={(template: WorkflowTemplate) => replaceWorkflow(template.build())}
+        onPick={(template: WorkflowTemplate) => {
+          createFile.current = true;
+          replaceWorkflow(template.build());
+        }}
         onBlank={() => replaceWorkflow(blankWorkflow())}
         onOpen={() => void open()}
         onFromPrompt={() => setFromPrompt(true)}
@@ -841,6 +893,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         workflow={workflow}
         onExit={exit}
         onRename={(name) => editWorkflow((current) => ({ ...current, name }))}
+        onRenameDone={createFileIfTitled}
         onTarget={(target) => editWorkflow((current) => ({ ...current, target }))}
         dirty={dirty}
         saveStatus={saveStatus}
@@ -852,6 +905,8 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         canStepForward={canStepForward(history)}
         onStep={step}
         onSave={() => void save()}
+        canReveal={Boolean(path)}
+        onReveal={() => void reveal()}
         onPrompt={() => setShowPrompt(true)}
         {...(handover ? { handover } : {})}
       />
@@ -872,6 +927,8 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
           <button onClick={() => setNotice(null)}>Dismiss</button>
         </div>
       ) : null}
+
+      {revealError ? <div className="banner" role="alert">{revealError}</div> : null}
 
       <div className="body">
         <WorkflowLibraries

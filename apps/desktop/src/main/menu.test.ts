@@ -35,6 +35,14 @@ describe("Save in the File menu", () => {
     expect(fileMenu).toContain("SAVE_WORKFLOW_CHANNEL");
   });
 
+  it("offers Reveal in Folder, initially unavailable, through the active window", () => {
+    const reveal = fileMenu.slice(fileMenu.indexOf('id: "reveal-workflow"'));
+    expect(reveal).toContain('label: "Reveal in Folder"');
+    expect(reveal).toContain("enabled: false");
+    expect(reveal).toContain("REVEAL_WORKFLOW_CHANNEL");
+    expect(reveal).toContain("BrowserWindow.getFocusedWindow()");
+  });
+
   /** The role's own File menu has no Save in it, which is why it was dropped. */
   it("does not fall back to the stock File menu", () => {
     expect(main).not.toContain('{ role: "fileMenu" }');

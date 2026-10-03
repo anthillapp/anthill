@@ -140,6 +140,10 @@ export type WorkflowToolbarProps = {
   canStepForward: boolean;
   onStep: (direction: "back" | "forward") => void;
   onSave: () => void;
+  /** The title field was left or confirmed with Enter. */
+  onRenameDone?: () => void;
+  canReveal: boolean;
+  onReveal: () => void;
   /** Open the prompt. Absent on a handover, where a second run is not wanted. */
   onPrompt: () => void;
   handover?: ToolbarHandover;
@@ -169,6 +173,10 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
         className="title-input on-dark"
         value={workflow.name}
         onChange={(event) => props.onRename(event.target.value)}
+        onBlur={() => props.onRenameDone?.()}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+        }}
         placeholder="Workflow name"
       />
 
@@ -327,6 +335,13 @@ export function WorkflowToolbar(props: WorkflowToolbarProps) {
         }
       >
         Save
+      </button>
+      <button
+        onClick={props.onReveal}
+        disabled={!props.canReveal}
+        title={props.canReveal ? "Show the saved JSON in its folder" : "Save this workflow first"}
+      >
+        Reveal in Folder
       </button>
 
       {handover ? (

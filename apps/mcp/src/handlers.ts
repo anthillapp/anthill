@@ -853,6 +853,11 @@ type Reached = {
   link: (workflowId: string) => string | undefined;
 };
 
+/** The Anthill a result names, where the call knows it. */
+function targetField(reach: Reached): Pick<DraftAnswer, "target"> {
+  return reach.resolved ? { target: { id: reach.resolved.target, label: reach.resolved.label } } : {};
+}
+
 /**
  * How a call reaches its Anthill: through the chat's pinned target, or through
  * the one fixed exchange a test gave.
@@ -861,11 +866,6 @@ type Reached = {
  * refusal here would be a fault; the build request that can be refused is
  * answered where it is read.
  */
-/** The Anthill a result names, where the call knows it. */
-function targetField(reach: Reached): Pick<DraftAnswer, "target"> {
-  return reach.resolved ? { target: { id: reach.resolved.target, label: reach.resolved.label } } : {};
-}
-
 function targetAccess(dependencies: HandlerDependencies): {
   handover(request: TargetRequest): Reached | { problem: ExchangeProblem };
   /** What `handover` would answer, without pinning the chat. */

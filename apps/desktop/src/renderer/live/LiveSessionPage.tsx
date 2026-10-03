@@ -18,7 +18,7 @@
  *   and usually dodges.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Workflow } from "@anthill/workflow-schema";
 import {
   CLI_LABEL,
@@ -28,35 +28,25 @@ import {
   isWatching,
   sessionMetrics,
   statusLabel,
-  type AttributedEvent,
   type ObservationEvent,
   type PendingRun,
 } from "@anthill/live";
-
-import { agentProfiles } from "@anthill/workflow";
 
 import { LIVE_SESSION_CHANNELS } from "../../shared/ipc.js";
 import type { BoundWorkflowResult } from "../../shared/ipc.js";
 import { useIpcHealth } from "../ipc-health.js";
 import { relative, spanned, useNow } from "./elapsed.js";
-import {
-  buildFeed,
-  FEED_FILTERS,
-  FEED_LIMIT,
-  matchesFilter,
-  type FeedFilter,
-} from "./feed.js";
-import { FeedCardView } from "./FeedCard.js";
+import { buildFeed, type FeedFilter } from "./feed.js";
+import { ActivityPanel, type ActivityScope, type FeedState } from "./ActivityPanel.js";
 import { PresenceChip, PresencePlaque } from "./PresenceChip.js";
 import { presenceKey } from "./presence.js";
 import { LiveWorkflowGraph } from "./LiveWorkflowGraph.js";
-import { HowItRan } from "./HowItRan.js";
 import { compact, endStateOf, outcomes, sessionUsage } from "./report.js";
 import { SessionReport } from "./SessionReport.js";
 import { UsagePanel } from "./UsagePanel.js";
-import { RestartRequired } from "./RestartRequired.js";
 import { RUN_STATE } from "./run-state.js";
 import { UnsupportedWindowsChip } from "../windows/unsupported-windows.js";
+import { interpreterLogoBackground } from "../workflow/interpreter-logos.js";
 
 export type LiveSessionPageProps = {
   storageError?: string;
@@ -68,28 +58,6 @@ export type LiveSessionPageProps = {
   /** What the CLI this run belongs to can expose, when it is known. */
   observation?: { available: boolean; note: string };
 };
-
-/**
- * Why the activity list looks the way it does.
- *
- * Five different situations used to render as the same blank panel, and only
- * one of them meant "nothing has happened yet". Naming them apart is the whole
- * fix: an empty feed is a statement about the session, and Anthill may only
- * make it when it was actually able to look.
- */
-type FeedState =
-  /** Still asking. */
-  | { kind: "loading" }
-  /** The process behind this screen is older than the screen. */
-  | { kind: "restart-required" }
-  /** Asking for the events failed, and it is not a version problem. */
-  | { kind: "failed"; detail: string }
-  /** This CLI writes nothing on this machine that Anthill can read. */
-  | { kind: "unobservable"; detail: string }
-  /** Anthill looked, and the session has genuinely done nothing yet. */
-  | { kind: "empty" }
-  /** There are events. */
-  | { kind: "events" };
 
 function clock(at: string): string {
   return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -171,22 +139,13 @@ function LiveSessionContent({
    * assigned. A step is also what the graph selects; an agent selects nothing
    * on the graph, because it is not one block.
    */
-  const [scope, setScope] = useState<
-    { kind: "block"; blockId: string } | { kind: "agent"; name: string; blockIds: string[] } | undefined
-  >();
+  const [scope, setScope] = useState<ActivityScope>();
   const selectedBlock = scope?.kind === "block" ? scope.blockId : undefined;
   const setSelectedBlock = useCallback(
     (blockId: string | undefined) => setScope(blockId ? { kind: "block", blockId } : undefined),
     [],
   );
-  const [openEvent, setOpenEvent] = useState<number | undefined>();
-  /**
-   * How the feed is ordered and filtered.
-   *
-   * Newest first by default: a session that keeps going would otherwise push
-   * the latest thing that happened off the bottom of the panel.
-   */
-  const [sort, setSort] = useState<"newest" | "oldest">("newest");
+  /** Here rather than in the panel: the session report opens the feed on one. */
   const [filter, setFilter] = useState<FeedFilter>("all");
   /** Set when reading or subscribing to the log fails for any other reason. */
   const [feedError, setFeedError] = useState<string | undefined>();
@@ -322,20 +281,6 @@ function LiveSessionContent({
   const doneCount = finishedSteps(view);
 
   /**
-   * The events this panel is currently about.
-   *
-   * Scope first — a selected block narrows the feed to what was tied to it —
-   * then the filter, then the order. The counts shown in the controls row are
-   * of this list, so what the header claims and what the feed holds cannot
-   * disagree.
-   */
-  const scoped = useMemo<AttributedEvent[]>(() => {
-    if (!scope) return view.events;
-    const ids = new Set(scope.kind === "block" ? [scope.blockId] : scope.blockIds);
-    return view.events.filter((event) => event.mapping.blockId !== undefined && ids.has(event.mapping.blockId));
-  }, [view.events, scope]);
-
-  /**
    * The ended session's report (ANT-142), folded from the same view the graph
    * draws and the same journal the feed reads, so the three cannot disagree
    * and a restart rebuilds identical numbers.
@@ -369,49 +314,11 @@ function LiveSessionContent({
     run.state === "completed" || run.state === "failed" || run.state === "observation_lost";
 
   /*
-    The feed draws a window; the diagram above it does not.
-
-    Both used to come from one truncated list, so a session past a thousand
-    events lost the steps it announced early — the graph was folded from a
-    record whose beginning had scrolled away, and blocks that had run for an
-    hour went back to "Waiting its turn" (ANT-73). The fold now gets
-    everything and the cap sits here, on what is rendered, which is the cost
-    it was always meant to bound.
+    The whole session's items, folded once. The panel scopes, filters and
+    caps them; folding before scoping keeps a tool call whose end named the
+    step in the step it ran in, and keeps every call's subagent in view.
   */
-  const cards = useMemo(
-    () => buildFeed(scoped, settled).slice(-FEED_LIMIT),
-    [scoped, settled],
-  );
-
-  /**
-   * The newest arrival, held as one id rather than a flag on a card.
-   *
-   * A card's id is its opening event's seq, so it survives the start→end
-   * update in place: an arrival is a card that was not here before, never a
-   * card that changed. Holding the id also means the next arrival takes the
-   * mark away from the one before it, so the drop-in plays exactly once and
-   * cannot replay on a filter change, a re-order, or any other re-render —
-   * which is what marking "whichever card is at the top" did.
-   *
-   * The first read is not an arrival. Everything in it was already there
-   * before this screen opened, and animating one of them would claim
-   * something just happened.
-   */
-  const newest = cards.length > 0 ? cards[cards.length - 1].id : undefined;
-  const [arrived, setArrived] = useState<number | undefined>();
-  const seen = useRef<number | undefined>();
-  useEffect(() => {
-    if (newest === undefined || newest === seen.current) return;
-    const first = seen.current === undefined;
-    seen.current = newest;
-    setArrived(first ? undefined : newest);
-  }, [newest]);
-
-  const filtered = useMemo(() => cards.filter((card) => matchesFilter(card, filter)), [cards, filter]);
-  const shown = useMemo(
-    () => (sort === "newest" ? [...filtered].reverse() : filtered),
-    [filtered, sort],
-  );
+  const cards = useMemo(() => buildFeed(view.events, settled), [view.events, settled]);
 
   /** Live splits into receiving and quiet; the rest come straight from state. */
   const presence = presenceKey(run, now);
@@ -426,23 +333,6 @@ function LiveSessionContent({
         ? `quiet for ${relative(view.lastSeenAt, now).replace(" ago", "")} – the session is still there`
         : `nothing read for ${relative(view.lastSeenAt, now).replace(" ago", "")} – it may still be running`
       : undefined;
-
-  const agentLabel = useCallback(
-    (blockId: string | undefined) => {
-      if (!blockId) return undefined;
-      const node = workflow.nodes.find((item) => item.id === blockId);
-      const agentId = node ? (node.config as { agentId?: string }).agentId : undefined;
-      if (!agentId) return undefined;
-      return agentProfiles(workflow).find((profile) => profile.id === agentId)?.name;
-    },
-    [workflow],
-  );
-
-  const blockName = useCallback(
-    (blockId: string | undefined) =>
-      blockId ? (workflow.nodes.find((node) => node.id === blockId)?.name ?? blockId) : undefined,
-    [workflow.nodes],
-  );
 
   const stop = useCallback(() => onStopObserving(run.anthillRunId), [onStopObserving, run.anthillRunId]);
 
@@ -484,14 +374,6 @@ function LiveSessionContent({
       setLooking(false);
     }
   }, [run.anthillRunId]);
-
-  const selectedName =
-    scope?.kind === "agent"
-      ? scope.name
-      : selectedBlock
-        ? (workflow.nodes.find((node) => node.id === selectedBlock)?.name ?? selectedBlock)
-        : undefined;
-  const selectedUsage = selectedBlock ? usage.blocks.find((block) => block.blockId === selectedBlock) : undefined;
 
   /** The ended session's progress, in the same words as the report's chips. */
   const endedProgress = (() => {
@@ -618,6 +500,15 @@ function LiveSessionContent({
               <li>Whether the agent is actually following the workflow.</li>
               <li>Why it took one path rather than another.</li>
               <li>Anything the CLI does not write down on this machine.</li>
+              {/* Moved here from the top of the Activity feed (ANT-268): the
+                  boundary still has to be said, and the feed's header is now
+                  only what the feed is showing. */}
+              <li>
+                The transcript itself. Anthill reads event metadata written by{" "}
+                {CLI_LABEL[run.selectedCli]} on this machine, plus what the agent said to you
+                &ndash; code, credential-shaped text and Anthill's own markers removed, and none
+                of the model's reasoning.
+              </li>
               {/*
                 This list said, until ANT-54, that a subagent's words were not
                 written down to show. They were — Claude Code files each
@@ -759,127 +650,22 @@ function LiveSessionContent({
           </div>
         </main>
 
-        <aside className="live-side">
-          <section className="live-activity">
-            {/* A live feed grows, so nothing that states the current scope may
-                live inside the scrolling area — it would scroll away exactly
-                when the feed is long enough for you to need it. */}
-            <header className="live-activity-top">
-              <h2>Activity</h2>
-              {scope ? (
-                <span className="scope-chip">
-                  {selectedName}
-                  <span className="scope-count">{scoped.length}</span>
-                  <button
-                    className="scope-clear"
-                    aria-label="Show the whole session"
-                    onClick={() => setScope(undefined)}
-                  >
-                    ✕
-                  </button>
-                </span>
-              ) : (
-                <span className="scope-whole">Whole session {view.events.length}</span>
-              )}
-            </header>
-
-            <div className="live-activity-controls">
-              <label className="sr-label" htmlFor="activity-order">
-                Order
-              </label>
-              <select
-                id="activity-order"
-                value={sort}
-                onChange={(event) => setSort(event.target.value as typeof sort)}
-              >
-                <option value="newest">Newest first</option>
-                <option value="oldest">Oldest first</option>
-              </select>
-
-              <span className="spacer" />
-              <span className="activity-count">
-                {filtered.length === cards.length
-                  ? `${cards.length} card${cards.length === 1 ? "" : "s"}`
-                  : `${filtered.length} of ${cards.length}`}
-              </span>
-            </div>
-
-            <div className="feed-filters" role="group" aria-label="Filter activity">
-              {FEED_FILTERS.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  aria-pressed={filter === item.key}
-                  onClick={() => setFilter(item.key)}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="live-activity-body">
-            <p className="live-note">
-              Event metadata written by {CLI_LABEL[run.selectedCli]} on this machine, plus one
-              line of each message the agent addressed to you – code, credential-shaped text and
-              Anthill's own markers removed. No full transcript, and none of the model's
-              reasoning.
-            </p>
-
-            {feed.kind === "restart-required" && health.status === "stale" ? (
-              <RestartRequired health={health} feature="Live Session" />
-            ) : null}
-
-            {feed.kind === "failed" ? (
-              <p className="live-feed-problem" role="alert">
-                Anthill could not read this run's activity, so this list is not a statement
-                that nothing happened. {feed.detail}
-              </p>
-            ) : null}
-
-            {storageError ? <p className="live-feed-problem" role="alert">{storageError}</p> : null}
-
-            {feed.kind === "unobservable" ? (
-              <p className="live-feed-problem" role="alert">
-                {feed.detail} Anthill cannot observe this session, so there is nothing to
-                show here – which is not the same as nothing happening.
-              </p>
-            ) : null}
-
-            {feed.kind === "loading" ? <p className="empty">Reading what Anthill has observed…</p> : null}
-
-            {end && selectedUsage && runsWorkflow ? <HowItRan block={selectedUsage} events={scoped.length} /> : null}
-
-            {feed.kind === "empty" || (feed.kind === "events" && shown.length === 0) ? (
-              <p className="empty">
-                {view.empty
-                  ? "Nothing recorded yet. Anthill is reading the records this CLI writes as it goes."
-                  : selectedBlock && cards.length === 0
-                    ? `Nothing mapped to this step. It may not have started, or ${CLI_LABEL[run.selectedCli]} may not write records Anthill can tie to it.`
-                    : "Nothing matches this filter."}
-              </p>
-            ) : null}
-
-            <div className="live-feed">
-              {shown.map((card) => (
-                <FeedCardView
-                  key={card.id}
-                  card={card}
-                  {...(runsWorkflow && card.blockId
-                    ? { blockName: blockName(card.blockId) as string }
-                    : {})}
-                  {...(runsWorkflow && agentLabel(card.blockId)
-                    ? { agentLabel: agentLabel(card.blockId) as string }
-                    : {})}
-                  // Only newest-first: under oldest-first the arrival lands at
-                  // the bottom and a drop-in would point the wrong way.
-                  isNew={card.id === arrived && sort === "newest"}
-                />
-              ))}
-            </div>
-            </div>
-          </section>
-
-        </aside>
+        <ActivityPanel
+          workflow={workflow}
+          runsWorkflow={runsWorkflow}
+          view={view}
+          cards={cards}
+          feed={feed}
+          health={health}
+          {...(storageError ? { storageError } : {})}
+          cli={{ label: CLI_LABEL[run.selectedCli], logo: interpreterLogoBackground(run.selectedCli) }}
+          scope={scope}
+          onClearScope={() => setScope(undefined)}
+          filter={filter}
+          onFilter={setFilter}
+          usage={usage.blocks}
+          ended={Boolean(end) || settled}
+        />
       </div>
 
       <footer className="statusbar">

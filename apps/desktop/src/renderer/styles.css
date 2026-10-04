@@ -82,6 +82,12 @@ body {
   height: 100%;
 }
 
+/* Workflow and Live session stay mounted side by side, one of them hidden
+   (ANT-267); the rule above would otherwise outrank the attribute. */
+.app[hidden] {
+  display: none;
+}
+
 /* ---------------- dark bars ---------------- */
 
 .topbar {
@@ -2085,9 +2091,16 @@ ul.plain {
   padding-top: 2px;
 }
 
+.prompt-recap .recap-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* Two lines of it: enough to recognise, not enough to re-read. */
 .prompt-recap .recap-text {
-  flex: 1;
   font-size: 13px;
   line-height: 1.55;
   color: var(--ink-2);
@@ -2097,12 +2110,131 @@ ul.plain {
   overflow: hidden;
 }
 
+/* The folder the draft will be made with, under the prompt it goes with. */
+.prompt-recap .recap-folder {
+  font-size: 12px;
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-recap .recap-path {
+  font-family: var(--mono);
+  color: var(--ink-2);
+}
+
 .prompt-recap .recap-edit {
   font-size: 12.5px;
   font-weight: 600;
   white-space: nowrap;
   color: var(--accent-700);
   padding-top: 2px;
+}
+
+/* ---------------- project folder (ANT-67) ---------------- */
+
+.folder-block {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-slab);
+  background: var(--surface);
+}
+
+.folder-icon {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--chip);
+  color: var(--ink-3);
+}
+
+.folder-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.folder-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.folder-title b {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.folder-title span {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.folder-desc {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #7d7979;
+  text-wrap: pretty;
+}
+
+.folder-kicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.folder-path {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-error {
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--accent-700);
+}
+
+.folder-button {
+  flex: none;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.folder-button.strong {
+  padding: 7px 13px;
+  font-weight: 600;
+}
+
+.folder-button.ghost {
+  padding: 7px 10px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-dim);
+}
+
+.folder-button.ghost:hover:not(:where(:disabled)) {
+  background: transparent;
+  color: var(--ink-2);
 }
 
 .interpreter-grid {
@@ -5096,10 +5228,14 @@ button.state-chip {
   background: var(--canvas);
 }
 
-.live-page-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--on-dark);
+/* The workflow's name beside the switcher, as the Workflow screen's title field sits. */
+.live-page-workflow {
+  color: var(--on-dark-dim);
+  font-size: 12.5px;
+  padding-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 34ch;
 }
 
 .live-page-plan {
@@ -5114,9 +5250,17 @@ button.state-chip {
 
 .live-page-body {
   display: grid;
-  grid-template-columns: 252px minmax(0, 1fr) 428px;
+  grid-template-columns: 252px minmax(0, 1fr) 520px;
   flex: 1;
   min-height: 0;
+}
+
+/* The window can be 1024 wide, and a 520px panel beside the rail would leave
+   the canvas a strip. Below this the panel gives some of its width back. */
+@media (max-width: 1240px) {
+  .live-page-body {
+    grid-template-columns: 252px minmax(0, 1fr) 440px;
+  }
 }
 
 .live-stage {
@@ -5348,6 +5492,8 @@ button.state-chip {
   .live-detour.is-live .live-detour-trail,
   .feed-card.event-new,
   .feed-glyph.state-working,
+  .feed-glyph.state-done,
+  .feed-agent-foot .feed-state.state-working i,
   .recent-chip.is-pulsing::before {
     animation: none;
   }
@@ -5361,13 +5507,12 @@ button.state-chip {
 /* The right panel */
 
 .live-side {
-  border-left: 1px solid var(--border);
-  background: var(--surface);
-  overflow-y: auto;
-  padding: 14px 16px 24px;
+  position: relative;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .live-side-top {
@@ -5426,18 +5571,6 @@ button.state-chip {
 
 /* Activity */
 
-.live-feed {
-  list-style: none;
-  margin: 10px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-/* The rows this feed was once made of are gone; the list they sat in is not.
-   Their rules outlived them by long enough to take the one motion in the
-   feed down with them — see `.feed-card.event-new`. */
 
 .live-cannot {
   border-top: 1px solid var(--border);
@@ -7289,90 +7422,125 @@ button.state-chip {
 
 /* Activity: the scope is stated outside the scrolling area, so it cannot
    scroll away exactly when the feed is long enough to need it. */
-.live-activity {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  flex: 1;
-}
-
 .live-activity-top {
   height: 44px;
   flex: none;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
+  padding: 0 12px 0 18px;
+  border-bottom: 1px solid var(--border);
 }
 
 .live-activity-top h2 {
-  flex: 1;
   margin: 0;
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+}
+
+.live-activity-top .spacer {
+  flex: 1;
 }
 
 .scope-whole {
-  font-size: 11.5px;
-  color: var(--ink-quiet);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.scope-count {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #f3f2f2;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 .scope-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  min-width: 0;
+  padding: 4px 5px 4px 11px;
+  border-radius: 999px;
   background: #eaf4fb;
   border: 1px solid #b9dcf0;
-  border-radius: 999px;
-  padding: 3px 5px 3px 10px;
+}
+
+.scope-chip b {
   font-size: 12px;
   font-weight: 600;
   color: #2f6d99;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.scope-count {
+.scope-chip .scope-count {
+  color: #2f6d99;
   background: #dcecf7;
-  border-radius: 999px;
-  padding: 0 6px;
-  font-weight: 500;
 }
 
 .scope-clear {
-  border: none;
-  background: none;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(47, 109, 153, 0.14);
   color: #2f6d99;
-  padding: 0 3px;
-  font: inherit;
+  font-size: 11px;
+  line-height: 1;
   cursor: pointer;
 }
 
-.live-activity-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding-bottom: 9px;
-  border-bottom: 1px solid #efeded;
+.scope-clear:hover:not(:disabled) {
+  background: rgba(47, 109, 153, 0.24);
+}
+
+/* Activity | Block, only while one block is selected. */
+.activity-switch {
   flex: none;
+  display: flex;
+  gap: 3px;
+  margin: 10px 14px 0 18px;
+  padding: 3px;
+  border-radius: 9px;
+  background: #efeded;
 }
 
-/* The base control is a full-width form field, which is right in a form and
-   wrong in a row of two: stretched, it pushed the count against the edge and
-   read as the panel's title. Here it is a control the width of its longest
-   option. */
-.live-activity-controls select {
-  font-size: 12px;
-  padding: 4px 6px;
-  width: auto;
-}
-
-/* The count is right-aligned, so filtering reads as a change to the far end
-   of the row rather than as text that follows the order control around. */
-.live-activity-controls .spacer {
+.activity-switch button {
   flex: 1;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  color: #7d7979;
+  cursor: pointer;
 }
 
-.activity-count {
-  font-size: 11.5px;
-  color: var(--ink-quiet);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+.activity-switch button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
+}
+
+.activity-switch button[aria-selected="true"],
+.activity-switch button[aria-selected="true"]:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(32, 30, 29, 0.1);
 }
 
 .sr-label {
@@ -7382,13 +7550,6 @@ button.state-chip {
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
-}
-
-.live-activity-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding-top: 10px;
 }
 
 /*
@@ -7428,7 +7589,7 @@ button.state-chip {
 
 @keyframes event-in {
   from {
-    transform: translateY(-7px);
+    transform: translateY(6px);
     opacity: 0;
   }
   to {
@@ -7744,215 +7905,515 @@ button.presence-chip {
 /* ------------------------------------------------------------------ */
 
 .feed-filters {
+  flex: none;
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
-  padding: 10px 16px;
+  padding: 9px 14px 9px 18px;
+  border-bottom: 1px solid #efeded;
 }
 
 .feed-filters button {
   padding: 4px 11px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: #fff;
+  background: var(--surface);
   font: inherit;
   font-size: 12px;
-  color: var(--ink-dim);
+  color: var(--ink-3);
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.feed-filters button:hover {
+.feed-filters button:hover:not(:disabled) {
   background: var(--canvas);
 }
 
-.feed-filters button[aria-pressed="true"] {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: #fff;
+.feed-filters button[aria-pressed="true"],
+.feed-filters button[aria-pressed="true"]:hover:not(:disabled) {
+  background: #2d2b2b;
+  border-color: #2d2b2b;
+  color: #f8f4f4;
+  font-weight: 600;
 }
 
-/*
- * The card these rules arrived naming `--line`, `--muted` and `--surface-2`,
- * three tokens this app has never had. An undefined custom property does not
- * warn and does not fall back: the declaration around it is discarded, and a
- * discarded `border` shorthand takes `border-style` to `none` with it. So the
- * card had no border, no left state rule and no tint, and looked like the
- * design it replaced. The names here are the app's own — same three colours,
- * one name each — and `styles.test.ts` now refuses a bare `var()` that names
- * nothing.
- */
-.feed-card {
+.feed-filters .spacer {
+  flex: 1;
+}
+
+/* The base control is a full-width form field; here it is a control the
+   width of its longest option. */
+.feed-filters select {
+  width: auto;
+  height: 28px;
+  padding: 0 6px;
   border: 1px solid var(--border);
-  border-left-width: 3px;
-  border-radius: 10px;
-  padding: 11px 13px;
-  margin: 0 16px 8px;
-  background: #fff;
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--ink-2);
 }
 
-/* Text the CLI showed the user sits on its own tint, so it never reads as
-   Anthill's own words. */
-.feed-card.kind-message {
-  background: var(--canvas);
+/* ------------------------------------------------------------------ */
+/* Activity feed — one action, one item, one header                    */
+/* ------------------------------------------------------------------ */
+
+.live-feed {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 18px 24px;
 }
 
-.feed-card.state-working {
-  border-left-color: #56aee0;
+/* No card frame: an item is a header and what sits under it. */
+.feed-card {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0;
 }
-.feed-card.state-done {
-  border-left-color: #2f8f5f;
-}
-.feed-card.state-failed {
-  border-left-color: #ec3013;
-}
-.feed-card.state-unknown {
-  border-left-color: #bab6b6;
-}
+
 .feed-card.kind-session {
-  border-left-color: var(--border);
+  padding: 8px 0;
+}
+
+.feed-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.feed-avatar {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+.feed-avatar.is-orchestrator {
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background-color: var(--surface);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 72%;
+}
+
+.feed-avatar.is-agent {
+  border-radius: 50%;
+  border: 1px solid #d7d3d3;
+}
+
+.feed-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
 .feed-card-top {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-}
-
-.feed-card-top + .feed-confidence {
-  display: inline-block;
-  margin: 6px 0 0;
-}
-
-.feed-glyph {
-  font-size: 11px;
-  line-height: 1;
-  flex: none;
-}
-.feed-glyph.state-working {
-  color: #56aee0;
-}
-.feed-glyph.state-done {
-  color: #2f8f5f;
-}
-.feed-glyph.state-failed {
-  color: #ec3013;
-}
-.feed-glyph.state-unknown {
-  color: #8a8584;
-}
-
-.feed-card-title {
-  flex: 1;
   min-width: 0;
+}
+
+.feed-name {
   font-size: 13px;
   font-weight: 600;
   color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.feed-confidence {
-  align-self: flex-start;
-  flex: none;
-  padding: 2px 8px;
+.feed-verb {
+  font-size: 11.5px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.feed-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 1px 8px;
   border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #f0eeee;
   font-size: 10.5px;
   font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.feed-confidence.conf-exact {
-  background: #e6f3ec;
-  color: #2f6b48;
-}
-.feed-confidence.conf-likely {
-  background: #f7ecd0;
-  color: #8a6a08;
-}
-.feed-confidence.conf-unmapped {
-  background: #fdf8ec;
-  color: #8a6a08;
+.feed-chip i {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 2px;
 }
 
 .feed-card-time {
+  margin-left: auto;
   flex: none;
+  font-family: var(--mono);
   font-size: 11px;
-  color: var(--ink-dim);
-  font-variant-numeric: tabular-nums;
+  color: var(--ink-quiet);
+  white-space: nowrap;
 }
 
-.feed-runtime,
-.feed-card-body,
-.feed-state {
-  margin: 6px 0 0;
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--ink-dim);
+/* What was said: a speech bubble, cornered towards who said it. */
+.feed-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 13px;
+  border-radius: 3px 12px 12px 12px;
+  background: #f3f2f2;
+  border: 1px solid transparent;
 }
 
-.feed-runtime code,
-.feed-evidence code {
-  font-family: var(--mono, ui-monospace, monospace);
-  font-size: 11.5px;
+.feed-card.is-unmapped .feed-bubble,
+.feed-card.is-unmapped .feed-tool {
+  border: 1px dashed #e3c98a;
 }
 
-.feed-state.state-working {
-  color: #2f6d99;
-}
-.feed-state.state-done {
-  color: #2f6b48;
-}
-.feed-state.state-failed {
-  color: #ae1800;
-}
-.feed-state.state-unknown {
-  color: #8a8584;
+.feed-bubble.is-agent {
+  background: var(--surface);
+  border-color: var(--border);
 }
 
-.feed-more,
-.feed-evidence-toggle {
-  margin-top: 6px;
+.feed-bubble.is-agent.state-working {
+  border-color: #b9dcf0;
+}
+
+.feed-card-body {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.62;
+  color: #302e2c;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.feed-card-body .message-markup {
+  white-space: normal;
+}
+
+.feed-more {
+  align-self: flex-start;
   padding: 0;
   border: 0;
   background: none;
   font: inherit;
-  font-size: 11.5px;
-  color: var(--accent, #ec3013);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-700);
   cursor: pointer;
 }
 
-.feed-evidence-toggle {
-  display: block;
+.feed-more:hover:not(:disabled) {
+  background: none;
+  text-decoration: underline;
+}
+
+.feed-agent-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 7px;
+  border-top: 1px solid #efeded;
+}
+
+.feed-agent-foot .feed-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.feed-agent-foot .feed-state i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.feed-agent-foot .feed-state.state-working i {
+  background: #56aee0;
+  animation: feed-pulse 1.8s ease-in-out infinite;
+}
+.feed-agent-foot .feed-state.state-done i { background: #2f8f5f; }
+.feed-agent-foot .feed-state.state-failed i { background: var(--accent); }
+.feed-agent-foot .feed-state.state-unknown i { background: var(--ink-quiet); }
+
+.feed-runtime {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.feed-runtime.is-none {
+  color: var(--ink-quiet);
+}
+
+/* A tool call: the whole box opens it. */
+.feed-tool {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 3px 12px 12px 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.feed-tool:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: #d7d3d3;
+}
+
+.feed-tool.state-failed,
+.feed-tool.state-failed:hover:not(:disabled) {
+  background: #fdf3f0;
+  border-color: #f3d0c7;
+}
+
+.feed-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.feed-tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 2px 7px 2px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink-2);
+}
+
+.feed-tool-chip span {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Never truncated: a command cut short is a different command. */
+.feed-tool-task {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.feed-glyph {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+.feed-glyph.state-working { color: #2f6d99; background: #eaf4fb; }
+.feed-glyph.state-done { color: #2f6b48; background: #e6f3ec; animation: feed-pop 360ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.feed-glyph.state-failed { color: var(--accent-700); background: #fff1ed; }
+.feed-glyph.state-unknown { color: var(--ink-dim); background: #f3f2f2; }
+
+.feed-tool .feed-state {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.feed-state.state-working { color: #2f6d99; font-weight: 600; }
+.feed-state.state-done { color: var(--ink-dim); }
+.feed-state.state-failed { color: var(--accent-700); font-weight: 600; }
+.feed-state.state-unknown { color: #8a6a08; }
+.feed-agent-foot .feed-state.state-done { color: #2f6b48; }
+.feed-agent-foot .feed-state.state-unknown { color: var(--ink-dim); }
+
+.feed-chevron {
+  flex: none;
+  color: var(--ink-dim);
+  transition: transform 150ms;
+}
+
+.feed-tool[aria-expanded="true"] .feed-chevron {
+  transform: rotate(180deg);
+}
+
+.feed-output {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin-top: 3px;
+}
+
+.feed-output pre {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: #2d2b2b;
+  color: #e6e2e2;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.feed-output span {
+  font-size: 11.5px;
   color: var(--ink-dim);
 }
 
-.feed-evidence-toggle:hover {
-  color: var(--ink);
+/* Session started, prompt submitted, session ended: a line, not an item. */
+.feed-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.feed-divider hr {
+  flex: 1;
+  height: 1px;
+  margin: 0;
+  border: 0;
+  background: var(--border);
+}
+
+.feed-divider b {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.feed-divider span {
+  font-size: 11.5px;
+  color: var(--ink-quiet);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.feed-evidence-toggle {
+  flex: none;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-quiet);
+  cursor: pointer;
+}
+
+.feed-evidence-toggle:hover:not(:disabled) {
+  background: none;
+  color: var(--accent-700);
 }
 
 .feed-evidence {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 14px;
-  margin: 8px 0 0;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  font-size: 11.5px;
+  grid-template-columns: 96px 1fr;
+  gap: 5px 10px;
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid #efeded;
 }
 
 .feed-evidence dt {
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--ink-dim);
 }
 
 .feed-evidence dd {
   margin: 0;
-  color: var(--ink);
+  font-size: 12.5px;
+  color: var(--ink-2);
   overflow-wrap: anywhere;
+}
+
+.feed-evidence code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+/* Every empty case in one shape, and none of them in the same words. */
+.feed-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 14px;
+  border-radius: 9px;
+  background: var(--canvas);
+}
+
+.feed-empty b {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.feed-empty span {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+
+@keyframes feed-pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+@keyframes feed-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
 /* How many runs are open, beside the chip that speaks for one of them. */
@@ -7964,19 +8425,6 @@ button.presence-chip {
   font-size: 11px;
   font-weight: 600;
   color: var(--ink-dim);
-}
-
-/*
- * Every screen with a workflow open reads the same way: the mark, the screen's
- * own name in bold, then the workflow's name beside it. Before this the
- * Workflow screen jumped straight to an unlabelled input, so the one field on
- * the bar had nothing saying what it named.
- */
-.screen-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--on-dark);
-  white-space: nowrap;
 }
 
 /* The workflow's own name, beside whatever screen is showing it. */
@@ -9920,26 +10368,257 @@ button.presence-chip {
 .usage-agent-blocks { font-size: 11.5px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .usage-note { margin: 0; font-size: 11.5px; line-height: 1.55; color: var(--ink-dim); }
 
-/* One step of an ended session, above its events in the feed. */
+/* The Block tab: one step as designed and as it ran, over the feed. */
+.block-tab {
+  position: absolute;
+  inset: 90px 0 0;
+  z-index: 5;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 18px 24px;
+  background: var(--surface);
+}
+
+.block-kicker {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-700);
+}
+
+.block-title {
+  margin: 4px 0 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.block-purpose {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+.block-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.block-task {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--canvas);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.block-task.is-none {
+  color: var(--ink-dim);
+}
+
+.block-ports {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.block-port {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.block-port > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.block-port i {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+}
+
+.block-port b {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.block-port em {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #f3f2f2;
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.block-port-to {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.block-port code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.block-facts {
+  display: flex;
+  gap: 18px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.block-facts b {
+  color: var(--ink);
+}
+
+.block-footnote {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+
+.block-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-700);
+  cursor: pointer;
+}
+
+.block-link:hover:not(:disabled) {
+  background: none;
+  text-decoration: underline;
+}
+
+.block-link:disabled {
+  color: var(--ink-dim);
+  cursor: default;
+}
+
+.block-note {
+  font-size: 11.5px;
+  color: var(--ink-dim);
+}
+
 .how-it-ran {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin: 0 0 10px;
-  padding: 12px 14px;
+  gap: 10px;
+  padding: 14px 15px;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--run-tone, #bab6b6);
+  border-left: 3px solid var(--ink-quiet);
   border-radius: 10px;
-  background: var(--surface);
 }
-.how-it-ran.is-done { --run-tone: #2f8f5f; }
-.how-it-ran.is-failed { --run-tone: var(--accent); }
-.how-it-ran.is-unknown { --run-tone: #8a8584; }
-.how-it-ran.is-waiting { --run-tone: #d8a21a; }
-.how-it-ran .kicker { font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-dim); }
-.how-it-ran-total { margin: 0; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.how-it-ran-passes { margin: 0; padding: 8px 0 0 18px; border-top: 1px solid #efeded; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
-.how-it-ran-note { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--ink-dim); }
+
+.how-it-ran .block-label {
+  margin: 0;
+}
+
+.how-it-ran-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.how-it-ran-status {
+  margin-left: auto;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.how-it-ran-figures {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.how-it-ran-figures b {
+  display: block;
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.how-it-ran-figures b.is-none {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-quiet);
+}
+
+.how-it-ran-figures span {
+  font-size: 11.5px;
+  color: var(--ink-dim);
+}
+
+.how-it-ran-passes {
+  margin: 0;
+  padding: 9px 0 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid #efeded;
+}
+
+.how-it-ran-passes li {
+  display: flex;
+  gap: 10px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+
+.how-it-ran-passes .n { width: 52px; flex: none; color: var(--ink-dim); }
+.how-it-ran-passes .t { width: 60px; flex: none; }
+
+.how-it-ran-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.how-it-ran-none {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-dim);
+}
 
 /* Provenance folds away once the session has ended. */
 .live-rail-details { padding: 0 4px; color: var(--on-dark-dim); }
@@ -10178,4 +10857,83 @@ button.presence-chip {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ==================================================================
+   Workflow / Live session switcher (ANT-267)
+   ==================================================================
+   Two tabs of one workspace, in the dark bar of both screens right after the
+   mark. Literal values from the handoff: they sit on the bar's own dark and
+   are not themed with the work surface. `.topbar button` styles every button
+   in the bar, so these are scoped tighter to win without `!important`. */
+
+.ws-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.06);
+  flex: none;
+}
+
+.topbar .ws-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--on-dark-dim);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.topbar .ws-tab:hover:not(:disabled) {
+  background: transparent;
+  color: var(--on-dark);
+}
+
+.topbar .ws-tab[aria-selected="true"],
+.topbar .ws-tab[aria-selected="true"]:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.13);
+  color: var(--on-dark);
+}
+
+.topbar .ws-tab[aria-disabled="true"],
+.topbar .ws-tab[aria-disabled="true"]:hover:not(:disabled) {
+  opacity: 0.45;
+  cursor: default;
+  color: var(--on-dark-dim);
+}
+
+.topbar .ws-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ws-tab-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: #605d5d;
+}
+
+/* The accent ring, not `.live-pulse`'s plain fade: the same claim the live
+   chip makes on the canvas. */
+.ws-tab-dot.is-live {
+  background: var(--accent);
+  animation: live-ring 1.6s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-tab-dot.is-live {
+    animation: none;
+  }
 }

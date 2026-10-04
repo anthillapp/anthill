@@ -88,7 +88,8 @@ export function wasDrag(from: { x: number; y: number }, to: { x: number; y: numb
 /** Pan and zoom, the same shape the Workflow canvas uses. */
 type Viewport = { x: number; y: number; scale: number };
 
-function kicker(node: Workflow["nodes"][number]): string {
+/** A block's kind as its card names it; the Activity panel's Block tab uses the same words. */
+export function kicker(node: Workflow["nodes"][number]): string {
   if (node.type === "start") return "START";
   if (node.type === "end") return "END";
   if (node.type === "approval") return "APPROVAL";
@@ -657,6 +658,9 @@ export function LiveWorkflowGraph({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!event.metaKey && !event.ctrlKey) return;
+      // A diagram in a tab that is not showing keeps its view for when it
+      // is: ⌘0 measured at nothing would reset it (ANT-267).
+      if (surface.current?.closest("[hidden]")) return;
       const active = document.activeElement;
       const tag = active?.tagName;
       if (

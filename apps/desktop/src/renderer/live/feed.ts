@@ -17,7 +17,15 @@
  * screen.
  */
 
-import { stoppedWithSession, subagentStops, type AttributedEvent, type MappingConfidence, type ObservationEvent } from "@anthill/live";
+import {
+  handsBack,
+  isHandback,
+  stoppedWithSession,
+  subagentStops,
+  type AttributedEvent,
+  type MappingConfidence,
+  type ObservationEvent,
+} from "@anthill/live";
 
 /**
  * How many cards the feed draws.
@@ -65,6 +73,13 @@ export type FeedCard = {
    */
   channels: string[];
   toolUseId?: string;
+  /**
+   * The call that started the subagent this came from, when it came from one.
+   *
+   * What ties a delegate's tool calls and messages to the subagent that made
+   * them, so the feed can say who acted rather than only what happened.
+   */
+  parentToolUseId?: string;
   /** The session the action happened in, so a turn ending closes only its own. */
   sessionId?: string;
   /** The raw event kinds folded into this card, in order. */
@@ -146,6 +161,14 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
   const cutOff = stoppedWithSession(events);
   /** Whose end each SubagentStop is: a subagent's, or Claude Code's own helper's (ANT-242, ANT-245). */
   const stopOf = subagentStops(events);
+  /**
+   * Where subagents hand back, a background one's turn ending or its
+   * SubagentStop finishes its card only once it has: before that it stopped
+   * to wait on work of its own (ANT-245).
+   */
+  const explicitHandback = handsBack(events);
+  const handedBack = new Set<string>();
+  const ends = (call: string) => !explicitHandback || handedBack.has(call);
 
   /** Another channel's record of this card's action, folded in rather than drawn twice. */
   const fold = (card: FeedCard, event: AttributedEvent) => {
@@ -189,6 +212,18 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
       }
     }
 
+    // A subagent handing its result back: that is its card finished, whatever
+    // its turn does next (ANT-245). The call itself still gets its own card.
+    if (isHandback(event) && event.parentToolUseId) {
+      handedBack.add(event.parentToolUseId);
+      const card = dispatched.get(event.parentToolUseId);
+      if (card?.background && open.get(event.parentToolUseId) === card) {
+        card.state = "done";
+        card.durationMs = Date.parse(event.at) - Date.parse(card.at);
+        open.delete(event.parentToolUseId);
+      }
+    }
+
     /*
       A delegate's own turn ending, named by the call that started it. It is
       what finishes a subagent that was sent off on its own, whose launch
@@ -199,7 +234,7 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
       const card = dispatched.get(event.parentToolUseId);
       if (card) {
         lastDelegateEnd = { card, at: Date.parse(event.at) };
-        if (card.background && open.get(event.parentToolUseId) === card) {
+        if (card.background && open.get(event.parentToolUseId) === card && ends(event.parentToolUseId)) {
           card.state = "done";
           card.durationMs = Date.parse(event.at) - Date.parse(card.at);
           open.delete(event.parentToolUseId);
@@ -234,7 +269,7 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
     const stop = event.kind === "subagent.end" ? stopOf(event) : undefined;
     const stopped = stop && typeof stop === "object" ? dispatched.get(stop.call) : undefined;
     if (stop && typeof stop === "object" && stopped) {
-      if (stopped.background && open.get(stop.call) === stopped) {
+      if (stopped.background && open.get(stop.call) === stopped && ends(stop.call)) {
         stopped.state = "done";
         stopped.durationMs = Date.parse(event.at) - Date.parse(stopped.at);
         open.delete(stop.call);
@@ -340,6 +375,7 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
       how: event.mapping.how,
       channels: [event.channel, ...(event.alsoFrom ?? [])],
       ...(event.toolUseId ? { toolUseId: event.toolUseId } : {}),
+      ...(event.parentToolUseId ? { parentToolUseId: event.parentToolUseId } : {}),
       ...(event.sessionId ? { sessionId: event.sessionId } : {}),
       events: [event.kind],
     };
@@ -357,21 +393,120 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
   return cards;
 }
 
-export type FeedFilter = "all" | "message" | "tool" | "agent" | "unmapped";
+/**
+ * The filter chips: All, Messages and Tools.
+ *
+ * `unmapped` has no chip of its own. The session report's "not tied to a
+ * step" count opens the feed on it, and the panel shows it as a fourth chip
+ * only while it is the one in force, so the reader can see why the list is
+ * short and leave it.
+ */
+export type FeedFilter = "all" | "message" | "tool" | "unmapped";
 
 export const FEED_FILTERS: { key: FeedFilter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "message", label: "Messages" },
   { key: "tool", label: "Tools" },
-  { key: "agent", label: "Agents" },
-  { key: "unmapped", label: "Unmapped" },
 ];
 
+export const UNMAPPED_FILTER = { key: "unmapped", label: "Not tied to a step" } as const;
+
+/**
+ * Whether a card passes a filter.
+ *
+ * Messages takes a subagent being started as well: handing a subagent its
+ * task is something said, not a tool's outcome, and the feed draws it as a
+ * bubble beside the other things said.
+ */
 export function matchesFilter(card: FeedCard, filter: FeedFilter): boolean {
   if (filter === "all") return true;
   if (filter === "unmapped") return card.confidence === "unmapped";
+  if (filter === "message") return card.kind === "message" || card.kind === "agent";
   return card.kind === filter;
 }
+
+/**
+ * Who acted: the session's own agent, or a subagent it started.
+ *
+ * The orchestrator watches every step at once, so it is never tied to one
+ * block however its record was mapped; a subagent works inside one.
+ */
+export type Speaker = { kind: "orchestrator" } | { kind: "agent"; name: string };
+
+/**
+ * Who each card is from, by card id.
+ *
+ * Only what the record says. A subagent's start is the subagent. Anything a
+ * delegate wrote carries the call that started it, and is that subagent's. A
+ * message the record signed as a subagent's, with no call to follow, is a
+ * subagent's under the name the record gave. Everything else is the session's
+ * own agent: a tool call is never handed to whichever subagent happened to be
+ * at work at the time.
+ *
+ * `profileOf` names the workflow's agent profile for a block, which is the
+ * name the workflow gave the agent and the one the canvas shows. It wins over
+ * the runtime's own word for it, which the agent card prints on its Runtime
+ * line instead.
+ *
+ * Folded over the whole feed rather than a scoped one, so narrowing to a
+ * block cannot lose the subagent a call is attributed to.
+ */
+export function speakersOf(
+  cards: readonly FeedCard[],
+  profileOf: (blockId: string | undefined) => string | undefined,
+): Map<number, Speaker> {
+  const agents = new Map<string, Speaker>();
+  const speakers = new Map<number, Speaker>();
+  for (const card of cards) {
+    if (card.kind !== "agent") continue;
+    const speaker: Speaker = { kind: "agent", name: profileOf(card.blockId) ?? card.agentName ?? "Subagent" };
+    speakers.set(card.id, speaker);
+    if (card.toolUseId) agents.set(card.toolUseId, speaker);
+  }
+  for (const card of cards) {
+    if (card.kind === "agent") continue;
+    const via = card.parentToolUseId ? agents.get(card.parentToolUseId) : undefined;
+    if (via) speakers.set(card.id, via);
+    else if (card.author?.kind === "subagent") {
+      speakers.set(card.id, { kind: "agent", name: profileOf(card.blockId) ?? card.author.name ?? "Subagent" });
+    } else speakers.set(card.id, { kind: "orchestrator" });
+  }
+  return speakers;
+}
+
+/**
+ * A tool call's outcome in the few words its row has room for.
+ *
+ * A finished call shows only how long it took: the tick beside it already
+ * says it finished.
+ */
+export function toolStatus(card: Pick<FeedCard, "state" | "durationMs">): string {
+  const duration = readDuration(card.durationMs);
+  switch (card.state) {
+    case "working":
+      return "Running";
+    case "done":
+      return duration || "Done";
+    case "failed":
+      return duration ? `Failed · ${duration}` : "Failed";
+    case "unknown":
+      return "No result";
+  }
+}
+
+/**
+ * The line under an opened tool call.
+ *
+ * Anthill keeps that a call ran and how it ended, never what it printed — the
+ * output is where a file's contents or a credential would be — so the box
+ * says which of those it is rather than "output as recorded" over nothing.
+ */
+export const OUTPUT_NOTE: Record<CardState, string> = {
+  done: "Anthill records that the call ran and how it ended, not what it printed.",
+  working: "Still running. Anthill records how a call ends, not what it prints.",
+  failed: "The call exited with an error. Anthill records that, not what it printed.",
+  unknown: "The call never reported back, so there is no output.",
+};
 
 /** Three tiers and nothing between them, always stated as a word. */
 export const CONFIDENCE_LABEL: Record<MappingConfidence, string> = {

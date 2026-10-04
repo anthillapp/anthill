@@ -14,7 +14,7 @@ import type { PendingRun } from "@anthill/live";
 import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-exchange";
 import type { Workflow } from "@anthill/workflow-schema";
 
-import type { SaveWorkflowResult } from "../../shared/ipc.js";
+import { LIVE_SESSION_CHANNELS, type SaveWorkflowResult } from "../../shared/ipc.js";
 import { WorkflowScreen } from "./WorkflowScreen.js";
 
 type Snapshot = { runs: PendingRun[]; capabilities: unknown[] };
@@ -68,6 +68,7 @@ function stubApi() {
       return () => { menuReveal = undefined; };
     }),
     openWorkflow: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
+    liveCancel: vi.fn(async (_runId: string) => undefined),
     // Which workflow is open is what main answers an `anthill://` link with,
     // so the screen tells it on every open and on unmount.
     workflowOpened: vi.fn(async () => undefined),
@@ -1166,6 +1167,8 @@ describe("a handover the user asked to watch", () => {
     lastObservedAt: new Date().toISOString(),
   };
 
+  const onExit = vi.fn();
+
   function open(mode: "watch" | "design", runs: PendingRun[]) {
     const api = stubApi();
     Object.assign(api, {
@@ -1187,13 +1190,17 @@ describe("a handover the user asked to watch", () => {
     api.liveSnapshot.mockResolvedValue({ runs, capabilities: [] });
     render(
       <WorkflowScreen
-        onExit={() => undefined}
+        onExit={onExit}
         onSettings={() => undefined}
         start={{ kind: "open", path: PATH }}
       />,
     );
     return api;
   }
+
+  /** The switcher in the bar that is showing; the hidden screen has its own. */
+  const tab = (name: "Workflow" | "Live session") => screen.getByRole("tab", { name });
+  const livePage = () => document.querySelector(".live-page") as HTMLElement | null;
 
   it("opens the live session without anybody clicking anything", async () => {
     open("watch", [run]);
@@ -1212,12 +1219,154 @@ describe("a handover the user asked to watch", () => {
   it("lets the reader leave the session and stay left", async () => {
     open("watch", [run]);
     await screen.findByText("Anthill is observing, not running");
-    fireEvent.click(await screen.findByTitle("Back to the workflow"));
+    fireEvent.click(tab("Workflow"));
 
     await screen.findByRole("button", { name: "Save" });
     // A second of the snapshot poll's worth of chances to drag them back.
     await new Promise((resolve) => setTimeout(resolve, 60));
-    expect(screen.queryByText("Anthill is observing, not running")).toBeNull();
+    expect(livePage()?.hidden).toBe(true);
+    expect(screen.getByRole("tab", { name: "Workflow", selected: true })).toBeTruthy();
+  });
+
+  /* Workflow and Live session as two tabs of one workspace (ANT-267). */
+
+  it("switches between the workflow and the session without stopping the observation", async () => {
+    const api = open("watch", [run]);
+    api.capabilities.mockResolvedValue({ contract: 2, channels: [...LIVE_SESSION_CHANNELS] });
+    await screen.findByText("Anthill is observing, not running");
+    await waitFor(() => expect(api.liveEvents).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(tab("Workflow"));
+    await screen.findByRole("button", { name: "Save" });
+    fireEvent.click(tab("Live session"));
+    expect(livePage()?.hidden).toBe(false);
+    expect(screen.getByRole("tab", { name: "Live session", selected: true })).toBeTruthy();
+    fireEvent.click(tab("Workflow"));
+    fireEvent.click(tab("Live session"));
+
+    // The page stayed mounted: one read of the feed, one subscription, and
+    // nothing told main to stop.
+    expect(api.liveEvents).toHaveBeenCalledTimes(1);
+    expect(api.onLiveEvents).toHaveBeenCalledTimes(1);
+    expect(api.liveCancel).not.toHaveBeenCalled();
+  });
+
+  it("keeps what each tab was showing", async () => {
+    open("watch", [run]);
+    await screen.findByText("Anthill is observing, not running");
+    const order = screen.getByLabelText("Order") as HTMLSelectElement;
+    fireEvent.change(order, { target: { value: "oldest" } });
+
+    fireEvent.click(tab("Workflow"));
+    await screen.findByRole("button", { name: "Save" });
+    fireEvent.click(document.querySelector('[data-testid^="workflow-block-"]') as HTMLElement);
+    expect(document.querySelector(".inspector-top h2")?.textContent).toBe("Selected block");
+
+    fireEvent.click(tab("Live session"));
+    expect((screen.getByLabelText("Order") as HTMLSelectElement).value).toBe("oldest");
+    fireEvent.click(tab("Workflow"));
+    expect(document.querySelector(".inspector-top h2")?.textContent).toBe("Selected block");
+  });
+
+  it("moves between the tabs from the keyboard, skipping one that cannot be chosen", async () => {
+    open("watch", [run]);
+    await screen.findByText("Anthill is observing, not running");
+    tab("Live session").focus();
+    fireEvent.keyDown(tab("Live session"), { key: "ArrowRight" });
+    expect(document.activeElement).toBe(tab("Workflow"));
+    fireEvent.keyDown(tab("Workflow"), { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(tab("Live session"));
+
+    // Choosing hides the bar it was chosen in; focus lands on the same tab
+    // in the bar that is now showing.
+    tab("Workflow").focus();
+    fireEvent.click(tab("Workflow"));
+    await waitFor(() => expect(document.activeElement).toBe(tab("Workflow")));
+    expect(tab("Workflow").closest(".app")?.hasAttribute("hidden")).toBe(false);
+  });
+
+  it("zooms only the diagram in front", async () => {
+    open("watch", [run]);
+    await screen.findByText("Anthill is observing, not running");
+    fireEvent.click(tab("Workflow"));
+    await screen.findByRole("button", { name: "Save" });
+    const zoom = () => (document.querySelector('.app:not(.live-page) [data-testid="zoom-level"]') as HTMLElement).textContent;
+    const before = zoom();
+
+    fireEvent.click(tab("Live session"));
+    fireEvent.keyDown(window, { key: "=", metaKey: true });
+    fireEvent.click(tab("Workflow"));
+    expect(zoom()).toBe(before);
+
+    fireEvent.keyDown(window, { key: "=", metaKey: true });
+    expect(zoom()).not.toBe(before);
+  });
+
+  it("does not step the workflow back while the session is in front", async () => {
+    open("watch", [run]);
+    await screen.findByText("Anthill is observing, not running");
+    const before = (screen.getByDisplayValue(WATCHED.name) as HTMLInputElement).value;
+    fireEvent.keyDown(window, { key: "z", metaKey: true });
+    expect(livePage()?.hidden).toBe(false);
+    expect((screen.getByDisplayValue(before) as HTMLInputElement).value).toBe(before);
+  });
+
+  it("goes back to the launch window from either tab", async () => {
+    open("watch", [run]);
+    await screen.findByText("Anthill is observing, not running");
+    fireEvent.click(screen.getByRole("button", { name: "←" }));
+    expect(onExit).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(tab("Workflow"));
+    await screen.findByRole("button", { name: "Save" });
+    fireEvent.click(screen.getByRole("button", { name: "←" }));
+    expect(onExit).toHaveBeenCalledTimes(2);
+  });
+
+  it("goes to the workflow on Stop observing, with the tab disabled once the run is gone", async () => {
+    const api = open("watch", [run]);
+    await screen.findByText("Anthill is observing, not running");
+    fireEvent.click(screen.getByRole("button", { name: "Stop observing in Anthill" }));
+
+    expect(api.liveCancel).toHaveBeenCalledWith(run.anthillRunId);
+    await screen.findByRole("button", { name: "Save" });
+    expect(livePage()).toBeNull();
+    // Main drops a cancelled run, and with it the reason the tab was open.
+    const pushed = api.onLiveSnapshot.mock.calls.map(([listener]) => listener);
+    act(() => pushed.forEach((listener) => listener({ runs: [], capabilities: [] })));
+    await waitFor(() => expect(tab("Live session").getAttribute("aria-disabled")).toBe("true"));
+  });
+
+  it("offers a session the moment one is confirmed, from the tab itself", async () => {
+    // A run of its own: the announcement is made once per run, ever.
+    open("design", [{ ...run, anthillRunId: "ANT-26726700" }]);
+    await screen.findByRole("button", { name: "Save" });
+    // The announcement asks first; dismissing it leaves the tab to do it.
+    fireEvent.click(await screen.findByRole("button", { name: "Stay in the workflow" }));
+
+    const live = tab("Live session");
+    expect(live.getAttribute("aria-disabled")).toBeNull();
+    expect(live.getAttribute("title")).toBe("The workflow stays open in its own tab");
+    expect(live.querySelector(".ws-tab-dot.is-live")).toBeTruthy();
+
+    fireEvent.click(live);
+    await screen.findByText("Anthill is observing, not running");
+  });
+
+  it("offers a finished session from the tab, as the chip does", async () => {
+    // Reopened after a restart: nothing is open in the tab, and the chip on
+    // the canvas already says the session finished.
+    open("design", [{ ...run, anthillRunId: "ANT-26726702", state: "completed" }]);
+    await screen.findByRole("button", { name: "Save" });
+
+    const live = tab("Live session");
+    expect(live.getAttribute("aria-disabled")).toBeNull();
+    expect(live.getAttribute("title")).toBe("The workflow stays open in its own tab");
+    // Finished, so no red dot claiming it is running.
+    expect(live.querySelector(".ws-tab-dot.is-live")).toBeNull();
+
+    fireEvent.click(live);
+    expect(livePage()?.hidden).toBe(false);
   });
 });
 

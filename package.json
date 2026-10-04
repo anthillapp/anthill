@@ -2,7 +2,7 @@
   "name": "anthill",
   "private": true,
   "license": "MIT",
-  "version": "0.8.8",
+  "version": "0.8.9",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -16,6 +16,7 @@
     "pretypecheck": "npm run build:deps",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "version:set": "node scripts/set-version.mjs",
+    "release": "node scripts/release.mjs",
     "plugin:target": "node scripts/plugin-target.mjs",
     "plugin:bundle": "npm run build:deps && npm run build --workspace=@anthill/mcp && node scripts/build-plugin-server.mjs"
   },

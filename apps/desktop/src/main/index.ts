@@ -41,6 +41,7 @@ import {
   type MarkerCli,
   type ObservationSetupActionResult,
   type ObservationSetupStatus,
+  type DraftFolder,
   type PromptDraftRequest,
   type PromptDraftResponse,
   type OpenWorkflowResult,
@@ -49,7 +50,13 @@ import {
 } from "../shared/ipc.js";
 import { createServices, type RunServices } from "./services.js";
 import { destinationInside, FileGrants, FolderGrants, rootToWrite, writeAllOrNothing } from "./safe-write.js";
-import { detectInterpreters, runDraft, signInToInterpreter } from "./interpreters.js";
+import {
+  detectInterpreters,
+  grantedDraftFolder,
+  runDraft,
+  shortenHome,
+  signInToInterpreter,
+} from "./interpreters.js";
 import { readCodexModels } from "./codex-models.js";
 import { readPiModels } from "./pi-models.js";
 import { readCodexAgentSupport } from "./codex-capability.js";
@@ -240,6 +247,12 @@ async function historyIfReadable(): Promise<RunServices | undefined> {
 }
 /** Folders a dialog handed out in this session; see `safe-write.ts`. */
 const grants = new FolderGrants();
+/**
+ * Folders the author let a drafting CLI read (ANT-67). Kept apart from
+ * `grants`: agreeing that a CLI may read a folder is not agreeing that Anthill
+ * may write agent files into it.
+ */
+const draftFolders = new FolderGrants();
 const workflowFiles = new FileGrants();
 
 /**
@@ -1288,6 +1301,8 @@ function registerIpcHandlers(): void {
   handle(
     IpcChannel.promptDraft,
     async (event, request: PromptDraftRequest): Promise<PromptDraftResponse> => {
+      const granted = await grantedDraftFolder(request, draftFolders);
+      if (granted.refused) return granted.refused;
       drafting?.abort();
       const controller = new AbortController();
       drafting = controller;
@@ -1295,6 +1310,7 @@ function registerIpcHandlers(): void {
         return await runDraft({
           interpreterId: request.interpreterId,
           instruction: request.instruction,
+          ...(granted.folder ? { folder: granted.folder } : {}),
           signal: controller.signal,
           onStage: (stage) => {
             if (!event.sender.isDestroyed()) {
@@ -1307,6 +1323,20 @@ function registerIpcHandlers(): void {
       }
     },
   );
+
+  // The picker is the consent for a drafting CLI to read the folder, and the
+  // grant is where it is written down. Directories only, and none created:
+  // there is nothing to read in a folder made on the spot.
+  handle(IpcChannel.promptFolderChoose, async (): Promise<DraftFolder | null> => {
+    const result = await dialog.showOpenDialog({
+      title: "Choose the project folder the CLI may read",
+      buttonLabel: "Choose",
+      properties: ["openDirectory"],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    const path = await draftFolders.grant(result.filePaths[0]);
+    return { path, displayPath: shortenHome(path) };
+  });
 
   handle(IpcChannel.promptDraftCancel, async () => {
     drafting?.abort();

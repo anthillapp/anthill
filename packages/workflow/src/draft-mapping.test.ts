@@ -577,6 +577,13 @@ describe("traceability", () => {
     });
   });
 
+  it("records the project folder the draft was made with, and only then", () => {
+    const withFolder = mapDraftToWorkflow(draft(), { ...OPTIONS, folder: "/Users/me/code/acme-web" });
+    expect(workflowSource(withFolder.workflow)?.folder).toBe("/Users/me/code/acme-web");
+    const without = mapDraftToWorkflow(draft(), OPTIONS);
+    expect(workflowSource(without.workflow)).not.toHaveProperty("folder");
+  });
+
   it("keeps the open questions with the workflow, not only in the preview", () => {
     const { workflow } = mapDraftToWorkflow(draft(), OPTIONS);
     expect(workflowSource(workflow)?.questions.map((item) => item.question)).toEqual([

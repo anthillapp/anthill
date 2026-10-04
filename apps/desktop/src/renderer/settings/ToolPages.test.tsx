@@ -12,9 +12,9 @@ import type { InterpreterInfo, PluginStatus } from "../../shared/ipc.js";
 import { SettingsScreen } from "./SettingsScreen.js";
 
 const TOOLS: InterpreterInfo[] = [
-  { id: "claude-code", label: "Claude Code", command: "claude", boundary: "", available: true, signedIn: true, version: "2.1.261" },
-  { id: "codex", label: "Codex", command: "codex", boundary: "", available: true, signedIn: false, version: "0.130.0" },
-  { id: "pi", label: "Pi", command: "pi", boundary: "", available: false },
+  { id: "claude-code", label: "Claude Code", command: "claude", boundary: "", folderBoundary: "", available: true, signedIn: true, version: "2.1.261" },
+  { id: "codex", label: "Codex", command: "codex", boundary: "", folderBoundary: "", available: true, signedIn: false, version: "0.130.0" },
+  { id: "pi", label: "Pi", command: "pi", boundary: "", folderBoundary: "", available: false },
 ];
 
 const PLUGINS: PluginStatus = {

@@ -1567,6 +1567,88 @@ describe("a subagent stopped by hand", () => {
 });
 
 /*
+  ANT-245, M5 of the 0.8.8-next QA. Claude Code's subagents hand back with a
+  SubagentHandback call. Two specialists sent off on their own each ended a
+  turn to wait on a background command, with nothing handed back; one was then
+  stopped by hand. Both steps were drawn Done — the stopped one beside a card
+  saying it was stopped.
+*/
+describe("a subagent that ends a turn before it hands back", () => {
+  const T = (s: number) => new Date(Date.parse("2026-10-03T21:09:00.000Z") + s * 1000).toISOString();
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const hook = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "hook", channel: "claude-code:hook", ...partial });
+  const sub = { kind: "subagent" as const };
+  const of = (call: string) => ({ parentToolUseId: call, agentId: `agent-${call}`, author: sub });
+
+  /** A coordinator that handed back, then two specialists sent off together. */
+  const dispatched = [
+    tx({ kind: "step.marker", title: "Step implement", blockId: "implement", at: T(0) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "coord", stepTag: "implement", at: T(1) }),
+    tx({ kind: "tool.start", title: "SubagentHandback", toolName: "SubagentHandback", toolUseId: "hb-coord", ...of("coord"), at: T(4) }),
+    hook({ kind: "subagent.end", title: "A subagent finished", agentId: "agent-coord", at: T(4.5) }),
+    tx({ kind: "tool.end", title: "Agent", toolUseId: "coord", at: T(4.6) }),
+    tx({ kind: "step.marker", title: "Step fix", blockId: "fix", at: T(5) }),
+    tx({ kind: "step.marker", title: "Step test", blockId: "test", at: T(5.05) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "a", stepTag: "test", background: true, at: T(6) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "a", background: true, at: T(6.1) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "b", stepTag: "fix", background: true, at: T(7) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "b", background: true, at: T(7.1) }),
+    // Each starts a command in the background and ends its turn to wait on it.
+    tx({ kind: "tool.start", title: "Bash", toolUseId: "a-sleep", ...of("a"), at: T(8) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "a-sleep", ...of("a"), at: T(8.5) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", ...of("a"), at: T(20) }),
+    hook({ kind: "subagent.end", title: "A subagent finished", agentId: "agent-a", at: T(20.2) }),
+    tx({ kind: "tool.start", title: "Monitor", toolUseId: "b-wait", ...of("b"), at: T(9) }),
+    tx({ kind: "tool.end", title: "Tool finished", toolUseId: "b-wait", ...of("b"), at: T(9.5) }),
+    tx({ kind: "turn.end", title: "The agent finished its turn", ...of("b"), at: T(25) }),
+    hook({ kind: "subagent.end", title: "A subagent finished", agentId: "agent-b", at: T(25.2) }),
+  ];
+
+  it("keeps the step working while its subagent waits on its own command", () => {
+    const view = foldLiveSession(workflow, run(), dispatched);
+    expect(view.blocks.test.state).toBe("running");
+    expect(view.blocks.fix.state).toBe("running");
+    expect(finishedSteps(view)).toBe(1);
+  });
+
+  it("ends a step whose subagent was stopped by hand failed, not done", () => {
+    const view = foldLiveSession(workflow, run(), [
+      ...dispatched,
+      tx({ kind: "notification", title: "Stopped by hand", ...of("b"), at: T(29) }),
+    ]);
+    expect(view.blocks.fix.state).toBe("failed");
+    expect(view.blocks.fix.note).toContain("stopped by hand");
+    expect(view.blocks.test.state).toBe("running");
+  });
+
+  it("finishes the step when the subagent hands back", () => {
+    const view = foldLiveSession(workflow, run(), [
+      ...dispatched,
+      // Woken by its command, it checks the result and hands back.
+      tx({ kind: "tool.start", title: "Bash", toolUseId: "b-check", ...of("b"), at: T(40) }),
+      tx({ kind: "tool.end", title: "Tool finished", toolUseId: "b-check", ...of("b"), at: T(41) }),
+      tx({ kind: "tool.start", title: "SubagentHandback", toolName: "SubagentHandback", toolUseId: "hb-b", ...of("b"), at: T(45) }),
+      hook({ kind: "subagent.end", title: "A subagent finished", agentId: "agent-b", at: T(45.5) }),
+    ]);
+    expect(view.blocks.fix.state).toBe("done");
+    expect(view.blocks.test.state).toBe("running");
+  });
+
+  it("leaves a step whose subagent never handed back unknown when the session is stopped", () => {
+    const view = foldLiveSession(workflow, run({ state: "observation_lost" }), [
+      ...dispatched,
+      tx({ kind: "notification", title: "Stopped by hand", at: T(36) }),
+      tx({ kind: "turn.end", title: "The agent finished its turn", at: T(37) }),
+    ]);
+    expect(view.blocks.test.state).not.toBe("done");
+    expect(view.blocks.fix.state).not.toBe("done");
+    expect(finishedSteps(view)).toBe(1);
+  });
+});
+
+/*
   W9 in the 0.8.3 QA: the session sent two subagents off on their own, ended
   its turn waiting for them, and was killed. Neither handed back, and both
   steps were drawn green and counted as finished.
@@ -2604,9 +2686,15 @@ describe("helper stops after a subagent's call, replayed from real journals", ()
     });
 
     it("keeps both developers running until they hand back", () => {
-      const view = foldLiveSession(mods, run(), journal);
+      const view = foldLiveSession(mods, run(), journal.filter((item) => item.seq < 125));
       expect(view.blocks.n1.state).toBe("done");
       expect(view.blocks.n2.state).toBe("running");
+      expect(view.blocks.n3.state).toBe("running");
+    });
+
+    it("finishes a developer's step on its handback (ANT-245)", () => {
+      const view = foldLiveSession(mods, run(), journal);
+      expect(view.blocks.n2.state).toBe("done");
       expect(view.blocks.n3.state).toBe("running");
     });
   });

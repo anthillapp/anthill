@@ -217,6 +217,7 @@ export {
   PROMPT_CLOSE,
   PROMPT_OPEN,
   buildDraftInstruction,
+  type DraftInstructionOptions,
 } from "./draft-instruction.js";
 
 export {
@@ -248,6 +249,7 @@ export {
   interpreterDefinition,
   isInterpreterId,
   isSignedOutFailure,
+  type DraftRun,
   type InterpreterDefinition,
   type InterpreterId,
 } from "./interpreters.js";

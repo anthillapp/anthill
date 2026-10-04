@@ -1252,6 +1252,58 @@ describe("the Anthill a chat reaches", () => {
     expect((refused.content[0] as { text: string }).text).toContain("This chat's handovers go to Anthill (dev build).");
   });
 
+  // ANT-273: refused before it reached any exchange — a `brief.report` that is
+  // a string rather than a list — the first result named nothing, and only the
+  // corrected second call said which Anthill. A call that stores nothing does
+  // not pin the chat, but it names where it would have gone.
+  it("names the target when the chat's first handover is malformed, without pinning the chat", async () => {
+    const { handlers, targets } = await throughTargets();
+    const malformed = completeWorkflow();
+    (malformed.brief as unknown as Record<string, unknown>).report = "SUMMARY.md";
+    const refused = await handlers.createWorkflowDraft(draftInput({ open: false, build: "dev", workflow: malformed }));
+
+    const answer = refused.structuredContent as { outcome: string; problems: { code: string }[]; target?: { id: string; label: string } };
+    expect(answer.outcome).toBe("invalid");
+    expect(answer.problems.map((problem) => problem.code)).toContain("WORKFLOW_MALFORMED");
+    expect(answer.target).toEqual({ id: "electron-dev", label: "Anthill (dev build)" });
+    expect((refused.content[0] as { text: string }).text).toContain("This chat's handovers go to Anthill (dev build).");
+    expect(targets.target).toBeUndefined();
+
+    const corrected = await handlers.createWorkflowDraft(draftInput({ open: false, build: "dev" }));
+    expect((corrected.structuredContent as { target?: { id: string } }).target?.id).toBe("electron-dev");
+    expect(targets.target?.target).toBe("electron-dev");
+  });
+
+  it("names the target when the chat's first handover is too large to read", async () => {
+    const { handlers, targets } = await throughTargets();
+    const refused = await handlers.createWorkflowDraft(
+      draftInput({ workflow: completeWorkflow({ description: "x".repeat(MAX_SUBMISSION_BYTES + 1) }) }),
+    );
+    const answer = refused.structuredContent as { problems: { code: string }[]; target?: { id: string } };
+    expect(answer.problems.map((problem) => problem.code)).toEqual([MCP_PROBLEM_CODES.SUBMISSION_TOO_LARGE]);
+    expect(answer.target?.id).toBe("app");
+    expect(targets.target).toBeUndefined();
+  });
+
+  it("names the pinned target on a malformed handover later in the chat", async () => {
+    const { handlers } = await throughTargets();
+    await handlers.createWorkflowDraft(draftInput());
+    const refused = await handlers.createWorkflowDraft(draftInput({ idempotencyKey: "handover-8", mode: "nonsense" }));
+    expect((refused.structuredContent as { target?: { id: string } }).target?.id).toBe("app");
+  });
+
+  it("refuses a malformed handover's build that the chat is not pinned to along with the rest", async () => {
+    const { handlers } = await throughTargets();
+    await handlers.createWorkflowDraft(draftInput());
+    const refused = await handlers.createWorkflowDraft(
+      draftInput({ idempotencyKey: "handover-8", build: "dev", mode: "nonsense" }),
+    );
+    const answer = refused.structuredContent as { problems: { field?: string; message: string }[] };
+    expect(answer.problems.map((problem) => problem.field)).toEqual(expect.arrayContaining(["mode", "build"]));
+    // The refusal names the Anthill the chat is on in so many words.
+    expect((refused.content[0] as { text: string }).text).toContain("already go to Anthill (installed app)");
+  });
+
   // ANT-238: before the web shell runs there is no port or token to link to,
   // and anthill:// opens nothing on Linux and Windows: no link at all.
   it("gives a web chat no anthill:// link while the web shell is not running", async () => {
@@ -1330,6 +1382,55 @@ describe("the Anthill a chat reaches", () => {
     it("quote a checkout path with spaces", async () => {
       const commands = await bindOnWeb({ anthillOnPath: false, checkout: "/Users/some one/anthill" });
       expect(commands).toContain(`'/Users/some one/anthill/apps/cli/out/cli/src/cli.js' run ANT-`);
+    });
+  });
+
+  /*
+    ANT-274: a fresh checkout set up for the dev build (build:deps, the MCP
+    server, plugin:target) never built its CLI, and with no `anthill` on the
+    PATH bind_run handed out `node …/apps/cli/out/cli/src/cli.js`, which was
+    not there: every report failed, and nothing said so.
+  */
+  describe("a dev-build chat whose checkout never built its CLI", () => {
+    async function bindOnDev(built: boolean) {
+      const checkout = await mkdtemp(join(tmpdir(), "anthill-checkout-"));
+      roots.push(checkout);
+      if (built) {
+        await mkdir(join(checkout, "apps", "cli", "out", "cli", "src"), { recursive: true });
+        await writeFile(join(checkout, "apps", "cli", "out", "cli", "src", "cli.js"), "");
+      }
+      const empty = await mkdtemp(join(tmpdir(), "anthill-mcp-bin-"));
+      roots.push(empty);
+      const { handlers } = await throughTargets({ env: { PATH: empty }, checkout });
+      const drafted = await handlers.createWorkflowDraft(draftInput({ open: false, build: "dev" }));
+      const ready = (await handlers.getReadyRevision({ workflowId: "workflow-1" })).structuredContent as { revision: number; digest: string };
+      const bound = await handlers.bindRun({ workflowId: "workflow-1", revision: ready.revision, digest: ready.digest, idempotencyKey: "bind-1" });
+      return { checkout, drafted, bound };
+    }
+    const textOf = (result: { content: unknown[] }) => (result.content[0] as { text: string }).text;
+
+    it("says so in bind_run's result, with the command that builds it", async () => {
+      const { checkout, bound } = await bindOnDev(false);
+      const cli = join(checkout, "apps", "cli", "out", "cli", "src", "cli.js");
+      expect(bound.structuredContent).toMatchObject({
+        outcome: "bound",
+        cliUnbuilt: { cli, checkout, build: "npm run build -w @anthill/cli" },
+      });
+      expect(textOf(bound)).toContain(`${cli} does not exist`);
+      expect(textOf(bound)).toContain(`\`npm run build -w @anthill/cli\` in ${checkout}`);
+    });
+
+    it("says so beside the progress check of a handover stored without opening", async () => {
+      const { drafted } = await bindOnDev(false);
+      expect(drafted.structuredContent).toHaveProperty("cliUnbuilt");
+      expect(textOf(drafted)).toContain("npm run build -w @anthill/cli");
+    });
+
+    it("says nothing about it once the CLI is built", async () => {
+      const { bound, drafted } = await bindOnDev(true);
+      expect(bound.structuredContent).not.toHaveProperty("cliUnbuilt");
+      expect(drafted.structuredContent).not.toHaveProperty("cliUnbuilt");
+      expect(textOf(bound)).not.toContain("has not been built");
     });
   });
 

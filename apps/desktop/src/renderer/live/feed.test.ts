@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AttributedEvent } from "@anthill/live";
 
-import { buildFeed, matchesFilter, readDuration } from "./feed.js";
+import { buildFeed, matchesFilter, readDuration, speakersOf, toolStatus } from "./feed.js";
 
 let seq = 0;
 function event(partial: Partial<AttributedEvent> & Pick<AttributedEvent, "kind">): AttributedEvent {
@@ -229,7 +229,11 @@ describe("the filters", () => {
 
   it("selects by kind", () => {
     expect(cards.filter((card) => matchesFilter(card, "tool"))).toHaveLength(1);
-    expect(cards.filter((card) => matchesFilter(card, "agent"))).toHaveLength(1);
+  });
+
+  it("counts a subagent being handed its task as something said", () => {
+    const said = cards.filter((card) => matchesFilter(card, "message"));
+    expect(said.map((card) => card.kind)).toEqual(["agent"]);
   });
 
   it("selects what could not be tied to a step, whatever kind it is", () => {
@@ -619,6 +623,32 @@ describe("a SubagentStop that names its subagent, in the feed", () => {
     expect(cards.filter((card) => card.kind !== "agent" && card.events.includes("subagent.end"))).toEqual([]);
   });
 
+  /*
+    M5 of the 0.8.8-next QA: where subagents hand back, one sent off on its own
+    ended a turn to wait on a background command and was drawn Completed
+    while it still worked.
+  */
+  it("keeps a card working until its subagent hands back, where subagents do", () => {
+    const handback = (who: typeof byA, s: number) =>
+      event({ kind: "tool.start", title: "SubagentHandback", toolName: "SubagentHandback", toolUseId: `hb-${who.agentId}`, ...who, at: T(s), ...tx });
+    const paused = [
+      ...journal,
+      event({ kind: "turn.end", title: "The agent finished its turn", ...byA, at: T(31), ...tx }),
+      event({ kind: "subagent.end", title: "A subagent finished", agentId: "agent-a", at: T(31.2), ...hook }),
+      handback(byB, 32),
+    ];
+    const agents = (cards: ReturnType<typeof buildFeed>) =>
+      cards.filter((card) => card.kind === "agent").map((card) => [card.agentName, card.state]);
+    expect(agents(buildFeed(paused, false))).toEqual([
+      ["writer-a", "working"],
+      ["writer-b", "done"],
+    ]);
+    expect(agents(buildFeed([...paused, handback(byA, 60)], false))).toEqual([
+      ["writer-a", "done"],
+      ["writer-b", "done"],
+    ]);
+  });
+
   it("draws nothing for one naming an agent the session never started", () => {
     const cards = buildFeed(
       [...journal, event({ kind: "subagent.end", title: "A subagent finished", agentId: "helper-1", at: T(30.5), ...hook })],
@@ -626,5 +656,70 @@ describe("a SubagentStop that names its subagent, in the feed", () => {
     );
     expect(cards.filter((card) => card.events.includes("subagent.end"))).toEqual([]);
     expect(cards.filter((card) => card.kind === "agent").map((card) => card.state)).toEqual(["working", "working"]);
+  });
+});
+
+/**
+ * Who acted (ANT-268).
+ *
+ * The header of every item names who did it. Only what the record says counts:
+ * a delegate's work carries the call that started it, and nothing is handed to
+ * whichever subagent happened to be at work nearby.
+ */
+describe("who each item is from", () => {
+  const profiles: Record<string, string> = { test: "Tester" };
+  const profileOf = (blockId: string | undefined) => (blockId ? profiles[blockId] : undefined);
+  const tested = { blockId: "test", confidence: "exact" as const, how: "the agent announced this step" };
+
+  it("signs a subagent's own calls and words with the subagent", () => {
+    const cards = buildFeed(
+      [
+        event({ kind: "subagent.start", agentName: "general-purpose", toolUseId: "a1", mapping: tested }),
+        event({ kind: "tool.start", toolName: "Bash", toolUseId: "t1", parentToolUseId: "a1" }),
+        event({ kind: "message", detail: "3 failed.", parentToolUseId: "a1", author: { kind: "subagent" } }),
+      ],
+      false,
+    );
+    const speakers = speakersOf(cards, profileOf);
+    for (const card of cards) expect(speakers.get(card.id)).toEqual({ kind: "agent", name: "Tester" });
+  });
+
+  it("names a subagent by the runtime's word when no block gives a profile", () => {
+    const cards = buildFeed([event({ kind: "subagent.start", agentName: "general-purpose", toolUseId: "a1" })], false);
+    expect(speakersOf(cards, profileOf).get(cards[0].id)).toEqual({ kind: "agent", name: "general-purpose" });
+  });
+
+  it("leaves everything else with the session's own agent, whatever block it was in", () => {
+    const cards = buildFeed(
+      [
+        event({ kind: "subagent.start", agentName: "general-purpose", toolUseId: "a1", mapping: tested }),
+        // In the same block, while the subagent works, but not from it.
+        event({ kind: "tool.start", toolName: "Read", toolUseId: "t2", mapping: tested }),
+        event({ kind: "message", detail: "Three tests fail.", author: { kind: "main" } }),
+      ],
+      false,
+    );
+    const speakers = speakersOf(cards, profileOf);
+    expect(speakers.get(cards[1].id)).toEqual({ kind: "orchestrator" });
+    expect(speakers.get(cards[2].id)).toEqual({ kind: "orchestrator" });
+  });
+
+  it("keeps a subagent the record signed but named nowhere a subagent", () => {
+    const cards = buildFeed([event({ kind: "message", detail: "Done.", author: { kind: "subagent" } })], false);
+    expect(speakersOf(cards, profileOf).get(cards[0].id)).toEqual({ kind: "agent", name: "Subagent" });
+  });
+});
+
+describe("a tool call's status in its row", () => {
+  it("reads as a duration once done, and never as Running after the session ended", () => {
+    expect(toolStatus({ state: "done", durationMs: 300 })).toBe("300ms");
+    expect(toolStatus({ state: "done" })).toBe("Done");
+    expect(toolStatus({ state: "failed", durationMs: 900 })).toBe("Failed · 900ms");
+    expect(toolStatus({ state: "working" })).toBe("Running");
+    expect(toolStatus({ state: "unknown" })).toBe("No result");
+
+    // Settled: a call still open when the session ends is no longer running.
+    const [card] = buildFeed([event({ kind: "tool.start", toolName: "Bash", toolUseId: "t1" })], true);
+    expect(toolStatus(card)).toBe("No result");
   });
 });

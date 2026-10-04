@@ -61,7 +61,7 @@ import {
 } from "./workflow-history.js";
 import { LiveIndicator } from "../live/LiveIndicator.js";
 import { PresencePlaque } from "../live/PresenceChip.js";
-import { mostRelevant, presenceKey, runsFor } from "../live/presence.js";
+import { hasSessionPage, mostRelevant, presenceKey, runsFor } from "../live/presence.js";
 import {
   markAnnounced,
   SessionStartedDialog,
@@ -70,6 +70,7 @@ import {
 import { LiveSessionPage } from "../live/LiveSessionPage.js";
 import { WorkflowToolbar, type ToolbarHandover } from "./WorkflowToolbar.js";
 import { HandoverNotice } from "./HandoverNotice.js";
+import { WorkspaceTabs, type WorkspaceTab } from "./WorkspaceTabs.js";
 import { handoverModel } from "./handover.js";
 import { useExchange } from "./use-exchange.js";
 import { CanvasTour } from "../tour/CanvasTour.js";
@@ -211,21 +212,32 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
     });
   }, []);
   /**
-   * The observed session being looked at, if any.
-   *
-   * A page rather than a panel, and only reachable while a session is actually
-   * live: every other observation state is a statement about what Anthill does
-   * not know, and there is nothing honest to fill a page with.
-   */
-  /**
    * Whether the canvas tour is showing. Read once per screen: it is due after
    * onboarding or a Show tips, and the canvas it points at only exists once a
    * workflow is open — which is when this component renders the canvas.
    */
   const [touring, setTouring] = useState(() => tourDue());
+  /**
+   * The observed session open in this window's Live session tab, if any.
+   *
+   * Set when the reader opens one — from the live chip, the announcement, the
+   * tab itself, or a `watch` handover going there by itself — and cleared only
+   * by Stop observing. Switching to the Workflow tab keeps it, and keeps its
+   * page mounted, so the feed goes on arriving and the page is as it was left
+   * when they come back (ANT-267).
+   */
   const [liveRun, setLiveRun] = useState<PendingRun | null>(
     start?.kind === "open" && start.live ? start.live : null,
   );
+  const [tab, setTab] = useState<WorkspaceTab>(
+    start?.kind === "open" && start.live ? "live" : "workflow",
+  );
+  /** Without a session open there is only the workflow to show. */
+  const showing: WorkspaceTab = liveRun ? tab : "workflow";
+  const openLive = useCallback((run: PendingRun) => {
+    setLiveRun(run);
+    setTab("live");
+  }, []);
   /** What the CLI behind the open live run can expose, as main reported it. */
   const [liveObservation, setLiveObservation] = useState<
     { available: boolean; note: string } | undefined
@@ -401,14 +413,16 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") return;
-      if (typingInAField()) return;
+      // The canvas is behind the Live session tab: an undo there would change
+      // a workflow nobody is looking at.
+      if (showing !== "workflow" || typingInAField()) return;
       event.preventDefault();
       keyStepAt.current = Date.now();
       step(event.shiftKey ? "forward" : "back");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [step]);
+  }, [step, showing]);
 
   /*
     The same two, from the app's Edit menu. In the app the menu takes ⌘Z and
@@ -419,11 +433,11 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   useEffect(
     () =>
       window.anthill.onEditHistory?.((action) => {
-        if (typingInAField()) return;
+        if (showing !== "workflow" || typingInAField()) return;
         if (Date.now() - keyStepAt.current < 400) return;
         step(action === "redo" ? "forward" : "back");
       }),
-    [step],
+    [step, showing],
   );
 
   const replaceWorkflow = useCallback(
@@ -706,14 +720,18 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    *
    * A `watch` handover is never announced, because the next effect is already
    * taking the reader there. Asking "open the session?" of somebody who asked
-   * for nothing else is a dialog with one answer.
+   * for nothing else is a dialog with one answer. Nor is a run already open in
+   * the Live session tab: the dialog would be waiting on the canvas, offering
+   * the session they just came from.
    */
   const [announcing, setAnnouncing] = useState<PendingRun | null>(null);
+  const openRunId = liveRun?.anthillRunId;
   useEffect(() => {
     if (!watched || opensLive || !shouldAnnounce(watched)) return;
     markAnnounced(watched.anthillRunId);
+    if (watched.anthillRunId === openRunId) return;
     setAnnouncing(watched);
-  }, [watched, opensLive]);
+  }, [watched, opensLive, openRunId]);
 
   /**
    * A `watch` handover goes to its session by itself.
@@ -725,17 +743,18 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    * changes underneath it. That is the whole of "no editing step" — the user
    * never has to find the indicator and click it.
    *
-   * Once per run, and remembered: `Stop observing` and the page's own Back
-   * both put the reader on the canvas deliberately, and an effect that sent
-   * them straight back would make those two buttons unusable.
+   * Once per run, and remembered: `Stop observing` and the Workflow tab both
+   * put the reader on the canvas deliberately, and an effect that sent them
+   * straight back would make the tab and the button unusable.
    */
   const sentToLive = useRef<string | null>(null);
+  const workflowShown = useRef(false);
   useEffect(() => {
     if (!opensLive || !watched || sentToLive.current === watched.anthillRunId) return;
     sentToLive.current = watched.anthillRunId;
     markAnnounced(watched.anthillRunId);
-    setLiveRun(watched);
-  }, [opensLive, watched]);
+    openLive(watched);
+  }, [opensLive, watched, openLive]);
 
   if (!workflow) {
     if (fromPrompt) {
@@ -866,30 +885,49 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
   const current = (run: PendingRun): PendingRun =>
     liveRuns.find((candidate) => candidate.anthillRunId === run.anthillRunId) ?? run;
 
-  if (liveRun && workflow) {
-    return (
-      <LiveSessionPage
-        workflow={workflow}
-        run={current(liveRun)}
-        storageError={liveStorageError}
-        {...(liveObservation ? { observation: liveObservation } : {})}
-        onBack={() => setLiveRun(null)}
-        onStopObserving={(runId) => {
-          void window.anthill.liveCancel(runId);
-          setLiveRun(null);
-        }}
-      />
-    );
-  }
+  /*
+   * What the Live session tab would show: the run open in it, or else the one
+   * the chip would open — a session confirmed live, or one that finished.
+   * Anything less certain leaves the tab disabled — the chip is where a maybe
+   * is explained.
+   */
+  const liveTarget = liveRun
+    ? current(liveRun)
+    : watched && hasSessionPage(watched)
+      ? watched
+      : undefined;
+  const tabs = (
+    <WorkspaceTabs
+      active={showing}
+      liveEnabled={liveTarget !== undefined}
+      liveNow={liveTarget?.state === "detected_live"}
+      onSelect={(next) => {
+        if (next === "workflow") setTab("workflow");
+        else if (liveRun) setTab("live");
+        else if (liveTarget) {
+          markAnnounced(liveTarget.anthillRunId);
+          setAnnouncing(null);
+          openLive(liveTarget);
+        }
+      }}
+    />
+  );
 
-  return (
-    <div className="app">
+  /*
+   * The canvas is built the first time its tab is shown, and kept from then
+   * on. A window opened straight onto a session would otherwise lay out and
+   * frame a canvas measured at nothing, and show it unframed later.
+   */
+  if (showing === "workflow") workflowShown.current = true;
+
+  const workflowPage = (
+    <div className="app" hidden={showing !== "workflow"}>
       {announcing && workflow ? (
         <SessionStartedDialog
           run={current(announcing)}
           workflowName={workflow.name}
           onOpenSession={() => {
-            setLiveRun(current(announcing));
+            openLive(current(announcing));
             setAnnouncing(null);
           }}
           onDismiss={() => setAnnouncing(null)}
@@ -941,6 +979,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         onPrompt={() => setShowPrompt(true)}
         onExport={() => setShowExport(true)}
         {...(handover ? { handover } : {})}
+        tabs={tabs}
       />
 
       {showProblems ? (
@@ -1070,7 +1109,7 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
                 <LiveIndicator
                   {...(workflow.id ? { workflowId: workflow.id } : {})}
                   onOpenSession={(run, capability) => {
-                    setLiveRun(run);
+                    openLive(run);
                     setLiveObservation(capability);
                   }}
                 />
@@ -1233,5 +1272,28 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         />
       ) : null}
     </div>
+  );
+
+  return (
+    <>
+      {liveRun ? (
+        <LiveSessionPage
+          key={liveRun.anthillRunId}
+          workflow={workflow}
+          run={current(liveRun)}
+          storageError={liveStorageError}
+          {...(liveObservation ? { observation: liveObservation } : {})}
+          hidden={showing !== "live"}
+          tabs={tabs}
+          onExit={exit}
+          onStopObserving={(runId) => {
+            void window.anthill.liveCancel(runId);
+            setLiveRun(null);
+            setTab("workflow");
+          }}
+        />
+      ) : null}
+      {workflowShown.current ? workflowPage : null}
+    </>
   );
 }

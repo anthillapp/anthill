@@ -37,6 +37,7 @@ import {
 import type { Workflow } from "@anthill/workflow-schema";
 
 import type { LaunchReport } from "./launch.js";
+import type { UnbuiltCli } from "./report-command.js";
 
 /** A step as the reporting commands name it. */
 export type RunStep = { id: string; name: string };
@@ -69,6 +70,8 @@ export type DraftAnswer = {
    * reporter where it is not (ANT-249). `enable` and `skip` take its place.
    */
   observationCommand?: string;
+  /** The checkout's CLI that command runs, when it was never built (ANT-274). */
+  cliUnbuilt?: UnbuiltCli;
   /**
    * What became of bringing Anthill up for this.
    *
@@ -222,6 +225,11 @@ export type BindAnswer = InvalidBindAnswer | {
 
   /** The commands the harness runs to report progress, ready to be followed. */
   reportingCommands?: string;
+  /**
+   * The checkout's CLI those commands run, when it was never built: they fail
+   * until it is, so the result says so and how (ANT-274).
+   */
+  cliUnbuilt?: UnbuiltCli;
   steps?: RunStep[];
   reason?: EligibilityRefusal;
   problems?: ExchangeProblem[];
@@ -322,6 +330,7 @@ export function draftText(answer: DraftAnswer): string {
   if (answer.openDeferred && answer.observationCommand) {
     parts.push(
       `Check detailed progress with \`${answer.observationCommand}\` (replace \`status\` with \`enable\` or \`skip\` for the other two).`,
+      ...unbuiltText(answer.cliUnbuilt),
     );
   }
 
@@ -533,9 +542,23 @@ export function bindText(answer: BindAnswer): string {
     // session and has no other way to learn which step the work is on.
     "Run these as you work. They are the only thing that tells Anthill which step you are on, and they change nothing about the work itself – if one cannot be run, carry on without it.",
     answer.reportingCommands ?? "",
+    ...unbuiltText(answer.cliUnbuilt),
     ...appText(answer.app),
     answer.url ?? "",
   ]);
+}
+
+/**
+ * What to say about a checkout's CLI the commands run and nobody built: they
+ * would fail with a path that is not there, and the reports would be lost
+ * without a word (ANT-274).
+ */
+function unbuiltText(unbuilt: UnbuiltCli | undefined): string[] {
+  if (!unbuilt) return [];
+  return [
+    `These commands run Anthill's CLI from the checkout at ${unbuilt.checkout}, and it has not been built: ${unbuilt.cli} does not exist, so they fail until it is. ` +
+      `Build it by running \`${unbuilt.build}\` in ${unbuilt.checkout}, then run them as written.`,
+  ];
 }
 
 export function callText(answer: CallAnswer): string {

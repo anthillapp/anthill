@@ -359,6 +359,19 @@ export class TargetSession {
   }
 
   handover(request: TargetRequest = {}): Reach | Refusal {
+    const reach = this.peek(request);
+    if ("refused" in reach || this.pinned) return reach;
+    this.pinned = reach;
+    this.onPin(reach.resolved);
+    return reach;
+  }
+
+  /**
+   * What `handover` would answer, without pinning: for a handover refused
+   * before it reached any exchange, which still names the Anthill the chat's
+   * handovers go to (ANT-273) but has stored nothing to decide it by.
+   */
+  peek(request: TargetRequest = {}): Reach | Refusal {
     if (this.pinned) {
       // A later call asking for a different build than the one the chat is
       // pinned to is refused: switching builds takes a new chat, because the
@@ -374,9 +387,7 @@ export class TargetSession {
     }
     const resolution = resolveTarget(this.context, request);
     if (!resolution.ok) return { refused: resolution.message };
-    this.pinned = this.reach(resolution.resolved);
-    this.onPin(resolution.resolved);
-    return this.pinned;
+    return this.reach(resolution.resolved);
   }
 
   /**

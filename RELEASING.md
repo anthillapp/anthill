@@ -273,5 +273,6 @@ For a released version that cannot wait for the next release:
 | `scripts/smoke-cli.mjs` | `linux-source`, `windows-source` | starts the installed CLI and fetches its page, with diagnostics off |
 
 GitHub enforces the rest: master takes pull requests only, squash only, with
-`check`, `macos-package` and `release-gate` passing; `*-next` branches take pull requests only,
+`check`, `linux-source`, `windows-source`, `macos-package` and
+`release-gate` passing; `*-next` branches take pull requests only,
 with `check` passing, and refuse force pushes.

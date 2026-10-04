@@ -7,7 +7,7 @@ imports it.
 
 The process is described once, for people and agents alike, in
 [RELEASING.md](RELEASING.md). Read it in full before you freeze a release,
-open or update a pull request into master, tag, make a hotfix, or check a
+open or update a pull request into master, make a hotfix, or check a
 release candidate. If this list and RELEASING.md disagree, RELEASING.md is
 right; fix this list.
 
@@ -25,9 +25,9 @@ Rules for every task:
 - **Never pick a version.** Before the freeze and before any pull request into
   master, ask the maintainer which version `<V>-next` becomes, and wait for the
   answer. The pull request into master says it, e.g. `` `0.8.7-next` = 0.8.8 ``.
-- **Do not merge into master or push tags** unless the maintainer asks for
-  that specific merge or tag. The tag goes on the master commit right after the
-  merge.
+- **Do not merge into master** unless the maintainer asks for that specific
+  merge: the merge publishes the release. The Release workflow tags the master
+  commit and publishes the macOS build by itself; never push a `v*` tag.
 - **A verification is about one commit**, named by its full SHA. Any change
   after it — a fix, a sync from master, a conflict resolution — is a new
   candidate and is checked again.

@@ -2,13 +2,13 @@
 #
 # The same checks the release workflow runs before it builds, on the same
 # runner (`macos-14`, Apple Silicon), so a change that would break a release is
-# caught on its pull request instead of on its tag. It builds no app and uses
-# no secrets: `pull_request` from a fork gets none, and none are needed.
+# caught on its pull request instead of on master. `check` builds no app and
+# uses no secrets: `pull_request` from a fork gets none, and none are needed.
 #
 # A push to master or the next-release branch (`<version>-next`) runs it again
 # on the exact commit, which is the commit a release verifies (RELEASING.md). That run, and a pull request
 # into master, also builds from source on Linux and Windows the way the README
-# tells people to. A green Linux or Windows job means the tree installs, builds,
+# tells people to, and packages the macOS app (`macos-package`). A green Linux or Windows job means the tree installs, builds,
 # passes its tests (Linux) and the CLI starts and serves its page there. It is
 # not E2E on that platform, and macOS passing proves nothing about either.
 name: CI
@@ -87,3 +87,35 @@ jobs:
       - run: npm run build
       - run: npm install --global ./apps/cli
       - run: node scripts/smoke-cli.mjs
+
+  # The macOS disk image, built and signed the way the Release workflow will
+  # publish it, from the same `.github/actions/macos-package`. It runs on the
+  # next-release branch and on pull requests into master, so the commit a
+  # release verifies has been packaged before it merges; the Release workflow
+  # then builds it again on master and publishes it. Nothing is published here.
+  # Not on a push to master, where the Release workflow is the build.
+  macos-package:
+    if: github.ref != 'refs/heads/master' && (github.event_name != 'pull_request' || github.base_ref == 'master')
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Signed and notarised when the secrets are there, as a release is: a
+      # signing failure belongs on the candidate, not on master. A pull request
+      # from a fork gets no secrets and builds ad-hoc signed.
+      - uses: ./.github/actions/macos-package
+        with:
+          macos-certificate: ${{ secrets.MACOS_CERTIFICATE }}
+          macos-certificate-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          apple-api-key-p8: ${{ secrets.APPLE_API_KEY_P8 }}
+          apple-api-key-id: ${{ secrets.APPLE_API_KEY_ID }}
+          apple-api-issuer: ${{ secrets.APPLE_API_ISSUER }}
+          apple-team-id: ${{ secrets.APPLE_TEAM_ID }}

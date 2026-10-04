@@ -1,9 +1,17 @@
-# Build the macOS disk image and attach it to a GitHub release.
+# Publish the macOS disk image when a release reaches master.
 #
-# Triggered by a tag rather than by a push to master: a release is a thing
-# somebody decides to make, and tagging is how they say so. Running on every
-# push would produce a stream of artefacts nobody asked for and no way to tell
-# which one is meant to be downloaded.
+# master receives only a verified release or a hotfix, each with a version no
+# release has had (RELEASING.md), so a push to master that carries such a
+# version is the release itself: this tags that commit `v<version>`, builds the
+# disk image and attaches it to a GitHub release. Merging the release pull
+# request is the decision; there is no tag for somebody to push by hand
+# afterwards, and so no window in which master has a release macOS does not.
+# Any other push to master — one whose version already has its tag — publishes
+# nothing.
+#
+# The same build runs in CI (`macos-package`) on the commit before it merges,
+# from the shared `.github/actions/macos-package`. A run started by hand builds
+# that artefact here too and publishes nothing.
 #
 # The runner is `macos-14`, pinned rather than `macos-latest`, because the
 # runner image decides the architecture of the build and `latest` moves without
@@ -13,163 +21,73 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
-  # So the build can be exercised without cutting a release.
+    branches: [master]
   workflow_dispatch:
 
 permissions:
   contents: write
 
+# Two pushes to master in a row are two releases; the second waits for the first.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
-  macos:
-    runs-on: macos-14
+  # The tag this push releases, or none (RELEASING.md). Cheap, so a push to
+  # master that releases nothing does not hold a macOS runner.
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
     steps:
-      # Full history, so the tag can be checked against master.
+      # Full history and tags, to tell a new version from one already released.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: release
+        run: node scripts/release.mjs released
+
+  macos:
+    needs: decide
+    if: needs.decide.outputs.tag != '' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
-      # A tag is the master commit a verified release or hotfix became, with
-      # that version (RELEASING.md). One anywhere else publishes nothing.
-      - run: node scripts/release.mjs tagged
-
       - run: npm ci
-
-      # The Electron-ABI copy of better-sqlite3. Not in the repository — it is a
-      # binary — so it is fetched here, and the packaged app fails at startup
-      # without it.
-      - run: node apps/desktop/scripts/fetch-electron-sqlite.mjs
 
       # A broken build is worth catching before it is published, not after
       # somebody downloads it.
+      - run: node apps/desktop/scripts/fetch-electron-sqlite.mjs
       - run: npm run typecheck
       - run: npm test
 
-      # Signing is optional and stays that way. Without the secrets this step
-      # does nothing and the build below produces the same ad-hoc signed disk
-      # image it always has — which still runs, but which macOS quarantines on
-      # download. With them, the app is signed and notarised and opens without
-      # ceremony.
-      #
-      # A throwaway keychain rather than the runner's login one: the runner is
-      # discarded after the job, but a certificate should not outlive the step
-      # that needed it even so.
-      - name: Import the Developer ID certificate, if there is one
-        env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-        run: |
-          if [ -z "$MACOS_CERTIFICATE" ]; then
-            echo "No MACOS_CERTIFICATE secret — building unsigned."
-            exit 0
-          fi
-          KEYCHAIN=$RUNNER_TEMP/signing.keychain-db
-          PASSWORD=$(uuidgen)
-          security create-keychain -p "$PASSWORD" "$KEYCHAIN"
-          security set-keychain-settings -lut 900 "$KEYCHAIN"
-          security unlock-keychain -p "$PASSWORD" "$KEYCHAIN"
-          # Whitespace is stripped from both because a secret carries whatever
-          # was pasted into it, and a trailing newline is invisible in the box.
-          # One rode in on the password and the import failed with "MAC
-          # verification failed (wrong password?)" — which is what a correct
-          # password plus a newline looks like from the outside.
-          printf '%s' "$MACOS_CERTIFICATE" | tr -d '[:space:]' | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          CERT_PASSWORD=$(printf '%s' "$MACOS_CERTIFICATE_PASSWORD" | tr -d '[:space:]')
-          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
-            -P "$CERT_PASSWORD" -T /usr/bin/codesign
-          rm -f "$RUNNER_TEMP/cert.p12"
-          # Without this, codesign stops to ask for permission nobody can give.
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$PASSWORD" "$KEYCHAIN" > /dev/null
-          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
-          security find-identity -v -p codesigning "$KEYCHAIN"
-
-      # The notary key is a file on disk, not a string: electron-builder reads
-      # APPLE_API_KEY as a path. So the secret carries the .p8 base64-encoded
-      # and it is written out here, inside the runner's temp directory.
-      - name: Write the notary key, if there is one
-        id: notary
-        env:
-          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
-        run: |
-          if [ -z "$APPLE_API_KEY_P8" ]; then
-            echo "No APPLE_API_KEY_P8 secret — the build will not be notarised."
-            exit 0
-          fi
-          KEY=$RUNNER_TEMP/notary.p8
-          printf '%s' "$APPLE_API_KEY_P8" | tr -d '[:space:]' | base64 --decode > "$KEY"
-          chmod 600 "$KEY"
-          echo "path=$KEY" >> "$GITHUB_OUTPUT"
-
-      # Built on its own so the Sentry token reaches only the bundler, which
-      # uploads the hidden source maps and deletes them. Packaging and signing
-      # below never see it. Without the secret, no maps are made at all.
-      #
-      # Diagnostics are compiled in only for a tagged release: a manual run's
-      # artefact, like a dev run or a local package, never reports anything.
-      - name: Build the app bundles
-        run: npm run build --workspace=@anthill/desktop
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          ANTHILL_RELEASE_BUILD: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
-
-      # Credentials reach electron-builder through the environment and appear
-      # nowhere in the repository. Absent, it skips notarising and says so; the
-      # build still succeeds.
-      # Trimmed in the shell rather than passed straight through: a secret
-      # holds exactly what was pasted, and pasting into the box leaves the
-      # cursor on a fresh line. The certificate password arrived that way and
-      # the import failed on it; these three happened not to, which is luck
-      # rather than a property worth relying on.
-      - run: |
-          export APPLE_API_KEY_ID=$(printf '%s' "$RAW_KEY_ID" | tr -d '[:space:]')
-          export APPLE_API_ISSUER=$(printf '%s' "$RAW_ISSUER" | tr -d '[:space:]')
-          export APPLE_TEAM_ID=$(printf '%s' "$RAW_TEAM_ID" | tr -d '[:space:]')
-          npm exec --workspace=@anthill/desktop -- electron-builder --mac
-        env:
-          RAW_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          RAW_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          RAW_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_API_KEY: ${{ steps.notary.outputs.path }}
-
-      # The source maps are the private source. They go to Sentry and nowhere
-      # else: electron-builder leaves them out, and this fails the release if
-      # one ever reaches the archive anyway.
-      - name: Check that no source map ships in the app
-        run: |
-          ASAR=apps/desktop/release/mac-arm64/Anthill.app/Contents/Resources/app.asar
-          if npx --no-install asar list "$ASAR" | grep -E '\.map$'; then
-            echo "::error::Source maps found in app.asar."
-            exit 1
-          fi
-
-      # Says plainly which of the two kinds of build this is, so a failure to
-      # sign cannot be discovered later by somebody downloading it.
-      - name: Report how the app was signed
-        run: |
-          codesign -dv --verbose=2 apps/desktop/release/mac-arm64/Anthill.app 2>&1 \
-            | grep -E "Signature|TeamIdentifier" || true
-          if codesign -dv apps/desktop/release/mac-arm64/Anthill.app 2>&1 | grep -q "adhoc"; then
-            echo "::warning::Ad-hoc signed. macOS will quarantine this download."
-          else
-            spctl -a -vv -t install apps/desktop/release/mac-arm64/Anthill.app 2>&1 || true
-          fi
-
-      - uses: actions/upload-artifact@v4
+      - uses: ./.github/actions/macos-package
         with:
-          name: anthill-macos-arm64
-          path: apps/desktop/release/*.dmg
+          release-build: ${{ needs.decide.outputs.tag != '' && '1' || '0' }}
+          sentry-auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          macos-certificate: ${{ secrets.MACOS_CERTIFICATE }}
+          macos-certificate-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          apple-api-key-p8: ${{ secrets.APPLE_API_KEY_P8 }}
+          apple-api-key-id: ${{ secrets.APPLE_API_KEY_ID }}
+          apple-api-issuer: ${{ secrets.APPLE_API_ISSUER }}
+          apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
 
-      # Only for a tag. A manual run leaves the artefact above and publishes
-      # nothing.
-      - if: startsWith(github.ref, 'refs/tags/v')
+      # Only for a new version on master. It creates the tag on the commit
+      # that was built; a manual run leaves the artefact and publishes nothing.
+      - if: needs.decide.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.decide.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           files: apps/desktop/release/*.dmg
           # Said on the release itself, because it is the first thing a
           # downloader meets and the last thing they will read afterwards.
@@ -188,3 +106,24 @@ jobs:
               and choose *Open*.
 
             After that it launches normally. A signed build needs none of this.
+
+  # The next release starts collecting at once (RELEASING.md, *After the
+  # release*): `<this version>-next` from the commit just released, the open
+  # pull requests moved onto it, and the previous next-release branch, now
+  # squashed into master, deleted. Only after the release is published.
+  next-branch:
+    needs: [decide, macos]
+    if: needs.decide.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/release.mjs next-branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASED_SHA: ${{ github.sha }}

@@ -1,4 +1,4 @@
-// Anthill MCP server 0.8.8, built by scripts/build-plugin-server.mjs
+// Anthill MCP server 0.8.9, built by scripts/build-plugin-server.mjs
 // from https://github.com/anthillapp/anthill. Do not edit: run
 // `npm run plugin:bundle` to write it again. MIT licensed.
 import { createRequire as __anthillCreateRequire } from "node:module";
@@ -37753,7 +37753,7 @@ function draftText(answer) {
   const shown = answer.openDeferred ? ". It has not been opened: call open_workflow with this workflow id when it is time to show it." : answer.displayRequested ? ". A display request is queued; Anthill has not acknowledged opening it." : ". No display request was queued. Desktop display is not confirmed.";
   const parts = [`${stored}${shown}`];
   if (answer.openDeferred && answer.observationCommand) {
-    parts.push(`Check detailed progress with \`${answer.observationCommand}\` (replace \`status\` with \`enable\` or \`skip\` for the other two).`);
+    parts.push(`Check detailed progress with \`${answer.observationCommand}\` (replace \`status\` with \`enable\` or \`skip\` for the other two).`, ...unbuiltText(answer.cliUnbuilt));
   }
   parts.push(stateText("ready_for_agent"), "Ask the user whether to start. When they say so, call get_ready_revision, then bind_run.");
   parts.push(...answer.app ? appText(answer.app) : targetText(answer.target));
@@ -37901,11 +37901,20 @@ function bindText(answer) {
     // session and has no other way to learn which step the work is on.
     "Run these as you work. They are the only thing that tells Anthill which step you are on, and they change nothing about the work itself \u2013 if one cannot be run, carry on without it.",
     answer.reportingCommands ?? "",
+    ...unbuiltText(answer.cliUnbuilt),
     ...appText(answer.app),
     answer.url ?? ""
   ]);
 }
 __name(bindText, "bindText");
+function unbuiltText(unbuilt) {
+  if (!unbuilt)
+    return [];
+  return [
+    `These commands run Anthill's CLI from the checkout at ${unbuilt.checkout}, and it has not been built: ${unbuilt.cli} does not exist, so they fail until it is. Build it by running \`${unbuilt.build}\` in ${unbuilt.checkout}, then run them as written.`
+  ];
+}
+__name(unbuiltText, "unbuiltText");
 function callText(answer) {
   const unnamed = answer.problems.every((problem2) => problem2.field === "workflowId");
   return join4([
@@ -38297,6 +38306,19 @@ var TargetSession = class {
     return this.pinned?.resolved;
   }
   handover(request = {}) {
+    const reach = this.peek(request);
+    if ("refused" in reach || this.pinned)
+      return reach;
+    this.pinned = reach;
+    this.onPin(reach.resolved);
+    return reach;
+  }
+  /**
+   * What `handover` would answer, without pinning: for a handover refused
+   * before it reached any exchange, which still names the Anthill the chat's
+   * handovers go to (ANT-273) but has stored nothing to decide it by.
+   */
+  peek(request = {}) {
     if (this.pinned) {
       if (request.build === "dev" && this.context.platform === "darwin" && this.pinned.resolved.target !== "electron-dev") {
         return {
@@ -38308,9 +38330,7 @@ var TargetSession = class {
     const resolution = resolveTarget(this.context, request);
     if (!resolution.ok)
       return { refused: resolution.message };
-    this.pinned = this.reach(resolution.resolved);
-    this.onPin(resolution.resolved);
-    return this.pinned;
+    return this.reach(resolution.resolved);
   }
   /**
    * A look that does not decide. With a build request — a session picking a
@@ -38622,10 +38642,18 @@ function onPath(name, deps) {
   return void 0;
 }
 __name(onPath, "onPath");
+var BUILD_CLI = "npm run build -w @anthill/cli";
 function reportingInvocation(resolved, deps) {
   const onThePath = onPath("anthill", deps) !== void 0;
   const reporter = deps.reporter ? { command: `${nodeFor(deps)} ${typedPath(deps.reporter, deps.platform)}` } : {};
-  const checkoutCli = !deps.reporter && resolved.checkout ? { command: `${nodeFor(deps)} ${typedPath(webShellCli(resolved.checkout), deps.platform)}` } : {};
+  const viaCheckout = /* @__PURE__ */ __name((checkout) => {
+    const cli = webShellCli(checkout);
+    return {
+      command: `${nodeFor(deps)} ${typedPath(cli, deps.platform)}`,
+      ...deps.exists(cli) ? {} : { unbuilt: { cli, checkout, build: BUILD_CLI } }
+    };
+  }, "viaCheckout");
+  const checkoutCli = !deps.reporter && resolved.checkout ? viaCheckout(resolved.checkout) : {};
   if (resolved.target !== "web")
     return onThePath ? {} : deps.reporter ? reporter : checkoutCli;
   const platform = { platform: deps.platform };
@@ -38634,8 +38662,7 @@ function reportingInvocation(resolved, deps) {
     return dataDir;
   if (!resolved.checkout)
     return { ...reporter, ...dataDir };
-  const cli = typedPath(webShellCli(resolved.checkout), deps.platform);
-  return { command: `${nodeFor(deps)} ${cli}`, ...dataDir };
+  return { ...viaCheckout(resolved.checkout), ...dataDir };
 }
 __name(reportingInvocation, "reportingInvocation");
 function nodeFor(deps) {
@@ -38657,6 +38684,7 @@ function invocationDeps(environment) {
         return false;
       }
     }, "executable"),
+    exists: /* @__PURE__ */ __name((path) => existsSync3(path), "exists"),
     node: process.execPath,
     ...existsSync3(besideThisServer) ? { reporter: besideThisServer } : {}
   };
@@ -38707,13 +38735,18 @@ function createHandlers(dependencies) {
         ...input.workflowId !== void 0 ? { workflowId: input.workflowId } : {},
         workflow: input.workflow
       };
+      const build = readBuild(input.build);
+      const bound = "problem" in build ? void 0 : targets.peek(build.request);
+      const refusedEarly = /* @__PURE__ */ __name((problems2) => result(draftText, {
+        ...invalidDraft([...problems2, ...bound && "problem" in bound ? [bound.problem] : []]),
+        ...bound && !("problem" in bound) ? targetField(bound) : {}
+      }), "refusedEarly");
       const oversize = checkSize(submitted);
       if (oversize)
-        return result(draftText, invalidDraft([oversize]));
-      const build = readBuild(input.build);
+        return refusedEarly([oversize]);
       const read = readSubmission(submitted);
       if (!read.ok || "problem" in build) {
-        return result(draftText, invalidDraft([...read.ok ? [] : read.problems, ..."problem" in build ? [build.problem] : []]));
+        return refusedEarly([...read.ok ? [] : read.problems, ..."problem" in build ? [build.problem] : []]);
       }
       const submission = read.submission;
       const reach = targets.handover(build.request);
@@ -38729,7 +38762,7 @@ function createHandlers(dependencies) {
           workflowId: created.workflowId,
           // The chat is pinned all the same, and a taken id is taken in this
           // Anthill's exchange: the refusal says which one.
-          ...reach.resolved ? { target: { id: reach.resolved.target, label: reach.resolved.label } } : {}
+          ...targetField(reach)
         });
       }
       const url2 = reach.link(created.workflowId);
@@ -38739,6 +38772,7 @@ function createHandlers(dependencies) {
       }
       const stored = await store.readWorkflow(created.workflowId);
       if (input.open === false) {
+        const reporting = reach.resolved ? invocation(reach.resolved) : {};
         return result(draftText, {
           outcome: problems.length > 0 ? "incomplete" : created.outcome,
           workflowId: created.workflowId,
@@ -38750,8 +38784,9 @@ function createHandlers(dependencies) {
           openDeferred: true,
           // Asked next, before open_workflow: the same command a report would
           // use, so it works on a machine with no `anthill` (ANT-249).
-          observationCommand: `${(reach.resolved ? invocation(reach.resolved) : {}).command ?? "anthill"} observation status`,
-          ...reach.resolved ? { target: { id: reach.resolved.target, label: reach.resolved.label } } : {},
+          observationCommand: `${reporting.command ?? "anthill"} observation status`,
+          ...reporting.unbuilt ? { cliUnbuilt: reporting.unbuilt } : {},
+          ...targetField(reach),
           ...problems.length > 0 ? { problems, questions: questionsFrom(problems, submission.workflow) } : {}
         });
       }
@@ -39059,6 +39094,7 @@ function createHandlers(dependencies) {
         throw new Error("The bound snapshot cannot be verified. No running state is implied.");
       }
       const steps = workflowSteps(snapshot.workflow);
+      const reporting = reach.resolved ? invocation(reach.resolved) : {};
       const reportingCommands = cliInstruction({
         runId: binding.runId,
         nonce: binding.nonce,
@@ -39066,7 +39102,7 @@ function createHandlers(dependencies) {
         cli: stored?.identity?.source.harness ?? "claude-code",
         promptVersion: MARKER_VERSION,
         issuedAt: binding.at
-      }, steps, reach.resolved ? invocation(reach.resolved) : {});
+      }, steps, reporting);
       const app = await bringUp(reach, workflowId);
       return result(bindText, {
         outcome: bound.outcome,
@@ -39082,6 +39118,8 @@ function createHandlers(dependencies) {
         registrationRequested: drop.outcome !== "conflict",
         app,
         reportingCommands,
+        // Said rather than handed out as a path that is not there (ANT-274).
+        ...reporting.unbuilt ? { cliUnbuilt: reporting.unbuilt } : {},
         steps,
         ...problemFields(drop.problems)
       });
@@ -39089,19 +39127,24 @@ function createHandlers(dependencies) {
   };
 }
 __name(createHandlers, "createHandlers");
+function targetField(reach) {
+  return reach.resolved ? { target: { id: reach.resolved.target, label: reach.resolved.label } } : {};
+}
+__name(targetField, "targetField");
 function targetAccess(dependencies) {
   const { targets, store } = dependencies;
   const answered = /* @__PURE__ */ __name((reach) => "refused" in reach ? { problem: { code: EXCHANGE_PROBLEM_CODES.SUBMISSION_FIELD_INVALID, message: reach.refused, field: "build" } } : reach, "answered");
   if (targets) {
     return {
       handover: /* @__PURE__ */ __name((request) => answered(targets.handover(request)), "handover"),
+      peek: /* @__PURE__ */ __name((request) => answered(targets.peek(request)), "peek"),
       read: /* @__PURE__ */ __name((request = {}) => answered(targets.read(request)), "read")
     };
   }
   if (!store)
     throw new Error("createHandlers needs either targets or a store.");
   const fixed = { store, launch: dependencies.launch ?? openUrl, link: workflowUrl };
-  return { handover: /* @__PURE__ */ __name(() => fixed, "handover"), read: /* @__PURE__ */ __name(() => fixed, "read") };
+  return { handover: /* @__PURE__ */ __name(() => fixed, "handover"), peek: /* @__PURE__ */ __name(() => fixed, "peek"), read: /* @__PURE__ */ __name(() => fixed, "read") };
 }
 __name(targetAccess, "targetAccess");
 function readBuild(value) {
@@ -39605,7 +39648,7 @@ __name(registerExchangeTools, "registerExchangeTools");
 
 // apps/mcp/dist/server.js
 var SERVER_NAME = "anthill";
-var SERVER_VERSION = true ? "0.8.8" : String(createRequire(import.meta.url)("../package.json").version ?? "0.0.0");
+var SERVER_VERSION = true ? "0.8.9" : String(createRequire(import.meta.url)("../package.json").version ?? "0.0.0");
 var TRANSPORT_FAILURE_EXIT_CODE = 1;
 function transportFailureLine(error51) {
   const reason = error51 instanceof Error ? error51.message : String(error51);

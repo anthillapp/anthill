@@ -1,6 +1,6 @@
 {
   "name": "@anthill/desktop",
-  "version": "0.8.8",
+  "version": "0.8.9",
   "private": true,
   "license": "MIT",
   "description": "Anthill desktop shell (Electron): visual workflow authoring, and passive observation of the sessions that do the work.",

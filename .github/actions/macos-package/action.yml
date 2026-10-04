@@ -6,7 +6,8 @@
 # it builds once that commit reaches master. Two copies of these steps would
 # drift, and a release would then ship a build nobody had checked.
 #
-# Expects the repository checked out, Node set up and `npm ci` run. Secrets come
+# Expects the repository checked out, Node set up and `npm ci` run; it builds
+# the workspace packages itself. Secrets come
 # in as inputs because a composite action cannot read them itself; any that are
 # empty are skipped and the build goes on, ad-hoc signed.
 name: macOS package
@@ -96,6 +97,14 @@ runs:
         printf '%s' "$APPLE_API_KEY_P8" | tr -d '[:space:]' | base64 --decode > "$KEY"
         chmod 600 "$KEY"
         echo "path=$KEY" >> "$GITHUB_OUTPUT"
+
+    # The workspace packages the app imports from their `dist`. The Release
+    # workflow had them already, as a side effect of its typecheck and tests;
+    # CI's macos-package runs neither, and the build failed to resolve
+    # @anthill/workflow-schema. Built here so the action needs nothing done
+    # before it but `npm ci`.
+    - shell: bash
+      run: npm run build:deps
 
     # Built on its own so the Sentry token reaches only the bundler, which
     # uploads the hidden source maps and deletes them. Packaging and signing

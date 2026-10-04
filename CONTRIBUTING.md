@@ -268,7 +268,7 @@ All three are on by default and each can be turned off there at any time:
   to Sentry. A dump may contain private data from memory. This requires error
   reporting and a restart. Turning it off stops new uploads immediately.
 
-On macOS, only tagged releases built by the release workflow can send
+On macOS, only releases the release workflow published can send
 diagnostics: development runs, manual workflow runs and locally built packages
 have it compiled out. On Linux, any built CLI can, once you opt in; the
 `run`, `step`, `done` and `observation` commands never report. The browser page
@@ -341,14 +341,15 @@ Writes `apps/desktop/release/Anthill-<version>-arm64.dmg`. Signed with whatever
 Developer ID certificate the machine has, and ad-hoc signed when it has none —
 which is the same build, minus Apple having been told who made it.
 
-CI does the same on a `v<version>` tag, which goes only on the master commit a
-verified release became ([RELEASING.md](RELEASING.md)).
-`.github/workflows/release.yml` refuses a tag anywhere else, then typechecks,
-runs the tests, builds the image on a macOS runner and attaches it to the
-release. The tag is the trigger, because publishing is a decision somebody
-makes rather than something every push should do. `workflow_dispatch` builds
-the same image without publishing, for checking that the next-release branch
-still packages.
+CI builds the same image on a macOS runner with
+`.github/actions/macos-package`. The `macos-package` job does it on every push
+to the next-release branch and on pull requests into master, and publishes
+nothing. When a verified release reaches master ([RELEASING.md](RELEASING.md)),
+`.github/workflows/release.yml` sees a version with no `v<version>` tag yet,
+typechecks, runs the tests, builds the image again on that commit, tags it and
+attaches the image to the release. Merging the release is the decision to
+publish; a push to master whose version is already released publishes nothing.
+`workflow_dispatch` builds the image without publishing.
 
 **Signing it properly.** The packaging is already configured for it — hardened
 runtime, the entitlements Electron needs under it, and notarisation are all in
@@ -371,7 +372,7 @@ do: the first is for running on your own machines, the second for the App
 Store. Distributing a Mac app outside the App Store needs a *Developer ID
 Application* certificate specifically, which is created by the account holder.
 
-With those in place a tag produces a build that opens on a double-click, and
+With those in place a release produces a build that opens on a double-click, and
 the workflow's last step says which of the two kinds it made rather than
 leaving it to be discovered by whoever downloads it.
 

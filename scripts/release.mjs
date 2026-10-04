@@ -5,7 +5,8 @@
  *   npm run release -- status         where new work branches from and which PRs go where
  *   npm run release -- gate           CI: may this pull request merge into master?
  *   npm run release -- landed <sha>   after a release or hotfix PR merged: is master that commit?
- *   npm run release -- tagged         release workflow: is the pushed tag a released master commit?
+ *   npm run release -- released       release workflow: the tag a push to master releases, if any
+ *   npm run release -- next-branch    release workflow, after publishing: open <version>-next, retire the old one
  *
  * master is the stable channel: Linux and Windows build it from source, and a
  * plugin installed from GitHub runs the server committed there. The next
@@ -18,6 +19,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { appendFileSync } from "node:fs";
 
 const SHA = /^[0-9a-f]{40}$/;
 const NEXT = /^(\d+\.\d+\.\d+)-next$/;
@@ -172,35 +174,123 @@ function landed(sha) {
   git("fetch", "--quiet", "--tags", "origin", "+refs/heads/master:refs/remotes/origin/master");
   const head = git("rev-parse", "origin/master");
   if (!has(sha)) die(`${sha} is not in this clone; fetch the release branch first.`);
-  if (tree(head) !== tree(sha)) die(`master (${head}) is not the verified commit's tree. Do not tag; find what differs: git diff ${sha} ${head}`);
+  if (tree(head) !== tree(sha)) die(`master (${head}) is not the verified commit's tree. Find what differs: git diff ${sha} ${head}`);
   const version = versionAt(head);
   const tag = `v${version}`;
-  if (tryGit("rev-parse", "--verify", "--quiet", `refs/tags/${tag}`)) die(`${tag} already exists.`);
+  const tagged = tryGit("rev-parse", "--verify", "--quiet", `refs/tags/${tag}^{commit}`);
   process.stdout.write(
     `master ${head} is the verified commit's tree, version ${version}.\n\n` +
-      `Tag it (this publishes the macOS release):\n  git tag ${tag} ${head} && git push origin ${tag}\n`,
+      (tagged === head
+        ? `${tag} is on it: the Release workflow has published it.\n`
+        : `The Release workflow tags it ${tag} and publishes the macOS build. Follow it:\n  gh run list --workflow release.yml --branch master --limit 1\n`),
   );
 }
 
-// ------------------------------------------------------------------ tagged
+// ---------------------------------------------------------------- released
 
-/** Run by the release workflow: a tag is only ever a released master commit. */
-function tagged() {
-  const ref = process.env.GITHUB_REF ?? "";
-  if (!ref.startsWith("refs/tags/")) {
-    process.stdout.write(`${ref || "No ref"} is not a tag: nothing to check.\n`);
+/**
+ * Run by the release workflow: the tag a push to master releases, written to
+ * GITHUB_OUTPUT as `tag=` (empty when it releases nothing).
+ *
+ * master receives only a verified release or a hotfix, each with a version
+ * higher than the last release, so a push whose version has no tag yet is a
+ * release, and the workflow tags that commit and publishes it. A push whose
+ * version is already tagged releases nothing. One whose version is lower than
+ * a released one is refused: something reached master that the gate should
+ * have stopped.
+ */
+function released() {
+  const { GITHUB_EVENT_NAME, GITHUB_REF, GITHUB_OUTPUT } = process.env;
+  const answer = (tag, why) => {
+    if (GITHUB_OUTPUT) appendFileSync(GITHUB_OUTPUT, `tag=${tag}\n`);
+    process.stdout.write(`${why}\n`);
+  };
+  if (GITHUB_EVENT_NAME !== "push" || GITHUB_REF !== "refs/heads/master") {
+    answer("", `${GITHUB_EVENT_NAME ?? "No event"} on ${GITHUB_REF || "no ref"} is not a push to master: nothing to release.`);
     return;
   }
-  const tag = ref.slice("refs/tags/".length);
-  git("fetch", "--quiet", "--no-tags", "origin", "+refs/heads/master:refs/remotes/origin/master");
-  const problems = [];
-  if (tryGit("merge-base", "--is-ancestor", "HEAD", "origin/master") === undefined) {
-    problems.push(`${tag} is not on master. Tags go on the master commit a verified release or hotfix became (RELEASING.md).`);
-  }
+  git("fetch", "--quiet", "--tags", "--force", "origin");
   const version = versionAt("HEAD");
-  if (tag !== `v${version}`) problems.push(`${tag} does not match package.json's version ${version}.`);
-  if (problems.length) die(problems.join("\n"));
-  process.stdout.write(`${tag} is on master and matches the version.\n`);
+  if (!parse(version)) die(`package.json's version ${version} is not X.Y.Z.`);
+  const tag = `v${version}`;
+  if (tryGit("rev-parse", "--verify", "--quiet", `refs/tags/${tag}`)) {
+    answer("", `${tag} is already released: nothing to publish.`);
+    return;
+  }
+  const newer = git("tag", "--list", "v*")
+    .split("\n")
+    .map((name) => name.slice(1))
+    .filter((v) => parse(v) && compare(v, version) > 0);
+  if (newer.length) die(`master is at ${version}, but v${newer.join(", v")} was already released. Nothing is published.`);
+  answer(tag, `${tag} is a new release: tagging this commit and publishing it.`);
+}
+
+// ------------------------------------------------------------- next-branch
+
+function gh(...args) {
+  return execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+/**
+ * Run by the release workflow once a release is published: the next release
+ * starts collecting in `<released version>-next`.
+ *
+ * A `*-next` branch whose tree is the released commit's is the release itself,
+ * squashed into master (the gate allows no other squash): its open pull
+ * requests move to the new branch and it is deleted. Moving a pull request
+ * does not rebase it; its author drops the old branch's commits (RELEASING.md,
+ * *After the release*). A `*-next` branch with any other tree holds work no
+ * release has shipped — what a hotfix leaves behind — and is renamed instead
+ * (GitHub moves its pull requests), never deleted; bringing master into it is
+ * then a pull request (*Hotfixes*, step 5). The new branch is made from the
+ * released commit only when nothing was renamed to it.
+ */
+function nextBranch() {
+  const { RELEASED_SHA, GITHUB_REPOSITORY } = process.env;
+  if (!SHA.test(RELEASED_SHA ?? "") || !GITHUB_REPOSITORY) die("next-branch needs RELEASED_SHA and GITHUB_REPOSITORY");
+  const repo = `repos/${GITHUB_REPOSITORY}`;
+  const version = versionAt(RELEASED_SHA);
+  if (!parse(version)) die(`No X.Y.Z version at ${RELEASED_SHA}.`);
+  const branch = `${version}-next`;
+  const releasedTree = tree(RELEASED_SHA);
+  const heads = gh("api", "--paginate", `${repo}/branches`, "--jq", ".[].name").split("\n").filter(Boolean);
+  let exists = heads.includes(branch);
+
+  for (const old of heads.filter((name) => NEXT.test(name) && name !== branch)) {
+    const oldTree = gh("api", `${repo}/branches/${old}`, "--jq", ".commit.commit.tree.sha");
+    if (oldTree !== releasedTree) {
+      if (exists) {
+        process.stdout.write(`WARNING: ${old} holds unreleased work and ${branch} already exists. Left as it is; sort it out by hand.\n`);
+        continue;
+      }
+      gh("api", "-X", "POST", `${repo}/branches/${old}/rename`, "-f", `new_name=${branch}`);
+      exists = true;
+      process.stdout.write(
+        `Renamed ${old} to ${branch}: it holds work this release did not ship. ` +
+          `Bring master into it through a sync/${version} pull request (RELEASING.md, Hotfixes, step 5).\n`,
+      );
+      continue;
+    }
+    if (!exists) {
+      gh("api", "-X", "POST", `${repo}/git/refs`, "-f", `ref=refs/heads/${branch}`, "-f", `sha=${RELEASED_SHA}`);
+      exists = true;
+      process.stdout.write(`Created ${branch} at ${RELEASED_SHA}.\n`);
+    }
+    const open = gh("pr", "list", "--repo", GITHUB_REPOSITORY, "--base", old, "--state", "open", "--json", "number", "--jq", ".[].number")
+      .split("\n")
+      .filter(Boolean);
+    for (const number of open) {
+      gh("api", "-X", "PATCH", `${repo}/pulls/${number}`, "-f", `base=${branch}`);
+      process.stdout.write(`Moved #${number} from ${old} to ${branch}.\n`);
+    }
+    gh("api", "-X", "DELETE", `${repo}/git/refs/heads/${old}`);
+    process.stdout.write(`Deleted ${old}: it is in master as the release.\n`);
+  }
+
+  if (!exists) {
+    gh("api", "-X", "POST", `${repo}/git/refs`, "-f", `ref=refs/heads/${branch}`, "-f", `sha=${RELEASED_SHA}`);
+    process.stdout.write(`Created ${branch} at ${RELEASED_SHA}.\n`);
+  }
 }
 
 const [command, ...rest] = process.argv.slice(2);
@@ -214,9 +304,12 @@ switch (command) {
   case "landed":
     landed(rest[0]);
     break;
-  case "tagged":
-    tagged();
+  case "released":
+    released();
+    break;
+  case "next-branch":
+    nextBranch();
     break;
   default:
-    die("usage: npm run release -- status | gate | landed <sha> | tagged");
+    die("usage: npm run release -- status | gate | landed <sha> | released | next-branch");
 }

@@ -1,0 +1,162 @@
+# Build and sign the macOS disk image, and keep it as the run's artefact.
+#
+# One definition for both places that build it: CI, on the next-release branch
+# and on pull requests into master, so the commit a release verifies has been
+# packaged before it can merge; and the Release workflow, which publishes what
+# it builds once that commit reaches master. Two copies of these steps would
+# drift, and a release would then ship a build nobody had checked.
+#
+# Expects the repository checked out, Node set up and `npm ci` run. Secrets come
+# in as inputs because a composite action cannot read them itself; any that are
+# empty are skipped and the build goes on, ad-hoc signed.
+name: macOS package
+description: Build, sign and check the macOS disk image, and upload it as an artefact.
+
+inputs:
+  release-build:
+    description: "'1' only for a build that is published: diagnostics are compiled in and source maps go to Sentry."
+    default: "0"
+  sentry-auth-token:
+    default: ""
+  macos-certificate:
+    default: ""
+  macos-certificate-password:
+    default: ""
+  apple-api-key-p8:
+    default: ""
+  apple-api-key-id:
+    default: ""
+  apple-api-issuer:
+    default: ""
+  apple-team-id:
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # The Electron-ABI copy of better-sqlite3. Not in the repository — it is a
+    # binary — so it is fetched here, and the packaged app fails at startup
+    # without it.
+    - shell: bash
+      run: node apps/desktop/scripts/fetch-electron-sqlite.mjs
+
+    # Signing is optional and stays that way. Without the secrets this step
+    # does nothing and the build below produces the same ad-hoc signed disk
+    # image it always has — which still runs, but which macOS quarantines on
+    # download. With them, the app is signed and notarised and opens without
+    # ceremony.
+    #
+    # A throwaway keychain rather than the runner's login one: the runner is
+    # discarded after the job, but a certificate should not outlive the step
+    # that needed it even so.
+    - name: Import the Developer ID certificate, if there is one
+      shell: bash
+      env:
+        MACOS_CERTIFICATE: ${{ inputs.macos-certificate }}
+        MACOS_CERTIFICATE_PASSWORD: ${{ inputs.macos-certificate-password }}
+      run: |
+        if [ -z "$MACOS_CERTIFICATE" ]; then
+          echo "No MACOS_CERTIFICATE secret — building unsigned."
+          exit 0
+        fi
+        KEYCHAIN=$RUNNER_TEMP/signing.keychain-db
+        PASSWORD=$(uuidgen)
+        security create-keychain -p "$PASSWORD" "$KEYCHAIN"
+        security set-keychain-settings -lut 900 "$KEYCHAIN"
+        security unlock-keychain -p "$PASSWORD" "$KEYCHAIN"
+        # Whitespace is stripped from both because a secret carries whatever
+        # was pasted into it, and a trailing newline is invisible in the box.
+        # One rode in on the password and the import failed with "MAC
+        # verification failed (wrong password?)" — which is what a correct
+        # password plus a newline looks like from the outside.
+        printf '%s' "$MACOS_CERTIFICATE" | tr -d '[:space:]' | base64 --decode > "$RUNNER_TEMP/cert.p12"
+        CERT_PASSWORD=$(printf '%s' "$MACOS_CERTIFICATE_PASSWORD" | tr -d '[:space:]')
+        security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+          -P "$CERT_PASSWORD" -T /usr/bin/codesign
+        rm -f "$RUNNER_TEMP/cert.p12"
+        # Without this, codesign stops to ask for permission nobody can give.
+        security set-key-partition-list -S apple-tool:,apple: -s -k "$PASSWORD" "$KEYCHAIN" > /dev/null
+        security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+        security find-identity -v -p codesigning "$KEYCHAIN"
+
+    # The notary key is a file on disk, not a string: electron-builder reads
+    # APPLE_API_KEY as a path. So the secret carries the .p8 base64-encoded
+    # and it is written out here, inside the runner's temp directory.
+    - name: Write the notary key, if there is one
+      id: notary
+      shell: bash
+      env:
+        APPLE_API_KEY_P8: ${{ inputs.apple-api-key-p8 }}
+      run: |
+        if [ -z "$APPLE_API_KEY_P8" ]; then
+          echo "No APPLE_API_KEY_P8 secret — the build will not be notarised."
+          exit 0
+        fi
+        KEY=$RUNNER_TEMP/notary.p8
+        printf '%s' "$APPLE_API_KEY_P8" | tr -d '[:space:]' | base64 --decode > "$KEY"
+        chmod 600 "$KEY"
+        echo "path=$KEY" >> "$GITHUB_OUTPUT"
+
+    # Built on its own so the Sentry token reaches only the bundler, which
+    # uploads the hidden source maps and deletes them. Packaging and signing
+    # below never see it. Without the token, no maps are made at all.
+    #
+    # Diagnostics are compiled in only for a published release: a check build,
+    # like a dev run or a local package, never reports anything.
+    - name: Build the app bundles
+      shell: bash
+      run: npm run build --workspace=@anthill/desktop
+      env:
+        SENTRY_AUTH_TOKEN: ${{ inputs.release-build == '1' && inputs.sentry-auth-token || '' }}
+        ANTHILL_RELEASE_BUILD: ${{ inputs.release-build }}
+
+    # Credentials reach electron-builder through the environment and appear
+    # nowhere in the repository. Absent, it skips notarising and says so; the
+    # build still succeeds.
+    # Trimmed in the shell rather than passed straight through: a secret
+    # holds exactly what was pasted, and pasting into the box leaves the
+    # cursor on a fresh line. The certificate password arrived that way and
+    # the import failed on it; these three happened not to, which is luck
+    # rather than a property worth relying on.
+    - shell: bash
+      run: |
+        export APPLE_API_KEY_ID=$(printf '%s' "$RAW_KEY_ID" | tr -d '[:space:]')
+        export APPLE_API_ISSUER=$(printf '%s' "$RAW_ISSUER" | tr -d '[:space:]')
+        export APPLE_TEAM_ID=$(printf '%s' "$RAW_TEAM_ID" | tr -d '[:space:]')
+        if [ -n "$NOTARY_KEY" ]; then export APPLE_API_KEY=$NOTARY_KEY; fi
+        npm exec --workspace=@anthill/desktop -- electron-builder --mac
+      env:
+        RAW_KEY_ID: ${{ inputs.apple-api-key-id }}
+        RAW_ISSUER: ${{ inputs.apple-api-issuer }}
+        RAW_TEAM_ID: ${{ inputs.apple-team-id }}
+        NOTARY_KEY: ${{ steps.notary.outputs.path }}
+
+    # The source maps are the private source. They go to Sentry and nowhere
+    # else: electron-builder leaves them out, and this fails the build if one
+    # ever reaches the archive anyway.
+    - name: Check that no source map ships in the app
+      shell: bash
+      run: |
+        ASAR=apps/desktop/release/mac-arm64/Anthill.app/Contents/Resources/app.asar
+        if npx --no-install asar list "$ASAR" | grep -E '\.map$'; then
+          echo "::error::Source maps found in app.asar."
+          exit 1
+        fi
+
+    # Says plainly which of the two kinds of build this is, so a failure to
+    # sign cannot be discovered later by somebody downloading it.
+    - name: Report how the app was signed
+      shell: bash
+      run: |
+        codesign -dv --verbose=2 apps/desktop/release/mac-arm64/Anthill.app 2>&1 \
+          | grep -E "Signature|TeamIdentifier" || true
+        if codesign -dv apps/desktop/release/mac-arm64/Anthill.app 2>&1 | grep -q "adhoc"; then
+          echo "::warning::Ad-hoc signed. macOS will quarantine this download."
+        else
+          spctl -a -vv -t install apps/desktop/release/mac-arm64/Anthill.app 2>&1 || true
+        fi
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: anthill-macos-arm64
+        path: apps/desktop/release/*.dmg

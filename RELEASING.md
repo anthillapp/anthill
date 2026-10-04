@@ -10,10 +10,11 @@ if the two ever disagree, this file is right.
 
 **master is the stable channel.** Linux and Windows users build Anthill from
 source on master, and a plugin installed from GitHub runs the MCP server
-committed there. macOS ships separately, as the disk image a `v<version>` tag
-builds. So master only ever receives a release whose exact commit was checked,
-or a hotfix, and the macOS tag sits on that same master commit: every
-platform's stable code is one release.
+committed there. macOS ships separately, as the disk image the Release
+workflow builds and publishes when a release reaches master. So master only
+ever receives a release whose exact commit was checked, or a hotfix, and the
+macOS release is tagged on that same master commit: every platform's stable
+code is one release.
 
 ## Branches at a glance
 
@@ -114,15 +115,11 @@ choice, made so the two cannot drift apart by accident.
    and nothing else; anything run by hand runs on a clean checkout where
    `git rev-parse HEAD` prints that SHA.
 2. **Automated checks** run by themselves on every push to the branch, on that
-   exact commit: `check`, `linux-source` and `windows-source` (CI). For macOS
-   packaging, also run the Release workflow by hand on the branch:
-
-   ```bash
-   gh workflow run release.yml --ref <V>-next
-   ```
-
-   It builds the disk image and publishes nothing. These checks are what
-   verifies a candidate.
+   exact commit: `check`, `linux-source`, `windows-source` and
+   `macos-package` (CI). `macos-package` builds and signs the macOS disk image
+   with the same steps the Release workflow publishes with
+   (`.github/actions/macos-package`), and publishes nothing; its image is the
+   run's artefact. These checks are what verifies a candidate.
 3. **A bug the checks find** is fixed by a pull request into the branch. The
    new tip is a new candidate and the automated checks run again by themselves.
    Anything else that was run on the old candidate and touches the changed code
@@ -141,7 +138,7 @@ not show that Anthill works on Linux.
 
 | Evidence | macOS | Linux (supported: CLI) | Windows (experimental) |
 | --- | --- | --- | --- |
-| Builds | Release workflow by hand on the branch (disk image) | `linux-source`: README steps, `npm run build` | `windows-source`: the same |
+| Builds | `macos-package` (disk image) | `linux-source`: README steps, `npm run build` | `windows-source`: the same |
 | Automated tests | `check`: typecheck and tests on `macos-14` | `linux-source`: `npm test` | not run |
 | Starts | not checked automatically | `linux-source`: the CLI serves its page | `windows-source`: the same |
 | End to end | only by hand: the desktop app with Codex and Claude Code | only by hand, on a Linux machine | only by hand, on a Windows machine |
@@ -167,20 +164,20 @@ as tested end to end.
    bring master into the branch (*Hotfixes*, step 5), verify the new candidate
    and update the line. Never resolve conflicts in GitHub's editor, on master,
    or by editing the squash.
-3. The maintainer squash-merges it. Only the maintainer merges into master and
-   pushes tags.
-4. Right after the merge, check master and get the tag command:
+3. The maintainer squash-merges it. Only the maintainer merges into master.
+4. **The merge publishes it.** The push to master runs the Release workflow:
+   its version has no `vX.Y.Z` tag yet, so it builds the macOS disk image again
+   on that master commit, tags the commit `vX.Y.Z` and attaches the image to a
+   GitHub release. Nobody pushes a tag by hand, so macOS never ships a release
+   master does not have, and master never has a release macOS lacks. A push to
+   master whose version is already tagged publishes nothing; one whose version
+   is lower than a released one fails the workflow.
+
+   To confirm master is the verified tree and see where the release stands:
 
    ```bash
    npm run release -- landed <verified SHA>
    ```
-
-   It confirms that master is now that commit's tree and prints
-   `git tag vX.Y.Z <master commit> && git push origin vX.Y.Z`. Pushing the tag
-   runs the Release workflow, which refuses a tag that is not on master or does
-   not match the version, then builds and publishes the macOS disk image. The
-   tag comes after the merge so that macOS never ships a release master does
-   not have yet.
 
 ## After the release
 
@@ -205,15 +202,23 @@ as tested end to end.
    running the server it carries is always the same version as that server,
    so it says nothing about being behind the app.
 
-2. **Open the next branch at once**, from the new master:
+2. **The next branch opens by itself.** Once the release is published, the
+   Release workflow (`next-branch`) creates `X.Y.Z-next` from the released
+   master commit, moves the open pull requests of the branch that was just
+   released onto it, and deletes that branch: its work is in master now. A
+   `*-next` branch whose tree is not the released commit's is never deleted:
+   it holds unreleased work (what a hotfix leaves behind) and is renamed to
+   `X.Y.Z-next` instead (*Hotfixes*, steps 4 and 5). If the job did not run,
+   do the same by hand:
 
    ```bash
    git push origin origin/master:refs/heads/X.Y.Z-next
+   git push origin --delete <released V>-next
    ```
 
-3. **Move open pull requests to it.** Retarget each one
-   (`gh pr edit <n> --base X.Y.Z-next`) and rebase its branch, dropping the
-   old branch's commits, which the squash replaced on master:
+3. **Rebase the moved pull requests.** Moving a pull request does not change
+   its branch, which still carries the old branch's commits that the squash
+   replaced on master. Drop them:
 
    ```bash
    git rebase --onto origin/X.Y.Z-next $(git merge-base HEAD <verified SHA>)
@@ -230,10 +235,12 @@ For a released version that cannot wait for the next release:
 2. Verify the hotfix branch's tip like a candidate: the automated checks
    above, on that exact commit.
 3. Open a pull request into master as in *Moving a release into master*, with
-   its own `Verified commit:` line; the gate, the squash, `landed` and the tag
-   are the same.
-4. master's version has moved, so rename the next-release branch after it
-   (`status` prints the command; GitHub retargets its open pull requests):
+   its own `Verified commit:` line; the gate, the squash, `landed` and the
+   release the merge publishes are the same.
+4. master's version has moved, so the next-release branch is renamed after
+   it. The Release workflow does this itself after publishing the hotfix
+   (`next-branch`); if it did not, `status` prints the command (GitHub
+   retargets its open pull requests):
 
    ```bash
    gh api -X POST repos/{owner}/{repo}/branches/<old V>-next/rename -f new_name=<new V>-next
@@ -253,11 +260,13 @@ For a released version that cannot wait for the next release:
 | Command | Where | What it does |
 | --- | --- | --- |
 | `npm run release -- status` | anyone | the next-release branch, open or frozen, its tip; how to create or rename it |
-| `npm run release -- landed <sha>` | after the merge into master | checks master is the verified tree, prints the tag command |
+| `npm run release -- landed <sha>` | after the merge into master | checks master is the verified tree and says whether it is published |
 | `release.mjs gate` | `release-gate` workflow, pull requests into master | the branch, version, verified commit and squash tree checks above |
-| `release.mjs tagged` | Release workflow, on a tag | refuses a tag off master or not matching the version |
+| `release.mjs released` | Release workflow, on a push to master | the tag to create and publish, or none when the version is already released |
+| `release.mjs next-branch` | Release workflow, after publishing | creates `X.Y.Z-next`, moves the released branch's pull requests to it and deletes it, or renames a branch with unreleased work |
+| `.github/actions/macos-package` | `macos-package` in CI, the Release workflow | builds, signs and checks the macOS disk image |
 | `scripts/smoke-cli.mjs` | `linux-source`, `windows-source` | starts the installed CLI and fetches its page, with diagnostics off |
 
 GitHub enforces the rest: master takes pull requests only, squash only, with
-`check` and `release-gate` passing; `*-next` branches take pull requests only,
+`check`, `macos-package` and `release-gate` passing; `*-next` branches take pull requests only,
 with `check` passing, and refuse force pushes.

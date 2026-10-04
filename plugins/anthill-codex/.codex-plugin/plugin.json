@@ -1,6 +1,6 @@
 {
   "name": "anthill",
-  "version": "0.8.8+codex.20261002145234",
+  "version": "0.8.9+codex.20261004000102",
   "description": "Hand work from Codex to Anthill as a local, reviewable workflow and report progress against the bound revision.",
   "author": {
     "name": "Nick Nesterov",

@@ -5,10 +5,14 @@
 # caught on its pull request instead of on master. `check` builds no app and
 # uses no secrets: `pull_request` from a fork gets none, and none are needed.
 #
-# A push to master or the next-release branch (`<version>-next`) runs it again
-# on the exact commit, which is the commit a release verifies (RELEASING.md). That run, and a pull request
-# into master, also builds from source on Linux and Windows the way the README
-# tells people to, and packages the macOS app (`macos-package`). A green Linux or Windows job means the tree installs, builds,
+# A push to the next-release branch (`<version>-next`) runs it again on the
+# exact commit, which is the commit a release verifies (RELEASING.md). That run,
+# and a pull request into master, also builds from source on Linux and Windows
+# the way the README tells people to, and packages the macOS app
+# (`macos-package`). A push to master does not run it: master receives only
+# the tree of a commit these checks already passed on (`release-gate`), and the
+# Release workflow, which runs there, typechecks and tests again before it
+# publishes. One pipeline per release, not two. A green Linux or Windows job means the tree installs, builds,
 # passes its tests (Linux) and the CLI starts and serves its page there. It is
 # not E2E on that platform, and macOS passing proves nothing about either.
 name: CI
@@ -16,7 +20,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [master, "*-next"]
+    branches: ["*-next"]
   workflow_dispatch:
 
 permissions:
@@ -93,9 +97,8 @@ jobs:
   # next-release branch and on pull requests into master, so the commit a
   # release verifies has been packaged before it merges; the Release workflow
   # then builds it again on master and publishes it. Nothing is published here.
-  # Not on a push to master, where the Release workflow is the build.
   macos-package:
-    if: github.ref != 'refs/heads/master' && (github.event_name != 'pull_request' || github.base_ref == 'master')
+    if: github.event_name != 'pull_request' || github.base_ref == 'master'
     runs-on: macos-14
     timeout-minutes: 60
     steps:

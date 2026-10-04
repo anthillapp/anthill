@@ -165,8 +165,9 @@ as tested end to end.
    and update the line. Never resolve conflicts in GitHub's editor, on master,
    or by editing the squash.
 3. The maintainer squash-merges it. Only the maintainer merges into master.
-4. **The merge publishes it.** The push to master runs the Release workflow:
-   its version has no `vX.Y.Z` tag yet, so it builds the macOS disk image again
+4. **The merge publishes it.** The push to master runs the Release workflow,
+   and only it: CI does not run on master, whose tree its checks already passed
+   on the branch. Its version has no `vX.Y.Z` tag yet, so the workflow builds the macOS disk image again
    on that master commit, tags the commit `vX.Y.Z` and attaches the image to a
    GitHub release. Nobody pushes a tag by hand, so macOS never ships a release
    master does not have, and master never has a release macOS lacks. A push to

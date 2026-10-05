@@ -9,8 +9,8 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,14 +18,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SpawnFn } from "@anthill/runtimes";
 
 import {
+  autoUpdatePlugins,
   GITHUB_SOURCE,
   installPlugin,
   installSource,
   installSteps,
   pluginConnections,
   probeServer,
+  updateSteps,
 } from "./plugin-connect.js";
-import type { PluginHarnessStatus, PluginStatus } from "../shared/ipc.js";
+import type { PluginAutoUpdate, PluginHarnessStatus, PluginStatus } from "../shared/ipc.js";
 
 const homes: string[] = [];
 afterEach(async () => {
@@ -65,13 +67,18 @@ setInterval(() => {}, 1000);
 /** What the real launcher does when it cannot find a server. */
 const LOST = `process.stderr.write("anthill plugin: Nothing says where the Anthill MCP server is.\\n"); process.exit(78);`;
 
-/** Stands in for the tools' CLIs: records each call and exits with the scripted code. */
-function tools(codes: Record<string, number> = {}) {
+/**
+ * Stands in for the tools' CLIs: records each call and exits with the scripted
+ * code. `effects` does to the home what the real command would have, for the
+ * commands whose result is read back afterwards.
+ */
+function tools(codes: Record<string, number> = {}, effects: Record<string, () => void> = {}) {
   const calls: string[] = [];
   const spawnFn: SpawnFn = (command, args, options) => {
     const line = [command, ...args].join(" ");
     calls.push(line);
     const code = Object.entries(codes).find(([prefix]) => line.startsWith(prefix))?.[1] ?? 0;
+    if (code === 0) Object.entries(effects).find(([prefix]) => line.startsWith(prefix))?.[1]();
     return spawn(
       process.execPath,
       ["-e", code === 0 ? "" : `process.stderr.write("Error: refused\\n"); process.exit(${code})`],
@@ -312,5 +319,224 @@ describe("checking the server answers", () => {
       status: { installed: true },
       serverAnswers: true,
     });
+  });
+});
+
+/*
+  ANT-282: a new Anthill brings the plugins installed from GitHub up to its
+  own version as it starts, with the tools' own commands and no question.
+*/
+describe("a new Anthill updates its plugins", () => {
+  const APP = "0.9.0";
+
+  /** Claude Code's records of a plugin installed from GitHub at this version. */
+  function claudeAt(dir: string, version: string, scope = "user"): void {
+    mkdirSync(join(dir, ".claude/plugins"), { recursive: true });
+    writeFileSync(
+      join(dir, ".claude/plugins/installed_plugins.json"),
+      JSON.stringify({ version: 2, plugins: { "anthill@anthill": [{ scope, version }] } }),
+    );
+    writeFileSync(
+      join(dir, ".claude/plugins/known_marketplaces.json"),
+      JSON.stringify({ anthill: { source: { source: "github", repo: GITHUB_SOURCE } } }),
+    );
+  }
+
+  /** Codex's records of a plugin added from the GitHub marketplace, with a cached copy at this version. */
+  async function codexAt(dir: string, version: string): Promise<void> {
+    await put(
+      join(dir, ".codex/config.toml"),
+      `[marketplaces.anthill-local]\nsource_type = "git"\nsource = "https://github.com/${GITHUB_SOURCE}.git"\n\n[plugins."anthill@anthill-local"]\nenabled = true\n`,
+    );
+    const copy = join(dir, ".codex/plugins/cache/anthill-local/anthill", version);
+    await put(join(copy, ".keep"), "");
+    await utimes(copy, new Date(1_000), new Date(1_000));
+  }
+
+  /** What `codex plugin add` leaves behind: a newer copy beside the old one. */
+  const codexAdds = (dir: string, version: string) => () =>
+    mkdirSync(join(dir, ".codex/plugins/cache/anthill-local/anthill", version), { recursive: true });
+
+  const deps = (dir: string, spawnFn: SpawnFn, over: { packaged?: boolean } = {}) => ({
+    home: dir,
+    spawnFn,
+    interpreters: async () => [],
+    appVersion: APP,
+    packaged: over.packaged ?? true,
+  });
+
+  it("runs each tool's own update commands, in order, and says each is updated", async () => {
+    const dir = await home();
+    claudeAt(dir, "0.8.9");
+    await codexAt(dir, "0.8.9+codex.20260901000000");
+    const { calls, spawnFn } = tools({}, {
+      "claude plugin update": () => claudeAt(dir, APP),
+      "codex plugin add": codexAdds(dir, `${APP}+codex.20261004000000`),
+    });
+    const reported: [string, PluginAutoUpdate][] = [];
+    const results = await autoUpdatePlugins({
+      ...deps(dir, spawnFn),
+      report: (harness, update) => reported.push([harness, update]),
+    });
+    expect(calls).toEqual([
+      "claude plugin marketplace update anthill",
+      "claude plugin update anthill@anthill --scope user",
+      "codex plugin marketplace upgrade anthill-local",
+      "codex plugin add anthill@anthill-local",
+    ]);
+    expect(results).toEqual({
+      "claude-code": { state: "updated", version: APP },
+      codex: { state: "updated", version: APP },
+    });
+    expect(reported).toEqual([
+      ["claude-code", { state: "updating", version: APP }],
+      ["claude-code", { state: "updated", version: APP }],
+      ["codex", { state: "updating", version: APP }],
+      ["codex", { state: "updated", version: APP }],
+    ]);
+  });
+
+  it("runs nothing when the plugins are at the app's version, or newer", async () => {
+    const dir = await home();
+    claudeAt(dir, APP);
+    await codexAt(dir, "0.9.1+codex.20261101000000");
+    const { calls, spawnFn } = tools();
+    expect(await autoUpdatePlugins(deps(dir, spawnFn))).toEqual({});
+    expect(calls).toEqual([]);
+  });
+
+  it("runs nothing from a development build", async () => {
+    const dir = await home();
+    claudeAt(dir, "0.8.9");
+    const { calls, spawnFn } = tools();
+    expect(await autoUpdatePlugins(deps(dir, spawnFn, { packaged: false }))).toEqual({});
+    expect(calls).toEqual([]);
+  });
+
+  it("leaves a plugin installed from a checkout alone", async () => {
+    const dir = await home();
+    const source = await checkout(dir);
+    await put(join(dir, ".claude/plugins/installed_plugins.json"), {
+      version: 2,
+      plugins: { "anthill@anthill": [{ scope: "user", version: "0.8.9" }] },
+    });
+    await put(join(dir, ".claude/plugins/known_marketplaces.json"), {
+      anthill: { source: { source: "directory", path: source } },
+    });
+    const { calls, spawnFn } = tools();
+    expect(await autoUpdatePlugins(deps(dir, spawnFn))).toEqual({});
+    expect(calls).toEqual([]);
+  });
+
+  it("leaves every plugin alone when plugin.json points them at a server", async () => {
+    const dir = await home();
+    claudeAt(dir, "0.8.9");
+    await codexAt(dir, "0.8.9+codex.1");
+    await put(join(dir, ".anthill/plugin.json"), { server: "/Users/me/anthill/apps/mcp/dist/server.js" });
+    const { calls, spawnFn } = tools();
+    expect(await autoUpdatePlugins(deps(dir, spawnFn))).toEqual({});
+    expect(calls).toEqual([]);
+  });
+
+  it("leaves a plugin someone switched off alone", async () => {
+    const dir = await home();
+    claudeAt(dir, "0.8.9");
+    await put(join(dir, ".claude/settings.json"), { enabledPlugins: { "anthill@anthill": false } });
+    const { calls, spawnFn } = tools();
+    expect(await autoUpdatePlugins(deps(dir, spawnFn))).toEqual({});
+    expect(calls).toEqual([]);
+  });
+
+  it("runs nothing for VS Code, which updates its own plugins", async () => {
+    if (process.platform === "win32") return;
+    const dir = await home();
+    const clone = join(dir, ".vscode/agent-plugins/github.com/anthillapp/anthill/plugins/anthill-vscode");
+    await put(join(clone, "plugin.json"), { name: "anthill", version: "0.8.9" });
+    await put(join(clone, "bin/anthill-mcp"), "");
+    await put(join(dir, ".vscode/agent-plugins/installed.json"), {
+      version: 1,
+      installed: [{ pluginUri: `file://${clone}`, marketplace: GITHUB_SOURCE }],
+    });
+    vi.stubEnv("XDG_CONFIG_HOME", join(dir, ".config"));
+    const user = process.platform === "darwin" ? join(dir, "Library/Application Support/Code/User") : join(dir, ".config/Code/User");
+    await put(join(user, "settings.json"), {});
+    const { calls, spawnFn } = tools();
+    expect(await autoUpdatePlugins(deps(dir, spawnFn))).toEqual({});
+    expect(calls).toEqual([]);
+    // The page still says it is behind; a click explains rather than runs.
+    const connections = await pluginConnections({ home: dir, interpreters: async () => [], appVersion: APP });
+    expect(connections.find((item) => item.harness === "vscode")?.status).toMatchObject({
+      installedVersion: "0.8.9",
+      availableVersion: APP,
+    });
+    const click = await installPlugin("vscode", { home: dir, interpreters: async () => [], appVersion: APP, openUrl: async () => undefined });
+    expect(click).toMatchObject({ ok: false, changed: false });
+    expect(calls).toEqual([]);
+  });
+
+  it("reports a failing tool in its own words, still tries the next, and throws nothing", async () => {
+    const dir = await home();
+    claudeAt(dir, "0.8.9");
+    await codexAt(dir, "0.8.9+codex.1");
+    const { calls, spawnFn } = tools({ "claude plugin marketplace update": 1 }, {
+      "codex plugin add": codexAdds(dir, `${APP}+codex.2`),
+    });
+    const results = await autoUpdatePlugins(deps(dir, spawnFn));
+    expect(results).toEqual({
+      "claude-code": { state: "failed", version: APP, error: "Error: refused" },
+      codex: { state: "updated", version: APP },
+    });
+    expect(calls).toEqual([
+      "claude plugin marketplace update anthill",
+      "codex plugin marketplace upgrade anthill-local",
+      "codex plugin add anthill@anthill-local",
+    ]);
+  });
+
+  it("says a tool's command is missing, rather than failing the launch", async () => {
+    const dir = await home();
+    claudeAt(dir, "0.8.9");
+    const spawnFn: SpawnFn = (_command, args, options) =>
+      spawn(join(dir, "no-such-claude"), args, { cwd: options.cwd, stdio: ["pipe", "pipe", "pipe"] });
+    const results = await autoUpdatePlugins(deps(dir, spawnFn));
+    expect(results["claude-code"]).toEqual({
+      state: "failed",
+      version: APP,
+      error: "Claude Code's command was not found on your PATH.",
+    });
+  });
+
+  it("does not call it updated when the commands succeed but the plugin is still behind", async () => {
+    // A marketplace that does not offer the new version yet: `update` finds
+    // nothing to do, and says so with exit 0.
+    const dir = await home();
+    claudeAt(dir, "0.8.9");
+    const { spawnFn } = tools();
+    const results = await autoUpdatePlugins(deps(dir, spawnFn));
+    expect(results["claude-code"]).toEqual({
+      state: "failed",
+      version: APP,
+      error: `Claude Code still has 0.8.9 after updating. Its marketplace may not offer ${APP} yet.`,
+    });
+  });
+
+  it("updates on the card's click too, which is the retry", async () => {
+    const dir = await home();
+    claudeAt(dir, "0.8.9");
+    const { calls, spawnFn } = tools({}, { "claude plugin update": () => claudeAt(dir, APP) });
+    const result = await installPlugin("claude-code", { home: dir, spawnFn, interpreters: async () => [], appVersion: APP });
+    expect(result).toEqual({ ok: true });
+    expect(calls).toEqual(["claude plugin marketplace update anthill", "claude plugin update anthill@anthill --scope user"]);
+  });
+
+  it("updates at the scope the plugin was installed at, and skips refreshing a local Codex marketplace", () => {
+    const claude = status({ installed: true, enabled: true, marketplace: "anthill", scope: "project" });
+    expect(updateSteps(claude).map((step) => step.args.join(" "))).toEqual([
+      "plugin marketplace update anthill",
+      "plugin update anthill@anthill --scope project",
+    ]);
+    const codex = status({ harness: "codex", label: "Codex", installed: true, enabled: true, checkout: "/src" });
+    expect(updateSteps(codex).map((step) => step.args.join(" "))).toEqual(["plugin add anthill@anthill-local"]);
+    expect(updateSteps(status({ harness: "vscode", label: "VS Code" }))).toEqual([]);
   });
 });

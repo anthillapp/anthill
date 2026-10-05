@@ -185,6 +185,16 @@ describe("VS Code, which has no command for plugins", () => {
     expect(byHand()).toContain("⌘, / Ctrl+,");
   });
 
+  // ANT-282: a marketplace install behind the app shows the update, with
+  // VS Code's own way to do it — Anthill has nothing to run for VS Code.
+  it("shows an update for a marketplace install behind the app, as a step in VS Code's own list", () => {
+    const behind = vscode({ installed: true, enabled: true, installedVersion: "0.8.9", availableVersion: "0.9.0", source: "anthillapp/anthill" });
+    expect(pluginVerdict(behind)).toBe("update");
+    const steps = pluginSteps(behind);
+    expect(steps[0]).toEqual({ says: "Update it in VS Code's list of agent plugins, which now offers 0.9.0." });
+    expect(steps.every((step) => !step.command)).toBe(true);
+  });
+
   it("switches a turned-off plugin back on where VS Code keeps the switch", () => {
     const [step] = pluginSteps(vscode({ installed: true, enabled: false }), "darwin");
     expect(step?.says).toContain("Customizations ▸ Plugins");

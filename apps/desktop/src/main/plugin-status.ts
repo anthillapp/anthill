@@ -33,7 +33,7 @@ import { fileURLToPath } from "node:url";
 
 import { CHECKED_PLUGIN_HARNESSES, PLUGIN_HARNESS_INFO, type CheckedPluginHarness } from "@anthill/workflow";
 
-import type { PluginHarnessStatus, PluginServerStatus, PluginStatus } from "../shared/ipc.js";
+import type { PluginAutoUpdate, PluginHarnessStatus, PluginServerStatus, PluginStatus } from "../shared/ipc.js";
 import { vscodeUserDir } from "./live/observers/vscode.js";
 
 type Json = Record<string, unknown>;
@@ -58,13 +58,49 @@ async function versionIn(checkout: string | undefined, harness: CheckedPluginHar
   return isRecord(value) && typeof value.version === "string" ? value.version : undefined;
 }
 
+/** The release a version names, without a build suffix such as Codex's `+codex.<timestamp>`. */
+export function releaseOf(version: string): string {
+  return version.trim().split("+")[0] ?? "";
+}
+
+/**
+ * Whether `installed` is an older release than `app`. Semver-ish, as the
+ * MCP server's drift notice compares them: numbers between dots and dashes,
+ * the build suffix ignored. A version it cannot read is not called older.
+ */
+export function olderRelease(installed: string, app: string): boolean {
+  const [have, want] = [releaseOf(installed), releaseOf(app)];
+  if (!have || !want) return false;
+  const parts = (value: string) => value.split(/[.-]/).map((part) => Number.parseInt(part, 10) || 0);
+  const [left, right] = [parts(have), parts(want)];
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) return difference < 0;
+  }
+  return false;
+}
+
+/**
+ * What a plugin installed from GitHub is due to update to (ANT-282).
+ *
+ * The marketplace on GitHub reads master, and every release's plugins carry
+ * the app's own version (`npm run version:set` writes one version everywhere),
+ * so the app that is running is the plugin version GitHub offers. Without
+ * this, `availableVersion` came only from a checkout, and a plugin installed
+ * from GitHub showed as up to date however far behind it was. Only ever
+ * upward: an app older than its plugin offers nothing, never a downgrade.
+ */
+function dueFromApp(installedVersion: string | undefined, appVersion: string | undefined): { availableVersion?: string } {
+  return installedVersion && appVersion && olderRelease(installedVersion, appVersion) ? { availableVersion: appVersion } : {};
+}
+
 /** What is said about a harness before anything is read about it. */
 function unread(harness: CheckedPluginHarness, toolFound: boolean): PluginHarnessStatus {
   const { label, plugin } = PLUGIN_HARNESS_INFO[harness];
   return { harness, label, plugin, toolFound, installed: false, enabled: false };
 }
 
-export async function claudeCodeStatus(home: string): Promise<PluginHarnessStatus> {
+export async function claudeCodeStatus(home: string, appVersion?: string): Promise<PluginHarnessStatus> {
   const { plugin } = PLUGIN_HARNESS_INFO["claude-code"];
   const root = join(home, ".claude");
   const base = unread("claude-code", existsSync(root));
@@ -95,9 +131,12 @@ export async function claudeCodeStatus(home: string): Promise<PluginHarnessStatu
     // has not written is a plugin nobody switched off.
     enabled: enabledPlugins[key] !== false,
     ...(typeof install?.version === "string" ? { installedVersion: install.version } : {}),
+    ...(typeof install?.scope === "string" ? { scope: install.scope } : {}),
     ...(marketplace ? { marketplace } : {}),
     ...(origin ? { source: origin } : {}),
-    ...(checkout ? { checkout, availableVersion: await versionIn(checkout, "claude-code") } : {}),
+    ...(checkout
+      ? { checkout, availableVersion: await versionIn(checkout, "claude-code") }
+      : dueFromApp(typeof install?.version === "string" ? install.version : undefined, appVersion)),
   };
 }
 
@@ -161,7 +200,7 @@ async function codexInstalledVersion(home: string, marketplace: string, plugin: 
   }
 }
 
-export async function codexStatus(home: string): Promise<PluginHarnessStatus> {
+export async function codexStatus(home: string, appVersion?: string): Promise<PluginHarnessStatus> {
   const { plugin, marketplace: defaultMarket } = PLUGIN_HARNESS_INFO.codex;
   const root = join(home, ".codex");
   const base = unread("codex", existsSync(root));
@@ -195,7 +234,7 @@ export async function codexStatus(home: string): Promise<PluginHarnessStatus> {
     ...(installedVersion ? { installedVersion } : {}),
     marketplace,
     ...(source ? { source } : {}),
-    ...(checkout ? { checkout, availableVersion: await versionIn(checkout, "codex") } : {}),
+    ...(checkout ? { checkout, availableVersion: await versionIn(checkout, "codex") } : dueFromApp(installedVersion, appVersion)),
   };
 }
 
@@ -308,7 +347,11 @@ export async function vscodeInstall(home: string, settings: unknown): Promise<VS
  * starting the installed launcher and hearing the server answer — is what
  * says it works.
  */
-export async function vscodeStatus(home: string, userDir: string = vscodeUserDir(home)): Promise<PluginHarnessStatus> {
+export async function vscodeStatus(
+  home: string,
+  userDir: string = vscodeUserDir(home),
+  appVersion?: string,
+): Promise<PluginHarnessStatus> {
   const base = unread("vscode", existsSync(userDir));
   if (!base.toolFound) return base;
 
@@ -331,22 +374,25 @@ export async function vscodeStatus(home: string, userDir: string = vscodeUserDir
   if (!install) return { ...base, ...(checkout ? { checkout } : {}) };
 
   const manifest = await readJson(join(install.path, PLUGIN_HARNESS_INFO.vscode.manifest));
+  const installedVersion = isRecord(manifest) && typeof manifest.version === "string" ? manifest.version : undefined;
   return {
     ...base,
     installed: true,
     enabled: true,
-    ...(isRecord(manifest) && typeof manifest.version === "string" ? { installedVersion: manifest.version } : {}),
+    ...(installedVersion ? { installedVersion } : {}),
     ...(install.marketplace ? { marketplace: install.marketplace } : {}),
     source: install.source,
-    ...(checkout ? { checkout, availableVersion: await versionIn(checkout, "vscode") } : {}),
+    // VS Code updates a plugin from its marketplace by itself, and has no
+    // command Anthill could run for it, so this only lets the page say so.
+    ...(checkout ? { checkout, availableVersion: await versionIn(checkout, "vscode") } : dueFromApp(installedVersion, appVersion)),
   };
 }
 
 /** How each harness's own records are read. */
-const STATUS: Record<CheckedPluginHarness, (home: string) => Promise<PluginHarnessStatus>> = {
+const STATUS: Record<CheckedPluginHarness, (home: string, appVersion?: string) => Promise<PluginHarnessStatus>> = {
   "claude-code": claudeCodeStatus,
   codex: codexStatus,
-  vscode: (home) => vscodeStatus(home),
+  vscode: (home, appVersion) => vscodeStatus(home, undefined, appVersion),
 };
 
 /** Whether the launcher both plugins ship can find the server it launches. */
@@ -360,10 +406,27 @@ export async function serverStatus(home: string): Promise<PluginServerStatus> {
   return { configured: true, settingsFile: file, path, exists: existsSync(path) };
 }
 
-export async function pluginStatus(home: string = homedir()): Promise<PluginStatus> {
+export type PluginStatusOptions = {
+  /**
+   * The running app's version (`app.getVersion()`), which is what a plugin
+   * installed from GitHub should be at (ANT-282). Passed in rather than read
+   * here, so this stays free of Electron; a shell without one leaves it out.
+   */
+  appVersion?: string;
+  /** What Anthill's own update did since it started, per tool. */
+  updates?: Partial<Record<CheckedPluginHarness, PluginAutoUpdate>>;
+};
+
+export async function pluginStatus(home: string = homedir(), options: PluginStatusOptions = {}): Promise<PluginStatus> {
   const [harnesses, server] = await Promise.all([
-    Promise.all(CHECKED_PLUGIN_HARNESSES.map((harness) => STATUS[harness](home))),
+    Promise.all(CHECKED_PLUGIN_HARNESSES.map((harness) => STATUS[harness](home, options.appVersion))),
     serverStatus(home),
   ]);
-  return { harnesses, server };
+  return {
+    harnesses: harnesses.map((harness) => {
+      const autoUpdate = options.updates?.[harness.harness];
+      return autoUpdate ? { ...harness, autoUpdate } : harness;
+    }),
+    server,
+  };
 }

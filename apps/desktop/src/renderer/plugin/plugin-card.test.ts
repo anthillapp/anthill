@@ -160,3 +160,84 @@ describe("a tool installed through its own links", () => {
     expect(pluginCard(connection({ harness: "vscode", status, serverAnswers: false }), idle, "VS Code").state).toBe("silent");
   });
 });
+
+/*
+  ANT-282: a plugin installed from GitHub that is behind the app. Anthill
+  updates it by itself as it starts; the card says what happened, and its
+  button is the retry when that did not work.
+*/
+describe("a plugin behind this Anthill", () => {
+  const behind = (status: Partial<PluginHarnessStatus> = {}, rest: Partial<PluginConnection> = {}) =>
+    connection({
+      ...rest,
+      status: { installed: true, enabled: true, installedVersion: "0.8.9", availableVersion: "0.9.0", ...status },
+      serverAnswers: true,
+    });
+
+  it("offers the update, run with the tool's own commands", () => {
+    const view = pluginCard(behind(), idle, "Claude Code");
+    expect(view).toMatchObject({ state: "update", badge: "Update available", action: { kind: "install", label: "Update for Claude Code" } });
+    expect(view.note).toBe("The plugin is 0.8.9; this Anthill comes with 0.9.0.");
+  });
+
+  it("says the update at launch is running, and offers nothing to click into it", () => {
+    const view = pluginCard(behind({ autoUpdate: { state: "updating", version: "0.9.0" } }), idle, "Codex");
+    expect(view).toMatchObject({ state: "installing", badge: "Updating…" });
+    expect(view.action).toBeUndefined();
+  });
+
+  it("shows why the update at launch failed, and retries from the same button", () => {
+    const view = pluginCard(
+      behind({ autoUpdate: { state: "failed", version: "0.9.0", error: "Codex's command was not found on your PATH." } }),
+      idle,
+      "Codex",
+    );
+    expect(view).toMatchObject({
+      state: "failed",
+      badge: "Update failed",
+      detail: "Codex's command was not found on your PATH.",
+      action: { kind: "install", label: "Try again" },
+    });
+  });
+
+  it("says it was updated along with Anthill, and that a new session picks it up", () => {
+    const view = pluginCard(
+      connection({ status: { installed: true, enabled: true, installedVersion: "0.9.0", autoUpdate: { state: "updated", version: "0.9.0" } }, serverAnswers: true }),
+      idle,
+      "Claude Code",
+    );
+    expect(view).toMatchObject({ state: "ready", badge: "Ready" });
+    expect(view.note).toBe("Updated to 0.9.0 along with Anthill. Start a new Claude Code session to use it.");
+  });
+
+  it("forgets a failure once the plugin is no longer behind", () => {
+    const view = pluginCard(
+      connection({
+        status: { installed: true, enabled: true, installedVersion: "0.9.0", autoUpdate: { state: "failed", version: "0.9.0", error: "offline" } },
+        serverAnswers: true,
+      }),
+      idle,
+      "Claude Code",
+    );
+    expect(view.state).toBe("ready");
+  });
+
+  it("says Updating and Update failed for a click on a plugin that is behind", () => {
+    expect(pluginCard(behind(), { kind: "installing", update: true }, "Codex")).toMatchObject({ state: "installing", badge: "Updating…" });
+    const failed = pluginCard(behind(), { kind: "failed", update: true, result: { ok: false, changed: false, error: "No." } }, "Codex");
+    expect(failed).toMatchObject({ state: "failed", badge: "Update failed", action: { kind: "install", label: "Try again" } });
+    expect(failed.note).toBe("The update didn't finish. Nothing on your machine was changed.");
+    const done = pluginCard(connection({ status: { installed: true, enabled: true }, serverAnswers: true }), { kind: "installed", update: true }, "Codex");
+    expect(done).toMatchObject({ state: "reload", note: "Updated. Start a new Codex session so it loads the new plugin." });
+  });
+
+  it("points VS Code at its own list of plugins, with nothing to run", () => {
+    const view = pluginCard(
+      behind({ harness: "vscode", label: "VS Code" }, { harness: "vscode", label: "VS Code", cli: { available: true } }),
+      idle,
+      "VS Code",
+    );
+    expect(view).toMatchObject({ state: "update", action: { kind: "settings", label: "Show the steps", outlined: true } });
+    expect(view.note).toContain("VS Code updates it by itself");
+  });
+});

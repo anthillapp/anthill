@@ -60,7 +60,8 @@ export function PluginCard({ harness, label, view, onInstall, onCheck, onGuide, 
               <span className="plugin-spin" aria-hidden="true">
                 ◌
               </span>
-              Installing…
+              {/* "Installing…", or "Updating…" for a plugin that is behind (ANT-282). */}
+              {view.badge}
             </button>
           ) : view.action ? (
             <button

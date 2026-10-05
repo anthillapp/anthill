@@ -1,9 +1,8 @@
 # Typecheck and test every pull request, while it is opened and updated.
 #
-# Pull requests are the only place checks run. Work reaches a next-release
-# branch (`<version>-next`) and master only through pull requests, so a push
-# to either is a merge of something these checks already passed, and running
-# them again on it would only repeat them.
+# Pull requests are the only place checks run. Work reaches `stage` and master
+# only through pull requests, so a push to either is a merge of something these
+# checks already passed, and running them again on it would only repeat them.
 #
 # `check` (typecheck and tests on `macos-14`, Apple Silicon) runs on every pull
 # request. It builds no app and uses no secrets: `pull_request` from a fork

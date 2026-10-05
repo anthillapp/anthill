@@ -109,7 +109,7 @@ has been told who built it.
 ### From source
 
 From a clean checkout. master is the latest release; to work on the next one,
-check out the next-release branch first (see *Pull requests* below).
+check out `stage` first (see *Pull requests* below).
 
 ```bash
 npm install
@@ -408,16 +408,13 @@ packages/
 
 master holds the latest release and nothing newer: Linux and Windows build it
 from source, and plugins installed from GitHub run it. The next release
-collects in a branch named after the release it follows — `0.8.8-next` while
-master is 0.8.8, since its own number is chosen only when it is frozen — and
-that is where pull requests go:
+collects in `stage`, and that is where pull requests go:
 
 ```bash
-npm run release -- status    # names the next-release branch
-git switch -c my-change origin/<version>-next
+git switch -c my-change origin/stage
 ```
 
-Open the pull request against `<version>-next`, not master; a pull request
+Open the pull request against `stage`, not master; a pull request
 into master from any other branch fails the `release-gate` check. The whole
 process, from the freeze to the tag and hotfixes, is in
 [RELEASING.md](RELEASING.md).

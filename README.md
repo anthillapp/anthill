@@ -16,7 +16,10 @@ where the session actually is.
 
 **macOS (Apple Silicon):** download the `.dmg` from
 [Releases](https://github.com/anthillapp/anthill/releases), open it and drag Anthill
-to Applications.
+to Applications. After that, Anthill updates itself: it checks GitHub for a new
+release, shows it under **Anthill → Check for Updates…** and in
+**Settings → About**, and installs it when you choose **Download and Install**.
+Turn the automatic check off on the same page.
 
 **Linux:** Anthill runs as a local web app, built from source:
 
@@ -198,7 +201,10 @@ off in **Settings → Privacy**:
   contain data that was in memory at the time.
 
 On macOS only release builds send diagnostics; the Linux CLI sends them too
-unless you turn them off. Nothing else leaves your machine. Details are in
+unless you turn them off. The macOS app also asks GitHub for the newest release
+when it opens and every few hours, a request for the public release list that
+carries nothing about you or your workflows; turn it off in
+**Settings → About**. Nothing else leaves your machine. Details are in
 [CONTRIBUTING.md](CONTRIBUTING.md#where-anthill-keeps-things).
 
 ## Links

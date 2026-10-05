@@ -88,7 +88,13 @@ jobs:
         with:
           tag_name: ${{ needs.decide.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          files: apps/desktop/release/*.dmg
+          # The disk image to download, and what an installed Anthill updates
+          # itself from: the zip, its blockmap and `latest-mac.yml` (ANT-76).
+          files: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest-mac.yml
           # Said on the release itself, because it is the first thing a
           # downloader meets and the last thing they will read afterwards.
           body: |

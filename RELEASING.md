@@ -173,6 +173,14 @@ as tested end to end.
    master whose version is already tagged publishes nothing; one whose version
    is lower than a released one fails the workflow.
 
+   Next to the disk image the release carries the zip, its `.blockmap` and
+   `latest-mac.yml`: what an installed Anthill updates itself from. The app
+   finds the newest release through `latest-mac.yml`, downloads the zip it
+   names, checks its sha512, and macOS installs it only if it is signed by the
+   same developer as the copy already installed. So a release built without
+   the signing secrets cannot reach anybody through the updater; those people
+   are sent to the release page to download it by hand.
+
    To confirm master is the verified tree and see where the release stands:
 
    ```bash

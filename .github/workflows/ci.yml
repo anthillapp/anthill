@@ -4,7 +4,7 @@
 # only through pull requests, so a push to either is a merge of something these
 # checks already passed, and running them again on it would only repeat them.
 #
-# `check` (typecheck and tests on `macos-14`, Apple Silicon) runs on every pull
+# `check` (typecheck and tests on `macos-15`, Apple Silicon) runs on every pull
 # request. It builds no app and uses no secrets: `pull_request` from a fork
 # gets none, and none are needed.
 #
@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   check:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -99,7 +99,7 @@ jobs:
   # publishes it. Nothing is published here.
   macos-package:
     if: github.event_name != 'pull_request' || github.base_ref == 'master'
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4

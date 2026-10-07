@@ -495,11 +495,11 @@ export function toolStatus(card: Pick<FeedCard, "state" | "durationMs">): string
 }
 
 /**
- * The line under an opened tool call.
+ * A tool call's tooltip.
  *
  * Anthill keeps that a call ran and how it ended, never what it printed — the
- * output is where a file's contents or a credential would be — so the box
- * says which of those it is rather than "output as recorded" over nothing.
+ * output is where a file's contents or a credential would be — so the card
+ * does not open, and its tooltip says why there is no output to see.
  */
 export const OUTPUT_NOTE: Record<CardState, string> = {
   done: "Anthill records that the call ran and how it ended, not what it printed.",

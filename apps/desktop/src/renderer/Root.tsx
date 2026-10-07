@@ -68,11 +68,26 @@ export function Root() {
     setSettingsPage(undefined);
     setSettingsFrom((current) => current ?? (start ? "workflow" : "launch"));
   }, [start]);
+  /**
+   * The menu asked for one page — Check for Updates… asks for About (ANT-76).
+   * Settings may already be open on another page, so it is opened afresh on
+   * the one asked for rather than left where it was.
+   */
+  const [settingsOpened, setSettingsOpened] = useState(0);
+  const openSettingsFromMenu = useCallback((page?: PageId) => {
+    if (!page) {
+      openSettings();
+      return;
+    }
+    setSettingsPage(page);
+    setSettingsOpened((count) => count + 1);
+    setSettingsFrom((current) => current ?? (start ? "workflow" : "launch"));
+  }, [openSettings, start]);
   const openPluginSettings = useCallback(() => {
     setSettingsPage("plugins");
     setSettingsFrom((current) => current ?? (start ? "workflow" : "launch"));
   }, [start]);
-  useEffect(() => window.anthill.onOpenSettings(openSettings), [openSettings]);
+  useEffect(() => window.anthill.onOpenSettings(openSettingsFromMenu), [openSettingsFromMenu]);
 
   /**
    * How many workflows have been handed to this window from outside it.
@@ -207,6 +222,7 @@ export function Root() {
       <div style={{ display: settingsFrom ? "none" : "contents" }}>{screen}</div>
       {settingsFrom ? (
         <SettingsScreen
+          key={settingsOpened}
           onLeave={() => setSettingsFrom(null)}
           {...(settingsPage ? { initialPage: settingsPage } : {})}
         />

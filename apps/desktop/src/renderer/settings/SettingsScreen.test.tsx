@@ -10,7 +10,7 @@
  * So most of these tests are about what the page refuses to contain.
  */
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ObservationHarnessSetup } from "../../shared/ipc.js";
@@ -130,6 +130,7 @@ describe("the page owns itself", () => {
     expect(page("General").getAttribute("aria-current")).toBe("page");
 
     fireEvent.click(page("About"));
+    await act(async () => undefined);
     expect(page("About").getAttribute("aria-current")).toBe("page");
     expect(page("General").getAttribute("aria-current")).toBeNull();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("About");
@@ -406,6 +407,9 @@ describe("about", () => {
     fireEvent.click(page("About"));
     const group = screen.getByText("Version").closest(".set-row") as HTMLElement;
     expect(within(group).getByText(__ANTHILL_VERSION__)).toBeTruthy();
+    // A shell without an updater still says where new versions come from (ANT-76).
+    expect(await screen.findByRole("button", { name: "Releases on GitHub" })).toBeTruthy();
+    await act(async () => undefined);
   });
 });
 

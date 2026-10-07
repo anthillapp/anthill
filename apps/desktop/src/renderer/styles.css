@@ -8318,7 +8318,7 @@ button.presence-chip {
   color: var(--ink-quiet);
 }
 
-/* A tool call: the whole box opens it. */
+/* A tool call: a row, not a toggle; there is no output to open it onto. */
 .feed-tool {
   display: flex;
   flex-direction: column;
@@ -8331,16 +8331,9 @@ button.presence-chip {
   font: inherit;
   color: inherit;
   text-align: left;
-  cursor: pointer;
 }
 
-.feed-tool:hover:not(:disabled) {
-  background: var(--surface);
-  border-color: #d7d3d3;
-}
-
-.feed-tool.state-failed,
-.feed-tool.state-failed:hover:not(:disabled) {
+.feed-tool.state-failed {
   background: #fdf3f0;
   border-color: #f3d0c7;
 }
@@ -8413,44 +8406,6 @@ button.presence-chip {
 .feed-state.state-unknown { color: #8a6a08; }
 .feed-agent-foot .feed-state.state-done { color: #2f6b48; }
 .feed-agent-foot .feed-state.state-unknown { color: var(--ink-dim); }
-
-.feed-chevron {
-  flex: none;
-  color: var(--ink-dim);
-  transition: transform 150ms;
-}
-
-.feed-tool[aria-expanded="true"] .feed-chevron {
-  transform: rotate(180deg);
-}
-
-.feed-output {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-  margin-top: 3px;
-}
-
-.feed-output pre {
-  margin: 0;
-  max-height: 220px;
-  overflow: auto;
-  padding: 10px 12px;
-  border-radius: 7px;
-  background: #2d2b2b;
-  color: #e6e2e2;
-  font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.feed-output span {
-  font-size: 11.5px;
-  color: var(--ink-dim);
-}
 
 /* Session started, prompt submitted, session ended: a line, not an item. */
 .feed-divider {

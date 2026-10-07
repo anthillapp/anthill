@@ -69,25 +69,6 @@ function ToolIcon({ tool }: { tool: string }) {
   );
 }
 
-function Chevron() {
-  return (
-    <svg
-      className="feed-chevron"
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
 export type FeedCardProps = {
   card: Card;
   /** Who acted. The session's own agent when absent. */
@@ -96,7 +77,7 @@ export type FeedCardProps = {
   cli: { label: string; logo: string };
   /** The block the card was tied to, and its colour on the canvas. */
   block?: { name: string; color: string };
-  /** Whether the tool output, or a divider's evidence, is open. */
+  /** Whether a divider's evidence is open. */
   open?: boolean;
   onToggle?: () => void;
   /** Whether a long message shows all of itself. */
@@ -215,7 +196,7 @@ export function FeedCardView({
           ) : card.kind === "agent" ? (
             <AgentBubble card={card} />
           ) : (
-            <ToolBox card={card} open={open} {...(onToggle ? { onToggle } : {})} />
+            <ToolBox card={card} />
           )}
         </div>
       </div>
@@ -276,14 +257,13 @@ function AgentBubble({ card }: { card: Card }) {
 }
 
 /** A tool call. Opening it shows what the call printed, when that was recorded. */
-function ToolBox({ card, open, onToggle }: { card: Card; open: boolean; onToggle?: () => void }) {
+function ToolBox({ card }: { card: Card }) {
+  // Not a toggle: Anthill records that a call happened and how it ended, not
+  // what it printed — the output is the part a credential or a file's contents
+  // would be in — so there is nothing to open it onto (ANT-297). The reason is
+  // one hover away instead.
   return (
-    <button
-      type="button"
-      className={`feed-tool state-${card.state}`}
-      aria-expanded={open}
-      onClick={onToggle}
-    >
+    <div className={`feed-tool state-${card.state}`} title={OUTPUT_NOTE[card.state]}>
       <span className="feed-tool-row">
         <span className="feed-tool-chip">
           <ToolIcon tool={card.title} />
@@ -294,17 +274,7 @@ function ToolBox({ card, open, onToggle }: { card: Card; open: boolean; onToggle
           {CARD_STATE_GLYPH[card.state]}
         </i>
         <span className={`feed-state state-${card.state}`}>{toolStatus(card)}</span>
-        <Chevron />
       </span>
-      {open ? (
-        <span className="feed-output">
-          {/* Anthill records that a call happened and how it ended, not what it
-              printed: the output is the part a credential or a file's contents
-              would be in. */}
-          <pre>No output recorded.</pre>
-          <span>{OUTPUT_NOTE[card.state]}</span>
-        </span>
-      ) : null}
-    </button>
+    </div>
   );
 }

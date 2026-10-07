@@ -179,6 +179,40 @@ describe("the Plugins page", () => {
     expect(await screen.findByText("Found")).toBeTruthy();
   });
 
+  // ANT-282: without a checkout, what is on offer is this Anthill's own version.
+  it("says a plugin from GitHub is behind this Anthill, and why the update at launch failed", async () => {
+    const api = stub();
+    api.pluginStatus.mockResolvedValue({
+      harnesses: [
+        {
+          ...PLUGINS.harnesses[0]!,
+          checkout: undefined,
+          installedVersion: "0.8.9",
+          availableVersion: "0.9.0",
+          source: "anthillapp/anthill",
+          autoUpdate: { state: "failed", version: "0.9.0", error: "claude plugin: offline" },
+        },
+        {
+          harness: "codex",
+          label: "Codex",
+          plugin: "anthill",
+          toolFound: true,
+          installed: true,
+          enabled: true,
+          installedVersion: "0.9.0+codex.20261004000000",
+          marketplace: "anthill-local",
+          autoUpdate: { state: "updated", version: "0.9.0" },
+        },
+      ],
+      server: { configured: false, settingsFile: "/Users/me/.anthill/plugin.json" },
+    });
+    open("Plugins");
+    expect(await screen.findByText(/version 0\.8\.9 · 0\.9\.0 available with this Anthill/)).toBeTruthy();
+    expect(screen.getByText(/couldn't update it as it started, and tries again next time: claude plugin: offline/)).toBeTruthy();
+    expect(screen.getByText("Updated to 0.9.0 along with Anthill. Start a new session to use it.")).toBeTruthy();
+    expect(screen.getByText("claude plugin update anthill@anthill")).toBeTruthy();
+  });
+
   it("calls an unconfigured server the plugin's own, not a problem", async () => {
     const api = stub();
     api.pluginStatus.mockResolvedValue({ ...PLUGINS, server: { configured: false, settingsFile: "/Users/me/.anthill/plugin.json" } });

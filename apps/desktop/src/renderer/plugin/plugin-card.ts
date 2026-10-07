@@ -17,6 +17,7 @@
 import { PLUGIN_HARNESS_INFO } from "@anthill/workflow";
 
 import type { PluginConnection, PluginInstallResult } from "../../shared/ipc.js";
+import { pluginVerdict } from "../settings/plugin-steps.js";
 
 export type CardState =
   | "checking"
@@ -24,19 +25,23 @@ export type CardState =
   | "available"
   | "installing"
   | "confirm"
+  | "update"
   | "reload"
   | "ready"
   | "failed"
   | "silent";
 
-/** What this window knows that main does not. */
+/**
+ * What this window knows that main does not. `update`: the click was on a
+ * plugin that is behind, so main updated it rather than installing (ANT-282).
+ */
 export type LocalCardState =
   | { kind: "idle" }
-  | { kind: "installing" }
+  | { kind: "installing"; update?: boolean }
   /** The tool's own install links were opened; the tool asks before it installs. */
   | { kind: "confirming" }
-  | { kind: "installed" }
-  | { kind: "failed"; result: Extract<PluginInstallResult, { ok: false }> };
+  | { kind: "installed"; update?: boolean }
+  | { kind: "failed"; result: Extract<PluginInstallResult, { ok: false }>; update?: boolean };
 
 export type CardAction = "install" | "check" | "guide" | "settings";
 
@@ -56,6 +61,7 @@ export const BADGE: Record<CardState, string> = {
   available: "Plugin not installed",
   installing: "Installing…",
   confirm: "Confirm in the tool",
+  update: "Update available",
   reload: "Restart needed",
   ready: "Ready",
   failed: "Install failed",
@@ -70,15 +76,20 @@ export function pluginCard(connection: PluginConnection | undefined, local: Loca
     ...extra,
   });
 
-  if (local.kind === "installing") return view("installing", `${label} may ask you to confirm – look for its prompt.`);
+  if (local.kind === "installing") {
+    return local.update
+      ? view("installing", `Updating the plugin with ${label}'s own commands…`, { badge: "Updating…" })
+      : view("installing", `${label} may ask you to confirm – look for its prompt.`);
+  }
   if (local.kind === "failed") {
     const { result } = local;
+    const what = local.update ? "update" : "install";
     return view(
       "failed",
       result.changed
-        ? "The install didn't finish. Part of it ran – Settings ▸ Plugins shows where each tool now stands."
-        : "The install didn't finish. Nothing on your machine was changed.",
-      { detail: result.error, action: { kind: "install", label: "Try again" } },
+        ? `The ${what} didn't finish. Part of it ran – Settings ▸ Plugins shows where each tool now stands.`
+        : `The ${what} didn't finish. Nothing on your machine was changed.`,
+      { detail: result.error, action: { kind: "install", label: "Try again" }, ...(local.update ? { badge: "Update failed" } : {}) },
     );
   }
   if (!connection) return view("checking", `Looking for ${label} on this Mac…`);
@@ -95,6 +106,14 @@ export function pluginCard(connection: PluginConnection | undefined, local: Loca
     );
   }
   const justInstalled = local.kind === "installed" || local.kind === "confirming";
+  const justUpdated = local.kind === "installed" && local.update;
+
+  // Anthill updating the plugin by itself as it started (ANT-282). Asked while
+  // it runs, the card says so and offers nothing to click into the middle of it.
+  if (status.autoUpdate?.state === "updating") {
+    return view("installing", `Updating the plugin to ${status.autoUpdate.version} along with Anthill…`, { badge: "Updating…" });
+  }
+
   if (!cli.available) {
     return view("missing", `${label} isn't on this Mac yet. Its install guide opens in your browser.`, {
       action: { kind: "guide", label: "Open install guide ↗", outlined: true },
@@ -104,7 +123,37 @@ export function pluginCard(connection: PluginConnection | undefined, local: Loca
   const tool = cli.version ? `${label} ${cli.version}` : label;
 
   if (status.installed && status.enabled) {
+    // Behind the version on offer (ANT-282): the plugin is updated before
+    // anything else about it is worth saying — an old plugin that answers
+    // still describes an Anthill that is gone.
+    if (pluginVerdict(status) === "update") {
+      const { installedVersion: have, availableVersion: want } = status;
+      const offer = status.checkout ? `the checkout has ${want}` : `this Anthill comes with ${want}`;
+      if (status.autoUpdate?.state === "failed") {
+        return view("failed", `Anthill couldn't update the plugin to ${want} as it started. It tries again next time, or now:`, {
+          badge: "Update failed",
+          detail: status.autoUpdate.error,
+          action: { kind: "install", label: "Try again" },
+        });
+      }
+      const info = PLUGIN_HARNESS_INFO[status.harness];
+      // Claude Code and Codex: their own commands, run from here.
+      if (info.installsFromAnthill && !info.installLinks) {
+        return view("update", `The plugin is ${have}; ${offer}.`, {
+          action: { kind: "install", label: `Update for ${label}` },
+        });
+      }
+      // VS Code updates its plugins by itself and has no command to run.
+      return view("update", `The plugin is ${have}; ${offer}. ${label} updates it by itself, or update it now from its list of agent plugins.`, {
+        action: { kind: "settings", label: "Show the steps", outlined: true },
+      });
+    }
     if (connection.serverAnswers) {
+      if (justUpdated) {
+        return view("reload", `Updated. Start a new ${label} session so it loads the new plugin.`, {
+          action: { kind: "check", label: "Check again" },
+        });
+      }
       // Just installed: whatever answered, a session already open has not
       // loaded it. Saying Ready here would send someone back to a session
       // that cannot see the plugin.
@@ -112,6 +161,12 @@ export function pluginCard(connection: PluginConnection | undefined, local: Loca
         return view("reload", `Installed. Start a new ${label} session so it loads the plugin.`, {
           action: { kind: "check", label: "Check again" },
         });
+      }
+      // Updated as Anthill started: a session already open keeps the old
+      // plugin until a new one starts, and nobody clicked anything to learn
+      // that, so the card says it.
+      if (status.autoUpdate?.state === "updated") {
+        return view("ready", `Updated to ${status.autoUpdate.version} along with Anthill. Start a new ${label} session to use it.`);
       }
       return view("ready", `Plugin enabled, and Anthill's local server answers from ${label}.`);
     }

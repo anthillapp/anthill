@@ -5,9 +5,11 @@
  * Kept apart from the page so every ending is written down in one place and
  * can be checked: the page's worth is entirely in whether these sentences and
  * commands are right. The commands are the tools' own — `claude plugin …` and
- * `codex plugin …`, as their `--help` gives them — and Anthill runs none of
+ * `codex plugin …`, as their `--help` gives them — and this page runs none of
  * them. Installing a plugin changes another program's configuration, and that
- * is the author's to do.
+ * is the author's to do. The one exception lives elsewhere: a new Anthill runs
+ * the `update` steps by itself as it starts, for a plugin from GitHub that is
+ * behind it (ANT-282, plugin-connect.ts).
  */
 
 import { PLUGIN_HARNESS_INFO, type CheckedPluginHarness } from "@anthill/workflow";

@@ -136,7 +136,8 @@ export const IpcChannel = {
  * download, cancel, install and the status push — and the page Settings
  * opens on, carried by the menu's request (ANT-76).
  */
-export const IPC_CONTRACT = 28;
+// 29: plugin status names the app's version and the launch's update; install also updates (ANT-282).
+export const IPC_CONTRACT = 29;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -614,11 +615,35 @@ export type PluginHarnessStatus = {
   marketplace?: string;
   /** Where that marketplace comes from: a path, a repository, a URL. */
   source?: string;
+  /** The scope the tool installed it at, when the tool records one (Claude Code: `user`, `project`, `local`). */
+  scope?: string;
   /** A local Anthill checkout offered as a marketplace, when one is known. */
   checkout?: string;
-  /** What that checkout would install now. */
+  /**
+   * What that checkout would install now. Without a checkout, this Anthill's
+   * own version, and only when the installed plugin is an older release: the
+   * plugins are released with the app, at the same version, so a plugin
+   * installed from GitHub is due for an update exactly when it is behind the
+   * app that is reading it (ANT-282). Never a version lower than the installed one.
+   */
   availableVersion?: string;
+  /**
+   * What Anthill's own update did with this plugin since it started (ANT-282).
+   * Not one of the tool's records: the main process adds it, and only for a
+   * plugin it tried to update.
+   */
+  autoUpdate?: PluginAutoUpdate;
 };
+
+/**
+ * Anthill updating a plugin installed from GitHub when it starts, to the
+ * version it was itself released with (ANT-282). `version` is the one it is
+ * updating to.
+ */
+export type PluginAutoUpdate =
+  | { state: "updating"; version: string }
+  | { state: "updated"; version: string }
+  | { state: "failed"; version: string; error: string };
 
 /** Whether the launcher both plugins ship can find the MCP server it runs. */
 export type PluginServerStatus = {
@@ -1229,8 +1254,9 @@ export interface AnthillApi {
   /** Each tool's plugin, with its CLI and a live check of the server it launches. */
   pluginConnections(): Promise<PluginConnection[]>;
   /**
-   * Install (or switch back on) Anthill's plugin in one tool, by running that
-   * tool's own plugin commands. The tool may still ask for confirmation.
+   * Install (or switch back on, or update when it is behind) Anthill's plugin
+   * in one tool, by running that tool's own plugin commands. The tool may
+   * still ask for confirmation.
    */
   pluginInstall(harness: CheckedPluginHarness): Promise<PluginInstallResult>;
   /** Open the tool's own install guide in the browser: one fixed page per tool. */

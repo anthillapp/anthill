@@ -9692,6 +9692,15 @@ button.presence-chip {
 
 .plugin-row + .plugin-row { border-top: 1px solid #efeded; }
 
+/* What Anthill's own update did as it started (ANT-282); a failure uses .harness-warning. */
+.plugin-update-note {
+  margin: -4px 16px 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  max-width: 70ch;
+}
+
 .plugin-steps {
   margin: 0 16px 16px;
   padding: 12px 14px 12px 32px;
@@ -9800,7 +9809,8 @@ button.presence-chip {
 .plugin-badge.is-checking { color: var(--ink-dim); }
 .plugin-badge.is-installing,
 .plugin-badge.is-confirm { background: #eaf4fb; color: #2f6d99; }
-.plugin-badge.is-reload { background: #f7ecd0; color: #8a6a08; }
+.plugin-badge.is-reload,
+.plugin-badge.is-update { background: #f7ecd0; color: #8a6a08; }
 .plugin-badge.is-ready { background: #e6f3ec; color: #2f6b48; }
 .plugin-badge.is-failed,
 .plugin-badge.is-silent { background: var(--accent-100); color: var(--accent-700); }

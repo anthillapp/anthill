@@ -25,7 +25,13 @@ import { homedir } from "node:os";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 
 import { parseWorkflow } from "@anthill/workflow-schema";
-import { checkWorkflowCompatibility, isCheckedPluginHarness, migrateWorkflow, PLUGIN_HARNESS_INFO } from "@anthill/workflow";
+import {
+  checkWorkflowCompatibility,
+  isCheckedPluginHarness,
+  migrateWorkflow,
+  PLUGIN_HARNESS_INFO,
+  type CheckedPluginHarness,
+} from "@anthill/workflow";
 import { ExchangeStore } from "@anthill/exchange-store";
 import { MARKER_VERSION, workflowSteps, type PendingRun } from "@anthill/live";
 import type { Workflow } from "@anthill/workflow-schema";
@@ -56,6 +62,7 @@ import {
   type PromptDraftRequest,
   type PromptDraftResponse,
   type OpenWorkflowResult,
+  type PluginAutoUpdate,
   type SaveWorkflowRequest,
   type SaveWorkflowResult,
   type SettingsPageRequest,
@@ -99,7 +106,7 @@ import { AgentLibraryStore } from "./agent-library.js";
 import { AssistantThreadStore } from "./assistant-threads.js";
 import { ModelPreferencesStore } from "./model-preferences.js";
 import { pluginStatus } from "./plugin-status.js";
-import { devCheckout, installPlugin, pluginConnections } from "./plugin-connect.js";
+import { autoUpdatePlugins, devCheckout, installPlugin, pluginConnections } from "./plugin-connect.js";
 import { SettingsStore, reportingConsentOnDisk, workflowFolderPath } from "./settings.js";
 import { DesktopAnalytics } from "./analytics.js";
 import { SENTRY_DSN, sanitizeErrorEvent } from "../shared/error-reporting.js";
@@ -1191,6 +1198,47 @@ function handle(
   registered.push(channel);
 }
 
+/*
+  The plugins' side of a new release (ANT-282). What the update at this
+  launch did, per tool, kept for the cards and Settings ▸ Plugins to say; and
+  the run itself, which an install clicked meanwhile waits for, so the same
+  tool's commands never run twice at once.
+*/
+const pluginUpdates: Partial<Record<CheckedPluginHarness, PluginAutoUpdate>> = {};
+let pluginUpdateRun: Promise<unknown> = Promise.resolve();
+
+/** What the plugin card's main-process side needs; the same for a click and for the update at launch. */
+function pluginConnectDeps() {
+  const appRoot = devCheckout(app.getAppPath(), app.isPackaged);
+  return {
+    ...(appRoot ? { appRoot } : {}),
+    appVersion: app.getVersion(),
+    updates: () => pluginUpdates,
+    interpreters: detectInterpreters,
+    openUrl: (url: string) => shell.openExternal(url),
+  };
+}
+
+/**
+ * Bring the installed plugins up to this release, in the background (ANT-282).
+ * The installed app only — `autoUpdatePlugins` refuses a development build —
+ * and never in the way: it waits for the login shell's PATH, which is where
+ * `claude` and `codex` are found, and nothing it does can throw out of here.
+ */
+function startPluginUpdate(): void {
+  pluginUpdateRun = userPath
+    .then(() =>
+      autoUpdatePlugins({
+        ...pluginConnectDeps(),
+        packaged: app.isPackaged,
+        report: (harness, update) => {
+          pluginUpdates[harness] = update;
+        },
+      }),
+    )
+    .catch(() => undefined);
+}
+
 function registerIpcHandlers(): void {
   const workflowSaver = new WorkflowSaver({
     folder: async () => workflowFolderPath(await settings().read(), homedir()),
@@ -1570,26 +1618,30 @@ function registerIpcHandlers(): void {
   handle(IpcChannel.modelPreferencesWrite, async (_event, next: unknown) => modelPreferences().write(next));
   // Read from the tools' own records on every ask: installing a plugin happens
   // in a terminal, and the page has to be right the next time it is opened.
-  handle(IpcChannel.pluginStatus, async () => pluginStatus());
+  // The app's version is what a plugin from GitHub should be at (ANT-282).
+  handle(IpcChannel.pluginStatus, async () =>
+    pluginStatus(undefined, { appVersion: app.getVersion(), updates: pluginUpdates }),
+  );
   // The plugin card: the records, plus the two things records cannot say —
   // whether the CLI runs, and whether the installed plugin's server answers.
-  const appRoot = devCheckout(app.getAppPath(), app.isPackaged);
-  const connectDeps = () => ({
-    ...(appRoot ? { appRoot } : {}),
-    interpreters: detectInterpreters,
-    openUrl: (url: string) => shell.openExternal(url),
-  });
   handle(IpcChannel.pluginConnections, async () => {
     await userPath;
-    return pluginConnections(connectDeps());
+    return pluginConnections(pluginConnectDeps());
   });
-  // Runs the tool's own plugin commands, and only on the author's click.
+  // Runs the tool's own plugin commands on the author's click: an install, or
+  // an update when the plugin is behind — which is also the retry for an
+  // update at launch that failed. The only commands run without a click are
+  // that update's (ANT-282).
   handle(IpcChannel.pluginInstall, async (_event, harness: unknown) => {
     if (!isCheckedPluginHarness(harness)) {
       return { ok: false, changed: false, error: "Unknown coding tool." };
     }
     await userPath;
-    return installPlugin(harness, connectDeps());
+    await pluginUpdateRun;
+    const result = await installPlugin(harness, pluginConnectDeps());
+    // What the click did is the card's to say now; the launch's word is spent.
+    if (result.ok) delete pluginUpdates[harness];
+    return result;
   });
   // The same rule for Anthill's own pages: a name in, a listed address out.
   handle(IpcChannel.linkOpen, async (_event, name: unknown) => {
@@ -2009,6 +2061,8 @@ void app.whenReady().then(async () => {
     setTimeout(() => void checkForUpdatesInBackground(), FIRST_UPDATE_CHECK_DELAY_MS).unref();
     setInterval(() => void checkForUpdatesInBackground(), UPDATE_CHECK_INTERVAL_MS).unref();
   }
+  // A new release brings its plugins along, after the window is up (ANT-282).
+  startPluginUpdate();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

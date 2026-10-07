@@ -206,6 +206,11 @@ as tested end to end.
    does extensions, unless its auto-update is off. Then start new sessions: a
    running session keeps the skill it started with.
 
+   Plugins installed from GitHub need none of this: the installed app, when it
+   starts at a new version, runs the same Claude Code and Codex commands for a
+   plugin older than itself. It leaves a plugin installed from a checkout, or
+   pointed at a checkout's server by `~/.anthill/plugin.json`, alone.
+
    If this step is skipped, the plugin's launcher reports the version it was
    installed at, and the MCP server puts a notice at the top of its
    instructions naming both versions and this command. That only works once

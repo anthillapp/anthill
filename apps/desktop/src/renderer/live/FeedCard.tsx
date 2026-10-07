@@ -19,6 +19,8 @@ import {
   CONFIDENCE_LABEL,
   MESSAGE_CLAMP,
   OUTPUT_NOTE,
+  flattenToolInput,
+  isLongToolInput,
   readDuration,
   toolStatus,
   type FeedCard as Card,
@@ -80,7 +82,7 @@ export type FeedCardProps = {
   /** Whether a divider's evidence is open. */
   open?: boolean;
   onToggle?: () => void;
-  /** Whether a long message shows all of itself. */
+  /** Whether a long message, or a tool call's long input, shows all of itself. */
   expanded?: boolean;
   onExpand?: () => void;
   /** Marks the newest arrival, for the drop-in. Only ever newest-first. */
@@ -196,7 +198,7 @@ export function FeedCardView({
           ) : card.kind === "agent" ? (
             <AgentBubble card={card} />
           ) : (
-            <ToolBox card={card} />
+            <ToolBox card={card} expanded={expanded} {...(onExpand ? { onExpand } : {})} />
           )}
         </div>
       </div>
@@ -257,24 +259,39 @@ function AgentBubble({ card }: { card: Card }) {
 }
 
 /** A tool call. Opening it shows what the call printed, when that was recorded. */
-function ToolBox({ card }: { card: Card }) {
+function ToolBox({ card, expanded, onExpand }: { card: Card; expanded: boolean; onExpand?: () => void }) {
   // Not a toggle: Anthill records that a call happened and how it ended, not
   // what it printed — the output is the part a credential or a file's contents
   // would be in — so there is nothing to open it onto (ANT-297). The reason is
   // one hover away instead.
+  const input = card.detail ?? "";
+  const long = isLongToolInput(input);
+  const full = long && expanded;
   return (
     <div className={`feed-tool state-${card.state}`} title={OUTPUT_NOTE[card.state]}>
+      {/* The input has a row of its own: beside a long tool name it was
+          squeezed to a letter a line (ANT-298). */}
       <span className="feed-tool-row">
-        <span className="feed-tool-chip">
+        <span className="feed-tool-chip" title={card.title}>
           <ToolIcon tool={card.title} />
           <span>{card.title}</span>
         </span>
-        <span className="feed-tool-task">{card.detail ?? ""}</span>
+        <span className="feed-tool-spacer" />
         <i className={`feed-glyph state-${card.state}`} aria-hidden="true">
           {CARD_STATE_GLYPH[card.state]}
         </i>
         <span className={`feed-state state-${card.state}`}>{toolStatus(card)}</span>
       </span>
+      {input ? (
+        <span className={`feed-tool-task ${full ? "is-full" : "is-clamped"}`}>
+          {full ? input : flattenToolInput(input)}
+        </span>
+      ) : null}
+      {long ? (
+        <button type="button" className="feed-more" onClick={onExpand}>
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
     </div>
   );
 }

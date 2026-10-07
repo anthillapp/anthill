@@ -17,7 +17,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { FeedCardView } from "./FeedCard.js";
-import { MESSAGE_CLAMP, type FeedCard } from "./feed.js";
+import { MESSAGE_CLAMP, isLongToolInput, type FeedCard } from "./feed.js";
 
 afterEach(cleanup);
 
@@ -93,18 +93,6 @@ describe("clamping a message card", () => {
     const shown = document.querySelector(".msg-markup")?.textContent ?? "";
     expect(shown).not.toContain("**");
   });
-
-  it("leaves a tool card alone, however long its detail", () => {
-    // Only a message is clamped; a tool card's detail is Anthill's own words
-    // about the record, not the agent's.
-    render(
-      <FeedCardView
-        cli={cli}
-        card={{ ...message(words(600)), kind: "tool", title: "File Operator" }}
-      />,
-    );
-    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
-  });
 });
 
 /**
@@ -133,5 +121,69 @@ describe("the arrival animation's selector", () => {
     const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
     expect(reduced).toContain(".feed-card.event-new");
     expect(reduced).toContain(".feed-glyph.state-working");
+  });
+});
+
+/** A tool call as the panel holds it, with its own expanded state. */
+function ToolCard({ title = "Bash", detail }: { title?: string; detail?: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const { detail: _none, ...bare } = message("");
+  const card: FeedCard = { ...bare, kind: "tool", title, ...(detail === undefined ? {} : { detail }) };
+  return <FeedCardView card={card} cli={cli} expanded={expanded} onExpand={() => setExpanded((on) => !on)} />;
+}
+
+const input = () => document.querySelector(".feed-tool-task");
+
+describe("a tool call's input", () => {
+  it("is a line of its own, never beside the tool name", () => {
+    render(<ToolCard title="mcp__plugin_anthill_exchange__run_workflow" detail="ANT-1" />);
+    expect(input()?.parentElement?.classList.contains("feed-tool")).toBe(true);
+    expect(document.querySelector(".feed-tool-row .feed-tool-task")).toBeNull();
+    // The name may be cut on screen; the tooltip still has all of it.
+    expect(document.querySelector(".feed-tool-chip")?.getAttribute("title")).toBe(
+      "mcp__plugin_anthill_exchange__run_workflow",
+    );
+  });
+
+  it("shows a short one-liner with nothing to press", () => {
+    render(<ToolCard detail="npm test" />);
+    expect(input()?.textContent).toBe("npm test");
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  });
+
+  it("has no input row when the call had no input", () => {
+    render(<ToolCard title="SubagentHandback" />);
+    expect(input()).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  });
+
+  it("offers Show more past 180 characters on one line", () => {
+    render(<ToolCard detail={`cat ${"/very/long/absolute/path".repeat(8)}`} />);
+    expect(input()?.classList.contains("is-clamped")).toBe(true);
+    expect(screen.getByRole("button", { name: "Show more" })).toBeTruthy();
+  });
+
+  it("collapses a script into one paragraph and opens it with its lines", () => {
+    const script = "python3 - <<'EOF'\nimport os\nprint(os.getcwd())\nEOF";
+    render(<ToolCard detail={script} />);
+    expect(input()?.textContent).toBe("python3 - <<'EOF' import os print(os.getcwd()) EOF");
+
+    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+    expect(input()?.textContent).toBe(script);
+    expect(input()?.classList.contains("is-full")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show less" }));
+    expect(input()?.classList.contains("is-clamped")).toBe(true);
+  });
+});
+
+describe("telling a long tool input", () => {
+  it("counts the flattened length and the raw lines", () => {
+    expect(isLongToolInput("a".repeat(180))).toBe(false);
+    expect(isLongToolInput("a".repeat(181))).toBe(true);
+    expect(isLongToolInput("a\nb\nc")).toBe(false);
+    expect(isLongToolInput("a\nb\nc\nd")).toBe(true);
+    // Indentation is not length: it goes when the input is flattened.
+    expect(isLongToolInput(`x${" ".repeat(400)}y`)).toBe(false);
   });
 });

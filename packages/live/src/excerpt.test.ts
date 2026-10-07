@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { MESSAGE_EXCERPT_LIMIT, messageExcerpt } from "./excerpt.js";
+import { MESSAGE_EXCERPT_LIMIT, closeMarkupCut, messageExcerpt } from "./excerpt.js";
 
 const marker = { runId: "ANT-1A2B3C4D", nonce: "9f8e7d" };
 
@@ -165,5 +165,46 @@ describe("the invisible step tag (ANT-167, ANT-168)", () => {
   it("never reaches the card, and leaves the Markdown whole", () => {
     expect(messageExcerpt("[//]: # (anthill:test)\n\nAdded `negate` to calc_py.", marker)).toBe("Added `negate` to calc_py.");
     expect(messageExcerpt("`[ANTHILL test]` I've added `shout` to svc_a.", marker)).toBe("I've added `shout` to svc_a.");
+  });
+});
+
+/**
+ * ANT-270. The excerpt is all Anthill keeps of a reply, so a cut that lands
+ * inside a link stays on screen as `[svc_a/app.py](svc_a…` for good.
+ */
+describe("where a long message is cut", () => {
+  it("does not stop inside a link", () => {
+    const text = `${"Changes made. ".repeat(41)}See [svc_a/app.py](svc_a/app.py) and [svc_b/app.py](svc_b/app.py).`;
+    const said = messageExcerpt(text, marker) as string;
+    expect(said.endsWith("…")).toBe(true);
+    expect(said).not.toMatch(/\[[^\]]*\]\([^)]*…$/);
+    expect(said).not.toMatch(/\[[^\]]*…$/);
+    expect(said.length).toBeLessThanOrEqual(MESSAGE_EXCERPT_LIMIT + 1);
+  });
+
+  it("goes back to before the link it would have broken", () => {
+    expect(closeMarkupCut("Changes made:\n- [svc_a/app.py](svc_a")).toBe("Changes made:");
+    expect(closeMarkupCut("**Changes made**\n\n1. [svc_a/app.py](svc_a")).toBe("**Changes made**");
+    expect(closeMarkupCut("Report: [TODO_REPORT.md")).toBe("Report:");
+  });
+
+  it("keeps a link that closed, and a bracket that is not a link", () => {
+    expect(closeMarkupCut("See [a.py](a.py) then")).toBe("See [a.py](a.py) then");
+    expect(closeMarkupCut("- [x] done\n- [ ] still")).toBe("- [x] done\n- [ ] still");
+  });
+
+  it("does not read an underscore inside a word as emphasis", () => {
+    expect(closeMarkupCut("Edited svc_a and svc_b and calc_py")).toBe("Edited svc_a and svc_b and calc_py");
+    expect(closeMarkupCut("This is _really")).toBe("This is");
+  });
+
+  it("does not read a list bullet as emphasis", () => {
+    expect(closeMarkupCut("* one\n* two")).toBe("* one\n* two");
+    expect(closeMarkupCut("* one *and")).toBe("* one");
+  });
+
+  it("does not stop inside code or bold", () => {
+    expect(closeMarkupCut("Run `npm te")).toBe("Run");
+    expect(closeMarkupCut("It was **fine")).toBe("It was");
   });
 });

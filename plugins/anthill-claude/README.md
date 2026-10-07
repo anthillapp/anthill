@@ -10,7 +10,8 @@ Verified against **Claude Code 2.1.261** (desktop app 2.2553.1) and **Anthill
 
 ## What it gives you
 
-* `/anthill:workflow` — one skill, taking `design` or `watch` plus the task.
+* `/anthill:workflow` — one skill, taking `design` or `watch` plus the task, or
+  `run` plus the path to a saved `workflow.json`.
   It is listed as `anthill:workflow`,
   and a session with no other skill of that name also answers to the short
   `/workflow` — the namespaced spelling is the one that cannot be taken by
@@ -138,6 +139,7 @@ to them and works the same under each.
 ```
 /anthill:workflow design Add retry-once to the checkout flow, let me read it first
 /anthill:workflow watch  Rework the importer — show me the work as it happens
+/anthill:workflow run "~/Library/Application Support/@anthill/desktop/exchange/workflows/importer/workflow.json"
 /anthill:workflow design --dev Add retry-once to the checkout flow, in the dev build
 ```
 
@@ -147,7 +149,8 @@ is not running; without it, the installed app. The first result says which one
 the chat reaches, and switching takes a new chat. On Linux and Windows every chat
 reaches the web shell from source, with or without `--dev`.
 
-Two commands, and the difference is whose workflow it is.
+Three commands. The first two hand a new job over, and the difference is whose
+workflow it is; the third runs one you already have.
 
 **`design`** — the workflow is yours. Claude asks what it does not know, drafts
 the plan and stops. Anthill opens it on the canvas, you change what you want,
@@ -166,6 +169,12 @@ waiting for you. Anthill opens the **Live Session** rather than the editor,
 because there is nothing there for you to settle — the command itself was the
 go-ahead. What you watch is the session's own progress reports moving through
 the graph it wrote.
+
+**`run "<path>"`** — run a workflow you already have again, from its
+`workflow.json`. **Export** in Anthill copies the command with the path in it.
+There is nothing to ask and nothing to draft: the file is the plan and the
+command is the go-ahead, so the session starts at once, and Anthill follows each
+run as a new session. Keep the command and run it as often as you like.
 
 `create` and `display` are accepted as aliases for the two. With no command,
 Claude reads the request; when that is genuinely ambiguous it asks, because the

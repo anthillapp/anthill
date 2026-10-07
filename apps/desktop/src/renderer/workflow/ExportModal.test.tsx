@@ -7,13 +7,14 @@
  * would claim this session's run.
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Workflow } from "@anthill/workflow-schema";
 
 import type { ExportWorkflowRequest, ExportWorkflowResponse } from "../../shared/ipc.js";
 
 import { ExportModal, PROMPT_FILE } from "./ExportModal.js";
+import { COPIED_MS, RUN_TOOL_KEY } from "./RunAgainCard.js";
 
 afterEach(() => {
   cleanup();
@@ -143,4 +144,88 @@ it("closes on Escape, on the backdrop and on Done", async () => {
   expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Done" }));
   expect(onClose).toHaveBeenCalledTimes(3);
+});
+
+/*
+ * Run it again from your coding tool (ANT-281): the command the plugin's `run`
+ * takes, and the path it reads. Copy only — pressing either starts nothing.
+ */
+const PATH = "~/Library/Application Support/@anthill/desktop/exchange/workflows/workflow-1/workflow.json";
+
+function clipboard() {
+  const writeText = vi.fn(async (_text: string) => undefined);
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  return writeText;
+}
+
+it("offers the run command for Claude Code by default, quoted as it is copied", async () => {
+  window.localStorage.removeItem(RUN_TOOL_KEY);
+  const { liveObserve, exportWorkflow } = stub();
+  const writeText = clipboard();
+  render(<ExportModal workflow={workflow} workflowPath={PATH} onClose={vi.fn()} />);
+
+  expect(screen.getByText("Agent files, Prompt.md and a run command, for running it again.")).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Claude Code" }).getAttribute("aria-selected")).toBe("true");
+  const shown = screen.getByTestId("run-command");
+  expect(shown.textContent).toBe(`/anthill:workflow run "${PATH}"`);
+  expect(shown.getAttribute("title")).toBe(`/anthill:workflow run "${PATH}"`);
+
+  fireEvent.click(screen.getByRole("button", { name: "Copy command" }));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith(`/anthill:workflow run "${PATH}"`));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy());
+
+  fireEvent.click(screen.getByRole("button", { name: "Copy path" }));
+  await waitFor(() => expect(writeText).toHaveBeenLastCalledWith(PATH));
+  // One "Copied" at a time: the command's button is back to itself.
+  await waitFor(() => expect(screen.getByRole("button", { name: "Copy command" })).toBeTruthy());
+  expect(screen.getAllByRole("button", { name: "Copied" })).toHaveLength(1);
+
+  expect(liveObserve).not.toHaveBeenCalled();
+  expect(exportWorkflow).not.toHaveBeenCalled();
+});
+
+it("switches the verb to Codex's, and remembers the choice for next time", () => {
+  window.localStorage.removeItem(RUN_TOOL_KEY);
+  stub();
+  const first = render(<ExportModal workflow={workflow} workflowPath={PATH} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("tab", { name: "Codex" }));
+  expect(screen.getByTestId("run-command").textContent).toBe(`$anthill run "${PATH}"`);
+  first.unmount();
+
+  render(<ExportModal workflow={workflow} workflowPath={PATH} onClose={vi.fn()} />);
+  expect(screen.getByRole("tab", { name: "Codex" }).getAttribute("aria-selected")).toBe("true");
+  window.localStorage.removeItem(RUN_TOOL_KEY);
+});
+
+it("lets go of Copied after a moment", async () => {
+  vi.useFakeTimers();
+  try {
+    stub();
+    clipboard();
+    render(<ExportModal workflow={workflow} workflowPath={PATH} onClose={vi.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy path" }));
+    });
+    expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy();
+    act(() => vi.advanceTimersByTime(COPIED_MS));
+    expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("keeps the card after Export, with the new note", async () => {
+  stub();
+  render(<ExportModal workflow={workflow} workflowPath={PATH} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Export" }));
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Exported" })).toBeTruthy());
+  expect(screen.getByTestId("run-command")).toBeTruthy();
+  expect(screen.getByText(/Each run is followed as a new session in Anthill\./)).toBeTruthy();
+});
+
+it("offers no command for a workflow with no file", () => {
+  stub();
+  render(<ExportModal workflow={workflow} onClose={vi.fn()} />);
+  expect(screen.queryByTestId("run-command")).toBeNull();
+  expect(screen.getByText("Agent files and Prompt.md, for running it again later.")).toBeTruthy();
 });

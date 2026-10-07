@@ -21,7 +21,8 @@ window. What is still rough:
 
 ## What it gives you
 
-* `/anthill:workflow` — one skill, taking `design` or `watch` plus the task.
+* `/anthill:workflow` — one skill, taking `design` or `watch` plus the task, or
+  `run` plus the path to a saved `workflow.json`.
 * Six MCP tools from Anthill's own server, which the skill calls for you.
 
 ## Installing
@@ -136,6 +137,7 @@ details; the launcher is the same file.
 ```
 /anthill:workflow design Add retry-once to the checkout flow, let me read it first
 /anthill:workflow watch  Rework the importer — show me the work as it happens
+/anthill:workflow run "~/Library/Application Support/@anthill/desktop/exchange/workflows/importer/workflow.json"
 /anthill:workflow design --dev Add retry-once to the checkout flow, in the dev build
 ```
 
@@ -146,6 +148,10 @@ want, press **Save** and tell the chat to start. It works from what you saved.
 **`watch`** — the workflow is the agent's, and you want to see the work happen.
 It writes the graph from your task, hands it over and starts. Anthill opens the
 **Live Session**.
+
+**`run "<path>"`** — run a workflow you already have again, from its
+`workflow.json`. **Export** in Anthill copies the command with the path in it.
+The chat starts at once, and Anthill follows each run as a new session.
 
 On macOS, `--dev` directly after the mode sends the chat to the development
 build of an Anthill checkout; without it, the installed app.

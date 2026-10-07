@@ -1,5 +1,5 @@
 /**
- * What the four tools answer, and what the model is told.
+ * What the tools answer, and what the model is told.
  *
  * The handlers are built against a real temporary exchange and called directly,
  * because every interesting case here is about what a second call sees after the
@@ -1138,6 +1138,172 @@ describe("revise_workflow", () => {
     });
     expect(answerOf(result).outcome).toBe("no_such_workflow");
     expect(textOf(result)).toContain("waiting will not change it");
+  });
+});
+
+/**
+ * ANT-281. `run "<path>"`: the same workflow, run again from the file the user
+ * keeps, each time as a new run of exactly what the file says.
+ */
+describe("run_workflow", () => {
+  async function workflowFile(workflow: unknown, name = "workflow.json"): Promise<{ dir: string; path: string }> {
+    const dir = await mkdtemp(join(tmpdir(), "anthill-run-file-"));
+    roots.push(dir);
+    const path = join(dir, name);
+    await writeFile(path, typeof workflow === "string" ? workflow : JSON.stringify(workflow, null, 2));
+    return { dir, path };
+  }
+
+  function runInput(path: string, overrides: Record<string, unknown> = {}) {
+    return { path, harness: "claude-code", sessionId: "session-run", idempotencyKey: "run-1", ...overrides };
+  }
+
+  it("starts a run of a workflow this Anthill already holds, and hands back the prompt", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    const { path } = await workflowFile(completeWorkflow());
+
+    const result = await handlers.runWorkflow(runInput(path));
+    const answer = answerOf(result);
+
+    expect(result.isError).toBeUndefined();
+    expect(answer).toMatchObject({
+      outcome: "started",
+      workflowId: "workflow-1",
+      stored: "unchanged",
+      revision: 1,
+      runId: "ANT-RUN1",
+      nonce: "n1",
+      sessionId: "session-run",
+      registrationRequested: true,
+    });
+
+    const binding = await store.readBinding("workflow-1", "ANT-RUN1");
+    expect(binding).toMatchObject({ revision: 1, sessionId: "session-run", requestKey: "run-1" });
+
+    // Shown, then registered: the order a watched handover arrives in.
+    const kinds = (await inbox(store)).map((drop) => drop.kind);
+    expect(kinds.filter((kind) => kind === "bind")).toHaveLength(1);
+    expect(kinds.filter((kind) => kind === "display")).toHaveLength(2);
+
+    // The prompt is the compiled workflow with this run's commands, and no
+    // marker: the binding already says which session it is.
+    const prompt = answer.prompt as string;
+    expect(prompt).toContain("anthill run ANT-RUN1 n1");
+    expect(prompt).toContain("anthill step ANT-RUN1 n1 step-1");
+    expect(prompt).toContain("anthill done ANT-RUN1 n1");
+    expect(prompt).toContain("Find the cause of the startup crash and fix it.");
+    expect(prompt).not.toContain("Anthill run marker");
+
+    const text = textOf(result);
+    expect(text).toContain("Do not ask whether to start");
+    expect(text).toContain(prompt.trim().slice(0, 200));
+  });
+
+  it("starts a new run each time it is run again, and the same one on a retry", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    const { path } = await workflowFile(completeWorkflow());
+
+    const first = answerOf(await handlers.runWorkflow(runInput(path)));
+    const retry = answerOf(await handlers.runWorkflow(runInput(path)));
+    const again = answerOf(await handlers.runWorkflow(runInput(path, { idempotencyKey: "run-2" })));
+
+    expect(first.outcome).toBe("started");
+    expect(retry).toMatchObject({ outcome: "already_started", runId: first.runId });
+    expect(again.outcome).toBe("started");
+    expect(again.runId).not.toBe(first.runId);
+    expect((await store.readWorkflow("workflow-1"))?.bindings).toHaveLength(2);
+  });
+
+  it("runs what the file says now, storing an edited file as a new revision", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    const edited = completeWorkflow({ name: "Ship the fix, carefully" });
+    const { path } = await workflowFile(edited);
+
+    const answer = answerOf(await handlers.runWorkflow(runInput(path)));
+
+    expect(answer).toMatchObject({ outcome: "started", stored: "revised", revision: 2 });
+    expect((await store.readRevision("workflow-1", 2))?.by).toBe("user");
+    expect(answer.digest).toBe(revisionDigest(edited));
+  });
+
+  it("hands over a workflow this Anthill has never seen, as a watched job", async () => {
+    const { handlers, store } = await openTools();
+    const { path } = await workflowFile(completeWorkflow({ id: "workflow-kept" }));
+
+    const answer = answerOf(await handlers.runWorkflow(runInput(path)));
+
+    expect(answer).toMatchObject({ outcome: "started", stored: "handed_over", workflowId: "workflow-kept" });
+    const stored = await store.readWorkflow("workflow-kept");
+    expect(stored?.identity?.mode).toBe("watch");
+    expect(stored?.identity?.source).toMatchObject({ harness: "claude-code", sessionId: "session-run" });
+    expect(stored?.identity?.source.taskText).toContain(path);
+  });
+
+  it("takes the path as the user copied it: quoted, and under ~", async () => {
+    const { dir } = await workflowFile(completeWorkflow({ id: "workflow-home" }));
+    const tools = createHandlers({
+      store: await openStore(),
+      home: dir,
+      launch: async () => ({ outcome: "opened" }),
+    });
+
+    const answer = answerOf(await tools.runWorkflow(runInput('"~/workflow.json"')));
+
+    expect(answer.outcome).toBe("started");
+    expect(answer.path).toBe(join(dir, "workflow.json"));
+  });
+
+  it("says plainly when there is no file there, and starts nothing", async () => {
+    const { handlers, store } = await openTools();
+    const result = await handlers.runWorkflow(runInput("/nowhere/at/all/workflow.json"));
+    const answer = answerOf(result);
+
+    expect(answer.outcome).toBe("invalid");
+    expect(problemCodes(answer)).toEqual(["WORKFLOW_FILE_UNREADABLE"]);
+    expect(textOf(result)).toContain("There is no file at /nowhere/at/all/workflow.json");
+    expect(await inbox(store)).toEqual([]);
+  });
+
+  it("refuses a file that is not JSON, or not a workflow, and starts nothing", async () => {
+    const { handlers, store } = await openTools();
+    const notJson = await workflowFile("{ this is not json", "notes.json");
+    const notWorkflow = await workflowFile({ hello: "world" }, "other.json");
+
+    const first = answerOf(await handlers.runWorkflow(runInput(notJson.path)));
+    const second = answerOf(await handlers.runWorkflow(runInput(notWorkflow.path)));
+
+    expect(first.outcome).toBe("invalid");
+    expect(problemCodes(first)).toEqual(["WORKFLOW_FILE_NOT_JSON"]);
+    expect(second.outcome).toBe("invalid");
+    expect(problemCodes(second).length).toBeGreaterThan(0);
+    expect(await inbox(store)).toEqual([]);
+  });
+
+  it("names every value the call is missing, at once", async () => {
+    const { handlers } = await openTools();
+    const answer = answerOf(await handlers.runWorkflow({}));
+
+    expect(answer.outcome).toBe("invalid");
+    expect(problemFields(answer)).toEqual(["path", "harness", "sessionId", "idempotencyKey"]);
+  });
+
+  it("asks the questions, and binds nothing, for a workflow that cannot be run yet", async () => {
+    const { handlers, store } = await openTools();
+    await handlers.createWorkflowDraft(draftInput());
+    const gutted = completeWorkflow();
+    const { path } = await workflowFile({ ...gutted, brief: { ...gutted.brief, doneCriteria: [] } });
+
+    const result = await handlers.runWorkflow(runInput(path));
+    const answer = answerOf(result);
+
+    expect(answer.outcome).toBe("not_ready");
+    expect(answer.questions).not.toHaveLength(0);
+    expect(answer.runId).toBeUndefined();
+    expect((await store.readWorkflow("workflow-1"))?.bindings).toEqual([]);
+    expect(textOf(result)).toContain("Nothing was started");
   });
 });
 

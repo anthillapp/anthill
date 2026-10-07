@@ -109,7 +109,7 @@ has been told who built it.
 ### From source
 
 From a clean checkout. master is the latest release; to work on the next one,
-check out the next-release branch first (see *Pull requests* below).
+check out `stage` first (see *Pull requests* below).
 
 ```bash
 npm install
@@ -342,12 +342,12 @@ Developer ID certificate the machine has, and ad-hoc signed when it has none —
 which is the same build, minus Apple having been told who made it.
 
 CI builds the same image on a macOS runner with
-`.github/actions/macos-package`. The `macos-package` job does it on every push
-to the next-release branch and on pull requests into master, and publishes
-nothing. When a verified release reaches master ([RELEASING.md](RELEASING.md)),
-`.github/workflows/release.yml` sees a version with no `v<version>` tag yet,
-typechecks, runs the tests, builds the image again on that commit, tags it and
-attaches the image to the release. Merging the release is the decision to
+`.github/actions/macos-package`. The `macos-package` job does it on pull
+requests into master, and publishes nothing. When a verified release reaches
+master ([RELEASING.md](RELEASING.md)), `.github/workflows/release.yml` sees a
+version with no `v<version>` tag yet, builds the image again on that commit,
+tags it and attaches the image to the release. It runs no checks of its own:
+the pull request passed them on exactly that tree. Merging the release is the decision to
 publish; a push to master whose version is already released publishes nothing.
 `workflow_dispatch` builds the image without publishing.
 
@@ -408,16 +408,13 @@ packages/
 
 master holds the latest release and nothing newer: Linux and Windows build it
 from source, and plugins installed from GitHub run it. The next release
-collects in a branch named after the release it follows — `0.8.8-next` while
-master is 0.8.8, since its own number is chosen only when it is frozen — and
-that is where pull requests go:
+collects in `stage`, and that is where pull requests go:
 
 ```bash
-npm run release -- status    # names the next-release branch
-git switch -c my-change origin/<version>-next
+git switch -c my-change origin/stage
 ```
 
-Open the pull request against `<version>-next`, not master; a pull request
+Open the pull request against `stage`, not master; a pull request
 into master from any other branch fails the `release-gate` check. The whole
 process, from the freeze to the tag and hotfixes, is in
 [RELEASING.md](RELEASING.md).

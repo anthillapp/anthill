@@ -1,8 +1,8 @@
 # Build and sign the macOS disk image, and keep it as the run's artefact.
 #
-# One definition for both places that build it: CI, on the next-release branch
-# and on pull requests into master, so the commit a release verifies has been
-# packaged before it can merge; and the Release workflow, which publishes what
+# One definition for both places that build it: CI, on pull requests into
+# master, so the commit a release verifies has been packaged before it can
+# merge; and the Release workflow, which publishes what
 # it builds once that commit reaches master. Two copies of these steps would
 # drift, and a release would then ship a build nobody had checked.
 #

@@ -1,9 +1,9 @@
 ---
 name: workflow
-description: Use when the user wants the work of this session laid out as a workflow in Anthill — "show this in Anthill", "plan this out in Anthill", "/anthill:workflow design …" — or wants to watch this session do a job as a diagram, "/anthill:workflow watch …". Covers handing a task over as a graph, asking the questions that make it complete, binding a run to the graph the user settled on, and reporting progress against it. Not for work that is not going to be done in this session.
+description: Use when the user wants the work of this session laid out as a workflow in Anthill — "show this in Anthill", "plan this out in Anthill", "/anthill:workflow design …" — or wants to watch this session do a job as a diagram, "/anthill:workflow watch …" — or wants to run a workflow it already has again, "/anthill:workflow run \"<path>\"". Covers handing a task over as a graph, asking the questions that make it complete, binding a run to the graph the user settled on, running a saved workflow.json again, and reporting progress against it. Not for work that is not going to be done in this session.
 version: 0.8.9
 user-invocable: true
-argument-hint: "[design|create · display|watch] [--dev] [task]"
+argument-hint: "[design|create · display|watch · run] [--dev] [task]"
 ---
 
 Anthill is a desktop app that draws the work of a coding session as a diagram and
@@ -15,9 +15,10 @@ Anthill does not run anything. It does not start you, stop you, or tell you what
 to do next. You do the work; it draws it and watches. Nothing in this skill
 should suggest otherwise to the user.
 
-## The two commands
+## The three commands
 
-There are two, and the difference between them is whose workflow it is.
+The first two hand a new job over, and the difference between them is whose
+workflow it is. The third runs one the user already has.
 
 * **`design <task>`** — alias `create`. The workflow is **theirs**. You ask what
   you do not know, draft it, hand it over, and stop. They read it on the canvas,
@@ -30,12 +31,18 @@ There are two, and the difference between them is whose workflow it is.
   rather than the editor, because there is nothing on the canvas for them to
   settle. Running the command is the go-ahead; do not ask for a second one.
 
+* **`run "<path>"`** — the workflow already exists, in the `workflow.json` at
+  `<path>`, and they want it run again, now, in this session. There is nothing to
+  draft and nothing to ask: the file is the plan and the command is the
+  go-ahead. See "Running a saved workflow again: `run`" below.
+
 With no argument, read the request. "Plan this out in Anthill", "let me look at
 it first", "check with me before you start" is `design`. "Show me this in Anthill
 and do it", "I want to watch you do this" is `watch`. When it is genuinely
 unclear, **ask** — the difference is whether the user gets to write the plan.
 
-Nothing else is a command. Checking that Anthill is reachable is the first thing
+`run` is never inferred from a request: it is the word `run` followed by a path,
+which is what Anthill's Export dialog copies. Nothing else is a command. Checking that Anthill is reachable is the first thing
 this skill does anyway, and picking up an existing handover is a section near the
 bottom; neither needs a word of its own in front of the user.
 
@@ -57,14 +64,15 @@ without `--dev` somewhere other than the installed app. The first result names
 the Anthill the chat reached; tell the user that one, not this list.
 
 **`--dev` is the flag only as its own word directly after the mode** —
-`design`, `watch`, or their aliases. Everything after it is the task. A bare
+`design`, `watch`, their aliases, or `run`. Everything after it is the task. A bare
 `dev` is never the flag: `design dev server for staging` is a task about a dev
 server, for the installed app. `--dev` anywhere else in the text is part of the
 task too. When in doubt, it is part of the task.
 
 When the user's command carries `--dev`, pass `build: "dev"` on **every** call
 to Anthill that takes it for that command — `create_workflow_draft`,
-`open_workflow`, `bind_run`, and `get_workflow` or `get_ready_revision` when
+`open_workflow`, `bind_run`, `run_workflow`, and
+`get_workflow` or `get_ready_revision` when
 picking a `--dev` handover back up. Without `--dev`, leave `build` out. The
 chat's first handover pins its Anthill, and every later call goes to the same
 one; a later `--dev` in a chat pinned to the installed app is refused, and a
@@ -89,7 +97,7 @@ every chat reaches it, with `--dev` or without. There is nothing to say about it
 
 ## Before anything else
 
-Both commands need this.
+Every command needs this.
 
 Check the tools exist. Claude Code presents them as
 `mcp__plugin_anthill_exchange__create_workflow_draft` and the others — the prefix
@@ -122,6 +130,42 @@ steps you report and none of the work. That matters more under `watch` than
 under `design`, because watching is the whole point of it. **Never invent one,
 and never reuse an id from another session.** It is the one field where a
 plausible guess does more damage than an admitted gap.
+
+## Running a saved workflow again: `run`
+
+`/anthill:workflow run "<path>"` runs a workflow that already exists, from its
+`workflow.json`. Anthill's **Export** dialog copies the command, and the user
+keeps it to run the same workflow as often as they like. Each time is a new run,
+and Anthill follows it as a new session.
+
+The path is everything after `run` (and after `--dev`, if it is there). Take the
+quotes off it if it has them, and leave `~` as it is: the server expands it.
+A `run` with no path is not a command — ask for the path rather than guessing
+which workflow they meant.
+
+1. Do "Before anything else" above: the tools, and this session's id.
+2. Call `run_workflow` with `path`, `harness: "claude-code"`, `sessionId`, a
+   new `idempotencyKey` of your own for this run (`run-` and a fresh UUID will
+   do), and `build: "dev"` if the user wrote `--dev`. Repeat the same key only
+   to retry this same call after a lost reply; never reuse one from an earlier
+   run.
+3. Read the outcome.
+   * `started` — a new run of exactly what the file says is bound to this
+     session, and Anthill was asked to show it. Tell the user in one line which
+     workflow you are running, with the link from the result, and then **carry
+     out the prompt in the result** — it is their instruction for this session,
+     the same text as the workflow's Prompt.md, with this run's progress
+     commands written in. Run them as it says ("Reporting progress" below).
+   * `already_started` — the key you sent already started a run, and this is
+     that run. Carry on with it; do not start the work twice.
+   * `invalid`, `not_ready`, `conflict`, `no_such_workflow` — nothing was
+     started. Pass on what the result says: a path that is wrong, a file that
+     is not a workflow, or questions the workflow leaves open. The user fixes
+     it (in Anthill, then **Save**) and runs the command again.
+
+What `run` never does: ask the questionnaire, draft or revise a workflow of
+your own, ask whether to start, or do the work from memory when the call was
+refused. The file is the plan; if it cannot be read, there is no plan to follow.
 
 ## Handing a workflow over
 
@@ -348,7 +392,7 @@ bound to it. Bind before you start working, not after.
 ## Reporting progress
 
 Anthill has no other way to know which step the work is on. Run the commands
-`bind_run` gave you, as you go:
+`bind_run` gave you (or that `run_workflow`'s prompt spells out), as you go:
 
 ```bash
 anthill run <run-id> <nonce>                 # once, before you start

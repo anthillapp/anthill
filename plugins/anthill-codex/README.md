@@ -128,6 +128,7 @@ another directory cannot see it.
 ```text
 $anthill design Add retry-once to checkout; let me edit the workflow first
 $anthill watch Fix the importer and show the work in Anthill while you do it
+$anthill run "~/Library/Application Support/@anthill/desktop/exchange/workflows/importer/workflow.json"
 $anthill design --dev Add retry-once to checkout, in the development build
 $anthill Describe this task as a workflow
 ```
@@ -142,6 +143,8 @@ task reaches the web shell from source, with or without `--dev`.
 decisions, then stops after opening the draft. `watch` binds immediately and
 reports the work through the existing `anthill` CLI channel. With no explicit
 mode, the skill infers execution intent and otherwise defaults to `design`.
+`run "<path>"` runs a saved `workflow.json` again — **Export** in Anthill copies
+the command — and starts at once, as a new run Anthill follows as a new session.
 
 The source session id comes from `CODEX_SESSION_ID`, which Codex records as
 `session_id` in its local rollout metadata. The skill never invents or borrows

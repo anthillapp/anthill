@@ -20,7 +20,14 @@
 import type { Workflow } from "@anthill/workflow-schema";
 import { compile, executableBlocks, type CompileResult } from "@anthill/workflow";
 
-import { cliInstruction, echoInstruction, renderMarker, stepOpening, type RunMarker } from "./marker.js";
+import {
+  cliInstruction,
+  echoInstruction,
+  renderMarker,
+  stepOpening,
+  type CliInvocation,
+  type RunMarker,
+} from "./marker.js";
 import type { RunStep } from "./pending-run.js";
 
 export type BootstrapResult = CompileResult & {
@@ -39,6 +46,21 @@ export type BootstrapOptions = {
    * ask leaves the prompt to the marker lines, which work everywhere.
    */
   reportViaCli?: boolean;
+  /**
+   * How the harness runs the CLI when `reportViaCli` is set and `anthill` alone
+   * would not do: the MCP server knows, for the Anthill it reached (ANT-232).
+   */
+  invocation?: CliInvocation;
+  /**
+   * `false` leaves the marker block out (ANT-281).
+   *
+   * The marker is how a *pasted* prompt finds its session: it reaches the
+   * session file in the user's own message. A run the MCP server has already
+   * bound knows its session from the binding, and its prompt arrives as a tool
+   * result rather than a user message, so a marker there would only be a
+   * second, weaker way to say the same thing.
+   */
+  includeMarker?: boolean;
 };
 
 /**
@@ -74,8 +96,9 @@ export function buildBootstrapPrompt(
   options: BootstrapOptions = {},
 ): BootstrapResult {
   const via = options.reportViaCli ? "cli" : "echo";
-  const compiled = compile(workflow, { stepOpening: (step) => stepOpening(marker, step, via) });
-  const sections: string[] = [renderMarker(marker)];
+  const invocation = options.invocation ?? {};
+  const compiled = compile(workflow, { stepOpening: (step) => stepOpening(marker, step, via, invocation) });
+  const sections: string[] = options.includeMarker === false ? [] : [renderMarker(marker)];
 
   if (compiled.files.length > 0) {
     // The files are still worth writing — they make the roles durable for any
@@ -117,7 +140,7 @@ export function buildBootstrapPrompt(
 
   sections.push(
     options.reportViaCli
-      ? cliInstruction(marker, workflowSteps(workflow))
+      ? cliInstruction(marker, workflowSteps(workflow), invocation)
       : echoInstruction(marker, workflowSteps(workflow)),
   );
   sections.push("---");

@@ -166,6 +166,15 @@ $anthill watch Rework the importer                               # Codex
 
 <img src="https://getanthill.ai/readme/anthill-watch.svg" width="100%" alt="Watch mode: the agent plans and starts at once, and Anthill shows each step as it happens.">
 
+**run**: run a workflow you already have again, as often as you like. **Export**
+in Anthill copies the command with the workflow's path in it, and each run is a
+new session in Anthill.
+
+```text
+/anthill:workflow run "<path to workflow.json>"                  # Claude Code, VS Code
+$anthill run "<path to workflow.json>"                           # Codex
+```
+
 Without a plugin, build the workflow in Anthill, press **Copy prompt**, and
 paste it into your CLI. Anthill recognises the session and follows it the same
 way.

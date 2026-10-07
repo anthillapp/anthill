@@ -3248,7 +3248,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve4.call(this, root, ref);
+      let _sch = resolve5.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3279,13 +3279,13 @@ var require_compile = __commonJS({
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
     __name(sameSchemaEnv, "sameSchemaEnv");
-    function resolve4(root, ref) {
+    function resolve5(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
       return sch || this.schemas[ref] || resolveSchema.call(this, root, ref);
     }
-    __name(resolve4, "resolve");
+    __name(resolve5, "resolve");
     function resolveSchema(root, ref) {
       const p = this.opts.uriResolver.parse(ref);
       const refPath = (0, resolve_1._getFullPath)(this.opts.uriResolver, p);
@@ -4145,7 +4145,7 @@ var require_fast_uri = __commonJS({
       return uri;
     }
     __name(normalize, "normalize");
-    function resolve4(baseURI, relativeURI, options) {
+    function resolve5(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -4178,7 +4178,7 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    __name(resolve4, "resolve");
+    __name(resolve5, "resolve");
     function resolveComponent(base, relative, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
@@ -4527,7 +4527,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve4,
+      resolve: resolve5,
       resolveComponent,
       equal,
       serialize,
@@ -8133,8 +8133,8 @@ var require_graceful_fs = __commonJS({
       fs2.createReadStream = createReadStream;
       fs2.createWriteStream = createWriteStream;
       var fs$readFile = fs2.readFile;
-      fs2.readFile = readFile2;
-      function readFile2(path, options, cb) {
+      fs2.readFile = readFile3;
+      function readFile3(path, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
         return go$readFile(path, options, cb);
@@ -8150,7 +8150,7 @@ var require_graceful_fs = __commonJS({
         }
         __name(go$readFile, "go$readFile");
       }
-      __name(readFile2, "readFile");
+      __name(readFile3, "readFile");
       var fs$writeFile = fs2.writeFile;
       fs2.writeFile = writeFile;
       function writeFile(path, data, options, cb) {
@@ -8869,11 +8869,11 @@ var require_mtime_precision = __commonJS({
     function probe(file2, fs, callback) {
       const cachedPrecision = fs[cacheSymbol];
       if (cachedPrecision) {
-        return fs.stat(file2, (err, stat) => {
+        return fs.stat(file2, (err, stat2) => {
           if (err) {
             return callback(err);
           }
-          callback(null, stat.mtime, cachedPrecision);
+          callback(null, stat2.mtime, cachedPrecision);
         });
       }
       const mtime = new Date(Math.ceil(Date.now() / 1e3) * 1e3 + 5);
@@ -8881,13 +8881,13 @@ var require_mtime_precision = __commonJS({
         if (err) {
           return callback(err);
         }
-        fs.stat(file2, (err2, stat) => {
+        fs.stat(file2, (err2, stat2) => {
           if (err2) {
             return callback(err2);
           }
-          const precision = stat.mtime.getTime() % 1e3 === 0 ? "s" : "ms";
+          const precision = stat2.mtime.getTime() % 1e3 === 0 ? "s" : "ms";
           Object.defineProperty(fs, cacheSymbol, { value: precision });
-          callback(null, stat.mtime, precision);
+          callback(null, stat2.mtime, precision);
         });
       });
     }
@@ -8945,14 +8945,14 @@ var require_lockfile = __commonJS({
         if (options.stale <= 0) {
           return callback(Object.assign(new Error("Lock file is already being held"), { code: "ELOCKED", file: file2 }));
         }
-        options.fs.stat(lockfilePath, (err2, stat) => {
+        options.fs.stat(lockfilePath, (err2, stat2) => {
           if (err2) {
             if (err2.code === "ENOENT") {
               return acquireLock(file2, { ...options, stale: 0 }, callback);
             }
             return callback(err2);
           }
-          if (!isLockStale(stat, options)) {
+          if (!isLockStale(stat2, options)) {
             return callback(Object.assign(new Error("Lock file is already being held"), { code: "ELOCKED", file: file2 }));
           }
           removeLock(file2, options, (err3) => {
@@ -8965,8 +8965,8 @@ var require_lockfile = __commonJS({
       });
     }
     __name(acquireLock, "acquireLock");
-    function isLockStale(stat, options) {
-      return stat.mtime.getTime() < Date.now() - options.stale;
+    function isLockStale(stat2, options) {
+      return stat2.mtime.getTime() < Date.now() - options.stale;
     }
     __name(isLockStale, "isLockStale");
     function removeLock(file2, options, callback) {
@@ -8986,7 +8986,7 @@ var require_lockfile = __commonJS({
       lock3.updateDelay = lock3.updateDelay || options.update;
       lock3.updateTimeout = setTimeout(() => {
         lock3.updateTimeout = null;
-        options.fs.stat(lock3.lockfilePath, (err, stat) => {
+        options.fs.stat(lock3.lockfilePath, (err, stat2) => {
           const isOverThreshold = lock3.lastUpdate + options.stale < Date.now();
           if (err) {
             if (err.code === "ENOENT" || isOverThreshold) {
@@ -8995,7 +8995,7 @@ var require_lockfile = __commonJS({
             lock3.updateDelay = 1e3;
             return updateLock(file2, options);
           }
-          const isMtimeOurs = lock3.mtime.getTime() === stat.mtime.getTime();
+          const isMtimeOurs = lock3.mtime.getTime() === stat2.mtime.getTime();
           if (!isMtimeOurs) {
             return setLockAsCompromised(
               file2,
@@ -9124,11 +9124,11 @@ var require_lockfile = __commonJS({
         if (err) {
           return callback(err);
         }
-        options.fs.stat(getLockFile(file3, options), (err2, stat) => {
+        options.fs.stat(getLockFile(file3, options), (err2, stat2) => {
           if (err2) {
             return err2.code === "ENOENT" ? callback(null, false) : callback(err2);
           }
-          return callback(null, !isLockStale(stat, options));
+          return callback(null, !isLockStale(stat2, options));
         });
       });
     }
@@ -9177,12 +9177,12 @@ var require_adapter = __commonJS({
     }
     __name(createSyncFs, "createSyncFs");
     function toPromise(method) {
-      return (...args) => new Promise((resolve4, reject) => {
+      return (...args) => new Promise((resolve5, reject) => {
         args.push((err, result2) => {
           if (err) {
             reject(err);
           } else {
-            resolve4(result2);
+            resolve5(result2);
           }
         });
         method(...args);
@@ -31876,7 +31876,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+        await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error51) {
@@ -31893,7 +31893,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       const earlyReject = /* @__PURE__ */ __name((error51) => {
         reject(error51);
       }, "earlyReject");
@@ -31971,7 +31971,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve4(parseResult.data);
+            resolve5(parseResult.data);
           }
         } catch (error51) {
           reject(error51);
@@ -32232,12 +32232,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve4, interval);
+      const timeoutId = setTimeout(resolve5, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -33353,7 +33353,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+      await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -34032,12 +34032,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve4) => {
+    return new Promise((resolve5) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve4();
+        resolve5();
       } else {
-        this._stdout.once("drain", resolve4);
+        this._stdout.once("drain", resolve5);
       }
     });
   }
@@ -34046,171 +34046,6 @@ var StdioServerTransport = class {
 // apps/mcp/dist/server.js
 import { realpathSync } from "node:fs";
 import { fileURLToPath as fileURLToPath2, pathToFileURL } from "node:url";
-
-// packages/live/dist/marker.js
-var MARKER_VERSION = "1";
-function newRunId(random = defaultRandom) {
-  return `ANT-${random().slice(0, 8).toUpperCase()}`;
-}
-__name(newRunId, "newRunId");
-function newNonce(random = defaultRandom) {
-  return random().slice(0, 6).toLowerCase();
-}
-__name(newNonce, "newNonce");
-function defaultRandom() {
-  return Math.random().toString(36).slice(2).padEnd(12, "0");
-}
-__name(defaultRandom, "defaultRandom");
-var CLI_NAME = "anthill";
-function typedPath(path, platform) {
-  if (platform === "win32")
-    return `"${path.replace(/\\/g, "/")}"`;
-  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(path) ? path : `'${path.replace(/'/g, "'\\''")}'`;
-}
-__name(typedPath, "typedPath");
-function cliInstruction(marker, steps = [], invocation = {}) {
-  const command = invocation.command ?? CLI_NAME;
-  const at = invocation.dataDir ? ` --data-dir ${typedPath(invocation.dataDir, invocation.platform ?? "linux")}` : "";
-  const lines = [
-    "## Progress reports",
-    "",
-    "Run these commands in a shell. They tell the Anthill window on this machine",
-    "which step the work is on. They do not affect the work: if a command cannot",
-    "be run, continue without it.",
-    "",
-    "**Once, before you begin:**",
-    "",
-    `    ${command} run${at} ${marker.runId} ${marker.nonce}`,
-    "",
-    "**Immediately before you start each step, and again whenever you come back to",
-    "an earlier one:**",
-    "",
-    `    ${command} step${at} ${marker.runId} ${marker.nonce} <step-id>`,
-    "",
-    "**Once the work is finished:**",
-    "",
-    `    ${command} done${at} ${marker.runId} ${marker.nonce}`
-  ];
-  if (steps.length > 0) {
-    lines.push("", "Use exactly these step ids:", "", ...steps.map((step) => `- \`${step.id}\` \u2013 ${step.name}`));
-  }
-  return lines.join("\n");
-}
-__name(cliInstruction, "cliInstruction");
-var ID = "([A-Za-z0-9_.:-]+)";
-var STEP_TAG = new RegExp(`\\[//\\]: # \\(anthill:${ID}\\)|\\[ANTHILL\\s+${ID}\\]`);
-var STEP_TAGS = new RegExp([
-  // A link-definition line, taken whole with its line break.
-  `^[ \\t]*\`?\\[//\\]: # \\(anthill:[A-Za-z0-9_.:-]+\\)\`?[ \\t]*(?:\\r?\\n|$)`,
-  // The old tag, with any backticks around it and the space after.
-  `\`?\\[ANTHILL\\s+[A-Za-z0-9_.:-]+\\]\`?[ \\t]*`
-].join("|"), "gm");
-
-// packages/live/dist/pending-run.js
-var TIMING = {
-  /**
-   * How long a copied prompt waits to be claimed by a session.
-   *
-   * This asks about discovery — did the user paste it anywhere? — and the
-   * question is settled the moment a session carries the marker. It was never
-   * meant to be a budget for the work itself.
-   */
-  pendingTtlMs: 30 * 60 * 1e3,
-  /** Shorter, when the chosen CLI writes nothing Anthill can read. */
-  unobservableTtlMs: 2 * 60 * 1e3,
-  /** How long a detected session may be quiet before Anthill stops claiming it. */
-  activityTtlMs: 5 * 60 * 1e3,
-  /**
-   * How long after its last evidence a matched run is still worth reading.
-   *
-   * Measured from the session's own last word rather than from the copy, so a
-   * workflow may take as long as the work takes. Silence this long is the only
-   * thing that closes a session Anthill actually found.
-   */
-  silenceTtlMs: 30 * 60 * 1e3,
-  /** How long a finished or failed record is kept for the user to read. */
-  retentionMs: 24 * 60 * 60 * 1e3
-};
-
-// packages/workflow/dist/harness.js
-var CLAUDE_CODE = {
-  target: "claude-code",
-  displayName: "Claude Code",
-  models: [
-    // Claude Code's own aliases, the same words `claude --model` takes; the
-    // CLI resolves each to the current model of that name (ANT-68).
-    { id: "fable", label: "Fable", hint: "Most capable, for the hardest steps" },
-    { id: "opus", label: "Opus", hint: "Deepest reasoning, slowest" },
-    { id: "sonnet", label: "Sonnet", hint: "Balanced \u2013 a good default" },
-    { id: "haiku", label: "Haiku", hint: "Fastest, for simple steps" },
-    { id: "inherit", label: "Inherit", hint: "Use the main session's model" }
-  ],
-  modelsAreDeclared: true,
-  defaultModel: "sonnet",
-  supportsReasoningEffort: false,
-  agentDir: ".claude/agents",
-  agentFileFormat: "markdown",
-  supportsPerAgentModel: true,
-  liveHooks: true
-};
-var CODEX = {
-  target: "codex",
-  displayName: "OpenAI Codex CLI",
-  models: [],
-  modelsAreDeclared: false,
-  // What a Codex agent file that names no model gets: the model of the session
-  // that spawned it. Anthill cannot know what that is, and says so rather than
-  // naming one.
-  defaultModel: "the session's model",
-  supportsReasoningEffort: true,
-  agentDir: ".codex/agents",
-  agentFileFormat: "toml",
-  supportsPerAgentModel: true,
-  liveHooks: true
-};
-var PI = {
-  target: "pi",
-  displayName: "Pi",
-  models: [],
-  modelsAreDeclared: false,
-  // What a pi invocation that names no model gets: the model of the session
-  // that spawned it. Anthill cannot know what that is, and says so rather than
-  // naming one.
-  defaultModel: "the session's model",
-  supportsReasoningEffort: true,
-  supportsPerAgentModel: false,
-  // pi's hooks are TypeScript extensions it loads itself; there is no config to write.
-  liveHooks: false
-};
-var VSCODE = {
-  target: "vscode",
-  displayName: "VS Code",
-  models: [],
-  modelsAreDeclared: false,
-  defaultModel: "the session's model",
-  supportsReasoningEffort: false,
-  supportsPerAgentModel: false,
-  // `~/.copilot/hooks/anthill.json`, which VS Code's agent reads by default.
-  liveHooks: true
-};
-var HARNESS_PROFILES = {
-  "claude-code": CLAUDE_CODE,
-  codex: CODEX,
-  pi: PI,
-  vscode: VSCODE
-};
-function harnessProfile(target) {
-  return HARNESS_PROFILES[target];
-}
-__name(harnessProfile, "harnessProfile");
-var DEFAULT_TARGET = "claude-code";
-
-// packages/workflow/dist/plugin-harness.js
-var PLUGIN_HARNESSES = ["claude-code", "codex", "vscode"];
-function isPluginHarness(value) {
-  return typeof value === "string" && PLUGIN_HARNESSES.includes(value);
-}
-__name(isPluginHarness, "isPluginHarness");
 
 // packages/workflow-schema/dist/types.js
 var HARNESS_TARGETS = [
@@ -34526,6 +34361,218 @@ function unescapeString(body) {
 }
 __name(unescapeString, "unescapeString");
 
+// packages/workflow-exchange/dist/contracts.js
+var EXCHANGE_VERSION = 1;
+var HANDOVER_MODES = [
+  "design",
+  "watch",
+  "show-and-go",
+  "approval-gate"
+];
+var EXCHANGE_PROBLEM_CODES = {
+  /** The version number is from a newer Anthill, or is not a version at all. */
+  EXCHANGE_VERSION_UNSUPPORTED: "EXCHANGE_VERSION_UNSUPPORTED",
+  /** The submission is not a JSON object. */
+  SUBMISSION_NOT_AN_OBJECT: "SUBMISSION_NOT_AN_OBJECT",
+  /** A required envelope field is absent. */
+  SUBMISSION_FIELD_MISSING: "SUBMISSION_FIELD_MISSING",
+  /** An envelope field is present but is not the kind of thing it has to be. */
+  SUBMISSION_FIELD_INVALID: "SUBMISSION_FIELD_INVALID",
+  /** The workflow document did not survive `WorkflowSchema`. */
+  WORKFLOW_MALFORMED: "WORKFLOW_MALFORMED",
+  /** The brief does not say when the work is finished. */
+  HANDOVER_NO_DONE_CRITERIA: "HANDOVER_NO_DONE_CRITERIA",
+  /** The submission does not carry what the user actually asked for. */
+  HANDOVER_NO_TASK_TEXT: "HANDOVER_NO_TASK_TEXT",
+  /** The workflow targets one tool and a different tool submitted it. */
+  HANDOVER_TARGET_MISMATCH: "HANDOVER_TARGET_MISMATCH"
+};
+function isSourceHarness(value) {
+  return HARNESS_TARGETS.includes(value);
+}
+__name(isSourceHarness, "isSourceHarness");
+function isHandoverMode(value) {
+  return HANDOVER_MODES.includes(value);
+}
+__name(isHandoverMode, "isHandoverMode");
+var SESSION_ID_MAX_LENGTH = 120;
+var SESSION_ID = /^[A-Za-z0-9_-]+$/;
+function isSessionId(value) {
+  return typeof value === "string" && value.length <= SESSION_ID_MAX_LENGTH && SESSION_ID.test(value);
+}
+__name(isSessionId, "isSessionId");
+
+// packages/workflow/dist/parallel.js
+var isPlain = /* @__PURE__ */ __name((edge) => (edge.kind === void 0 || edge.kind === "next") && !edge.condition?.trim(), "isPlain");
+function parallelPlan(workflow) {
+  const out = /* @__PURE__ */ new Map();
+  for (const edge of workflow.edges)
+    out.set(edge.source, [...out.get(edge.source) ?? [], edge]);
+  const back = /* @__PURE__ */ new Set();
+  const state = /* @__PURE__ */ new Map();
+  const walk = /* @__PURE__ */ __name((id) => {
+    state.set(id, "open");
+    for (const edge of out.get(id) ?? []) {
+      if (edge.kind === "rework" || state.get(edge.target) === "open") {
+        back.add(edge.id);
+        continue;
+      }
+      if (!state.has(edge.target))
+        walk(edge.target);
+    }
+    state.set(id, "done");
+  }, "walk");
+  for (const node of workflow.nodes)
+    if (node.type === "start")
+      walk(node.id);
+  for (const node of workflow.nodes)
+    if (!state.has(node.id))
+      walk(node.id);
+  const forward = /* @__PURE__ */ __name((id) => (out.get(id) ?? []).filter((edge) => !back.has(edge.id)), "forward");
+  const reach = /* @__PURE__ */ __name((from) => {
+    const seen = /* @__PURE__ */ new Set([from]);
+    const queue = [from];
+    while (queue.length > 0) {
+      const id = queue.shift();
+      for (const edge of forward(id)) {
+        if (!seen.has(edge.target)) {
+          seen.add(edge.target);
+          queue.push(edge.target);
+        }
+      }
+    }
+    return seen;
+  }, "reach");
+  const forks = /* @__PURE__ */ new Map();
+  for (const node of workflow.nodes) {
+    if (node.type === "condition" || node.type === "end" || node.type === "approval")
+      continue;
+    const edges = out.get(node.id) ?? [];
+    if (edges.length >= 2 && edges.every(isPlain))
+      forks.set(node.id, edges.map((edge) => edge.target));
+  }
+  const incoming = /* @__PURE__ */ new Map();
+  for (const edge of workflow.edges) {
+    if (back.has(edge.id))
+      continue;
+    incoming.set(edge.target, [...incoming.get(edge.target) ?? [], edge.source]);
+  }
+  const joins = /* @__PURE__ */ new Map();
+  for (const targets of forks.values()) {
+    const branches = targets.map(reach);
+    const branchesOf = /* @__PURE__ */ __name((id) => branches.flatMap((set2, index) => set2.has(id) ? [index] : []), "branchesOf");
+    for (const [id, sources] of incoming) {
+      const onBranches = sources.map((source) => ({ source, on: branchesOf(source) })).filter(({ on }) => on.length > 0);
+      const distinct = new Set(onBranches.flatMap(({ on }) => on.length === 1 ? on : []));
+      if (distinct.size < 2)
+        continue;
+      const waits = [.../* @__PURE__ */ new Set([...joins.get(id) ?? [], ...onBranches.map(({ source }) => source)])];
+      joins.set(id, waits);
+    }
+  }
+  const regions = [];
+  for (const [fork, targets] of forks) {
+    const stops = /* @__PURE__ */ new Set([fork, ...joins.keys()]);
+    regions.push(targets.map((start) => {
+      const seen = /* @__PURE__ */ new Set([start]);
+      const queue = [start];
+      while (queue.length > 0) {
+        const id = queue.shift();
+        for (const edge of out.get(id) ?? []) {
+          if (stops.has(edge.target) || seen.has(edge.target))
+            continue;
+          seen.add(edge.target);
+          queue.push(edge.target);
+        }
+      }
+      return seen;
+    }));
+  }
+  const parallel = /* @__PURE__ */ __name((a, b) => a !== b && regions.some((branches) => branches.some((mine, i) => mine.has(a) && !mine.has(b) && branches.some((theirs, j) => j !== i && theirs.has(b) && !theirs.has(a)))), "parallel");
+  return { forks, joins, parallel };
+}
+__name(parallelPlan, "parallelPlan");
+
+// packages/workflow/dist/harness.js
+var CLAUDE_CODE = {
+  target: "claude-code",
+  displayName: "Claude Code",
+  models: [
+    // Claude Code's own aliases, the same words `claude --model` takes; the
+    // CLI resolves each to the current model of that name (ANT-68).
+    { id: "fable", label: "Fable", hint: "Most capable, for the hardest steps" },
+    { id: "opus", label: "Opus", hint: "Deepest reasoning, slowest" },
+    { id: "sonnet", label: "Sonnet", hint: "Balanced \u2013 a good default" },
+    { id: "haiku", label: "Haiku", hint: "Fastest, for simple steps" },
+    { id: "inherit", label: "Inherit", hint: "Use the main session's model" }
+  ],
+  modelsAreDeclared: true,
+  defaultModel: "sonnet",
+  supportsReasoningEffort: false,
+  agentDir: ".claude/agents",
+  agentFileFormat: "markdown",
+  supportsPerAgentModel: true,
+  liveHooks: true
+};
+var CODEX = {
+  target: "codex",
+  displayName: "OpenAI Codex CLI",
+  models: [],
+  modelsAreDeclared: false,
+  // What a Codex agent file that names no model gets: the model of the session
+  // that spawned it. Anthill cannot know what that is, and says so rather than
+  // naming one.
+  defaultModel: "the session's model",
+  supportsReasoningEffort: true,
+  agentDir: ".codex/agents",
+  agentFileFormat: "toml",
+  supportsPerAgentModel: true,
+  liveHooks: true
+};
+var PI = {
+  target: "pi",
+  displayName: "Pi",
+  models: [],
+  modelsAreDeclared: false,
+  // What a pi invocation that names no model gets: the model of the session
+  // that spawned it. Anthill cannot know what that is, and says so rather than
+  // naming one.
+  defaultModel: "the session's model",
+  supportsReasoningEffort: true,
+  supportsPerAgentModel: false,
+  // pi's hooks are TypeScript extensions it loads itself; there is no config to write.
+  liveHooks: false
+};
+var VSCODE = {
+  target: "vscode",
+  displayName: "VS Code",
+  models: [],
+  modelsAreDeclared: false,
+  defaultModel: "the session's model",
+  supportsReasoningEffort: false,
+  supportsPerAgentModel: false,
+  // `~/.copilot/hooks/anthill.json`, which VS Code's agent reads by default.
+  liveHooks: true
+};
+var HARNESS_PROFILES = {
+  "claude-code": CLAUDE_CODE,
+  codex: CODEX,
+  pi: PI,
+  vscode: VSCODE
+};
+function harnessProfile(target) {
+  return HARNESS_PROFILES[target];
+}
+__name(harnessProfile, "harnessProfile");
+var DEFAULT_TARGET = "claude-code";
+
+// packages/workflow/dist/plugin-harness.js
+var PLUGIN_HARNESSES = ["claude-code", "codex", "vscode"];
+function isPluginHarness(value) {
+  return typeof value === "string" && PLUGIN_HARNESSES.includes(value);
+}
+__name(isPluginHarness, "isPluginHarness");
+
 // packages/workflow/dist/agent-models.js
 var HARNESS_DEFAULT = "__default__";
 function isConfiguredFor(models, target) {
@@ -34536,6 +34583,22 @@ function configuredHarnesses(models) {
   return HARNESS_TARGETS.filter((target) => isConfiguredFor(models, target));
 }
 __name(configuredHarnesses, "configuredHarnesses");
+function explicitModelFor(models, target) {
+  const id = models?.[target]?.id?.trim();
+  return !id || id === HARNESS_DEFAULT ? void 0 : id;
+}
+__name(explicitModelFor, "explicitModelFor");
+function reasoningEffortFor(models, target) {
+  if (!harnessProfile(target).supportsReasoningEffort)
+    return void 0;
+  const effort = models?.[target]?.reasoningEffort?.trim();
+  return !effort || effort === HARNESS_DEFAULT ? void 0 : effort;
+}
+__name(reasoningEffortFor, "reasoningEffortFor");
+function modelFor(models, target) {
+  return explicitModelFor(models, target) ?? harnessProfile(target).defaultModel;
+}
+__name(modelFor, "modelFor");
 function harnessOwningModel(model) {
   const owners = HARNESS_TARGETS.filter((target) => {
     const harness = harnessProfile(target);
@@ -34598,6 +34661,56 @@ function migrateModels(value) {
   return { models: { [owner]: { id: name } } };
 }
 __name(migrateModels, "migrateModels");
+
+// packages/workflow/dist/toml.js
+function tomlString(value) {
+  const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t").replace(/[ --]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
+  return `"${escaped}"`;
+}
+__name(tomlString, "tomlString");
+function tomlMultiline(value) {
+  const escaped = value.replace(/\\/g, "\\\\").replace(/"{3,}/g, (run) => `${'\\"'.repeat(run.length)}`).replace(/\r\n/g, "\n");
+  return `"""
+${escaped}"""`;
+}
+__name(tomlMultiline, "tomlMultiline");
+function tomlTable(entries) {
+  return entries.filter((entry) => entry !== void 0).map((entry) => `${entry.key} = ${entry.multiline ? tomlMultiline(entry.value) : tomlString(entry.value)}`).join("\n");
+}
+__name(tomlTable, "tomlTable");
+
+// packages/workflow/dist/brief.js
+var DEFAULT_CONSTRAINTS = [
+  "Stay on this task. Do not switch to unrelated work.",
+  "Make the smallest reasonable change. Do not refactor beyond what the goal requires.",
+  "Do not make a check pass without fixing the underlying issue."
+];
+var DEFAULT_REPORT_SECTIONS = [
+  "Root cause",
+  "Changes made",
+  "How it was verified",
+  "Remaining risks"
+];
+function cleanList(values, fallback) {
+  const cleaned = (values ?? []).map((value) => value.trim()).filter((value) => value.length > 0);
+  return cleaned.length > 0 ? cleaned : [...fallback];
+}
+__name(cleanList, "cleanList");
+function resolveBrief(workflow) {
+  const brief = workflow.brief ?? {};
+  return {
+    goal: brief.goal?.trim() || workflow.description?.trim() || void 0,
+    context: brief.context?.trim() || void 0,
+    assumptions: cleanList(brief.assumptions, []),
+    verification: brief.verification?.trim() || void 0,
+    doneCriteria: cleanList(brief.doneCriteria, []),
+    constraints: cleanList(brief.constraints, DEFAULT_CONSTRAINTS),
+    prohibitedActions: cleanList(brief.prohibitedActions, []),
+    finalAction: brief.finalAction?.trim() || void 0,
+    report: cleanList(brief.report, DEFAULT_REPORT_SECTIONS)
+  };
+}
+__name(resolveBrief, "resolveBrief");
 
 // packages/workflow/dist/format.js
 var WORKFLOW_FORMAT_VERSION = 5;
@@ -35257,10 +35370,20 @@ var DEFINITIONS = [
   }
 ];
 var ACTION_LIBRARY = Object.fromEntries(DEFINITIONS.map((definition) => [definition.kind, definition]));
+function actionDefinition(kind) {
+  return ACTION_LIBRARY[kind];
+}
+__name(actionDefinition, "actionDefinition");
 function isActionKind(value) {
   return typeof value === "string" && ACTION_KINDS.includes(value);
 }
 __name(isActionKind, "isActionKind");
+var ACTION_CATEGORY_LABELS = {
+  understand: "Understand",
+  build: "Build",
+  verify: "Verify",
+  deliver: "Deliver"
+};
 
 // packages/workflow/dist/node-config.js
 var WORKFLOWNER_NODE_TYPES = ["start", "agent", "approval", "end"];
@@ -35294,17 +35417,89 @@ function agentConfig(node) {
   };
 }
 __name(agentConfig, "agentConfig");
+function approvalConfig(node) {
+  return { prompt: readString(node.config, "prompt") };
+}
+__name(approvalConfig, "approvalConfig");
 function slugify2(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 __name(slugify2, "slugify");
 
 // packages/workflow/dist/agent-description.js
+var NAMED = 6;
 var MIN_DESCRIPTION_LENGTH = 80;
 function describesEnough(description) {
   return (description ?? "").trim().length >= MIN_DESCRIPTION_LENGTH;
 }
 __name(describesEnough, "describesEnough");
+function firstSentence(text) {
+  const trimmed = text.trim().replace(/\s+/g, " ");
+  const match = /^(.+?[.!?])(\s|$)/.exec(trimmed);
+  return (match ? match[1] : trimmed).replace(/[.!?]$/, "");
+}
+__name(firstSentence, "firstSentence");
+function listed(items) {
+  const unique = [
+    ...new Set(items.map((item) => item.trim().replace(/[.!?]+$/, "")).filter(Boolean))
+  ];
+  if (unique.length <= NAMED)
+    return unique.join("; ");
+  const rest = unique.length - NAMED;
+  return `${unique.slice(0, NAMED).join("; ")}; and ${rest} more`;
+}
+__name(listed, "listed");
+function clause(text) {
+  const sentence2 = firstSentence(text);
+  return /^[A-Z][a-z]/.test(sentence2) ? sentence2.charAt(0).toLowerCase() + sentence2.slice(1) : sentence2;
+}
+__name(clause, "clause");
+function describeAgent(profile, steps, workflow) {
+  const name = profile.name.trim() || "This agent";
+  const configs = steps.map((step) => ({ step, config: agentConfig(step) }));
+  const paragraphs = [];
+  const opening = [];
+  opening.push(profile.role?.trim() ? `${name}: ${firstSentence(profile.role)}.` : `${name}.`);
+  const goal = workflow.brief?.goal?.trim();
+  if (goal)
+    opening.push(`The work it belongs to: ${clause(goal)}.`);
+  paragraphs.push(opening.join(" "));
+  if (configs.length > 0) {
+    const duties = configs.map(({ step, config: config2 }) => {
+      const action = config2.actionKind ? actionDefinition(config2.actionKind) : void 0;
+      const kind = action ? ` (${action.label.toLowerCase()})` : "";
+      const what = config2.purpose?.trim() || config2.task?.trim();
+      return `${step.name || "an unnamed step"}${kind}${what ? ` \u2013 ${clause(what)}` : ""}`;
+    });
+    paragraphs.push(`${configs.length === 1 ? "It carries out one step" : `It carries out ${configs.length} steps, in this order`}: ${duties.join("; ")}.`);
+  }
+  const inputs = configs.flatMap(({ config: config2 }) => config2.inputs ?? []);
+  const outputs = configs.flatMap(({ config: config2 }) => config2.expectedOutput ? [firstSentence(config2.expectedOutput)] : []);
+  const criteria = configs.flatMap(({ config: config2 }) => config2.successCriteria ?? []);
+  const approach = [];
+  if (inputs.length > 0)
+    approach.push(`Before starting a step it reads: ${listed(inputs)}.`);
+  if (outputs.length > 0)
+    approach.push(`It hands back: ${listed(outputs)}.`);
+  if (criteria.length > 0)
+    approach.push(`A step of its is done when: ${listed(criteria)}.`);
+  if (approach.length > 0)
+    paragraphs.push(approach.join(" "));
+  const constraints = [
+    ...workflow.brief?.constraints ?? [],
+    ...configs.flatMap(({ config: config2 }) => config2.constraints ?? [])
+  ];
+  const handoffs = configs.flatMap(({ config: config2 }) => config2.handoff ? [firstSentence(config2.handoff)] : []);
+  const closing = [];
+  if (constraints.length > 0)
+    closing.push(`Throughout: ${listed(constraints)}.`);
+  if (handoffs.length > 0)
+    closing.push(`When a step is done it passes on: ${listed(handoffs)}.`);
+  if (closing.length > 0)
+    paragraphs.push(closing.join(" "));
+  return paragraphs.join("\n\n");
+}
+__name(describeAgent, "describeAgent");
 
 // packages/workflow/dist/outputs.js
 var OUTCOME_LABELS = {
@@ -35862,6 +36057,18 @@ function assignedAgents(workflow, nodeOrder) {
 __name(assignedAgents, "assignedAgents");
 
 // packages/workflow/dist/compile.js
+var WorkflowCompileError = class extends Error {
+  static {
+    __name(this, "WorkflowCompileError");
+  }
+  issues;
+  constructor(issues) {
+    super(`This diagram cannot be turned into a prompt yet:
+- ${issues.join("\n- ")}`);
+    this.name = "WorkflowCompileError";
+    this.issues = issues;
+  }
+};
 function outgoingEdges(workflow, nodeId2) {
   return workflow.edges.filter((edge) => edge.source === nodeId2);
 }
@@ -35891,6 +36098,465 @@ function orderNodes(workflow) {
   return ordered;
 }
 __name(orderNodes, "orderNodes");
+function describeCondition(condition) {
+  const parsed = parseEdgeCondition(condition);
+  if (!parsed.ok)
+    return `\`${condition}\``;
+  const { rawPath, operator, value, valueType } = parsed.condition;
+  const rendered = valueType === "string" ? `"${value}"` : String(value);
+  const verb = operator === "==" ? "is" : "is not";
+  return `\`${rawPath}\` ${verb} ${rendered}`;
+}
+__name(describeCondition, "describeCondition");
+function yamlString(value) {
+  return JSON.stringify(value);
+}
+__name(yamlString, "yamlString");
+function indentBlock(text, indent) {
+  return text.trim().split("\n").map((line) => line.trim().length === 0 ? "" : `${indent}${line}`).join("\n");
+}
+__name(indentBlock, "indentBlock");
+function renderStepDetail(config2) {
+  const lines = [];
+  if (config2.purpose)
+    lines.push("", `Purpose: ${config2.purpose}`);
+  if (config2.task)
+    lines.push("", config2.task);
+  if (config2.inputs?.length) {
+    lines.push("", "Inputs:", ...config2.inputs.map((item) => `- ${item}`));
+  }
+  if (config2.expectedOutput)
+    lines.push("", `Expected output: ${config2.expectedOutput}`);
+  if (config2.successCriteria?.length) {
+    lines.push("", "This step succeeds when:", ...config2.successCriteria.map((item) => `- ${item}`));
+  }
+  if (config2.handoff)
+    lines.push("", `Hand off: ${config2.handoff}`);
+  return lines;
+}
+__name(renderStepDetail, "renderStepDetail");
+function actionLabel(action) {
+  return `${ACTION_CATEGORY_LABELS[action.category]} \xB7 ${action.label}`;
+}
+__name(actionLabel, "actionLabel");
+function buildAgentFile(assignment, workflow, harness) {
+  if (!harness.agentDir)
+    return void 0;
+  const { profile, slug } = assignment;
+  const steps = assignment.stepIds.map((id) => workflow.nodes.find((node) => node.id === id)).filter((node) => node !== void 0);
+  const description = profile.description?.trim() || describeAgent(profile, steps, workflow);
+  const model = modelFor(profile.models, harness.target);
+  const chosen = explicitModelFor(profile.models, harness.target);
+  const effort = reasoningEffortFor(profile.models, harness.target);
+  const body = [`You are the ${profile.name}.`];
+  if (profile.role?.trim())
+    body.push("", profile.role.trim());
+  if (profile.description?.trim())
+    body.push("", profile.description.trim());
+  const constraintsOf = /* @__PURE__ */ __name((step) => agentConfig(step).constraints ?? [], "constraintsOf");
+  const shared = [...new Set(steps.flatMap(constraintsOf))].filter((item) => steps.every((step) => constraintsOf(step).includes(item)));
+  if (steps.length === 1) {
+    const config2 = agentConfig(steps[0]);
+    const action = config2.actionKind ? actionDefinition(config2.actionKind) : void 0;
+    if (action)
+      body.push("", `Action: ${actionLabel(action)} \u2013 ${action.summary}.`);
+    body.push(...renderStepDetail(config2));
+  } else {
+    body.push("", "You are responsible for these stages of the workflow. The orchestrating prompt", "says which one you are being asked for.");
+    for (const step of steps) {
+      const config2 = agentConfig(step);
+      const action = config2.actionKind ? actionDefinition(config2.actionKind) : void 0;
+      body.push("", `## ${step.name} (${action ? actionLabel(action) : "Step"})`);
+      body.push(...renderStepDetail(config2));
+      const own = [...new Set(constraintsOf(step))].filter((item) => !shared.includes(item));
+      if (own.length > 0) {
+        body.push("", "Constraints for this stage only:", ...own.map((item) => `- ${item}`));
+      }
+    }
+  }
+  if (shared.length > 0) {
+    body.push("", steps.length > 1 ? "## Constraints for every stage" : "## Constraints", "", ...shared.map((item) => `- ${item}`));
+  }
+  const instructions = body.join("\n").trim();
+  if (harness.agentFileFormat === "toml") {
+    const content2 = `${tomlTable([
+      { key: "name", value: slug },
+      { key: "description", value: description },
+      { key: "developer_instructions", value: instructions, multiline: true },
+      // Omitted rather than resolved when the author chose to inherit: a
+      // Codex agent file with no `model` takes the spawning session's, and
+      // writing a name instead would pin it to whatever Anthill believed the
+      // default was on the day the file was written.
+      chosen ? { key: "model", value: chosen } : void 0,
+      effort ? { key: "model_reasoning_effort", value: effort } : void 0
+    ])}
+`;
+    return { path: `${harness.agentDir}/${slug}.toml`, content: content2, steps: steps.length };
+  }
+  const content = [
+    "---",
+    `name: ${slug}`,
+    `description: ${yamlString(description)}`,
+    `model: ${model}`,
+    "---",
+    "",
+    instructions,
+    ""
+  ].join("\n");
+  return { path: `${harness.agentDir}/${slug}.md`, content, steps: steps.length };
+}
+__name(buildAgentFile, "buildAgentFile");
+function joinList(items) {
+  return items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+__name(joinList, "joinList");
+function startTogether(targets, byId, stepNumbers, usesSubagents) {
+  const names = targets.map((id) => {
+    const block = byId.get(id);
+    const step = stepNumbers.get(id);
+    return step === void 0 ? block?.name ?? id : `${step} (${block?.name ?? id})`;
+  });
+  const all = targets.every((id) => stepNumbers.has(id)) ? `steps ${joinList(names)}` : joinList(names);
+  return usesSubagents ? `continue to ${all} at the same time \u2013 they are independent. Hand each to its own subagent in one go, and do not wait for one before starting the next.` : `continue to ${all} \u2013 they are independent, so do all of them, in whichever order suits.`;
+}
+__name(startTogether, "startTogether");
+function renderTransitions(workflow, node, stepNumbers, plan, usesSubagents) {
+  const edges = outgoingEdges(workflow, node.id);
+  if (edges.length === 0)
+    return [];
+  const byId = new Map(workflow.nodes.map((item) => [item.id, item]));
+  const fork = plan.forks.get(node.id);
+  if (fork)
+    return [`Then ${startTogether(fork, byId, stepNumbers, usesSubagents)}`];
+  const describeTarget = /* @__PURE__ */ __name((edge) => {
+    const target = byId.get(edge.target);
+    if (!target)
+      return "an unknown block";
+    if (target.type === "end") {
+      return plan.joins.has(target.id) ? `stop \u2013 this branch is finished; the workflow is complete (${target.name}) once every parallel branch is` : `stop \u2013 the workflow is complete (${target.name})`;
+    }
+    if (edge.kind === "rework") {
+      const limit = agentConfig(target).maxIterations;
+      const bound = limit === void 0 ? "" : `, at most ${limit} passes in total`;
+      const step2 = stepNumbers.get(target.id);
+      const where2 = step2 === void 0 ? target.name : `step ${step2} (${target.name})`;
+      return `send the work back to ${where2} to be redone${bound}`;
+    }
+    if (edge.kind === "question") {
+      const step2 = stepNumbers.get(target.id);
+      const where2 = step2 === void 0 ? target.name : `step ${step2} (${target.name})`;
+      return `put the question to ${where2} and wait for the answer`;
+    }
+    if (edge.kind === "stop") {
+      const step2 = stepNumbers.get(target.id);
+      const where2 = step2 === void 0 ? target.name : `step ${step2} (${target.name})`;
+      return `stop this path at ${where2}`;
+    }
+    const step = stepNumbers.get(target.id);
+    const where = step === void 0 ? target.name : `step ${step} (${target.name})`;
+    const isLoopBack = step !== void 0 && step <= (stepNumbers.get(node.id) ?? Number.MAX_SAFE_INTEGER);
+    if (isLoopBack) {
+      const limit = agentConfig(target).maxIterations;
+      const bound = limit === void 0 ? "" : `, at most ${limit} passes in total`;
+      return `go back to ${where}${bound}`;
+    }
+    return `continue to ${where}`;
+  }, "describeTarget");
+  if (edges.length === 1 && edges[0].condition === void 0) {
+    return [`Then ${describeTarget(edges[0])}.`];
+  }
+  const gate = node.type === "approval";
+  const open2 = edges.filter((edge) => edge.condition === void 0);
+  const byLabel = gate || open2.length > 1;
+  const lines = ["Then:"];
+  let otherwiseSaid = false;
+  for (const edge of edges) {
+    const label = edge.label?.trim();
+    if (edge.condition !== void 0) {
+      const when2 = edge.kind === "switch" && !parseEdgeCondition(edge.condition).ok ? edge.condition.trim() : describeCondition(edge.condition);
+      lines.push(`- if ${when2}${label ? ` (${label})` : ""}, ${describeTarget(edge)}.`);
+    } else if (byLabel && label) {
+      lines.push(`- if ${gate ? "they answer" : "the outcome is"} "${label}", ${describeTarget(edge)}.`);
+    } else if (!otherwiseSaid) {
+      otherwiseSaid = true;
+      lines.push(`- otherwise${label ? ` (${label})` : ""}, ${describeTarget(edge)}.`);
+    } else {
+      lines.push(`- or, if that is what happened instead, ${describeTarget(edge)}.`);
+    }
+  }
+  return lines;
+}
+__name(renderTransitions, "renderTransitions");
+function bulletList(heading, items, level = "##") {
+  return [`${level} ${heading}`, "", ...items.map((item) => `- ${item}`)].join("\n");
+}
+__name(bulletList, "bulletList");
+function paragraph(heading, body, level = "##") {
+  return [`${level} ${heading}`, "", body].join("\n");
+}
+__name(paragraph, "paragraph");
+function buildSharedContext(brief) {
+  const parts = [
+    "## Shared context",
+    "",
+    "This section applies to every step below."
+  ];
+  if (brief.goal)
+    parts.push("", paragraph("Goal", brief.goal, "###"));
+  if (brief.context)
+    parts.push("", paragraph("Project context", brief.context, "###"));
+  if (brief.assumptions.length > 0) {
+    parts.push("", bulletList("Assumptions", brief.assumptions, "###"));
+  }
+  if (brief.doneCriteria.length > 0) {
+    parts.push("", bulletList("Done criteria", brief.doneCriteria, "###"));
+  }
+  if (brief.verification) {
+    parts.push("", paragraph("Verification", brief.verification, "###"));
+  }
+  if (brief.constraints.length > 0) {
+    parts.push("", bulletList("Constraints", brief.constraints, "###"));
+  }
+  if (brief.prohibitedActions.length > 0) {
+    parts.push("", bulletList("Do not", brief.prohibitedActions, "###"));
+  }
+  return parts.join("\n");
+}
+__name(buildSharedContext, "buildSharedContext");
+function renderLoops(workflow, brief, nameOf) {
+  const cycles = findCycles(workflow);
+  if (cycles.length === 0)
+    return void 0;
+  const agentOfStep = /* @__PURE__ */ new Map();
+  for (const assignment of assignedAgents(workflow)) {
+    for (const stepId of assignment.stepIds) {
+      agentOfStep.set(stepId, assignment.profile.name);
+    }
+  }
+  const describeStep = /* @__PURE__ */ __name((nodeId2) => {
+    const step = nameOf(nodeId2);
+    const agent = agentOfStep.get(nodeId2);
+    return agent ? `${step} (${agent})` : step;
+  }, "describeStep");
+  const sections = ["## Loops"];
+  for (const cycle of cycles) {
+    const names = cycle.map(describeStep);
+    const limits = cycle.map((id) => agentConfig(workflow.nodes.find((node) => node.id === id))).map((config2) => config2.maxIterations).filter((value) => typeof value === "number");
+    const limit = limits.length > 0 ? Math.min(...limits) : void 0;
+    sections.push("");
+    sections.push(`### ${names.join(" \u21C4 ")}`);
+    sections.push("");
+    sections.push("Each time round this loop:");
+    sections.push("");
+    sections.push("1. Investigate what is actually wrong before changing anything.");
+    sections.push("2. Make the smallest reasonable fix.");
+    sections.push("3. Verify it locally.");
+    sections.push("4. Verify it independently \u2013 do not rely only on the check written alongside the fix.");
+    sections.push("5. Evaluate against the done criteria above. If they are not met, go round again.");
+    if (limit !== void 0) {
+      sections.push("");
+      sections.push(`Stop after at most ${limit} passes. Reaching that limit is a result to report, not a reason to declare the work finished.`);
+    }
+  }
+  if (brief.doneCriteria.length === 0) {
+    sections.push("");
+    sections.push("> No done criteria were given, so the loop has no defined exit. Add them.");
+  }
+  return sections.join("\n");
+}
+__name(renderLoops, "renderLoops");
+function buildPrompt(workflow, harness, ordered, options) {
+  const stepNumbers = /* @__PURE__ */ new Map();
+  ordered.filter((node) => node.type === "agent" || node.type === "approval").forEach((node, index) => stepNumbers.set(node.id, index + 1));
+  const brief = resolveBrief(workflow);
+  const nameOf = /* @__PURE__ */ __name((nodeId2) => workflow.nodes.find((node) => node.id === nodeId2)?.name ?? nodeId2, "nameOf");
+  const sections = [];
+  sections.push(`# ${workflow.name || "Workflow"}`);
+  if (workflow.description?.trim())
+    sections.push(workflow.description.trim());
+  sections.push([
+    "> **How to read this workflow.** Anthill generated it from a diagram; Anthill does",
+    "> not run it. The ordering, conditions, branches and limits below are",
+    "> instructions for you as the external harness, not behaviour Anthill enforces.",
+    "> Nothing stops you departing from them, so follow them deliberately and say so",
+    "> when you cannot."
+  ].join("\n"));
+  sections.push(buildSharedContext(brief));
+  const usesSubagents = Boolean(harness.agentDir);
+  sections.push(usesSubagents ? [
+    "You are orchestrating a workflow that was designed as a diagram in Anthill.",
+    "",
+    `Each step below names a subagent defined in \`${harness.agentDir}/\`. Delegate the step's`,
+    "work to that subagent rather than doing it yourself, then use its result to decide",
+    "which step comes next."
+  ].join("\n") : [
+    "You are carrying out a workflow that was designed as a diagram in Anthill.",
+    "",
+    "Each step below names the agent that carries it out. Take on those agents one at",
+    "a time, in the order given, and use each step's result to decide which step comes",
+    "next."
+  ].join("\n"));
+  const agents = assignedAgents(workflow, ordered);
+  if (agents.length > 0) {
+    const roster = agents.map(({ profile, slug, stepIds }) => {
+      const model = modelFor(profile.models, harness.target);
+      const chosen = explicitModelFor(profile.models, harness.target);
+      const effort = reasoningEffortFor(profile.models, harness.target);
+      const modelNote = harness.supportsPerAgentModel ? ` \u2013 model: ${model}` : "";
+      const stepCount = stepIds.length > 1 ? ` \u2013 ${stepIds.length} steps` : "";
+      const role = profile.role?.trim() ? ` \u2013 ${profile.role.trim()}` : "";
+      return `- \`${slug}\` (${profile.name})${role}${stepCount}${modelNote}`;
+    });
+    sections.push([
+      "## Agents",
+      "",
+      ...roster,
+      "",
+      "An agent that appears at several steps is the same agent returning to the work,",
+      "not a new one each time."
+    ].join("\n"));
+  }
+  const agentOf = /* @__PURE__ */ new Map();
+  for (const assignment of agents) {
+    for (const stepId of assignment.stepIds)
+      agentOf.set(stepId, assignment);
+  }
+  const plan = parallelPlan(workflow);
+  const byId = new Map(workflow.nodes.map((item) => [item.id, item]));
+  const steps = ["## Steps"];
+  for (const node of ordered) {
+    const fork = node.type === "start" ? plan.forks.get(node.id) : void 0;
+    if (fork)
+      steps.push("", `To begin, ${startTogether(fork, byId, stepNumbers, usesSubagents)}`);
+  }
+  const waitsFor = /* @__PURE__ */ __name((id) => {
+    const sources = plan.joins.get(id);
+    if (!sources)
+      return [];
+    const names = sources.map((source) => {
+      const block = byId.get(source);
+      const step = stepNumbers.get(source);
+      return step === void 0 ? block?.name ?? source : `step ${step} (${block?.name ?? source})`;
+    });
+    return [
+      "",
+      // Without subagents the branches are done one after another, and the
+      // fork said so; "in parallel" here contradicted it (ANT-182).
+      `Start this step only once ${joinList(names)} are ${names.length === 2 ? "both" : "all"} finished \u2013 ${usesSubagents ? "they run in parallel and meet here" : "they are independent branches and meet here"}.`
+    ];
+  }, "waitsFor");
+  ordered.forEach((node) => {
+    if (node.type !== "agent" && node.type !== "approval")
+      return;
+    const step = stepNumbers.get(node.id);
+    if (node.type === "approval") {
+      const prompt = approvalConfig(node).prompt;
+      steps.push("");
+      steps.push(`### ${step}. ${node.name} \u2013 stop and ask a human`);
+      steps.push(...waitsFor(node.id));
+      const opening2 = options.stepOpening?.({ id: node.id, delegated: false }) ?? [];
+      if (opening2.length > 0)
+        steps.push("", ...opening2);
+      steps.push("");
+      steps.push(prompt ? `Ask: ${prompt}` : "Ask the person running this workflow whether to continue.");
+      steps.push("");
+      steps.push("Do not decide this yourself and do not continue until they answer.");
+      const transitions2 = renderTransitions(workflow, node, stepNumbers, plan, usesSubagents);
+      if (transitions2.length > 0) {
+        steps.push("");
+        steps.push(...transitions2);
+      }
+      return;
+    }
+    const config2 = agentConfig(node);
+    const assignment = agentOf.get(node.id);
+    const action = config2.actionKind ? actionDefinition(config2.actionKind) : void 0;
+    steps.push("");
+    const heading = assignment ? usesSubagents ? `### ${step}. ${node.name} \u2013 delegate to the \`${assignment.slug}\` subagent` : `### ${step}. ${node.name} \u2013 act as ${assignment.profile.name}` : `### ${step}. ${node.name}`;
+    steps.push(heading);
+    steps.push(...waitsFor(node.id));
+    const opening = options.stepOpening?.({ id: node.id, delegated: Boolean(assignment && usesSubagents) }) ?? [];
+    if (opening.length > 0)
+      steps.push("", ...opening);
+    if (action) {
+      steps.push("");
+      steps.push(`Action: ${action.label} \u2013 ${action.summary} (${ACTION_CATEGORY_LABELS[action.category]}).`);
+    }
+    if (config2.purpose) {
+      steps.push("");
+      steps.push(`Purpose: ${config2.purpose}`);
+    }
+    if (config2.task) {
+      steps.push("", "Task:", "", indentBlock(config2.task, "> "));
+    }
+    if (config2.inputs?.length) {
+      steps.push("", "Inputs:", "", ...config2.inputs.map((item) => `- ${item}`));
+    }
+    if (config2.expectedOutput) {
+      steps.push("", `Expected output: ${config2.expectedOutput}`);
+    }
+    if (config2.successCriteria?.length) {
+      steps.push("", "This step succeeds when:", "", ...config2.successCriteria.map((item) => `- ${item}`));
+    }
+    if (config2.constraints?.length) {
+      steps.push("", "For this step only:", "", ...config2.constraints.map((item) => `- ${item}`));
+    }
+    if (config2.handoff) {
+      steps.push("", `Hand off: ${config2.handoff}`);
+    }
+    const transitions = renderTransitions(workflow, node, stepNumbers, plan, usesSubagents);
+    if (transitions.length > 0) {
+      steps.push("");
+      steps.push(...transitions);
+    }
+  });
+  sections.push(steps.join("\n"));
+  const loops = renderLoops(workflow, brief, nameOf);
+  if (loops)
+    sections.push(loops);
+  sections.push([
+    "## Rules",
+    "",
+    plan.forks.size > 0 ? usesSubagents ? "- Follow the steps in the order given \u2013 steps marked to run at the same time start together; do not skip ahead." : "- Follow the steps in the order given \u2013 steps marked as independent can be done in any order; do not skip ahead." : "- Follow the steps in the order given; do not skip ahead.",
+    "- After each step, state which branch you are taking and why.",
+    "- If a step's result is ambiguous, ask rather than guessing which branch to take.",
+    "- The constraints in the shared context apply throughout, not only to the step being worked on."
+  ].join("\n"));
+  if (brief.finalAction) {
+    sections.push(paragraph("Final action", brief.finalAction));
+  }
+  sections.push(bulletList("Report at the end", brief.report));
+  return `${sections.join("\n\n")}
+`;
+}
+__name(buildPrompt, "buildPrompt");
+function compile(workflow, options = {}) {
+  const validation = validateWorkflow(workflow);
+  if (!validation.valid) {
+    throw new WorkflowCompileError(validation.errors.map((error51) => error51.message));
+  }
+  const harness = harnessProfile(workflow.target ?? DEFAULT_TARGET);
+  const ordered = orderNodes(workflow);
+  const agents = assignedAgents(workflow, ordered);
+  const files = [];
+  for (const assignment of agents) {
+    const file2 = buildAgentFile(assignment, workflow, harness);
+    if (file2)
+      files.push(file2);
+  }
+  const warnings = [];
+  if (!harness.supportsPerAgentModel) {
+    const chosen = agents.filter(({ profile }) => isConfiguredFor(profile.models, harness.target));
+    if (chosen.length > 0) {
+      warnings.push(`${harness.displayName} has no per-agent model selection, so the models chosen for ${chosen.length} agent(s) are not applied.`);
+    }
+  }
+  if (!harness.agentDir) {
+    warnings.push(`${harness.displayName} has no subagent files, so every step is inlined into the prompt instead.`);
+  }
+  return { prompt: buildPrompt(workflow, harness, ordered, options), files, warnings };
+}
+__name(compile, "compile");
 function executableBlocks(workflow) {
   return orderNodes(workflow).filter((node) => node.type !== "start" && node.type !== "end");
 }
@@ -35987,57 +36653,6 @@ var SHAPE2 = `{
       "options": ["a plausible answer", "another plausible answer"] }
   ]
 }`;
-
-// packages/live/dist/bootstrap.js
-function workflowSteps(workflow) {
-  return executableBlocks(workflow).map((node) => ({
-    id: node.id,
-    name: node.name,
-    ...node.type === "approval" ? { gate: true } : {}
-  }));
-}
-__name(workflowSteps, "workflowSteps");
-
-// packages/workflow-exchange/dist/contracts.js
-var EXCHANGE_VERSION = 1;
-var HANDOVER_MODES = [
-  "design",
-  "watch",
-  "show-and-go",
-  "approval-gate"
-];
-var EXCHANGE_PROBLEM_CODES = {
-  /** The version number is from a newer Anthill, or is not a version at all. */
-  EXCHANGE_VERSION_UNSUPPORTED: "EXCHANGE_VERSION_UNSUPPORTED",
-  /** The submission is not a JSON object. */
-  SUBMISSION_NOT_AN_OBJECT: "SUBMISSION_NOT_AN_OBJECT",
-  /** A required envelope field is absent. */
-  SUBMISSION_FIELD_MISSING: "SUBMISSION_FIELD_MISSING",
-  /** An envelope field is present but is not the kind of thing it has to be. */
-  SUBMISSION_FIELD_INVALID: "SUBMISSION_FIELD_INVALID",
-  /** The workflow document did not survive `WorkflowSchema`. */
-  WORKFLOW_MALFORMED: "WORKFLOW_MALFORMED",
-  /** The brief does not say when the work is finished. */
-  HANDOVER_NO_DONE_CRITERIA: "HANDOVER_NO_DONE_CRITERIA",
-  /** The submission does not carry what the user actually asked for. */
-  HANDOVER_NO_TASK_TEXT: "HANDOVER_NO_TASK_TEXT",
-  /** The workflow targets one tool and a different tool submitted it. */
-  HANDOVER_TARGET_MISMATCH: "HANDOVER_TARGET_MISMATCH"
-};
-function isSourceHarness(value) {
-  return HARNESS_TARGETS.includes(value);
-}
-__name(isSourceHarness, "isSourceHarness");
-function isHandoverMode(value) {
-  return HANDOVER_MODES.includes(value);
-}
-__name(isHandoverMode, "isHandoverMode");
-var SESSION_ID_MAX_LENGTH = 120;
-var SESSION_ID = /^[A-Za-z0-9_-]+$/;
-function isSessionId(value) {
-  return typeof value === "string" && value.length <= SESSION_ID_MAX_LENGTH && SESSION_ID.test(value);
-}
-__name(isSessionId, "isSessionId");
 
 // packages/workflow-exchange/dist/submission.js
 function checkExchangeVersion(submitted) {
@@ -36546,9 +37161,6 @@ function describeState(state) {
   };
 }
 __name(describeState, "describeState");
-
-// apps/mcp/dist/handlers.js
-import { createHash as createHash2 } from "node:crypto";
 
 // packages/exchange-store/dist/store.js
 import { createHash } from "node:crypto";
@@ -37710,7 +38322,253 @@ function defaultDataDir(environment = {}) {
 }
 __name(defaultDataDir, "defaultDataDir");
 
+// packages/live/dist/marker.js
+var MARKER_CLIS = ["codex", "claude-code", "pi", "vscode"];
+function isMarkerCli(value) {
+  return typeof value === "string" && MARKER_CLIS.includes(value);
+}
+__name(isMarkerCli, "isMarkerCli");
+var MARKER_VERSION = "1";
+var FIELD = {
+  runId: "anthill-run-id",
+  nonce: "anthill-nonce",
+  workflowId: "anthill-workflow",
+  cli: "anthill-cli",
+  promptVersion: "anthill-prompt-version",
+  issuedAt: "anthill-issued-at"
+};
+function newRunId(random = defaultRandom) {
+  return `ANT-${random().slice(0, 8).toUpperCase()}`;
+}
+__name(newRunId, "newRunId");
+function newNonce(random = defaultRandom) {
+  return random().slice(0, 6).toLowerCase();
+}
+__name(newNonce, "newNonce");
+function defaultRandom() {
+  return Math.random().toString(36).slice(2).padEnd(12, "0");
+}
+__name(defaultRandom, "defaultRandom");
+function renderMarker(marker) {
+  const lines = [
+    "<!-- Anthill run marker. Anthill uses this to recognise this session on this",
+    "     machine after you start it. It contains no secrets, tokens, or file paths.",
+    `${FIELD.runId}: ${marker.runId}`,
+    `${FIELD.nonce}: ${marker.nonce}`
+  ];
+  if (marker.workflowId)
+    lines.push(`${FIELD.workflowId}: ${marker.workflowId}`);
+  lines.push(`${FIELD.cli}: ${marker.cli}`, `${FIELD.promptVersion}: ${marker.promptVersion}`, `${FIELD.issuedAt}: ${marker.issuedAt}`, "-->");
+  return lines.join("\n");
+}
+__name(renderMarker, "renderMarker");
+function echoInstruction(marker, steps = []) {
+  const lines = [
+    "## Progress markers",
+    "",
+    "Print these lines exactly, each on a line of its own, as plain output. They",
+    "are correlation markers for the Anthill window on this machine and change",
+    "nothing about the work itself. Print them yourself, in this session: a",
+    "subagent's output does not count, so never leave one to a subagent.",
+    "",
+    `**Once, before you begin:**`,
+    "",
+    `    ${RUN_TOKEN} ${marker.runId} ${marker.nonce}`,
+    "",
+    `**Immediately before you start each step, and again whenever you come back to`,
+    `an earlier one:**`,
+    "",
+    `    ${STEP_TOKEN} ${marker.runId} ${marker.nonce} <step-id>`
+  ];
+  if (steps.length > 0) {
+    lines.push("", "Use exactly these step ids:", "", ...steps.map((step) => `- \`${step.id}\` \u2013 ${step.name}`));
+  }
+  lines.push("", "**Begin every message you write** with a line naming the step it is about,", "followed by a blank line. It does not replace the step line; it tells the", "Anthill window which step your words belong to, and chat windows hide it:", "", `    ${stepTagLine("<step-id>")}`);
+  lines.push("", "Once the work is finished, print one more line, exactly:", "", `    ${DONE_TOKEN} ${marker.runId} ${marker.nonce}`);
+  lines.push("", "Each step below opens with the command that prints its line, so a step line", "can come from a command's output as well as from your reply; either is read the", "same way. The same goes for these two lines if you cannot put them in a reply.");
+  return lines.join("\n");
+}
+__name(echoInstruction, "echoInstruction");
+function stepOpening(marker, step, via = "echo", invocation = {}) {
+  const command = via === "cli" ? cliCommand("step", invocation, marker.runId, marker.nonce, step.id) : `printf '${STEP_TOKEN} ${marker.runId} ${marker.nonce} ${step.id}\\n'`;
+  const lines = [
+    "Your first action in this step, and again each time you come back to it: run",
+    "this command, which tells the Anthill window the step has begun.",
+    "",
+    `    ${command}`,
+    "",
+    "Begin every message you write in this step with this line, then a blank line:",
+    "",
+    `    ${stepTagLine(step.id)}`
+  ];
+  if (step.delegated) {
+    lines.push("", "Run the command yourself before you hand the step to the subagent; do not ask the", "subagent to run it. Do ask it to begin its own messages with that same line too.");
+  }
+  return lines;
+}
+__name(stepOpening, "stepOpening");
+var CLI_NAME = "anthill";
+function typedPath(path, platform) {
+  if (platform === "win32")
+    return `"${path.replace(/\\/g, "/")}"`;
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(path) ? path : `'${path.replace(/'/g, "'\\''")}'`;
+}
+__name(typedPath, "typedPath");
+function cliInstruction(marker, steps = [], invocation = {}) {
+  const lines = [
+    "## Progress reports",
+    "",
+    "Run these commands in a shell. They tell the Anthill window on this machine",
+    "which step the work is on. They do not affect the work: if a command cannot",
+    "be run, continue without it.",
+    "",
+    "**Once, before you begin:**",
+    "",
+    `    ${cliCommand("run", invocation, marker.runId, marker.nonce)}`,
+    "",
+    "**Immediately before you start each step, and again whenever you come back to",
+    "an earlier one:**",
+    "",
+    `    ${cliCommand("step", invocation, marker.runId, marker.nonce, "<step-id>")}`,
+    "",
+    "**Once the work is finished:**",
+    "",
+    `    ${cliCommand("done", invocation, marker.runId, marker.nonce)}`
+  ];
+  if (steps.length > 0) {
+    lines.push("", "Use exactly these step ids:", "", ...steps.map((step) => `- \`${step.id}\` \u2013 ${step.name}`));
+  }
+  return lines.join("\n");
+}
+__name(cliInstruction, "cliInstruction");
+function cliCommand(subcommand, invocation, ...args) {
+  const command = invocation.command ?? CLI_NAME;
+  const at = invocation.dataDir ? ` --data-dir ${typedPath(invocation.dataDir, invocation.platform ?? "linux")}` : "";
+  return `${command} ${subcommand}${at} ${args.join(" ")}`;
+}
+__name(cliCommand, "cliCommand");
+var RUN_TOKEN = "ANTHILL-RUN";
+function stepTagLine(stepId) {
+  return `[//]: # (anthill:${stepId})`;
+}
+__name(stepTagLine, "stepTagLine");
+var ID = "([A-Za-z0-9_.:-]+)";
+var STEP_TAG = new RegExp(`\\[//\\]: # \\(anthill:${ID}\\)|\\[ANTHILL\\s+${ID}\\]`);
+var STEP_TAGS = new RegExp([
+  // A link-definition line, taken whole with its line break.
+  `^[ \\t]*\`?\\[//\\]: # \\(anthill:[A-Za-z0-9_.:-]+\\)\`?[ \\t]*(?:\\r?\\n|$)`,
+  // The old tag, with any backticks around it and the space after.
+  `\`?\\[ANTHILL\\s+[A-Za-z0-9_.:-]+\\]\`?[ \\t]*`
+].join("|"), "gm");
+var STEP_TOKEN = "ANTHILL-STEP";
+var DONE_TOKEN = "ANTHILL-DONE";
+
+// packages/live/dist/pending-run.js
+var TIMING = {
+  /**
+   * How long a copied prompt waits to be claimed by a session.
+   *
+   * This asks about discovery — did the user paste it anywhere? — and the
+   * question is settled the moment a session carries the marker. It was never
+   * meant to be a budget for the work itself.
+   */
+  pendingTtlMs: 30 * 60 * 1e3,
+  /** Shorter, when the chosen CLI writes nothing Anthill can read. */
+  unobservableTtlMs: 2 * 60 * 1e3,
+  /** How long a detected session may be quiet before Anthill stops claiming it. */
+  activityTtlMs: 5 * 60 * 1e3,
+  /**
+   * How long after its last evidence a matched run is still worth reading.
+   *
+   * Measured from the session's own last word rather than from the copy, so a
+   * workflow may take as long as the work takes. Silence this long is the only
+   * thing that closes a session Anthill actually found.
+   */
+  silenceTtlMs: 30 * 60 * 1e3,
+  /** How long a finished or failed record is kept for the user to read. */
+  retentionMs: 24 * 60 * 60 * 1e3
+};
+
+// packages/live/dist/bootstrap.js
+function workflowSteps(workflow) {
+  return executableBlocks(workflow).map((node) => ({
+    id: node.id,
+    name: node.name,
+    ...node.type === "approval" ? { gate: true } : {}
+  }));
+}
+__name(workflowSteps, "workflowSteps");
+function buildBootstrapPrompt(workflow, marker, options = {}) {
+  const via = options.reportViaCli ? "cli" : "echo";
+  const invocation = options.invocation ?? {};
+  const compiled = compile(workflow, { stepOpening: /* @__PURE__ */ __name((step) => stepOpening(marker, step, via, invocation), "stepOpening") });
+  const sections = options.includeMarker === false ? [] : [renderMarker(marker)];
+  if (compiled.files.length > 0) {
+    sections.push([
+      "## Set-up: create these files first",
+      "",
+      "Before doing any of the work below, create these files exactly as given.",
+      "They define the agents the workflow refers to. Do not change their contents.",
+      "",
+      "Your own list of callable agents was fixed when this session started, so the",
+      "files you create now may not be callable here \u2013 they are for later sessions",
+      "in this repository. Where a step below says to delegate to one of these",
+      "agents and your harness does not recognise it, do not substitute a different",
+      "agent. Carry the step out yourself, following that agent's file above as if",
+      "you were it, and say plainly that you did so."
+    ].join("\n"));
+    for (const file2 of compiled.files) {
+      sections.push([`### \`${file2.path}\``, "", "```markdown", file2.content.trimEnd(), "```"].join("\n"));
+    }
+  } else {
+    sections.push([
+      "## Set-up",
+      "",
+      "Nothing to create. Every agent this workflow refers to is described inline below."
+    ].join("\n"));
+  }
+  sections.push(options.reportViaCli ? cliInstruction(marker, workflowSteps(workflow), invocation) : echoInstruction(marker, workflowSteps(workflow)));
+  sections.push("---");
+  sections.push(compiled.prompt.trimEnd());
+  return { ...compiled, marker, bootstrapPrompt: sections.join("\n\n") };
+}
+__name(buildBootstrapPrompt, "buildBootstrapPrompt");
+
+// apps/mcp/dist/handlers.js
+import { createHash as createHash2 } from "node:crypto";
+
 // apps/mcp/dist/text.js
+function runText(answer) {
+  const file2 = answer.path ? ` ${answer.path}` : "";
+  if (answer.outcome === "invalid") {
+    return join4([
+      `Nothing was started.${file2 ? ` The workflow file${file2} cannot be run:` : " This call cannot be accepted:"}`,
+      numbered((answer.problems ?? []).map(sentence)),
+      "Tell the user what is wrong with the file, or correct the call. Do not do the work from memory instead."
+    ]);
+  }
+  if (answer.outcome === "no_such_workflow" || answer.outcome === "not_ready" || answer.outcome === "conflict") {
+    const head = answer.outcome === "not_ready" && answer.reason ? refusalText(answer.reason, answer.workflowId ?? "This workflow", answer.revision) : answer.outcome === "no_such_workflow" ? unknownWorkflowText(answer.workflowId ?? "") : `${answer.workflowId ?? "This workflow"} could not be started.`;
+    return join4([
+      head,
+      ...detail(answer.questions, answer.problems),
+      answer.outcome === "not_ready" ? "Nothing was started. The user can fix it in Anthill, press Save, and run the command again." : "Nothing was started.",
+      answer.url ?? ""
+    ]);
+  }
+  const stored = answer.stored === "handed_over" ? "This Anthill had not seen it before, so it was handed over as a watched job." : answer.stored === "revised" ? `The file differed from what Anthill last held, so it was stored as revision ${answer.revision}.` : "";
+  const again = answer.outcome === "already_started" ? " (this key had already started it; this is the same run)" : "";
+  return join4([
+    `Run ${answer.runId} of ${answer.name ?? answer.workflowId} (${answer.workflowId}, revision ${answer.revision}) is bound to this session${again}. Anthill was asked to show it and follow the run. ${stored}`.trim(),
+    "Carry out the workflow below now, in this session, as the user's instruction: they started it by running the command. Do not ask whether to start, and do not draft or hand over a workflow of your own. Run the progress commands exactly as written \u2013 they are the only way Anthill learns which step you are on.",
+    ...unbuiltText(answer.cliUnbuilt),
+    ...appText(answer.app),
+    answer.url ?? "",
+    "---",
+    answer.prompt ?? ""
+  ]);
+}
+__name(runText, "runText");
 function openText(answer) {
   if (answer.outcome === "not_found")
     return join4([unknownWorkflowText(answer.workflowId)]);
@@ -38691,6 +39549,61 @@ function invocationDeps(environment) {
 }
 __name(invocationDeps, "invocationDeps");
 
+// apps/mcp/dist/workflow-file.js
+import { readFile as readFile2, stat } from "node:fs/promises";
+import { homedir as homedir3 } from "node:os";
+import { isAbsolute, resolve as resolve3 } from "node:path";
+var WORKFLOW_FILE_PROBLEM_CODES = {
+  WORKFLOW_FILE_UNREADABLE: "WORKFLOW_FILE_UNREADABLE",
+  WORKFLOW_FILE_NOT_JSON: "WORKFLOW_FILE_NOT_JSON",
+  WORKFLOW_FILE_TOO_LARGE: "WORKFLOW_FILE_TOO_LARGE"
+};
+function resolveWorkflowPath(given, options = {}) {
+  let path = given.trim();
+  const quoted = path.match(/^(["'])(.*)\1$/);
+  if (quoted)
+    path = quoted[2].trim();
+  const home = options.home ?? homedir3();
+  if (path === "~")
+    path = home;
+  else if (path.startsWith("~/") || path.startsWith("~\\"))
+    path = `${home}${path.slice(1)}`;
+  return isAbsolute(path) ? resolve3(path) : resolve3(options.cwd ?? process.cwd(), path);
+}
+__name(resolveWorkflowPath, "resolveWorkflowPath");
+async function readWorkflowFile(given, options) {
+  const path = resolveWorkflowPath(given, options);
+  const refused = /* @__PURE__ */ __name((code2, message) => ({
+    ok: false,
+    path,
+    problems: [{ code: WORKFLOW_FILE_PROBLEM_CODES[code2], message, field: "path" }]
+  }), "refused");
+  let size;
+  try {
+    const info = await stat(path);
+    if (!info.isFile())
+      return refused("WORKFLOW_FILE_UNREADABLE", `${path} is not a file. Name the workflow.json itself.`);
+    size = info.size;
+  } catch (error51) {
+    const missing = error51.code === "ENOENT";
+    return refused("WORKFLOW_FILE_UNREADABLE", missing ? `There is no file at ${path}. Check the path: copy it again from Anthill's Export dialog or status bar.` : `${path} could not be read: ${error51 instanceof Error ? error51.message : String(error51)}`);
+  }
+  if (size > options.maxBytes) {
+    return refused("WORKFLOW_FILE_TOO_LARGE", `${path} is ${size} bytes, larger than the ${options.maxBytes} a workflow can be. It is probably not a workflow.`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(await readFile2(path, "utf8"));
+  } catch (error51) {
+    return error51 instanceof SyntaxError ? refused("WORKFLOW_FILE_NOT_JSON", `${path} is not JSON: ${error51.message}. Is it the workflow.json?`) : refused("WORKFLOW_FILE_UNREADABLE", `${path} could not be read: ${error51 instanceof Error ? error51.message : String(error51)}`);
+  }
+  const read = readStoredWorkflowDocument(parsed);
+  if (!read.ok)
+    return { ok: false, path, problems: read.problems };
+  return { ok: true, path, workflow: read.workflow };
+}
+__name(readWorkflowFile, "readWorkflowFile");
+
 // apps/mcp/dist/handlers.js
 var MAX_SUBMISSION_BYTES = 1e6;
 var MAX_BIND_KEY_LENGTH = 256;
@@ -39123,6 +40036,194 @@ function createHandlers(dependencies) {
         steps,
         ...problemFields(drop.problems)
       });
+    },
+    /**
+     * Run a workflow kept in a file, again, in this session (ANT-281).
+     *
+     * One call where a handover takes four, because the user's command is the
+     * whole of the decision: `run "<path>"` says which workflow and that it
+     * should start now. What it does is what those four would — store the
+     * file's content as the workflow's latest revision (or as a new handover,
+     * when this Anthill has never seen it), ask the app to show it, bind a new
+     * run of exactly that content to this session, and hand back the prompt to
+     * work from — and every rule on the way is still the store's.
+     *
+     * The prompt is the one Prompt.md carries, compiled from the bound
+     * revision, with this run's progress commands in it and no marker: the
+     * binding already says which session the run is.
+     */
+    async runWorkflow(input) {
+      const problems = [];
+      const given = typeof input.path === "string" && input.path.trim() ? input.path : void 0;
+      if (given === void 0) {
+        problems.push(callProblem(input.path, "path", "the path to a workflow.json, and not a blank one", 'It is the path in the command the user ran: run "<path>".'));
+      }
+      const harness = isMarkerCli(input.harness) ? input.harness : void 0;
+      if (harness === void 0) {
+        problems.push(callProblem(input.harness, "harness", '"claude-code", "codex", "pi" or "vscode"', "Which tool you are, so the progress you report is attributed to it."));
+      }
+      const sessionProblem = checkSessionId(input.sessionId, "sessionId");
+      if (sessionProblem)
+        problems.push(sessionProblem);
+      const session = isSessionId(input.sessionId) ? input.sessionId : void 0;
+      const runKey = typeof input.idempotencyKey === "string" && input.idempotencyKey.trim() && input.idempotencyKey.length <= MAX_BIND_KEY_LENGTH ? input.idempotencyKey : void 0;
+      if (runKey === void 0) {
+        problems.push(callProblem(input.idempotencyKey, "idempotencyKey", `a key of your own: a string of at most ${MAX_BIND_KEY_LENGTH} characters, and not a blank one`, "Mint a new one for every run command, and repeat it only to retry the same call after a lost reply."));
+      }
+      const build = readBuild(input.build);
+      if ("problem" in build)
+        problems.push(build.problem);
+      if (given === void 0 || harness === void 0 || session === void 0 || runKey === void 0 || "problem" in build) {
+        return result(runText, { outcome: "invalid", ...problemFields(problems) });
+      }
+      const file2 = await readWorkflowFile(given, {
+        maxBytes: MAX_SUBMISSION_BYTES,
+        ...dependencies.home !== void 0 ? { home: dependencies.home } : {},
+        ...dependencies.cwd !== void 0 ? { cwd: dependencies.cwd } : {}
+      });
+      if (!file2.ok)
+        return result(runText, { outcome: "invalid", path: file2.path, ...problemFields(file2.problems) });
+      const workflow = file2.workflow;
+      const workflowId = workflow.id;
+      const reach = targets.handover(build.request);
+      if ("problem" in reach) {
+        return result(runText, { outcome: "invalid", path: file2.path, workflowId, ...problemFields([reach.problem]) });
+      }
+      const { store } = reach;
+      const refusedWith = /* @__PURE__ */ __name((answer) => result(runText, { path: file2.path, ...answer }), "refusedWith");
+      let stored;
+      const existing = await store.readWorkflow(workflowId);
+      if (existing?.identity) {
+        const added = await store.addRevision(workflowId, workflow, "user");
+        if (added.outcome !== "added" && added.outcome !== "unchanged") {
+          return refusedWith({
+            outcome: added.outcome === "no_such_workflow" ? "no_such_workflow" : "conflict",
+            workflowId,
+            ...problemFields(added.problems, workflow)
+          });
+        }
+        stored = added.outcome === "added" ? "revised" : "unchanged";
+      } else {
+        const read = readSubmission({
+          exchangeVersion: EXCHANGE_VERSION,
+          idempotencyKey: `run:${runKey}`,
+          mode: "watch",
+          source: { harness, sessionId: session, taskText: `run "${given.trim()}"` },
+          workflow
+        });
+        if (!read.ok)
+          return refusedWith({ outcome: "invalid", workflowId, ...problemFields(read.problems, workflow) });
+        const created = await store.createWorkflow(read.submission);
+        if (created.outcome !== "created" && created.outcome !== "already_exists") {
+          return refusedWith({
+            outcome: created.outcome === "refused" ? "not_ready" : "conflict",
+            workflowId,
+            ...problemFields(created.problems, workflow)
+          });
+        }
+        stored = "handed_over";
+      }
+      const eligibility = await store.eligibleRevision(workflowId);
+      if (!eligibility.eligible) {
+        const refused = await incompleteRevision(store, workflowId, eligibility.reason, eligibility.revision);
+        return refusedWith({
+          outcome: eligibility.reason === "no_such_workflow" ? "no_such_workflow" : "not_ready",
+          workflowId,
+          ...eligibility.reason === "no_such_workflow" ? {} : { url: reach.link(workflowId) },
+          ...notReadyFields(eligibility, refused)
+        });
+      }
+      const chosen = eligibility.revision;
+      if (chosen.digest !== revisionDigest(workflow)) {
+        return refusedWith({
+          outcome: "conflict",
+          workflowId,
+          url: reach.link(workflowId),
+          revision: chosen.revision,
+          ...problemFields([{
+            code: EXCHANGE_STORE_PROBLEM_CODES.STORE_REVISION_CONFLICT,
+            message: `${workflowId} changed in Anthill while this run was starting, so revision ${chosen.revision} is no longer what ${file2.path} says. Nothing was bound; run the command again.`
+          }])
+        });
+      }
+      try {
+        compile(chosen.workflow);
+      } catch (error51) {
+        if (!(error51 instanceof WorkflowCompileError))
+          throw error51;
+        return refusedWith({
+          outcome: "not_ready",
+          workflowId,
+          url: reach.link(workflowId),
+          revision: chosen.revision,
+          ...problemFields(error51.issues.map((message) => ({
+            code: EXCHANGE_PROBLEM_CODES.WORKFLOW_MALFORMED,
+            message
+          })))
+        });
+      }
+      const display = await store.dropInbox({
+        kind: "display",
+        key: displayKey(workflowId, `run:${runKey}`),
+        workflowId,
+        revision: chosen.revision
+      });
+      const bound = await store.bindRequest(workflowId, chosen.revision, chosen.digest, runKey, session, () => ({ runId: mintRunId(), nonce: mintNonce() }));
+      if (bound.outcome !== "bound" && bound.outcome !== "already_bound") {
+        const refused = await incompleteRevision(store, workflowId, bound.reason, bound.revision);
+        return refusedWith({
+          outcome: bound.outcome === "no_such_workflow" ? "no_such_workflow" : bound.outcome === "not_eligible" ? "not_ready" : "conflict",
+          workflowId,
+          ...bound.outcome !== "no_such_workflow" ? { url: reach.link(workflowId) } : {},
+          revision: chosen.revision,
+          ...bound.reason ? { reason: bound.reason } : {},
+          ...problemFields(bound.problems, refused)
+        });
+      }
+      const binding = bound.binding;
+      if (!binding)
+        throw new Error(`A run was bound to ${workflowId} but no binding came back.`);
+      const registration = await store.dropInbox({
+        kind: "bind",
+        key: bindKey(binding.runId),
+        workflowId,
+        revision: binding.revision,
+        runId: binding.runId
+      });
+      const snapshot = await store.readRevision(workflowId, binding.revision);
+      if (!snapshot || snapshot.digest !== binding.digest) {
+        throw new Error("The bound snapshot cannot be verified. No running state is implied.");
+      }
+      const reporting = reach.resolved ? invocation(reach.resolved) : {};
+      const { bootstrapPrompt } = buildBootstrapPrompt(snapshot.workflow, {
+        runId: binding.runId,
+        nonce: binding.nonce,
+        workflowId,
+        cli: harness,
+        promptVersion: MARKER_VERSION,
+        issuedAt: binding.at
+      }, { reportViaCli: true, invocation: reporting, includeMarker: false });
+      const app = await bringUp(reach, workflowId);
+      return result(runText, {
+        outcome: bound.outcome === "bound" ? "started" : "already_started",
+        path: file2.path,
+        workflowId,
+        name: snapshot.workflow.name,
+        url: app.link ?? reach.link(workflowId),
+        stored,
+        revision: binding.revision,
+        digest: snapshot.digest,
+        runId: binding.runId,
+        nonce: binding.nonce,
+        ...binding.sessionId ? { sessionId: binding.sessionId } : {},
+        displayRequested: display.outcome !== "conflict",
+        registrationRequested: registration.outcome !== "conflict",
+        app,
+        prompt: bootstrapPrompt,
+        ...reporting.unbuilt ? { cliUnbuilt: reporting.unbuilt } : {},
+        steps: workflowSteps(snapshot.workflow),
+        ...problemFields([...display.problems ?? [], ...registration.problems ?? []])
+      });
     }
   };
 }
@@ -39324,10 +40425,16 @@ ask.
 The user may edit the workflow while you work. That makes a new revision; the run
 you bound keeps the one it started from, so nothing changes underneath you.
 
-None of these tools reads your files, runs a command, or reaches the network.`;
+run_workflow is the user's command to run a saved workflow again: run "<path>".
+It does the handover, the bind and the prompt in one call, for the workflow.json
+the user named. Their command is the go-ahead: no questionnaire, no draft of
+your own, no asking whether to start. Carry out the prompt it returns.
+
+None of these tools runs a command or reaches the network, and run_workflow's
+workflow.json is the only file any of them reads.`;
 
 // apps/mcp/dist/options.js
-import { isAbsolute, resolve as resolve3 } from "node:path";
+import { isAbsolute as isAbsolute2, resolve as resolve4 } from "node:path";
 var DATA_DIR_FLAG = "--data-dir";
 var NO_LAUNCH_FLAG = "--no-launch";
 var TARGET_FLAG = "--target";
@@ -39408,13 +40515,13 @@ ${USAGE}` };
 
 ${USAGE}` };
   }
-  if (dataDir !== void 0 && (!dataDir.trim() || !isAbsolute(dataDir))) {
+  if (dataDir !== void 0 && (!dataDir.trim() || !isAbsolute2(dataDir))) {
     return { ok: false, message: `${DATA_DIR_FLAG} needs an absolute path; harness working directories can change.` };
   }
   return {
     ok: true,
     options: {
-      ...dataDir !== void 0 ? { dataDir: resolve3(dataDir) } : {},
+      ...dataDir !== void 0 ? { dataDir: resolve4(dataDir) } : {},
       launch,
       ...target ? { target } : {}
     }
@@ -39643,6 +40750,47 @@ one, and nothing is bound.`,
       openWorldHint: false
     }
   }, async (args) => handlers.bindRun(args));
+  server.registerTool("run_workflow", {
+    title: "Run a saved workflow again",
+    description: `Start a fresh run of a workflow kept in a workflow.json, in this session.
+
+For the user's command run "<path>" (ANT-281): /anthill:workflow run in Claude
+Code and VS Code, $anthill run in Codex. The command is the go-ahead \u2013 it names
+the workflow and says to start \u2013 so there is nothing to ask and nothing to draft.
+
+It reads the file, stores its content as the workflow's latest revision (or
+hands it over, if this Anthill has never seen it), asks Anthill to show it, binds
+a new run of exactly that content to this session, and returns the prompt to
+work from: the same text as the workflow's Prompt.md, with this run's progress
+commands in it.
+
+Returns an outcome of:
+  started           a new run is bound; carry out the prompt in the result.
+  already_started   this idempotencyKey already started a run; it is the same one.
+  invalid           nothing was started: the file or the call is what has to change.
+  not_ready         nothing was started: the workflow cannot be run as it stands,
+                    and the problems or questions say why.
+  no_such_workflow  nothing was started: the workflow vanished while starting.
+  conflict          nothing was started: something else is in the way, and the
+                    message says what.
+
+Every run carries path, harness, sessionId and idempotencyKey. Mint a new
+idempotencyKey for each run command and repeat it only to retry the same call.`,
+    inputSchema: {
+      path: external_exports.unknown().optional().describe('The workflow.json the user named, as they wrote it: absolute, "~/\u2026" or relative to your working directory. Quotes around it are fine.'),
+      harness: external_exports.unknown().optional().describe('Which tool you are: "claude-code", "codex", "pi" or "vscode".'),
+      sessionId: external_exports.unknown().optional().describe("Your own identifier for this conversation, the same one a handover carries: letters, digits, hyphens and underscores. The run is matched against your session files by it."),
+      idempotencyKey: external_exports.unknown().optional().describe("A new key of your own for this run, of at most 256 characters. Repeat it only to retry this same call after a lost reply; a new key is a new run."),
+      build: BUILD
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      // The same key returns the run it already started.
+      idempotentHint: true,
+      openWorldHint: false
+    }
+  }, async (args) => handlers.runWorkflow(args));
 }
 __name(registerExchangeTools, "registerExchangeTools");
 

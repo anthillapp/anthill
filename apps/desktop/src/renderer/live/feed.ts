@@ -549,11 +549,11 @@ export function toolStatus(card: Pick<FeedCard, "state" | "durationMs">): string
 }
 
 /**
- * The line under an opened tool call.
+ * A tool call's tooltip.
  *
  * Anthill keeps that a call ran and how it ended, never what it printed — the
- * output is where a file's contents or a credential would be — so the box
- * says which of those it is rather than "output as recorded" over nothing.
+ * output is where a file's contents or a credential would be — so the card
+ * does not open, and its tooltip says why there is no output to see.
  */
 export const OUTPUT_NOTE: Record<CardState, string> = {
   done: "Anthill records that the call ran and how it ended, not what it printed.",
@@ -608,3 +608,21 @@ export function readDuration(ms: number | undefined): string {
  * that holds at any length.
  */
 export const MESSAGE_CLAMP = 336;
+
+/**
+ * A tool call's input, as the collapsed card shows it: one paragraph.
+ *
+ * A heredoc or a script keeps its lines only when opened; collapsed, its
+ * newlines would spend the three lines the card has on indentation.
+ */
+export function flattenToolInput(input: string): string {
+  return input.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Whether a tool call's input gets Show more: past what three lines of the
+ * card hold, by length or by lines of its own.
+ */
+export function isLongToolInput(input: string): boolean {
+  return flattenToolInput(input).length > 180 || input.split("\n").length > 3;
+}

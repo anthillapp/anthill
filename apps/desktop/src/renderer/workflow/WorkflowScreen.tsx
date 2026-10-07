@@ -48,7 +48,7 @@ import { TemplatePicker } from "./TemplatePicker.js";
 import { blankWorkflow, UNTITLED_WORKFLOW } from "./sample-workflow.js";
 import { PromptModal } from "./PromptModal.js";
 import { ExportModal } from "./ExportModal.js";
-import { fileName, RevealPath } from "./RevealPath.js";
+import { fileName, homeRelative, RevealPath } from "./RevealPath.js";
 import { DescribeChangeAssistant } from "./DescribeChangeAssistant.js";
 import {
   canStepBack,
@@ -994,7 +994,13 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         />
       ) : null}
 
-      {showExport ? <ExportModal workflow={workflow} onClose={() => setShowExport(false)} /> : null}
+      {showExport ? (
+        <ExportModal
+          workflow={workflow}
+          workflowPath={path ? homeRelative(path, host.home) : undefined}
+          onClose={() => setShowExport(false)}
+        />
+      ) : null}
 
       <WorkflowToolbar
         workflow={workflow}

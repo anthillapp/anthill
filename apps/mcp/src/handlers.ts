@@ -34,12 +34,22 @@
  */
 
 import {
+  EXCHANGE_STORE_PROBLEM_CODES,
   ExchangeStore,
   type Eligibility,
   type EligibilityRefusal,
   type ExchangeWorkflow,
 } from "@anthill/exchange-store";
-import { MARKER_VERSION, cliInstruction, newNonce, newRunId, workflowSteps } from "@anthill/live";
+import {
+  MARKER_VERSION,
+  buildBootstrapPrompt,
+  cliInstruction,
+  isMarkerCli,
+  newNonce,
+  newRunId,
+  workflowSteps,
+} from "@anthill/live";
+import { WorkflowCompileError, compile } from "@anthill/workflow";
 import {
   EXCHANGE_PROBLEM_CODES,
   EXCHANGE_VERSION,
@@ -48,6 +58,7 @@ import {
   isSessionId,
   readSubmission,
   readWorkflowDocument,
+  revisionDigest,
   type ExchangeProblem,
 } from "@anthill/workflow-exchange";
 import type { Workflow } from "@anthill/workflow-schema";
@@ -62,18 +73,21 @@ import {
   questionsFrom,
   readyText,
   reviseText,
+  runText,
   workflowText,
   type BindAnswer,
   type CallAnswer,
   type DraftAnswer,
   type ReadyAnswer,
   type ReviseAnswer,
+  type RunAnswer,
   type WorkflowAnswer,
 } from "./text.js";
 import { openUrl, type LaunchReport, type Launcher } from "./launch.js";
 import { currentEnvironment, type ResolvedTarget, type TargetRequest, type TargetSession } from "./target.js";
 import { invocationDeps, reportingInvocation, type ReportingInvocation } from "./report-command.js";
 import { workflowUrl } from "./url.js";
+import { readWorkflowFile } from "./workflow-file.js";
 
 /**
  * The largest handover this server will take, in bytes of JSON.
@@ -138,6 +152,10 @@ export type HandlerDependencies = {
    * PATH. Injected so a test fixes the PATH; defaults to the real machine.
    */
   invocation?: (resolved: ResolvedTarget) => ReportingInvocation;
+  /** The home directory a `run` path's `~` stands for; defaults to this user's. */
+  home?: string;
+  /** What a relative `run` path is relative to; defaults to this process's directory. */
+  cwd?: string;
 };
 
 /**
@@ -215,6 +233,25 @@ export type BindRunInput = {
   build?: unknown;
 };
 
+/**
+ * What `run_workflow` is given (ANT-281), judged here for the reason a bind is.
+ *
+ * A path where every other tool takes a document, because the command the user
+ * keeps and pastes again names the file, and the file is what they edit.
+ */
+export type RunWorkflowInput = {
+  /** The workflow.json to run: absolute, `~/…`, or relative to the harness's directory. */
+  path?: unknown;
+  /** Which tool is doing the run, so the progress lines are attributed to it. */
+  harness?: unknown;
+  /** This session, which the run is matched against. */
+  sessionId?: unknown;
+  /** A key of the caller's own for this one run, repeated on a retry. */
+  idempotencyKey?: unknown;
+  /** `"dev"` for the development build, on the chat's first handover (ANT-223). */
+  build?: unknown;
+};
+
 export type Handlers = {
   createWorkflowDraft(input: CreateDraftInput): Promise<CallToolResult>;
   reviseWorkflow(input: ReviseInput): Promise<CallToolResult>;
@@ -222,6 +259,7 @@ export type Handlers = {
   openWorkflow(input: OpenInput): Promise<CallToolResult>;
   getReadyRevision(input: OpenInput): Promise<CallToolResult>;
   bindRun(input: BindRunInput): Promise<CallToolResult>;
+  runWorkflow(input: RunWorkflowInput): Promise<CallToolResult>;
 };
 
 export function createHandlers(dependencies: HandlerDependencies): Handlers {
@@ -835,6 +873,231 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         ...(reporting.unbuilt ? { cliUnbuilt: reporting.unbuilt } : {}),
         steps,
         ...problemFields(drop.problems),
+      });
+    },
+
+    /**
+     * Run a workflow kept in a file, again, in this session (ANT-281).
+     *
+     * One call where a handover takes four, because the user's command is the
+     * whole of the decision: `run "<path>"` says which workflow and that it
+     * should start now. What it does is what those four would — store the
+     * file's content as the workflow's latest revision (or as a new handover,
+     * when this Anthill has never seen it), ask the app to show it, bind a new
+     * run of exactly that content to this session, and hand back the prompt to
+     * work from — and every rule on the way is still the store's.
+     *
+     * The prompt is the one Prompt.md carries, compiled from the bound
+     * revision, with this run's progress commands in it and no marker: the
+     * binding already says which session the run is.
+     */
+    async runWorkflow(input): Promise<CallToolResult> {
+      const problems: ExchangeProblem[] = [];
+
+      const given = typeof input.path === "string" && input.path.trim() ? input.path : undefined;
+      if (given === undefined) {
+        problems.push(callProblem(input.path, "path", "the path to a workflow.json, and not a blank one",
+          "It is the path in the command the user ran: run \"<path>\"."));
+      }
+
+      const harness = isMarkerCli(input.harness) ? input.harness : undefined;
+      if (harness === undefined) {
+        problems.push(callProblem(input.harness, "harness", '"claude-code", "codex", "pi" or "vscode"',
+          "Which tool you are, so the progress you report is attributed to it."));
+      }
+
+      const sessionProblem = checkSessionId(input.sessionId, "sessionId");
+      if (sessionProblem) problems.push(sessionProblem);
+      const session = isSessionId(input.sessionId) ? input.sessionId : undefined;
+
+      const runKey = typeof input.idempotencyKey === "string" && input.idempotencyKey.trim() &&
+        input.idempotencyKey.length <= MAX_BIND_KEY_LENGTH ? input.idempotencyKey : undefined;
+      if (runKey === undefined) {
+        problems.push(callProblem(input.idempotencyKey, "idempotencyKey",
+          `a key of your own: a string of at most ${MAX_BIND_KEY_LENGTH} characters, and not a blank one`,
+          "Mint a new one for every run command, and repeat it only to retry the same call after a lost reply."));
+      }
+
+      const build = readBuild(input.build);
+      if ("problem" in build) problems.push(build.problem);
+
+      if (given === undefined || harness === undefined || session === undefined || runKey === undefined ||
+        "problem" in build) {
+        return result(runText, { outcome: "invalid", ...problemFields(problems) });
+      }
+
+      const file = await readWorkflowFile(given, {
+        maxBytes: MAX_SUBMISSION_BYTES,
+        ...(dependencies.home !== undefined ? { home: dependencies.home } : {}),
+        ...(dependencies.cwd !== undefined ? { cwd: dependencies.cwd } : {}),
+      });
+      if (!file.ok) return result(runText, { outcome: "invalid", path: file.path, ...problemFields(file.problems) });
+      const workflow = file.workflow;
+      const workflowId = workflow.id;
+
+      const reach = targets.handover(build.request);
+      if ("problem" in reach) {
+        return result(runText, { outcome: "invalid", path: file.path, workflowId, ...problemFields([reach.problem]) });
+      }
+      const { store } = reach;
+      const refusedWith = (answer: Omit<RunAnswer, "path">) => result(runText, { path: file.path, ...answer });
+
+      /*
+        The file's content becomes the workflow's latest revision. A workflow
+        this Anthill already holds takes it as a revision — `unchanged` when the
+        file is what was last saved, which is the usual case for the working
+        copy the status bar names — and one it has never seen is handed over
+        as a watched job, by this session, in the user's own command.
+      */
+      let stored: RunAnswer["stored"];
+      const existing = await store.readWorkflow(workflowId);
+      if (existing?.identity) {
+        const added = await store.addRevision(workflowId, workflow, "user");
+        if (added.outcome !== "added" && added.outcome !== "unchanged") {
+          return refusedWith({
+            outcome: added.outcome === "no_such_workflow" ? "no_such_workflow" : "conflict",
+            workflowId,
+            ...problemFields(added.problems, workflow),
+          });
+        }
+        stored = added.outcome === "added" ? "revised" : "unchanged";
+      } else {
+        const read = readSubmission({
+          exchangeVersion: EXCHANGE_VERSION,
+          idempotencyKey: `run:${runKey}`,
+          mode: "watch",
+          source: { harness, sessionId: session, taskText: `run "${given.trim()}"` },
+          workflow,
+        });
+        if (!read.ok) return refusedWith({ outcome: "invalid", workflowId, ...problemFields(read.problems, workflow) });
+        const created = await store.createWorkflow(read.submission);
+        if (created.outcome !== "created" && created.outcome !== "already_exists") {
+          return refusedWith({
+            outcome: created.outcome === "refused" ? "not_ready" : "conflict",
+            workflowId,
+            ...problemFields(created.problems, workflow),
+          });
+        }
+        stored = "handed_over";
+      }
+
+      // Asked of the store, as every bind is, and then checked against the
+      // file: a revision saved by somebody else between the two writes is
+      // content the user did not name, and binding it would run the wrong plan.
+      const eligibility = await store.eligibleRevision(workflowId);
+      if (!eligibility.eligible) {
+        const refused = await incompleteRevision(store, workflowId, eligibility.reason, eligibility.revision);
+        return refusedWith({
+          outcome: eligibility.reason === "no_such_workflow" ? "no_such_workflow" : "not_ready",
+          workflowId,
+          ...(eligibility.reason === "no_such_workflow" ? {} : { url: reach.link(workflowId) }),
+          ...notReadyFields(eligibility, refused),
+        });
+      }
+      const chosen = eligibility.revision;
+      if (chosen.digest !== revisionDigest(workflow)) {
+        return refusedWith({
+          outcome: "conflict",
+          workflowId,
+          url: reach.link(workflowId),
+          revision: chosen.revision,
+          ...problemFields([{
+            code: EXCHANGE_STORE_PROBLEM_CODES.STORE_REVISION_CONFLICT,
+            message: `${workflowId} changed in Anthill while this run was starting, so revision ${chosen.revision} is no longer what ${file.path} says. Nothing was bound; run the command again.`,
+          }]),
+        });
+      }
+
+      // Compiled once before anything is bound, so a graph the compiler
+      // refuses leaves no run behind it.
+      try {
+        compile(chosen.workflow);
+      } catch (error) {
+        if (!(error instanceof WorkflowCompileError)) throw error;
+        return refusedWith({
+          outcome: "not_ready",
+          workflowId,
+          url: reach.link(workflowId),
+          revision: chosen.revision,
+          ...problemFields(error.issues.map((message) => ({
+            code: EXCHANGE_PROBLEM_CODES.WORKFLOW_MALFORMED,
+            message,
+          }))),
+        });
+      }
+
+      // Shown first, then bound, the order a watched handover arrives in: the
+      // app opens the workflow and moves to the Live Session when the run binds.
+      const display = await store.dropInbox({
+        kind: "display",
+        key: displayKey(workflowId, `run:${runKey}`),
+        workflowId,
+        revision: chosen.revision,
+      });
+
+      const bound = await store.bindRequest(workflowId, chosen.revision, chosen.digest, runKey, session,
+        () => ({ runId: mintRunId(), nonce: mintNonce() }));
+      if (bound.outcome !== "bound" && bound.outcome !== "already_bound") {
+        const refused = await incompleteRevision(store, workflowId, bound.reason, bound.revision);
+        return refusedWith({
+          outcome: bound.outcome === "no_such_workflow" ? "no_such_workflow" : bound.outcome === "not_eligible"
+            ? "not_ready" : "conflict",
+          workflowId,
+          ...(bound.outcome !== "no_such_workflow" ? { url: reach.link(workflowId) } : {}),
+          revision: chosen.revision,
+          ...(bound.reason ? { reason: bound.reason } : {}),
+          ...problemFields(bound.problems, refused),
+        });
+      }
+      const binding = bound.binding;
+      if (!binding) throw new Error(`A run was bound to ${workflowId} but no binding came back.`);
+
+      const registration = await store.dropInbox({
+        kind: "bind",
+        key: bindKey(binding.runId),
+        workflowId,
+        revision: binding.revision,
+        runId: binding.runId,
+      });
+
+      const snapshot = await store.readRevision(workflowId, binding.revision);
+      if (!snapshot || snapshot.digest !== binding.digest) {
+        throw new Error("The bound snapshot cannot be verified. No running state is implied.");
+      }
+      const reporting: ReportingInvocation = reach.resolved ? invocation(reach.resolved) : {};
+      const { bootstrapPrompt } = buildBootstrapPrompt(
+        snapshot.workflow,
+        {
+          runId: binding.runId,
+          nonce: binding.nonce,
+          workflowId,
+          cli: harness,
+          promptVersion: MARKER_VERSION,
+          issuedAt: binding.at,
+        },
+        { reportViaCli: true, invocation: reporting, includeMarker: false },
+      );
+
+      const app = await bringUp(reach, workflowId);
+      return result(runText, {
+        outcome: bound.outcome === "bound" ? "started" : "already_started",
+        path: file.path,
+        workflowId,
+        name: snapshot.workflow.name,
+        url: app.link ?? reach.link(workflowId),
+        stored,
+        revision: binding.revision,
+        digest: snapshot.digest,
+        runId: binding.runId,
+        nonce: binding.nonce,
+        ...(binding.sessionId ? { sessionId: binding.sessionId } : {}),
+        displayRequested: display.outcome !== "conflict",
+        registrationRequested: registration.outcome !== "conflict",
+        app,
+        prompt: bootstrapPrompt,
+        ...(reporting.unbuilt ? { cliUnbuilt: reporting.unbuilt } : {}),
+        steps: workflowSteps(snapshot.workflow),
+        ...problemFields([...(display.problems ?? []), ...(registration.problems ?? [])]),
       });
     },
   };

@@ -221,6 +221,39 @@ describe("the progress channel", () => {
 });
 
 /**
+ * The prompt a bound run gets back from the MCP server (ANT-281).
+ *
+ * The run already has a binding, so the marker is left out, and the server
+ * knows how this machine runs the CLI, so every command uses that spelling —
+ * the progress section and each step's own opening alike.
+ */
+describe("the prompt for a run that is already bound", () => {
+  const invocation = { command: "node /opt/anthill/cli.js", dataDir: "/tmp/anthill data", platform: "darwin" as const };
+
+  it("leaves the marker block out when asked to", () => {
+    const { bootstrapPrompt } = buildBootstrapPrompt(workflow("claude-code"), marker, {
+      reportViaCli: true,
+      includeMarker: false,
+    });
+    expect(parseMarker(bootstrapPrompt)).toBeUndefined();
+    expect(bootstrapPrompt).not.toContain("Anthill run marker");
+    expect(bootstrapPrompt).toContain(`anthill run ${marker.runId} ${marker.nonce}`);
+  });
+
+  it("spells every command the way the invocation says, steps included", () => {
+    const { bootstrapPrompt } = buildBootstrapPrompt(workflow("claude-code"), marker, {
+      reportViaCli: true,
+      invocation,
+    });
+    const at = "--data-dir '/tmp/anthill data'";
+    expect(bootstrapPrompt).toContain(`node /opt/anthill/cli.js run ${at} ${marker.runId} ${marker.nonce}`);
+    expect(bootstrapPrompt).toContain(`node /opt/anthill/cli.js step ${at} ${marker.runId} ${marker.nonce} read`);
+    expect(bootstrapPrompt).toContain(`node /opt/anthill/cli.js done ${at} ${marker.runId} ${marker.nonce}`);
+    expect(bootstrapPrompt).not.toMatch(/^\s+anthill /m);
+  });
+});
+
+/**
  * The prompt and the marker list agree about what step 1 is (ANT-101).
  *
  * They were two orderings of the same blocks: the prompt numbered them by a

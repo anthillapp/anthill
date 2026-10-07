@@ -50,6 +50,11 @@ corrupts the message stream.
 
 `create_workflow_draft` → `get_ready_revision` → `bind_run`, once per handover.
 `get_workflow` answers where a handover stands and is not part of the sequence.
+`run_workflow` is the sequence in one call, for a workflow the user already has:
+it reads the `workflow.json` the user's `run "<path>"` command names, stores it
+as the latest revision (or hands it over, when this Anthill has never seen it),
+binds a new run to the calling session and returns the compiled prompt — the
+text of Prompt.md, with the run's progress commands in it and no marker.
 `revise_workflow` stores a later version of one that exists, for when the user
 asks the harness to change the plan rather than changing it in the app; it is
 kept apart from `create_workflow_draft` because the two differ in what they

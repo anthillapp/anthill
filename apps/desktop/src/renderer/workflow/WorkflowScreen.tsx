@@ -48,7 +48,7 @@ import { TemplatePicker } from "./TemplatePicker.js";
 import { blankWorkflow, UNTITLED_WORKFLOW } from "./sample-workflow.js";
 import { PromptModal } from "./PromptModal.js";
 import { ExportModal } from "./ExportModal.js";
-import { fileName, RevealPath } from "./RevealPath.js";
+import { fileName, homeRelative, RevealPath } from "./RevealPath.js";
 import { DescribeChangeAssistant } from "./DescribeChangeAssistant.js";
 import {
   canStepBack,
@@ -312,6 +312,37 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    * ever one started from the workflow that is open.
    */
   const watched = mostRelevant(runsFor(liveRuns, workflow?.id));
+
+  /**
+   * The run this workflow last had, once the live store has let it go
+   * (ANT-275).
+   *
+   * The store drops a settled run a day after it ends, and the tab then said
+   * no session had ever run a workflow the launch window called Finished. Main
+   * keeps how each workflow's last run ended, and hands that run back here so
+   * the finished session can still be opened. Asked only while the snapshot
+   * has nothing for the workflow: anything it does have is the answer.
+   */
+  const workflowId = workflow?.id;
+  const [ended, setEnded] = useState<{ workflowId: string; run: PendingRun }>();
+  const snapshotHasRun = watched !== undefined;
+  useEffect(() => {
+    if (!workflowId || snapshotHasRun) return;
+    let live = true;
+    Promise.resolve()
+      .then(() => window.anthill.liveLastRun(workflowId))
+      .then((run) => {
+        if (live && run?.workflowId === workflowId) setEnded({ workflowId, run });
+      })
+      .catch(() => {
+        // An older main process does not serve this channel. The tab stays
+        // as it was: open while the live store has the run, and not after.
+      });
+    return () => {
+      live = false;
+    };
+  }, [workflowId, snapshotHasRun]);
+  const endedRun = ended?.workflowId === workflowId ? ended?.run : undefined;
 
   /** Open one agent in the inspector, remembering the step it came from. */
   const editAgent = useCallback(
@@ -889,13 +920,18 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    * What the Live session tab would show: the run open in it, or else the one
    * the chip would open — a session confirmed live, or one that finished.
    * Anything less certain leaves the tab disabled — the chip is where a maybe
-   * is explained.
+   * is explained. With no run in the snapshot at all, the finished session the
+   * workflow last had, kept after the store dropped it (ANT-275).
    */
   const liveTarget = liveRun
     ? current(liveRun)
-    : watched && hasSessionPage(watched)
-      ? watched
-      : undefined;
+    : watched
+      ? hasSessionPage(watched)
+        ? watched
+        : undefined
+      : endedRun && hasSessionPage(endedRun)
+        ? endedRun
+        : undefined;
   const tabs = (
     <WorkspaceTabs
       active={showing}
@@ -958,7 +994,13 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
         />
       ) : null}
 
-      {showExport ? <ExportModal workflow={workflow} onClose={() => setShowExport(false)} /> : null}
+      {showExport ? (
+        <ExportModal
+          workflow={workflow}
+          workflowPath={path ? homeRelative(path, host.home) : undefined}
+          onClose={() => setShowExport(false)}
+        />
+      ) : null}
 
       <WorkflowToolbar
         workflow={workflow}

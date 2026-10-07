@@ -23,11 +23,19 @@ import {
   type GeneratedFile,
 } from "@anthill/workflow";
 
+import { RunAgainCard } from "./RunAgainCard.js";
+
 /** The compiled workflow's file name in the export. */
 export const PROMPT_FILE = "Prompt.md";
 
 export type ExportModalProps = {
   workflow: Workflow;
+  /**
+   * The workflow's JSON, as the status bar shows it (home-relative where it
+   * can be): what the plugin's `run` command reads (ANT-281). Absent for a
+   * workflow with no file yet, which has no command to offer.
+   */
+  workflowPath?: string;
   onClose: () => void;
 };
 
@@ -93,7 +101,7 @@ function Toggle({
   );
 }
 
-export function ExportModal({ workflow, onClose }: ExportModalProps) {
+export function ExportModal({ workflow, workflowPath, onClose }: ExportModalProps) {
   const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
   const harness = HARNESS_PROFILES[workflow.target ?? DEFAULT_TARGET];
@@ -203,7 +211,9 @@ export function ExportModal({ workflow, onClose }: ExportModalProps) {
             <p>
               {done
                 ? "Ready to reuse — nothing was started."
-                : "Agent files and Prompt.md, for running it again later."}
+                : workflowPath
+                  ? "Agent files, Prompt.md and a run command, for running it again."
+                  : "Agent files and Prompt.md, for running it again later."}
             </p>
           </div>
           <span className="spacer" />
@@ -233,9 +243,11 @@ export function ExportModal({ workflow, onClose }: ExportModalProps) {
                   ))}
                 </ul>
               </section>
+              {workflowPath ? <RunAgainCard path={workflowPath} target={workflow.target} /> : null}
               <p className="export-note">
-                To run it again, open the folder's workflow in Anthill and press Prompt, or paste
-                Prompt.md into your coding tool. Anthill follows that run as a new session.
+                {workflowPath
+                  ? "Each run is followed as a new session in Anthill. You can also open the workflow in Anthill and press Prompt, or paste Prompt.md into your coding tool."
+                  : "To run it again, open the folder's workflow in Anthill and press Prompt, or paste Prompt.md into your coding tool. Anthill follows that run as a new session."}
               </p>
             </>
           ) : (
@@ -292,6 +304,8 @@ export function ExportModal({ workflow, onClose }: ExportModalProps) {
                   Change…
                 </button>
               </div>
+
+              {workflowPath ? <RunAgainCard path={workflowPath} target={workflow.target} /> : null}
 
               {outcome.kind === "failed" ? (
                 <section className="handover-receipt is-failed" role="alert">

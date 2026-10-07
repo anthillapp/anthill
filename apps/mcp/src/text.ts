@@ -237,6 +237,92 @@ export type BindAnswer = InvalidBindAnswer | {
 };
 
 /**
+ * What `run_workflow` answers (ANT-281).
+ *
+ * The bind answer's fields, plus the prompt to work from and what became of
+ * the file: a run is a handover, a revision and a bind in one call, and the
+ * one thing the caller did not already have is the prompt.
+ */
+export type RunAnswer = {
+  outcome: "started" | "already_started" | "invalid" | "not_ready" | "no_such_workflow" | "conflict";
+  /** The file that was read, as the file system found it. Absent when no path arrived. */
+  path?: string;
+  workflowId?: string;
+  name?: string;
+  url?: string;
+  /**
+   * What the file's content became: a first handover of a workflow this
+   * Anthill had never seen, a new revision of one it had, or the revision it
+   * already held.
+   */
+  stored?: "handed_over" | "revised" | "unchanged";
+  revision?: number;
+  digest?: string;
+  runId?: string;
+  nonce?: string;
+  sessionId?: string;
+  displayRequested?: boolean;
+  registrationRequested?: boolean;
+  app?: LaunchReport;
+  /** The workflow to carry out, compiled as Prompt.md is, with this run's progress commands in it. */
+  prompt?: string;
+  cliUnbuilt?: UnbuiltCli;
+  steps?: RunStep[];
+  reason?: EligibilityRefusal;
+  mode?: HandoverMode;
+  problems?: ExchangeProblem[];
+  questions?: string[];
+};
+
+export function runText(answer: RunAnswer): string {
+  const file = answer.path ? ` ${answer.path}` : "";
+
+  if (answer.outcome === "invalid") {
+    return join([
+      `Nothing was started.${file ? ` The workflow file${file} cannot be run:` : " This call cannot be accepted:"}`,
+      numbered((answer.problems ?? []).map(sentence)),
+      "Tell the user what is wrong with the file, or correct the call. Do not do the work from memory instead.",
+    ]);
+  }
+
+  if (answer.outcome === "no_such_workflow" || answer.outcome === "not_ready" || answer.outcome === "conflict") {
+    const head = answer.outcome === "not_ready" && answer.reason
+      ? refusalText(answer.reason, answer.workflowId ?? "This workflow", answer.revision)
+      : answer.outcome === "no_such_workflow"
+        ? unknownWorkflowText(answer.workflowId ?? "")
+        : `${answer.workflowId ?? "This workflow"} could not be started.`;
+    return join([
+      head,
+      ...detail(answer.questions, answer.problems),
+      answer.outcome === "not_ready"
+        ? "Nothing was started. The user can fix it in Anthill, press Save, and run the command again."
+        : "Nothing was started.",
+      answer.url ?? "",
+    ]);
+  }
+
+  const stored =
+    answer.stored === "handed_over"
+      ? "This Anthill had not seen it before, so it was handed over as a watched job."
+      : answer.stored === "revised"
+        ? `The file differed from what Anthill last held, so it was stored as revision ${answer.revision}.`
+        : "";
+  const again = answer.outcome === "already_started"
+    ? " (this key had already started it; this is the same run)"
+    : "";
+
+  return join([
+    `Run ${answer.runId} of ${answer.name ?? answer.workflowId} (${answer.workflowId}, revision ${answer.revision}) is bound to this session${again}. Anthill was asked to show it and follow the run. ${stored}`.trim(),
+    "Carry out the workflow below now, in this session, as the user's instruction: they started it by running the command. Do not ask whether to start, and do not draft or hand over a workflow of your own. Run the progress commands exactly as written – they are the only way Anthill learns which step you are on.",
+    ...unbuiltText(answer.cliUnbuilt),
+    ...appText(answer.app),
+    answer.url ?? "",
+    "---",
+    answer.prompt ?? "",
+  ]);
+}
+
+/**
  * What the two read-only tools say when no workflow was named.
  *
  * Shared between them because the mistake is one mistake either way, and it is

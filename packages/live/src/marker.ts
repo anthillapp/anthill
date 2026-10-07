@@ -216,10 +216,11 @@ export function stepOpening(
   marker: Pick<RunMarker, "runId" | "nonce">,
   step: { id: string; delegated: boolean },
   via: "echo" | "cli" = "echo",
+  invocation: CliInvocation = {},
 ): string[] {
   const command =
     via === "cli"
-      ? `${CLI_NAME} step ${marker.runId} ${marker.nonce} ${step.id}`
+      ? cliCommand("step", invocation, marker.runId, marker.nonce, step.id)
       : `printf '${STEP_TOKEN} ${marker.runId} ${marker.nonce} ${step.id}\\n'`;
   const lines = [
     "Your first action in this step, and again each time you come back to it: run",
@@ -294,8 +295,6 @@ export function cliInstruction(
   steps: readonly { id: string; name: string }[] = [],
   invocation: CliInvocation = {},
 ): string {
-  const command = invocation.command ?? CLI_NAME;
-  const at = invocation.dataDir ? ` --data-dir ${typedPath(invocation.dataDir, invocation.platform ?? "linux")}` : "";
   const lines = [
     "## Progress reports",
     "",
@@ -305,16 +304,16 @@ export function cliInstruction(
     "",
     "**Once, before you begin:**",
     "",
-    `    ${command} run${at} ${marker.runId} ${marker.nonce}`,
+    `    ${cliCommand("run", invocation, marker.runId, marker.nonce)}`,
     "",
     "**Immediately before you start each step, and again whenever you come back to",
     "an earlier one:**",
     "",
-    `    ${command} step${at} ${marker.runId} ${marker.nonce} <step-id>`,
+    `    ${cliCommand("step", invocation, marker.runId, marker.nonce, "<step-id>")}`,
     "",
     "**Once the work is finished:**",
     "",
-    `    ${command} done${at} ${marker.runId} ${marker.nonce}`,
+    `    ${cliCommand("done", invocation, marker.runId, marker.nonce)}`,
   ];
 
   // The ids belong next to the instruction rather than at the end of the
@@ -329,6 +328,18 @@ export function cliInstruction(
   }
 
   return lines.join("\n");
+}
+
+/**
+ * One CLI call as the harness types it: the command, the subcommand, then
+ * `--data-dir` where the invocation has one, then the arguments. The one
+ * spelling both the progress section and each step's opening use, so the two
+ * cannot drift apart.
+ */
+function cliCommand(subcommand: "run" | "step" | "done", invocation: CliInvocation, ...args: string[]): string {
+  const command = invocation.command ?? CLI_NAME;
+  const at = invocation.dataDir ? ` --data-dir ${typedPath(invocation.dataDir, invocation.platform ?? "linux")}` : "";
+  return `${command} ${subcommand}${at} ${args.join(" ")}`;
 }
 
 export const RUN_TOKEN = "ANTHILL-RUN";

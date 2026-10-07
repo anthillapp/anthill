@@ -9,11 +9,14 @@
 # Any other push to master — one whose version already has its tag — publishes
 # nothing.
 #
-# The same build runs in CI (`macos-package`) on the commit before it merges,
-# from the shared `.github/actions/macos-package`. A run started by hand builds
-# that artefact here too and publishes nothing.
+# Nothing is checked here: the release pull request already passed every
+# check on exactly this tree (`check`, the Linux and Windows source builds,
+# and `macos-package`, which is this same build from the shared
+# `.github/actions/macos-package`), and `release-gate` made sure the merge is
+# that tree. This only builds and publishes. A run started by hand builds the
+# artefact and publishes nothing.
 #
-# The runner is `macos-14`, pinned rather than `macos-latest`, because the
+# The runner is `macos-15`, pinned rather than `macos-latest`, because the
 # runner image decides the architecture of the build and `latest` moves without
 # telling anyone. It is Apple Silicon, which matches the only arch this app
 # packages for.
@@ -53,7 +56,7 @@ jobs:
   macos:
     needs: decide
     if: needs.decide.outputs.tag != '' || github.event_name == 'workflow_dispatch'
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -63,12 +66,6 @@ jobs:
           cache: npm
 
       - run: npm ci
-
-      # A broken build is worth catching before it is published, not after
-      # somebody downloads it.
-      - run: node apps/desktop/scripts/fetch-electron-sqlite.mjs
-      - run: npm run typecheck
-      - run: npm test
 
       - uses: ./.github/actions/macos-package
         with:
@@ -106,24 +103,3 @@ jobs:
               and choose *Open*.
 
             After that it launches normally. A signed build needs none of this.
-
-  # The next release starts collecting at once (RELEASING.md, *After the
-  # release*): `<this version>-next` from the commit just released, the open
-  # pull requests moved onto it, and the previous next-release branch, now
-  # squashed into master, deleted. Only after the release is published.
-  next-branch:
-    needs: [decide, macos]
-    if: needs.decide.outputs.tag != ''
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: node scripts/release.mjs next-branch
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASED_SHA: ${{ github.sha }}

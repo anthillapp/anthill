@@ -127,7 +127,69 @@ export function messageExcerpt(
 
   const joined = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   if (!joined) return undefined;
+  // The cut must not land inside a link or a code span: the page would print
+  // `[app.py](svc_a…` as written, forever, because this is all that is kept
+  // (ANT-270).
   return joined.length > MESSAGE_EXCERPT_LIMIT
-    ? `${joined.slice(0, MESSAGE_EXCERPT_LIMIT).trimEnd()}…`
+    ? `${closeMarkupCut(joined.slice(0, MESSAGE_EXCERPT_LIMIT))}…`
     : joined;
+}
+
+/**
+ * Where a marker opens or closes. Leaves out the ones that are not markup at
+ * all: a `*` that starts a list item, and an `_` inside a word (`svc_a`),
+ * which Markdown does not read as emphasis.
+ */
+function markerPositions(text: string, marker: "**" | "*" | "_"): number[] {
+  const shape = marker === "**" ? /\*\*/g : marker === "*" ? /(?<!\*)\*(?!\*)/g : /_/g;
+  const found: number[] = [];
+  for (const match of text.matchAll(shape)) {
+    const at = match.index ?? 0;
+    const before = text[at - 1] ?? "";
+    const after = text[at + match[0].length] ?? "";
+    if (marker === "*" && /^\s$/.test(after) && /(?:^|\n)[ \t]*$/.test(text.slice(0, at))) continue;
+    if (marker === "_" && /\w/.test(before) && /\w/.test(after)) continue;
+    found.push(at);
+  }
+  return found;
+}
+
+/**
+ * A prefix of Markdown, shortened to the last point where every marker it
+ * opened is closed again.
+ *
+ * Any prefix of a message can end in the middle of `**bold**`, an inline code
+ * span or a link, and the renderer then prints the raw markers — or, for a
+ * link, half of its target — which is the source code the page exists to
+ * hide. So the cut retreats instead: to before the open backtick, the open
+ * emphasis, or the `[` of a link whose `](target)` it never reached. The
+ * caller adds the `…`.
+ */
+export function closeMarkupCut(prefix: string): string {
+  let cut = prefix;
+
+  // Inline code first: a backtick span makes every other marker inside it
+  // literal, so an odd number of backticks means the cut landed inside one.
+  const ticks = (cut.match(/`/g) ?? []).length;
+  if (ticks % 2 === 1) cut = cut.slice(0, cut.lastIndexOf("`"));
+
+  // Then emphasis, longest marker first so `**` is not read as two `*`.
+  for (const marker of ["**", "*", "_"] as const) {
+    const found = markerPositions(cut, marker);
+    if (found.length % 2 === 1) cut = cut.slice(0, found[found.length - 1]);
+  }
+
+  // And a link whose target the cut never reached. A bracket that has closed
+  // and is not followed by `(` is just a bracket — `[x] done` — and stays.
+  const open = cut.lastIndexOf("[");
+  if (open >= 0) {
+    const tail = cut.slice(open);
+    const complete = /^\[[^\]]*\]\([^\s)]+\)/.test(tail);
+    const plain = /^\[[^\]]*\](?!\(|$)/.test(tail);
+    if (!complete && !plain) cut = cut.slice(0, open);
+  }
+
+  // A list item or heading whose text was all cut away leaves its bare
+  // marker, which reads as a stray `-` before the `…`.
+  return cut.replace(/(?:^|\n)[ \t]*(?:[-*+]|\d+[.)]|#{1,6})[ \t]*$/, "").trimEnd();
 }

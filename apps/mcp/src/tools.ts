@@ -1,5 +1,5 @@
 /**
- * The four tools, as the harness sees them.
+ * The tools, as the harness sees them.
  *
  * `registerTool` rather than `server.tool`, which is deprecated in every one of
  * its overloads in SDK 1.30.0. Names carry no prefix, because the host adds a
@@ -349,5 +349,69 @@ one, and nothing is bound.`,
       },
     },
     async (args) => handlers.bindRun(args),
+  );
+
+  server.registerTool(
+    "run_workflow",
+    {
+      title: "Run a saved workflow again",
+      description: `Start a fresh run of a workflow kept in a workflow.json, in this session.
+
+For the user's command run "<path>" (ANT-281): /anthill:workflow run in Claude
+Code and VS Code, $anthill run in Codex. The command is the go-ahead – it names
+the workflow and says to start – so there is nothing to ask and nothing to draft.
+
+It reads the file, stores its content as the workflow's latest revision (or
+hands it over, if this Anthill has never seen it), asks Anthill to show it, binds
+a new run of exactly that content to this session, and returns the prompt to
+work from: the same text as the workflow's Prompt.md, with this run's progress
+commands in it.
+
+Returns an outcome of:
+  started           a new run is bound; carry out the prompt in the result.
+  already_started   this idempotencyKey already started a run; it is the same one.
+  invalid           nothing was started: the file or the call is what has to change.
+  not_ready         nothing was started: the workflow cannot be run as it stands,
+                    and the problems or questions say why.
+  no_such_workflow  nothing was started: the workflow vanished while starting.
+  conflict          nothing was started: something else is in the way, and the
+                    message says what.
+
+Every run carries path, harness, sessionId and idempotencyKey. Mint a new
+idempotencyKey for each run command and repeat it only to retry the same call.`,
+      inputSchema: {
+        path: z
+          .unknown()
+          .optional()
+          .describe(
+            'The workflow.json the user named, as they wrote it: absolute, "~/…" or relative to your working directory. Quotes around it are fine.',
+          ),
+        harness: z
+          .unknown()
+          .optional()
+          .describe('Which tool you are: "claude-code", "codex", "pi" or "vscode".'),
+        sessionId: z
+          .unknown()
+          .optional()
+          .describe(
+            "Your own identifier for this conversation, the same one a handover carries: letters, digits, hyphens and underscores. The run is matched against your session files by it.",
+          ),
+        idempotencyKey: z
+          .unknown()
+          .optional()
+          .describe(
+            "A new key of your own for this run, of at most 256 characters. Repeat it only to retry this same call after a lost reply; a new key is a new run.",
+          ),
+        build: BUILD,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        // The same key returns the run it already started.
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (args) => handlers.runWorkflow(args),
   );
 }

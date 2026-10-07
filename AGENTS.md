@@ -15,16 +15,19 @@ Rules for every task:
 
 - **master is the stable channel** (Linux and Windows build it from source;
   plugins installed from GitHub run it). Never base work on master and never
-  open a pull request into master; only the next-release branch or a hotfix
-  goes there, as RELEASING.md describes.
-- **Work goes into the next-release branch `<V>-next`**, where `<V>` is master's
-  version (`0.8.8-next` while master is 0.8.8). Ask, do not guess:
-  `npm run release -- status`. Branch from `origin/<V>-next`, open the pull
-  request against it, merge with squash. A frozen branch takes only fixes for
-  what the release's checks found.
+  open a pull request into master; only `stage` or a hotfix goes there, as
+  RELEASING.md describes.
+- **Work goes into `stage`.** Branch from `origin/stage`, open the pull request
+  against it, merge with squash. Only what can ship goes in: `stage` is always
+  green and releasable. A frozen `stage` (`npm run release -- status`) takes
+  only fixes for what the release's checks found.
 - **Never pick a version.** Before the freeze and before any pull request into
-  master, ask the maintainer which version `<V>-next` becomes, and wait for the
-  answer. The pull request into master says it, e.g. `` `0.8.7-next` = 0.8.8 ``.
+  master, ask the maintainer which version `stage` becomes, and wait for the
+  answer.
+- **Into master and back, merge commits only.** `stage` and hotfixes merge into
+  master with a merge commit; after a hotfix, master is brought into `stage`
+  with a merge commit too. Never squash those, and never rebase or force-push
+  `stage`.
 - **Do not merge into master** unless the maintainer asks for that specific
   merge: the merge publishes the release. The Release workflow tags the master
   commit and publishes the macOS build by itself; never push a `v*` tag.

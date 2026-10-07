@@ -582,9 +582,14 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
       };
       let landing = entryPoint(targetRect, port, output.anchor ?? (loop ? { u: loop.arrive, v: 1 } : undefined));
       // A finger to the block in line with the hub is a straight line: in the
-      // short gap after the hub a curve kinks backwards.
+      // short gap after the hub a curve kinks backwards. Not when a block
+      // stands between them, though: a switcher's exit to the second of two
+      // steps in its row ran straight through the first and read as leaving
+      // it (ANT-259). That one goes round, as any other line does.
       const inLine = Boolean(finger) && !output.bend && landing.side === "left" && Math.abs(landing.y - port.y) < 4;
-      let geometry = inLine ? straight(port, landing) : route(port, landing, options);
+      const direct = inLine ? straight(port, landing) : undefined;
+      let geometry =
+        direct && !passesUnder(port, landing, direct, blocks) ? direct : route(port, landing, options);
       /*
         A finger to a block just past the hub, a little above or below it,
         landed on that block's bottom or top. A curve lines up for those from

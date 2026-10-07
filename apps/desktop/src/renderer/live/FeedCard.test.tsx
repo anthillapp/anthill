@@ -135,3 +135,49 @@ describe("the arrival animation's selector", () => {
     expect(reduced).toContain(".feed-glyph.state-working");
   });
 });
+
+describe("a divider for steps announced together (ANT-296)", () => {
+  const divider = (steps: string[], repeated?: boolean): FeedCard => ({
+    id: 7,
+    kind: "session",
+    state: "done",
+    title: steps.length > 1 ? "Steps announced together" : "Step announced",
+    at: "2026-10-07T04:27:17.118Z",
+    detail: steps[0],
+    blockId: steps[0],
+    confidence: "exact",
+    how: "the agent announced this step",
+    channels: ["anthill:report"],
+    events: steps.map(() => "step.marker"),
+    steps,
+    ...(repeated ? { repeated } : {}),
+  });
+
+  it("names every step by its block name, and says it came again", () => {
+    render(
+      <FeedCardView
+        cli={cli}
+        card={divider(["fix", "test", "review"], true)}
+        stepNames={["Fix count_words", "Run the tests", "Review the change"]}
+      />,
+    );
+    expect(screen.getByText("Steps announced together")).toBeTruthy();
+    expect(document.querySelector(".feed-divider span")?.textContent).toMatch(
+      /^Fix count_words, Run the tests, Review the change · reported again · /,
+    );
+  });
+
+  it("keeps a lone step's divider as it was", () => {
+    render(
+      <FeedCardView
+        cli={cli}
+        card={divider(["fix"])}
+        block={{ name: "Fix count_words", color: "#000" }}
+        stepNames={["Fix count_words"]}
+      />,
+    );
+    expect(screen.getByText("Step announced")).toBeTruthy();
+    expect(document.querySelector(".feed-divider span")?.textContent).toMatch(/^Fix count_words · /);
+    expect(document.querySelector(".feed-divider span")?.textContent).not.toContain("reported again");
+  });
+});

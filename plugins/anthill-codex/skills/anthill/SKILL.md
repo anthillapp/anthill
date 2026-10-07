@@ -345,8 +345,12 @@ not back yet) is entering it, so report it then; returning to a block you left
 is entering it again. Before reporting the next block, check that each block
 you worked on since the last report had its own, and report a missed one before
 moving on rather than jump past it. Report only blocks you worked on; say in the
-chat why one was not needed. Run `anthill done` only after the bound workflow's
-done criteria and final action are complete. These commands write Anthill's
+chat why one was not needed. Report each block with its own command,
+immediately before you start it — also one that turns out to need no change,
+once you go through it. Never report several blocks after the fact in one
+command, and never repeat reports that already went through: if one failed, run
+only that one again. Run `anthill done` on its own, only after the bound
+workflow's done criteria and final action are complete. These commands write Anthill's
 local progress journal outside the project workspace. If Codex reports
 `EPERM`/`EACCES` for that journal, request the narrow local permission the host
 offers and retry the same reporting command once. Do not broaden the request to

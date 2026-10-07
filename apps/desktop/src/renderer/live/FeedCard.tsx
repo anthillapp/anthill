@@ -96,6 +96,8 @@ export type FeedCardProps = {
   cli: { label: string; logo: string };
   /** The block the card was tied to, and its colour on the canvas. */
   block?: { name: string; color: string };
+  /** What the reader knows each of a divider's announced steps by, in its order. */
+  stepNames?: string[];
   /** Whether the tool output, or a divider's evidence, is open. */
   open?: boolean;
   onToggle?: () => void;
@@ -111,6 +113,7 @@ export function FeedCardView({
   speaker = { kind: "orchestrator" },
   cli,
   block,
+  stepNames,
   open = false,
   onToggle,
   expanded = false,
@@ -122,7 +125,14 @@ export function FeedCardView({
 
   if (card.kind === "session") {
     // A step announcement's detail is the step's id; the reader knows the step by its name.
-    const detail = block && card.detail === card.blockId ? block.name : card.detail;
+    // Announcements folded together name every step, and say when one came twice (ANT-296).
+    const steps = card.steps ?? [];
+    const folded = steps.length > 1 || card.repeated === true;
+    const detail = folded
+      ? `${(stepNames ?? steps).join(", ")}${card.repeated ? " · reported again" : ""}`
+      : block && card.detail === card.blockId
+        ? block.name
+        : card.detail;
     return (
       <article className={className}>
         <div className="feed-divider">

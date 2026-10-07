@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Workflow } from "@anthill/workflow-schema";
 import { WORKFLOW_TEMPLATES, addOutput } from "@anthill/workflow";
 
-import { PORT_OFFSET, labelHalfSize } from "./geometry";
+import { PORT_OFFSET, labelHalfSize, pointsAlong } from "./geometry";
 import { withDisplayLayout } from "./display-layout";
 import type { WorkflowNode } from "@anthill/workflow-schema";
 
@@ -926,3 +926,54 @@ function pathPoints(path: string): { x: number; y: number }[] {
 function distanceTo(point: { x: number; y: number }, points: readonly { x: number; y: number }[]): number {
   return Math.min(...points.map((other) => Math.hypot(other.x - point.x, other.y - point.y)));
 }
+
+/*
+  ANT-259, the 0.8.7 QA: Checker switches to two steps placed in one row to
+  its right. The finger to the second was drawn as the straight line a finger
+  in line with its hub gets, under the first step, and read as that step's way
+  out: "Write TODO report → clean → Write clean report".
+*/
+describe("a switcher's exit to a step further along its row", () => {
+  const step = (id: string, type: WorkflowNode["type"], x: number): WorkflowNode => ({
+    id,
+    type,
+    name: id,
+    config: type === "agent" ? { actionKind: "agent-step" } : {},
+    position: { x, y: 44 },
+  });
+  const row: Workflow = {
+    id: "switch-row",
+    name: "Switch row",
+    version: "1",
+    nodes: [step("checker", "condition", 286), step("todo", "agent", 616), step("clean", "agent", 946)],
+    edges: [
+      { id: "to-todo", source: "checker", target: "todo", kind: "switch", label: "todo" },
+      { id: "to-clean", source: "checker", target: "clean", kind: "switch", label: "clean" },
+    ],
+  };
+  const model = buildCanvasModel(row);
+  const path = (id: string) => model.connected.find((item) => item.output.id === id)!;
+  const todo = model.rects.get("todo")!;
+  const runsUnder = (id: string) =>
+    pointsAlong(path(id).geometry.path).some(
+      (point) =>
+        point.x > todo.left && point.x < todo.left + todo.w && point.y > todo.top && point.y < todo.top + todo.h,
+    );
+
+  it("goes round the step in between", () => {
+    expect(runsUnder("to-clean")).toBe(false);
+    expect(path("to-clean").geometry.lane).toBeDefined();
+  });
+
+  it("keeps the finger to the step in line with the hub straight", () => {
+    const geometry = path("to-todo").geometry;
+    expect(geometry.lane).toBeUndefined();
+    expect(geometry.from.y).toBe(geometry.to.y);
+  });
+
+  it("puts its label off the other finger's line", () => {
+    const label = path("to-clean").label;
+    const { halfH } = labelHalfSize("clean");
+    expect(Math.abs(label.y - path("to-todo").geometry.to.y)).toBeGreaterThan(halfH);
+  });
+});

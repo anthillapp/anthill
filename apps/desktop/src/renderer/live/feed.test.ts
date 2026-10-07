@@ -723,3 +723,88 @@ describe("a tool call's status in its row", () => {
     expect(toolStatus(card)).toBe("No result");
   });
 });
+
+describe("steps announced back to back (ANT-296)", () => {
+  /** At a given offset in milliseconds, so a case is about how close the reports came. */
+  const at = (ms: number) => new Date(Date.parse("2026-10-07T04:27:17.000Z") + ms).toISOString();
+  const marker = (blockId: string, when?: number) =>
+    event({
+      ...(when !== undefined ? { at: at(when), recordedAt: at(when) } : {}),
+      kind: "step.marker",
+      channel: "anthill:report",
+      source: "anthill",
+      title: "Step announced",
+      detail: blockId,
+      blockId,
+      mapping: { confidence: "exact", blockId, how: "the agent announced this step" },
+    });
+
+  it("folds a burst reported after the fact, and twice, into one divider", () => {
+    // ANT-3J482BUO: fix, test, review, then the same three again, then done.
+    const cards = buildFeed(
+      [
+        event({ kind: "tool.start", toolName: "Bash", toolUseId: "t1", at: at(-900) }),
+        marker("fix", 118),
+        marker("test", 177),
+        marker("review", 238),
+        marker("fix", 414),
+        marker("test", 471),
+        marker("review", 530),
+        event({ kind: "tool.end", toolUseId: "t1", at: at(700) }),
+      ],
+      false,
+    );
+    const dividers = cards.filter((card) => card.kind === "session");
+    expect(dividers).toHaveLength(1);
+    expect(dividers[0].title).toBe("Steps announced together");
+    expect(dividers[0].steps).toEqual(["fix", "test", "review"]);
+    expect(dividers[0].repeated).toBe(true);
+    expect(dividers[0].events).toHaveLength(6);
+    // The Bash call itself is still its own card, finished.
+    expect(cards.find((card) => card.kind === "tool")?.state).toBe("done");
+  });
+
+  it("leaves a lone announcement as it was", () => {
+    const [card] = buildFeed([marker("fix")], false);
+    expect(card.title).toBe("Step announced");
+    expect(card.detail).toBe("fix");
+    expect(card.repeated).toBeUndefined();
+  });
+
+  it("does not fold a step named again after work: that is a second pass", () => {
+    const cards = buildFeed(
+      [
+        marker("test"),
+        event({ kind: "tool.start", toolName: "Bash", toolUseId: "t1" }),
+        event({ kind: "tool.end", toolUseId: "t1", ok: false }),
+        marker("fix"),
+        event({ kind: "tool.start", toolName: "Edit", toolUseId: "t2" }),
+        event({ kind: "tool.end", toolUseId: "t2" }),
+        marker("test"),
+      ],
+      false,
+    );
+    const dividers = cards.filter((card) => card.kind === "session");
+    expect(dividers.map((card) => card.detail)).toEqual(["test", "fix", "test"]);
+    expect(dividers.every((card) => card.title === "Step announced" && !card.repeated)).toBe(true);
+  });
+
+  it("does not fold reports minutes apart, even with nothing read between them", () => {
+    // Where Anthill reads only the reports, every step arrives with nothing
+    // between; they are separate steps, not a burst.
+    const cards = buildFeed([marker("a", 0), marker("b", 90_000), marker("c", 200_000)], false);
+    expect(cards.map((card) => card.title)).toEqual(["Step announced", "Step announced", "Step announced"]);
+  });
+
+  it("does not fold across the agent's turn ending", () => {
+    const cards = buildFeed(
+      [
+        marker("a", 0),
+        event({ kind: "turn.end", title: "The agent finished its turn", at: at(100) }),
+        marker("b", 200),
+      ],
+      false,
+    );
+    expect(cards.filter((card) => card.title === "Step announced")).toHaveLength(2);
+  });
+});

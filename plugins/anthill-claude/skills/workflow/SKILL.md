@@ -424,6 +424,11 @@ which tells the user a step was skipped when it was done.
   missed, report it now, before the next, rather than jump past it.
 * **Only blocks you worked on.** A block the work made unnecessary is not
   reported; say in the chat why it was not needed.
+* **One block, one report, at the moment you enter it.** Report each block on
+  its own, immediately before you start it — also one that turns out to need no
+  change, once you go through it. Never report several blocks after the fact in
+  one command, and never repeat reports that already went through: if one
+  failed, run only that one again. Run `done` on its own, at the very end.
 
 This is the whole of what `watch` shows. A watched session that never reports a
 step is a Live Session page with a graph nobody is moving through, which is the

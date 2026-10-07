@@ -12,6 +12,11 @@ export const EXTERNAL_LINKS = {
   privacy: "https://github.com/anthillapp/anthill#where-anthill-keeps-things",
   /** The Windows issue form: what an experimental Windows build reports through (ANT-154). */
   windowsIssue: "https://github.com/anthillapp/anthill/issues/new?template=windows.yml",
+  /**
+   * The newest release, with its notes and its disk image: what an update
+   * offers, and where to get it by hand when it cannot install itself (ANT-76).
+   */
+  releases: "https://github.com/anthillapp/anthill/releases/latest",
 } as const;
 
 /**

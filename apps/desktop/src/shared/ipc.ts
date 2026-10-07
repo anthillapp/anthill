@@ -81,6 +81,11 @@ export const IpcChannel = {
   interpreterSignIn: "interpreters:sign-in",
   pathsCheck: "paths:check",
   pathReveal: "path:reveal",
+  updateStatus: "update:status",
+  updateCheck: "update:check",
+  updateDownload: "update:download",
+  updateCancel: "update:cancel",
+  updateInstall: "update:install",
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -126,7 +131,12 @@ export const IpcChannel = {
 // 25: the platform in the capabilities, and quitting from the Windows gate (ANT-154).
 // 26: Edit ▸ Undo / Redo sent to the page (ANT-192).
 // 27: the run a workflow last had, after the live store dropped it (ANT-275).
-export const IPC_CONTRACT = 27;
+/*
+ * 28: updates from GitHub Releases on Settings ▸ About — status, check,
+ * download, cancel, install and the status push — and the page Settings
+ * opens on, carried by the menu's request (ANT-76).
+ */
+export const IPC_CONTRACT = 28;
 
 export type IpcCapabilities = {
   /** The main process's own contract number. */
@@ -196,6 +206,15 @@ export const LIVE_EVENTS_CHANNEL = "live:events-changed";
  * through ⌘, instead.
  */
 export const OPEN_SETTINGS_CHANNEL = "app:open-settings";
+
+/**
+ * The Settings page the menu asked for, when it asked for one: Check for
+ * Updates… opens About (ANT-76). Absent, Settings opens where it always has.
+ */
+export type SettingsPageRequest = "about";
+
+/** Push channel (main -> renderer). Where updating Anthill stands (ANT-76). */
+export const UPDATE_STATUS_CHANNEL = "update:status-changed";
 
 /**
  * The File menu asking the focused window to save what it has open.
@@ -721,6 +740,64 @@ export type AppSettings = {
    * An absolute path, or empty for the default, `~/Documents/Anthill`.
    */
   workflowFolder: string;
+  /**
+   * Whether Anthill asks GitHub for a newer release by itself, at launch and
+   * every few hours. On by default; it only finds out, it never downloads.
+   */
+  updateChecks: boolean;
+};
+
+/* ------------------------------------------------------------------ */
+/* Updating Anthill (ANT-76)                                           */
+/* ------------------------------------------------------------------ */
+
+/** What kind of thing stopped an update, so the screen can say what to do. */
+export type UpdateErrorKind =
+  | "offline"
+  | "rate-limited"
+  | "integrity"
+  | "signature"
+  | "disk"
+  | "location"
+  | "no-release"
+  | "unknown";
+
+export type UpdateFailedDuring = "check" | "download" | "install";
+
+/**
+ * Where updating Anthill stands.
+ *
+ * Only ever moved forward by the person: a check may happen by itself, but a
+ * download waits for Download and Install, and the restart for Restart to
+ * Update.
+ */
+export type UpdateState =
+  /** This build cannot update itself: a development run, or not macOS. */
+  | { phase: "unavailable"; reason: string }
+  | { phase: "idle" }
+  | { phase: "checking" }
+  /** The installed version is the latest release, as of `checkedAt`. */
+  | { phase: "current"; checkedAt: string }
+  | { phase: "available"; version: string; releaseDate?: string; releaseName?: string }
+  | { phase: "downloading"; version: string; percent: number; transferred: number; total: number }
+  /** Downloaded and verified; restarting installs it. So does quitting. */
+  | { phase: "ready"; version: string }
+  | {
+      phase: "failed";
+      during: UpdateFailedDuring;
+      kind: UpdateErrorKind;
+      /** Written for the person, with what to do next. */
+      message: string;
+      /** Whether trying the same thing again could work. */
+      retryable: boolean;
+      /** The release it was about, once one was found. */
+      version?: string;
+    };
+
+export type UpdateStatus = {
+  /** The version running now. */
+  current: string;
+  state: UpdateState;
 };
 
 /** How the default workflow folder is shown; main resolves it against the home folder. */
@@ -1182,8 +1259,28 @@ export interface AnthillApi {
   ): () => void;
   /** Subscribe to observation changes. Returns an unsubscribe function. */
   onLiveSnapshot(listener: (snapshot: LiveSnapshot) => void): () => void;
-  /** Fires when the user picks Settings… (⌘,) from the menu bar. */
-  onOpenSettings(listener: () => void): () => void;
+  /**
+   * Fires when the user picks Settings… (⌘,) from the menu bar, or Check for
+   * Updates…, which names the page to open on.
+   */
+  onOpenSettings(listener: (page?: SettingsPageRequest) => void): () => void;
+
+  /*
+   * Updating Anthill from GitHub Releases (ANT-76). Only the packaged macOS
+   * app answers these; a shell without them shows the release page instead.
+   */
+  /** Where updating stands now. */
+  updateStatus?(): Promise<UpdateStatus>;
+  /** Ask GitHub whether there is a newer release. */
+  updateCheck?(): Promise<UpdateStatus>;
+  /** Download and verify the release a check found. */
+  updateDownload?(): Promise<UpdateStatus>;
+  /** Stop a download in progress. */
+  updateCancel?(): Promise<UpdateStatus>;
+  /** Restart into the downloaded release, after asking about anything open. */
+  updateInstall?(): Promise<UpdateStatus>;
+  /** Subscribe to changes. Returns an unsubscribe function. */
+  onUpdateStatus?(listener: (status: UpdateStatus) => void): () => void;
 
   /* Local observation setup */
 

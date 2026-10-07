@@ -24,6 +24,7 @@ import { useSetupPoll } from "../live/use-setup-poll.js";
 import { CHIP, hookState } from "./hook-state.js";
 import { UnsupportedWindowsChip } from "../windows/unsupported-windows.js";
 import { CodingToolsPage, ModelsPage, PluginsPage } from "./ToolPages.js";
+import { UpdateRows, updateWaiting, useUpdateStatus } from "./UpdateRows.js";
 
 import { DEFAULT_WORKFLOW_FOLDER } from "../../shared/ipc.js";
 import type {
@@ -91,6 +92,8 @@ export function SettingsScreen({
 }) {
   const [page, setPage] = useState<PageId>(initialPage);
   const [query, setQuery] = useState("");
+  // A release waiting on the person is pointed at from the rail (ANT-76).
+  const update = updateWaiting(useUpdateStatus());
 
   const nav = useMemo(() => {
     const want = query.trim().toLowerCase();
@@ -147,6 +150,7 @@ export function SettingsScreen({
                   >
                     <i className="mark" aria-hidden="true" />
                     <span className="label">{item.label}</span>
+                    {item.id === "about" && update ? <span className="badge">Update</span> : null}
                   </button>
                 ))}
               </div>
@@ -220,6 +224,7 @@ const ALL_OFF: AppSettings = {
   finishedNotifications: false,
   observationLostNotifications: false,
   workflowFolder: "",
+  updateChecks: false,
 };
 
 /**
@@ -818,6 +823,8 @@ function AboutPage() {
       >
         <span className="set-note">{__ANTHILL_VERSION__}</span>
       </SettingRow>
+      <SettingDivider />
+      <UpdateRows />
       <SettingDivider />
       {/* On every platform: this is the product's public statement of scope,
           in the same words as the README, the CLI and the release notes. */}

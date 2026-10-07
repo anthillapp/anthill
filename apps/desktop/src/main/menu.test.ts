@@ -38,7 +38,10 @@ describe("Save in the File menu", () => {
   it("offers Reveal in Finder (Show in Folder off macOS), initially unavailable, through the active window", () => {
     const reveal = fileMenu.slice(fileMenu.indexOf('id: "reveal-workflow"'));
     expect(reveal).toContain('label: process.platform === "darwin" ? "Reveal in Finder" : "Show in Folder"');
-    expect(reveal).toContain("enabled: false");
+    // Off until the page says there is a file to show; kept outside the menu
+    // so rebuilding it for an update's label does not switch it back on or off.
+    expect(reveal).toContain("enabled: workflowRevealable");
+    expect(main).toContain("let workflowRevealable = false;");
     expect(reveal).toContain("REVEAL_WORKFLOW_CHANNEL");
     expect(reveal).toContain("BrowserWindow.getFocusedWindow()");
   });
@@ -60,5 +63,32 @@ describe("the page does not bind it a second time", () => {
       expect(source).not.toMatch(/key\.toLowerCase\(\)\s*!==\s*"s"/);
       expect(source).not.toMatch(/key\s*===\s*"s"/i);
     }
+  });
+});
+
+/**
+ * ANT-76. A release found in the background has to be visible without
+ * opening anything, and the app menu is where macOS apps keep it: right
+ * under About, labelled with what updating is waiting on.
+ */
+describe("updates in the app menu", () => {
+  const appMenu = main.slice(main.indexOf('role: "appMenu"'), main.indexOf('label: "File"'));
+
+  it("sits under About and takes its label from where updating stands", () => {
+    expect(appMenu.indexOf('{ role: "about" }')).toBeLessThan(appMenu.indexOf('id: "check-for-updates"'));
+    expect(appMenu).toContain("label: update.label");
+    expect(main).toContain("const update = updateMenuItem(updates().status());");
+  });
+
+  it("is rebuilt whenever that changes", () => {
+    const setup = main.slice(main.indexOf("function updates(): UpdateController"));
+    const onChange = setup.slice(setup.indexOf("onChange: (status) => {"), setup.indexOf("\n  return updateController;"));
+    expect(onChange).toContain("UPDATE_STATUS_CHANNEL");
+    expect(onChange).toContain("applyMenu();");
+  });
+
+  it("asks before restarting, from the menu as from Settings", () => {
+    expect(appMenu).toContain("void installUpdate();");
+    expect(main).toContain("guard: mayRestartToUpdate,");
   });
 });

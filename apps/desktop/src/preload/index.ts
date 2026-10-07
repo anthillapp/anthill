@@ -21,6 +21,7 @@ import {
   REVEAL_WORKFLOW_CHANNEL,
   EDIT_HISTORY_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
+  UPDATE_STATUS_CHANNEL,
   type AnthillApi,
   type AppSettings,
   type ExportWorkflowRequest,
@@ -31,6 +32,8 @@ import {
   type PromptDraftRequest,
   type PromptDraftStage,
   type SaveWorkflowRequest,
+  type SettingsPageRequest,
+  type UpdateStatus,
 } from "../shared/ipc.js";
 
 const errorReportingAtLaunch = process.argv.includes("--anthill-report-errors");
@@ -129,10 +132,21 @@ const api: AnthillApi = {
       ipcRenderer.removeListener(LIVE_EVENTS_CHANNEL, handler);
     };
   },
-  onOpenSettings: (listener: () => void) => {
-    const handler = () => listener();
+  onOpenSettings: (listener: (page?: SettingsPageRequest) => void) => {
+    // Only a page this build knows; anything else opens Settings as before.
+    const handler = (_event: unknown, page?: unknown) => listener(page === "about" ? page : undefined);
     ipcRenderer.on(OPEN_SETTINGS_CHANNEL, handler);
     return () => ipcRenderer.removeListener(OPEN_SETTINGS_CHANNEL, handler);
+  },
+  updateStatus: () => ipcRenderer.invoke(IpcChannel.updateStatus),
+  updateCheck: () => ipcRenderer.invoke(IpcChannel.updateCheck),
+  updateDownload: () => ipcRenderer.invoke(IpcChannel.updateDownload),
+  updateCancel: () => ipcRenderer.invoke(IpcChannel.updateCancel),
+  updateInstall: () => ipcRenderer.invoke(IpcChannel.updateInstall),
+  onUpdateStatus: (listener: (status: UpdateStatus) => void) => {
+    const handler = (_event: unknown, status: UpdateStatus) => listener(status);
+    ipcRenderer.on(UPDATE_STATUS_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(UPDATE_STATUS_CHANNEL, handler);
   },
   onSaveWorkflow: (listener: () => void) => {
     const handler = () => listener();

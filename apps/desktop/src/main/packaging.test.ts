@@ -130,6 +130,51 @@ describe("what a release produces", () => {
   });
 });
 
+/*
+ * ANT-76. An installed Anthill updates itself from what the release carries:
+ * electron-updater reads `latest-mac.yml`, which names a zip and its sha512,
+ * and Squirrel.Mac installs from the zip. A release with only the disk image
+ * is one no installed copy can find, so each link of that chain is checked
+ * here — the config that makes the files, and the steps that publish them.
+ */
+describe("what an installed Anthill updates from", () => {
+  const build = manifest.build as unknown as {
+    mac: { target: { target: string; arch: string[] }[] };
+    publish: { provider: string; owner: string; repo: string; releaseType?: string }[];
+  };
+  const action = readFileSync(resolve("../../.github/actions/macos-package/action.yml"), "utf8");
+  const release = readFileSync(resolve("../../.github/workflows/release.yml"), "utf8");
+
+  it("builds the zip Squirrel installs from, for the same architecture as the disk image", () => {
+    const zip = build.mac.target.find((entry) => entry.target === "zip");
+    const dmg = build.mac.target.find((entry) => entry.target === "dmg");
+    expect(zip?.arch).toEqual(dmg?.arch);
+  });
+
+  it("looks for releases in the public repository, stable ones only", () => {
+    expect(build.publish).toEqual([
+      { provider: "github", owner: "anthillapp", repo: "anthill", releaseType: "release" },
+    ]);
+  });
+
+  it("is the updater the app depends on, from the same release line as the builder", () => {
+    expect(manifest.dependencies["electron-updater"]).toMatch(/^~?6\./);
+  });
+
+  it("never publishes from electron-builder itself: the Release workflow does", () => {
+    expect(action).toMatch(/electron-builder --mac --publish never/);
+    const scripts = (manifest as unknown as { scripts: Record<string, string> }).scripts;
+    expect(scripts.dist).toContain("--publish never");
+  });
+
+  it("keeps the update files with the build and attaches them to the release", () => {
+    for (const file of ["*.dmg", "*.zip", "*.blockmap", "latest-mac.yml"]) {
+      expect(action, file).toContain(`apps/desktop/release/${file}`);
+      expect(release, file).toContain(`apps/desktop/release/${file}`);
+    }
+  });
+});
+
 /**
  * What notarisation requires, checked against the manifest rather than trusted.
  *

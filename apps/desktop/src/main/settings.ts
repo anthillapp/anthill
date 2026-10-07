@@ -70,6 +70,12 @@ export type Settings = {
    * outside it asks on Save whether to overwrite it or copy it here.
    */
   workflowFolder: string;
+  /**
+   * Whether Anthill asks GitHub for a newer release by itself (ANT-76). On by
+   * default: it is one request to a public page, it sends nothing about the
+   * person, and it only finds out — downloading waits to be asked for.
+   */
+  updateChecks: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -83,6 +89,7 @@ export const DEFAULT_SETTINGS: Settings = {
   finishedNotifications: false,
   observationLostNotifications: false,
   workflowFolder: "",
+  updateChecks: true,
 };
 
 /** The desktop Save destination: the one chosen, or `~/Documents/Anthill`. */

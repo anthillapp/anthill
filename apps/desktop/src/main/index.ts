@@ -8,7 +8,17 @@ import { installedObservationRuntime } from "./live/installed-runtime.js";
  * through the channels declared in `../shared/ipc.ts`.
  */
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
+import {
+  app,
+  autoUpdater as squirrel,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeImage,
+  Notification,
+  shell,
+} from "electron";
 import { basename, dirname, join, resolve } from "node:path";
 import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -32,6 +42,7 @@ import {
   REVEAL_WORKFLOW_CHANNEL,
   EDIT_HISTORY_CHANNEL,
   PROMPT_DRAFT_STAGE_CHANNEL,
+  UPDATE_STATUS_CHANNEL,
   type AppSettings,
   type IpcCapabilities,
   type LiveObserveRequest,
@@ -47,6 +58,8 @@ import {
   type OpenWorkflowResult,
   type SaveWorkflowRequest,
   type SaveWorkflowResult,
+  type SettingsPageRequest,
+  type UpdateStatus,
 } from "../shared/ipc.js";
 import { createServices, type RunServices } from "./services.js";
 import { destinationInside, FileGrants, FolderGrants, rootToWrite, writeAllOrNothing } from "./safe-write.js";
@@ -94,6 +107,15 @@ import { externalLink } from "../shared/links.js";
 import { writeSettingsWithConsent, type ReportingGate } from "./diagnostics-consent.js";
 import * as Sentry from "@sentry/electron/main";
 import { claimScheme } from "./url-scheme.js";
+import { autoUpdater, CancellationToken } from "electron-updater";
+import {
+  electronUpdateSource,
+  FIRST_UPDATE_CHECK_DELAY_MS,
+  installBlocker,
+  UPDATE_CHECK_INTERVAL_MS,
+  UpdateController,
+  updateMenuItem,
+} from "./updater.js";
 import { PendingRunStore } from "./live/store.js";
 import { WorkflowStatusStore } from "./live/workflow-status.js";
 import { lastRun } from "./live/last-run.js";
@@ -340,6 +362,125 @@ async function mayDiscardWorkflow(
   return response === 1;
 }
 
+/* ------------------------------------------------------------------ */
+/* Updating Anthill (ANT-76)                                           */
+/* ------------------------------------------------------------------ */
+
+/** A run Anthill is still watching for, or watching. */
+function observing(run: { state: string; closedAt?: string }): boolean {
+  return !run.closedAt &&
+    (run.state === "pending_after_copy" || run.state === "detected_live" || run.state === "ambiguous_match");
+}
+
+/** One question with Cancel as the safe answer; `true` means go ahead. */
+async function askToGoOn(window: BrowserWindow | undefined, message: string, detail: string, button: string): Promise<boolean> {
+  const options = { type: "warning" as const, buttons: ["Cancel", button], defaultId: 0, cancelId: 0, message, detail };
+  const { response } = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options);
+  return response === 1;
+}
+
+/**
+ * Restarting to update interrupts whatever is open, so each thing that would
+ * be interrupted is named and agreed to first: unsaved edits, a draft being
+ * written from a prompt, a session being watched. Cancel is the default
+ * every time. Agreeing also settles the window's own close question, which
+ * would otherwise ask about the edits a second time on the way out.
+ */
+async function mayRestartToUpdate(): Promise<boolean> {
+  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  if (window && !(await mayDiscardWorkflow(
+    window,
+    "Update and discard changes",
+    "Updating restarts Anthill, which discards everything since the last save. To keep it, choose Cancel and save first.",
+  ))) return false;
+  if (drafting && !(await askToGoOn(
+    window,
+    "Anthill is still drafting a workflow from your prompt.",
+    "Updating restarts Anthill and stops the draft. You can start it again once the new version is open.",
+    "Stop and Update",
+  ))) return false;
+  if ((live?.snapshot().runs ?? []).some(observing) && !(await askToGoOn(
+    window,
+    "Anthill is watching a session.",
+    "Updating restarts Anthill, so it stops watching for a moment. The session itself keeps running, and Anthill picks it up again from what it recorded once the new version is open.",
+    "Update Anyway",
+  ))) return false;
+  allowCloseWithUnsavedWorkflow = true;
+  quitting = true;
+  return true;
+}
+
+let updateController: UpdateController | undefined;
+
+/**
+ * Updates, set up once. Only the packaged macOS app can swap itself for a
+ * release; anything else gets a controller that says why not, so the screen
+ * has one shape to show either way.
+ */
+function updates(): UpdateController {
+  if (updateController) return updateController;
+  const unavailable = !app.isPackaged
+    ? "This is a development build. Updates install in the released app."
+    : process.platform !== "darwin"
+      ? "Anthill updates itself on macOS. Here, build the new release from source."
+      : undefined;
+  updateController = new UpdateController({
+    current: app.getVersion(),
+    ...(unavailable
+      ? { unavailable }
+      : {
+          source: electronUpdateSource(
+            autoUpdater,
+            // Squirrel.Mac itself, which electron-updater feeds and which says
+            // when the new app is verified and staged.
+            squirrel,
+            () => new CancellationToken(),
+          ),
+        }),
+    installBlocker: () => installBlocker(process.execPath),
+    guard: mayRestartToUpdate,
+    onChange: (status) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send(UPDATE_STATUS_CHANNEL, status);
+      }
+      applyMenu();
+    },
+  });
+  return updateController;
+}
+
+/** Ask GitHub by itself, if the person has not turned that off. Finds out only. */
+async function checkForUpdatesInBackground(): Promise<void> {
+  try {
+    if (!(await settings().read()).updateChecks) return;
+    await updates().check({ background: true });
+  } catch {
+    // A check nobody asked for has nobody to tell.
+  }
+}
+
+/** Restart into the downloaded release, from the menu or from Settings. */
+async function installUpdate(): Promise<UpdateStatus> {
+  const status = await updates().install();
+  // The swap refused to start: nothing is quitting after all, and the
+  // window's own close question is back on.
+  if (status.state.phase === "failed") {
+    quitting = false;
+    allowCloseWithUnsavedWorkflow = false;
+  }
+  return status;
+}
+
+/** Open Settings ▸ About, where updates are shown and decided. */
+function openUpdateSettings(): void {
+  const page: SettingsPageRequest = "about";
+  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0];
+  if (!window) return;
+  if (window.isMinimized()) window.restore();
+  window.focus();
+  window.webContents.send(OPEN_SETTINGS_CHANNEL, page);
+}
+
 /**
  * Locate the Electron-ABI build of better-sqlite3.
  *
@@ -410,6 +551,13 @@ let agents: AgentLibraryStore | undefined;
 let assistantThreads: AssistantThreadStore | undefined;
 let settingsStore: SettingsStore | undefined;
 let workflowStatusStore: WorkflowStatusStore | undefined;
+
+/**
+ * The drafting run in progress, if any. One at a time, which is what the
+ * screen offers. Held here so the cancel channel has something to abort, and
+ * so a restart to update can say it would stop one (ANT-76).
+ */
+let drafting: AbortController | null = null;
 
 /**
  * `~` is a shell convenience, not a path. Agents write it constantly, and
@@ -1321,10 +1469,6 @@ function registerIpcHandlers(): void {
     return await readPiModels();
   });
 
-  // One drafting run at a time, which is what the screen offers. Held here so
-  // the cancel channel has something to abort.
-  let drafting: AbortController | null = null;
-
   handle(
     IpcChannel.promptDraft,
     async (event, request: PromptDraftRequest): Promise<PromptDraftResponse> => {
@@ -1504,14 +1648,22 @@ function registerIpcHandlers(): void {
   // File ▸ Reveal in Finder follows the path in the editor's status bar.
   handle(IpcChannel.workflowSetRevealable, async (event, revealable: boolean) => {
     if (event.sender !== mainWindow?.webContents) return;
+    workflowRevealable = revealable === true;
     const reveal = Menu.getApplicationMenu()?.getMenuItemById("reveal-workflow");
-    if (reveal) reveal.enabled = revealable === true;
+    if (reveal) reveal.enabled = workflowRevealable;
   });
 
   handle(IpcChannel.workflowSetDirty, async (_event, dirty: boolean) => {
     workflowDirty = Boolean(dirty);
     if (!workflowDirty) allowCloseWithUnsavedWorkflow = false;
   });
+
+  // Updating Anthill (ANT-76). Each answers with where updating now stands.
+  handle(IpcChannel.updateStatus, async (): Promise<UpdateStatus> => updates().status());
+  handle(IpcChannel.updateCheck, async (): Promise<UpdateStatus> => updates().check());
+  handle(IpcChannel.updateDownload, async (): Promise<UpdateStatus> => updates().download());
+  handle(IpcChannel.updateCancel, async (): Promise<UpdateStatus> => updates().cancel());
+  handle(IpcChannel.updateInstall, async (): Promise<UpdateStatus> => installUpdate());
 
   handle(
     IpcChannel.workflowExport,
@@ -1716,13 +1868,36 @@ function editHistory(window: unknown, action: "undo" | "redo"): void {
   target.webContents.send(EDIT_HISTORY_CHANNEL, action);
 }
 
+/**
+ * Whether File ▸ Reveal in Finder has a file to show. Kept here because the
+ * menu is rebuilt when an update's label changes, and a rebuilt item would
+ * otherwise come back disabled.
+ */
+let workflowRevealable = false;
+
 function applyMenu(): void {
+  // Under About, where macOS apps keep it. It says what updating is waiting
+  // on, so a release found in the background is visible without opening
+  // anything (ANT-76).
+  const update = updateMenuItem(updates().status());
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       {
         role: "appMenu",
         submenu: [
           { role: "about" },
+          {
+            id: "check-for-updates",
+            label: update.label,
+            click: () => {
+              if (update.action === "install") {
+                void installUpdate();
+                return;
+              }
+              openUpdateSettings();
+              if (update.action === "check") void updates().check();
+            },
+          },
           { type: "separator" },
           {
             label: "Settings…",
@@ -1761,7 +1936,7 @@ function applyMenu(): void {
             id: "reveal-workflow",
             // As the status bar says it (ANT-206): Finder by name on macOS.
             label: process.platform === "darwin" ? "Reveal in Finder" : "Show in Folder",
-            enabled: false,
+            enabled: workflowRevealable,
             click: (_item, window) => {
               const target = window instanceof BrowserWindow ? window : BrowserWindow.getFocusedWindow();
               target?.webContents.send(REVEAL_WORKFLOW_CHANNEL);
@@ -1827,6 +2002,13 @@ void app.whenReady().then(async () => {
   // Reading what a coding harness left in the exchange, from here on. Started
   // after the window so the first workflow it finds has somewhere to go.
   exchangeInbox().start();
+
+  // A look for a newer release shortly after launch and every few hours,
+  // unless turned off on Settings ▸ About. It only finds out (ANT-76).
+  if (updates().status().state.phase !== "unavailable") {
+    setTimeout(() => void checkForUpdatesInBackground(), FIRST_UPDATE_CHECK_DELAY_MS).unref();
+    setInterval(() => void checkForUpdatesInBackground(), UPDATE_CHECK_INTERVAL_MS).unref();
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

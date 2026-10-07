@@ -28,6 +28,7 @@
  */
 
 import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { closeMarkupCut } from "@anthill/live";
 
 /**
  * Targets not worth printing.
@@ -322,36 +323,32 @@ export function renderInline(
  * Cut a message down without cutting through its markup.
  *
  * The collapsed card shows a prefix of the source, and a prefix can end in the
- * middle of `**bold**` or an inline code span — which the parser then renders
- * literally, putting the raw markers back on screen that this whole file
- * exists to take off it. So the cut retreats to the last position where every
- * marker it has opened is also closed.
+ * middle of `**bold**`, an inline code span or a link — which the parser then
+ * renders literally, putting the raw markers back on screen that this whole
+ * file exists to take off it. So the cut retreats to the last position where
+ * every marker it has opened is also closed (`closeMarkupCut`).
  */
 export function clampMarkup(text: string, limit: number): string {
   if (text.length <= limit) return text;
-  let cut = text.slice(0, limit);
+  return `${closeMarkupCut(text.slice(0, limit))}…`;
+}
 
-  // Inline code first: a backtick span makes every other marker inside it
-  // literal, so an odd number of backticks means the cut landed inside one.
-  const ticks = (cut.match(/`/g) ?? []).length;
-  if (ticks % 2 === 1) cut = cut.slice(0, cut.lastIndexOf("`"));
-
-  // Then emphasis, longest marker first so `**` is not read as two `*`.
-  for (const marker of ["**", "*", "_"]) {
-    const count = cut.split(marker).length - 1;
-    if (count % 2 === 1) cut = cut.slice(0, cut.lastIndexOf(marker));
-  }
-
-  // And a link whose target the cut never reached.
-  const open = cut.lastIndexOf("[");
-  if (open > cut.lastIndexOf(")")) cut = cut.slice(0, open);
-
-  return `${cut.trimEnd()}…`;
+/**
+ * An excerpt that was cut before the cut knew about markup.
+ *
+ * Excerpts are kept as they were recorded, so a session recorded by an older
+ * Anthill still ends `[app.py](svc_a…` on disk. Its tail is repaired the same
+ * way a new cut is made, so it reads the same as one (ANT-270).
+ */
+export function repairCutTail(text: string): string {
+  if (!text.endsWith("…")) return text;
+  return `${closeMarkupCut(text.slice(0, -1))}…`;
 }
 
 export type MessageMarkupProps = { text: string };
 
-export function MessageMarkup({ text }: MessageMarkupProps) {
+export function MessageMarkup({ text: source }: MessageMarkupProps) {
+  const text = repairCutTail(source);
   const blocks = parseBlocks(text);
   const revealable = useRevealablePaths(text);
   return (

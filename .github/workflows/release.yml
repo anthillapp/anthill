@@ -16,7 +16,7 @@
 # that tree. This only builds and publishes. A run started by hand builds the
 # artefact and publishes nothing.
 #
-# The runner is `macos-14`, pinned rather than `macos-latest`, because the
+# The runner is `macos-15`, pinned rather than `macos-latest`, because the
 # runner image decides the architecture of the build and `latest` moves without
 # telling anyone. It is Apple Silicon, which matches the only arch this app
 # packages for.
@@ -56,7 +56,7 @@ jobs:
   macos:
     needs: decide
     if: needs.decide.outputs.tag != '' || github.event_name == 'workflow_dispatch'
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 

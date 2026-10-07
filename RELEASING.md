@@ -140,7 +140,7 @@ not show that Anthill works on Linux.
 | Evidence | macOS | Linux (supported: CLI) | Windows (experimental) |
 | --- | --- | --- | --- |
 | Builds | `macos-package` (disk image) | `linux-source`: README steps, `npm run build` | `windows-source`: the same |
-| Automated tests | `check`: typecheck and tests on `macos-14` | `linux-source`: `npm test` | not run |
+| Automated tests | `check`: typecheck and tests on `macos-15` | `linux-source`: `npm test` | not run |
 | Starts | not checked automatically | `linux-source`: the CLI serves its page | `windows-source`: the same |
 | End to end | only by hand: the desktop app with Codex and Claude Code | only by hand, on a Linux machine | only by hand, on a Windows machine |
 

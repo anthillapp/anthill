@@ -59,6 +59,14 @@ describe.each([
     expect(text()).toContain("## Which Anthill: `--dev`");
     expect(text()).toContain('pass `build: "dev"` on **every** call');
     expect(text()).toContain("`get_workflow` or `get_ready_revision` when\npicking a `--dev` handover back up");
+    expect(text()).toContain("`bind_run`, `run_workflow`, and");
+  });
+
+  // ANT-281: run "<path>" runs a saved workflow.json again, through run_workflow.
+  it("runs a saved workflow again with run \"<path>\", without asking or drafting", () => {
+    expect(text()).toContain("run_workflow");
+    expect(text()).toMatch(/run "<path>"/);
+    expect(text()).toMatch(/carry\s+out\s+the\s+prompt/);
   });
 
   it("covers the four cases: with and without --dev, a task about dev, and a pinned chat", () => {

@@ -4762,6 +4762,150 @@ button.state-chip {
 }
 .export-folder button:hover:not(:disabled) { border-color: #7d7979; background: var(--surface); }
 
+/* Run it again from your coding tool (ANT-281). */
+.run-again {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid #d7d3d3;
+}
+
+.run-again-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.run-again-titles {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.run-again-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.run-again-desc {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-3);
+  text-wrap: pretty;
+}
+
+.run-again-tools {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: #efeded;
+}
+
+.run-again-tools button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  font-size: 12px;
+  white-space: nowrap;
+  color: #7d7979;
+}
+.run-again-tools button:hover:not(:disabled) { background: transparent; color: var(--ink-2); }
+.run-again-tools button.is-on,
+.run-again-tools button.is-on:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(32, 30, 29, 0.1);
+}
+
+.run-again-tools i {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 3px;
+  background: center / contain no-repeat;
+}
+
+.run-again-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 12px;
+  border-radius: 8px;
+  background: #2d2b2b;
+}
+
+.run-again-command-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--on-dark-2);
+}
+.run-again-command-text .verb { color: #f19a85; }
+
+.run-again-path {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.run-again-path .label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+
+/* Cut at the start, so the file name stays in view. */
+.run-again-path-text {
+  flex: 1;
+  min-width: 0;
+  direction: rtl;
+  text-align: left;
+  color: var(--ink-3);
+}
+.run-again-path-text bdi { direction: ltr; unicode-bidi: isolate; }
+
+.run-again-copy {
+  flex: none;
+  padding: 5px 11px;
+  border-radius: 6px;
+  border: 1px solid #d7d3d3;
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+.run-again-copy:hover:not(:disabled) { border-color: #7d7979; background: var(--surface); }
+.run-again-copy.is-dark {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: transparent;
+  color: var(--on-dark);
+}
+.run-again-copy.is-dark:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.4); background: transparent; }
+.run-again-copy.is-copied,
+.run-again-copy.is-copied:hover:not(:disabled) {
+  border-color: #cfe6d8;
+  background: #f6faf7;
+  color: #2f6b48;
+}
+
 .export-written {
   border-radius: 10px;
   padding: 14px 16px;
@@ -8865,6 +9009,22 @@ button.presence-chip {
 
 .set-divider { display: block; height: 1px; background: #efeded; }
 
+/* A download's progress, under the sentence that says what it is (ANT-76). */
+.set-progress {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  height: 6px;
+  margin-top: 8px;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  appearance: none;
+  background: #efeded;
+}
+.set-progress::-webkit-progress-bar { background: #efeded; border-radius: 999px; }
+.set-progress::-webkit-progress-value { background: var(--accent); border-radius: 999px; transition: width 0.2s ease; }
+
 .set-btn {
   padding: 6px 12px;
   flex: none;
@@ -9532,6 +9692,15 @@ button.presence-chip {
 
 .plugin-row + .plugin-row { border-top: 1px solid #efeded; }
 
+/* What Anthill's own update did as it started (ANT-282); a failure uses .harness-warning. */
+.plugin-update-note {
+  margin: -4px 16px 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  max-width: 70ch;
+}
+
 .plugin-steps {
   margin: 0 16px 16px;
   padding: 12px 14px 12px 32px;
@@ -9640,7 +9809,8 @@ button.presence-chip {
 .plugin-badge.is-checking { color: var(--ink-dim); }
 .plugin-badge.is-installing,
 .plugin-badge.is-confirm { background: #eaf4fb; color: #2f6d99; }
-.plugin-badge.is-reload { background: #f7ecd0; color: #8a6a08; }
+.plugin-badge.is-reload,
+.plugin-badge.is-update { background: #f7ecd0; color: #8a6a08; }
 .plugin-badge.is-ready { background: #e6f3ec; color: #2f6b48; }
 .plugin-badge.is-failed,
 .plugin-badge.is-silent { background: var(--accent-100); color: var(--accent-700); }

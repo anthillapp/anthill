@@ -13,7 +13,16 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { pathToFileURL } from "node:url";
 
-import { claudeCodeStatus, codexStatus, pluginStatus, readCodexConfig, readJsonc, serverStatus, vscodeStatus } from "./plugin-status.js";
+import {
+  claudeCodeStatus,
+  codexStatus,
+  olderRelease,
+  pluginStatus,
+  readCodexConfig,
+  readJsonc,
+  serverStatus,
+  vscodeStatus,
+} from "./plugin-status.js";
 
 const homes: string[] = [];
 afterEach(async () => {
@@ -71,11 +80,25 @@ describe("Claude Code", () => {
       installed: true,
       enabled: true,
       installedVersion: "0.7.6",
+      scope: "user",
       marketplace: "anthill",
       source,
       checkout: source,
       availableVersion: "0.7.8",
     });
+  });
+
+  it("offers a checkout's version even when the app is newer: the checkout is what installs", async () => {
+    const dir = await home();
+    const source = await checkout(dir, "0.7.8");
+    await put(join(dir, ".claude/plugins/installed_plugins.json"), {
+      version: 2,
+      plugins: { "anthill@anthill": [{ scope: "user", version: "0.7.6" }] },
+    });
+    await put(join(dir, ".claude/plugins/known_marketplaces.json"), {
+      anthill: { source: { source: "directory", path: source } },
+    });
+    expect(await claudeCodeStatus(dir, "0.9.0")).toMatchObject({ checkout: source, availableVersion: "0.7.8" });
   });
 
   it("knows a plugin someone switched off", async () => {
@@ -258,5 +281,91 @@ describe("VS Code", () => {
     expect((await vscodeStatus(dir, user)).checkout).toBeUndefined();
     await put(join(user, "settings.json"), { "chat.plugins.marketplaces": [pathToFileURL(root).href] });
     expect(await vscodeStatus(dir, user)).toMatchObject({ toolFound: true, installed: false, checkout: root });
+  });
+});
+
+/*
+  A plugin installed from GitHub is due an update exactly when it is an older
+  release than the app reading it: the plugins are released with the app, at
+  its version (ANT-282). Before this, only a checkout ever offered a version,
+  and every plugin from GitHub read as up to date however old it was.
+*/
+describe("the app's version, for a plugin installed from GitHub", () => {
+  async function claudeFromGitHub(version: string): Promise<string> {
+    const dir = await home();
+    await put(join(dir, ".claude/plugins/installed_plugins.json"), {
+      version: 2,
+      plugins: { "anthill@anthill": [{ scope: "user", version }] },
+    });
+    await put(join(dir, ".claude/plugins/known_marketplaces.json"), {
+      anthill: { source: { source: "github", repo: "anthillapp/anthill" } },
+    });
+    return dir;
+  }
+
+  it("offers the app's version to a plugin that is behind it", async () => {
+    const dir = await claudeFromGitHub("0.8.9");
+    expect(await claudeCodeStatus(dir, "0.9.0")).toMatchObject({
+      installedVersion: "0.8.9",
+      availableVersion: "0.9.0",
+      source: "anthillapp/anthill",
+    });
+  });
+
+  it("offers nothing at the same version, and never a downgrade", async () => {
+    expect((await claudeCodeStatus(await claudeFromGitHub("0.9.0"), "0.9.0")).availableVersion).toBeUndefined();
+    expect((await claudeCodeStatus(await claudeFromGitHub("0.9.1"), "0.9.0")).availableVersion).toBeUndefined();
+    // Without the app's version — the CLI shell, an older caller — there is nothing to compare.
+    expect((await claudeCodeStatus(await claudeFromGitHub("0.8.9"))).availableVersion).toBeUndefined();
+  });
+
+  it("compares Codex's release, not its +codex build stamp", async () => {
+    const dir = await home();
+    await put(
+      join(dir, ".codex/config.toml"),
+      `[marketplaces.anthill-local]\nsource_type = "git"\nsource = "https://github.com/anthillapp/anthill.git"\n\n[plugins."anthill@anthill-local"]\nenabled = true\n`,
+    );
+    await put(join(dir, ".codex/plugins/cache/anthill-local/anthill/0.9.0+codex.20261004000102/.keep"), "");
+    expect((await codexStatus(dir, "0.9.0")).availableVersion).toBeUndefined();
+    expect(await codexStatus(dir, "0.9.1")).toMatchObject({
+      installedVersion: "0.9.0+codex.20261004000102",
+      availableVersion: "0.9.1",
+    });
+  });
+
+  it("says VS Code's marketplace install is behind too, for the page to say so", async () => {
+    const dir = await home();
+    const clone = join(dir, ".vscode/agent-plugins/github.com/anthillapp/anthill/plugins/anthill-vscode");
+    await put(join(clone, "plugin.json"), { name: "anthill", version: "0.8.9" });
+    await put(join(clone, "bin/anthill-mcp"), "");
+    await put(join(dir, ".vscode/agent-plugins/installed.json"), {
+      version: 1,
+      installed: [{ pluginUri: pathToFileURL(clone).href, marketplace: "anthillapp/anthill" }],
+    });
+    const user = join(dir, "Code", "User");
+    await put(join(user, "settings.json"), {});
+    expect(await vscodeStatus(dir, user, "0.9.0")).toMatchObject({ installedVersion: "0.8.9", availableVersion: "0.9.0" });
+  });
+
+  it("carries what Anthill's own update did into the answer", async () => {
+    const dir = await claudeFromGitHub("0.8.9");
+    const status = await pluginStatus(dir, {
+      appVersion: "0.9.0",
+      updates: { "claude-code": { state: "failed", version: "0.9.0", error: "offline" } },
+    });
+    expect(status.harnesses[0]).toMatchObject({
+      availableVersion: "0.9.0",
+      autoUpdate: { state: "failed", version: "0.9.0", error: "offline" },
+    });
+    expect(status.harnesses[1].autoUpdate).toBeUndefined();
+  });
+
+  it("orders releases by number, ignoring build suffixes", () => {
+    expect(olderRelease("0.8.9", "0.9.0")).toBe(true);
+    expect(olderRelease("0.8.10", "0.8.9")).toBe(false);
+    expect(olderRelease("0.8.9", "0.8.10")).toBe(true);
+    expect(olderRelease("0.9.0+codex.1", "0.9.0")).toBe(false);
+    expect(olderRelease("0.8.9+codex.9", "0.9.0")).toBe(true);
+    expect(olderRelease("", "0.9.0")).toBe(false);
   });
 });

@@ -198,6 +198,13 @@ describe("clamping a message", () => {
     expect(clampMarkup("A sentence long enough to be cut short.", 12).endsWith("…")).toBe(true);
   });
 
+  it("repairs an excerpt an older Anthill cut inside a link (ANT-270)", () => {
+    const shown = show("Changes made:\n\n- [svc_a/app.py](svc_a…");
+    expect(shown.textContent).not.toContain("[");
+    expect(shown.textContent).not.toContain("](");
+    expect(shown.textContent?.endsWith("…")).toBe(true);
+  });
+
   it("keeps whole markup that fits inside the limit", () => {
     const cut = clampMarkup("A **bold** start, and then a great deal more text besides.", 30);
     expect(cut).toContain("**bold**");

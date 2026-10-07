@@ -481,9 +481,24 @@ function pluginNote(status: PluginHarnessStatus): string {
   if (PLUGIN_HARNESS_INFO[status.harness].beta) parts.unshift("Beta");
   if (status.installedVersion) parts.push(`version ${status.installedVersion}`);
   if (status.availableVersion && status.availableVersion !== status.installedVersion) {
-    parts.push(`${status.availableVersion} available in the checkout`);
+    // Without a checkout, what is on offer is this Anthill's own version (ANT-282).
+    parts.push(`${status.availableVersion} available ${status.checkout ? "in the checkout" : "with this Anthill"}`);
   }
   return parts.join(" · ");
+}
+
+/** What Anthill's own update did with the plugin as it started, when it tried (ANT-282). */
+function autoUpdateLine(status: PluginHarnessStatus, verdict: PluginVerdict): string | undefined {
+  const update = status.autoUpdate;
+  if (update?.state === "updating") return `Updating to ${update.version} along with Anthill…`;
+  if (update?.state === "updated" && verdict === "installed") {
+    return `Updated to ${update.version} along with Anthill. Start a new session to use it.`;
+  }
+  // Only while it is still behind: a later update from a terminal settles it.
+  if (update?.state === "failed" && verdict === "update") {
+    return `Anthill couldn't update it as it started, and tries again next time: ${update.error}`;
+  }
+  return undefined;
 }
 
 export function PluginsPage() {
@@ -520,6 +535,15 @@ export function PluginsPage() {
     return () => window.removeEventListener("focus", refresh);
   }, [refresh]);
 
+  // Anthill's own update at launch ends with nothing to bring this window back
+  // into focus, so while one runs the page reads again every few seconds (ANT-282).
+  const updating = status?.harnesses.some((item) => item.autoUpdate?.state === "updating") ?? false;
+  useEffect(() => {
+    if (!updating) return;
+    const timer = window.setTimeout(refresh, 3_000);
+    return () => window.clearTimeout(timer);
+  }, [updating, status, refresh]);
+
   const checkout = status?.harnesses.find((item) => item.checkout)?.checkout;
   const server = status ? serverSteps(status.server, checkout) : [];
 
@@ -529,7 +553,8 @@ export function PluginsPage() {
         Anthill&rsquo;s plugin lets Claude Code, Codex and VS Code hand a workflow to this window.
         This page reads what each tool has recorded about it. It installs nothing: the commands
         below are the tools&rsquo; own, for you to run in a terminal, and VS Code&rsquo;s steps are
-        lines for its own settings.
+        lines for its own settings. When Anthill itself is updated, it brings the Claude Code and
+        Codex plugins up to its own version the next time it starts.
       </p>
 
       {failed ? (
@@ -545,6 +570,7 @@ export function PluginsPage() {
         ) : (
           status.harnesses.map((harness, index) => {
             const verdict = VERDICT[pluginVerdict(harness)];
+            const updateLine = autoUpdateLine(harness, pluginVerdict(harness));
             return (
               <Fragment key={harness.harness}>
                 {index > 0 ? <SettingDivider /> : null}
@@ -552,6 +578,9 @@ export function PluginsPage() {
                   <SettingRow label={harness.label} note={pluginNote(harness)}>
                     <StateChip tone={verdict.tone}>{verdict.label}</StateChip>
                   </SettingRow>
+                  {updateLine ? (
+                    <p className={harness.autoUpdate?.state === "failed" ? "harness-warning" : "plugin-update-note"}>{updateLine}</p>
+                  ) : null}
                   {/* A checkout either tool knows about is the one to name: the
                       same repository serves both plugins. */}
                   <Steps steps={pluginSteps({ ...harness, checkout: harness.checkout ?? checkout }, platform)} />

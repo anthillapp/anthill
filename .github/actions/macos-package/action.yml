@@ -1,8 +1,8 @@
 # Build and sign the macOS disk image, and keep it as the run's artefact.
 #
-# One definition for both places that build it: CI, on the next-release branch
-# and on pull requests into master, so the commit a release verifies has been
-# packaged before it can merge; and the Release workflow, which publishes what
+# One definition for both places that build it: CI, on pull requests into
+# master, so the commit a release verifies has been packaged before it can
+# merge; and the Release workflow, which publishes what
 # it builds once that commit reaches master. Two copies of these steps would
 # drift, and a release would then ship a build nobody had checked.
 #
@@ -133,7 +133,7 @@ runs:
         export APPLE_API_ISSUER=$(printf '%s' "$RAW_ISSUER" | tr -d '[:space:]')
         export APPLE_TEAM_ID=$(printf '%s' "$RAW_TEAM_ID" | tr -d '[:space:]')
         if [ -n "$NOTARY_KEY" ]; then export APPLE_API_KEY=$NOTARY_KEY; fi
-        npm exec --workspace=@anthill/desktop -- electron-builder --mac
+        npm exec --workspace=@anthill/desktop -- electron-builder --mac --publish never
       env:
         RAW_KEY_ID: ${{ inputs.apple-api-key-id }}
         RAW_ISSUER: ${{ inputs.apple-api-issuer }}
@@ -165,7 +165,15 @@ runs:
           spctl -a -vv -t install apps/desktop/release/mac-arm64/Anthill.app 2>&1 || true
         fi
 
+    # The disk image is what people download. The zip, its blockmap and
+    # `latest-mac.yml` are what an installed Anthill updates itself from
+    # (ANT-76): the manifest names the zip and its sha512, and the release
+    # has to carry all three or the update cannot find or check it.
     - uses: actions/upload-artifact@v4
       with:
         name: anthill-macos-arm64
-        path: apps/desktop/release/*.dmg
+        path: |
+          apps/desktop/release/*.dmg
+          apps/desktop/release/*.zip
+          apps/desktop/release/*.blockmap
+          apps/desktop/release/latest-mac.yml

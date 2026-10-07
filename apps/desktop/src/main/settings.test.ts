@@ -102,6 +102,13 @@ describe("the preferences", () => {
     expect(await store.write({})).toEqual(on);
   });
 
+  it("look for updates by themselves unless that is turned off, and remember it (ANT-76)", async () => {
+    const store = new SettingsStore(path);
+    expect((await store.read()).updateChecks).toBe(true);
+    await store.write({ updateChecks: false });
+    expect((await new SettingsStore(path).read()).updateChecks).toBe(false);
+  });
+
   it("keep each kind of notification on its own switch", async () => {
     const store = new SettingsStore(path);
     await store.write({ loopNotifications: true, finishedNotifications: true });

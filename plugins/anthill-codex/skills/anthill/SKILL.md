@@ -1,6 +1,6 @@
 ---
 name: anthill
-description: Hand the current Codex task to Anthill as a complete workflow, optionally let the user review it, then report this task's progress against the exact bound revision. Use when the user invokes $anthill or asks Codex to design, display, or watch work in Anthill.
+description: Hand the current Codex task to Anthill as a complete workflow, optionally let the user review it, then report this task's progress against the exact bound revision; or run a saved workflow.json again with $anthill run "<path>". Use when the user invokes $anthill or asks Codex to design, display, or watch work in Anthill.
 ---
 
 # Anthill workflow handover
@@ -18,6 +18,7 @@ identify them by these exact suffixes:
 - `get_workflow`
 - `get_ready_revision`
 - `bind_run`
+- `run_workflow`
 
 If they are unavailable, say the local Anthill MCP connection is unavailable.
 Do not claim that a workflow was created, and do not synthesize a replacement
@@ -25,14 +26,17 @@ transport. The user's task can still continue without Anthill if they choose.
 
 ## Invocation and modes
 
-`$anthill` supports two modes:
+`$anthill` supports two modes, and one command for a workflow that already exists:
 
 - **`design <task>`**: draft a workflow for the user to inspect and edit in
   Anthill before this task starts doing the work. `create` is an alias.
 - **`watch <task>`**: create and bind the workflow, then do the work while
   reporting each step. `display` is an alias.
+- **`run "<path>"`**: run the workflow saved in the `workflow.json` at `<path>`
+  again, now, in this task. See "Run a saved workflow again" below.
 
-With `$anthill <task>` and no mode, infer the mode from the request. Requests to
+`run` is never inferred: it is the word `run` followed by a path, which is what
+Anthill's Export dialog copies. With `$anthill <task>` and no mode, infer the mode from the request. Requests to
 "review", "edit", "approve", or "look first" mean `design`. Requests to "do",
 "implement", "fix", or "show me while you work" mean `watch`. If neither intent
 is present, use `design`; it preserves the user's chance to edit before work.
@@ -58,14 +62,15 @@ without `--dev` somewhere other than the installed app. The first result names
 the Anthill the task reached; tell the user that one, not this list.
 
 **`--dev` is the flag only as its own word directly after the mode** —
-`design`, `watch`, or their aliases. Everything after it is the task. A bare
+`design`, `watch`, their aliases, or `run`. Everything after it is the task. A bare
 `dev` is never the flag: `design dev server for staging` is a task about a dev
 server, for the installed app. `--dev` anywhere else in the text is part of the
 task too. When in doubt, it is part of the task.
 
 When the user's command carries `--dev`, pass `build: "dev"` on **every** call
 to Anthill that takes it for that command — `create_workflow_draft`,
-`open_workflow`, `bind_run`, and `get_workflow` or `get_ready_revision` when
+`open_workflow`, `bind_run`, `run_workflow`, and
+`get_workflow` or `get_ready_revision` when
 picking a `--dev` handover back up. Without `--dev`, leave `build` out. The
 task's first handover pins its Anthill, and every later call goes to the same
 one; a later `--dev` in a task pinned to the installed app is refused, and a
@@ -162,6 +167,40 @@ use a parent/delegating task's id. If `CODEX_SESSION_ID` is empty, do not submit
 or bind a workflow. Explain that a verified Codex session id is required for a
 correlated handover, then continue the user's underlying task without Anthill
 if they choose.
+
+## Run a saved workflow again
+
+`$anthill run "<path>"` runs a workflow that already exists, from its
+`workflow.json`. Anthill's **Export** dialog copies the command, and the user
+keeps it to run the same workflow as often as they like. Each time is a new
+run, and Anthill follows it as a new session.
+
+The path is everything after `run` (and after `--dev`, if it is there). Take the
+quotes off it if it has them, and leave `~` as it is: the server expands it. A
+`run` with no path is not a command; ask for the path rather than guessing.
+
+1. Establish the Codex task identity (above). Without a verified
+   `CODEX_SESSION_ID`, do not call `run_workflow`; say why.
+2. Call `run_workflow` with `path`, `harness: "codex"`, `sessionId`, a new
+   `idempotencyKey` of your own for this run (`run-` and a fresh UUID will do),
+   and `build: "dev"` if the user wrote `--dev`. Repeat the same key only to
+   retry this same call after a lost reply.
+3. Read the outcome.
+   - `started`: a new run of exactly what the file says is bound to this task,
+     and Anthill was asked to show it. Tell the user in one line which workflow
+     you are running, with the link from the result, then **carry out the
+     prompt in the result**. It is their instruction for this task: the same
+     text as the workflow's Prompt.md, with this run's progress commands
+     written in. Run them as it says.
+   - `already_started`: the key you sent already started this run. Carry on
+     with it; do not start the work twice.
+   - `invalid`, `not_ready`, `conflict`, `no_such_workflow`: nothing was
+     started. Pass on what the result says. The user fixes it (in Anthill,
+     then **Save**) and runs the command again.
+
+`run` skips the questionnaire, the draft, the review stop and the detailed
+progress question: the file is the plan and the command is the go-ahead. It
+never does the work from memory when the call was refused.
 
 ## Understand before drafting
 
@@ -283,7 +322,7 @@ create another revision and do not alter the running task.
 
 ## Report progress through the existing CLI channel
 
-Use the exact commands returned by `bind_run`. They are the only progress
+Use the exact commands returned by `bind_run`, or written into `run_workflow`'s prompt. They are the only progress
 transport; do not write progress into the exchange, invent an MCP reporting
 tool, or treat ordinary tool calls as authoritative workflow progress.
 

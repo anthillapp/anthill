@@ -24,6 +24,13 @@
  *   not proof the plugin works. The check starts the installed plugin's own
  *   launcher, exactly as the tool's `.mcp.json` would, and waits for Anthill's
  *   server to answer an MCP `initialize`. Only that makes a card Ready.
+ * - **A new Anthill brings its plugins along (ANT-282).** The one thing run
+ *   without a click: when the installed app starts, a plugin installed from
+ *   GitHub that is an older release than the app is updated with the same
+ *   commands the Plugins page shows. Nothing is asked, by the maintainer's
+ *   decision — the plugin and the app are one release, and a plugin left
+ *   behind describes behaviour the app no longer has. A developer's install,
+ *   from a checkout or pointed at a checkout's server, is never touched.
  */
 
 import { existsSync } from "node:fs";
@@ -36,6 +43,7 @@ import { PLUGIN_HARNESS_INFO, isInterpreterId, type CheckedPluginHarness } from 
 
 import type {
   InterpreterInfo,
+  PluginAutoUpdate,
   PluginConnection,
   PluginHarnessStatus,
   PluginInstallResult,
@@ -130,6 +138,12 @@ type Tool = {
   /** Whether the tool already offers the marketplace by this name. */
   marketplaceKnown(home: string, name: string): Promise<boolean>;
   installSteps(status: PluginHarnessStatus, id: string, source: string, marketplaceKnown: boolean): Step[];
+  /**
+   * The tool's own commands that bring an installed plugin up to what its
+   * marketplace offers now: the ones the Plugins page shows for an update.
+   * Nothing for a tool with no command for it.
+   */
+  updateSteps(status: PluginHarnessStatus, id: string, marketplace: string): Step[];
 };
 
 const TOOLS: Record<CheckedPluginHarness, Tool> = {
@@ -152,6 +166,15 @@ const TOOLS: Record<CheckedPluginHarness, Tool> = {
       return [
         ...(marketplaceKnown ? [] : [{ command: "claude", args: ["plugin", "marketplace", "add", source] }]),
         { command: "claude", args: ["plugin", "install", id, "--scope", "user"] },
+      ];
+    },
+    // `marketplace update` re-reads the marketplace (a GitHub one is fetched
+    // again); `plugin update` then installs what it offers, at the scope the
+    // install was made at — `user` when Anthill made it.
+    updateSteps(status, id, marketplace) {
+      return [
+        { command: "claude", args: ["plugin", "marketplace", "update", marketplace] },
+        { command: "claude", args: ["plugin", "update", id, "--scope", status.scope ?? "user"] },
       ];
     },
   },
@@ -184,6 +207,16 @@ const TOOLS: Record<CheckedPluginHarness, Tool> = {
         { command: "codex", args: ["plugin", "add", id] },
       ];
     },
+    // Codex has no `update`: `marketplace upgrade` refreshes the Git snapshot
+    // of a marketplace (a local one has nothing to refresh), and adding the
+    // plugin again installs the version it now offers, beside the old one in
+    // Codex's cache.
+    updateSteps(status, id, marketplace) {
+      return [
+        ...(status.checkout ? [] : [{ command: "codex", args: ["plugin", "marketplace", "upgrade", marketplace] }]),
+        { command: "codex", args: ["plugin", "add", id] },
+      ];
+    },
   },
   vscode: {
     async installedRoot(home) {
@@ -197,6 +230,9 @@ const TOOLS: Record<CheckedPluginHarness, Tool> = {
     // VS Code has no command for it. The card shows the steps instead, and
     // `installPlugin` refuses before it would run nothing and call it done.
     installSteps: () => [],
+    // VS Code updates a plugin installed from its marketplace by itself, as it
+    // does extensions; Anthill has nothing to run (RELEASING.md).
+    updateSteps: () => [],
   },
 };
 
@@ -271,6 +307,10 @@ export async function probeServer(
 
 export type ConnectDeps = {
   home?: string;
+  /** The running app's version, which a plugin installed from GitHub should be at (ANT-282). */
+  appVersion?: string;
+  /** What Anthill's own update did since it started, for the cards to say. */
+  updates?: () => Partial<Record<CheckedPluginHarness, PluginAutoUpdate>>;
   /** The checkout a development build runs from, when it is one. */
   appRoot?: string;
   spawnFn?: SpawnFn;
@@ -285,7 +325,10 @@ const BETWEEN_LINKS_MS = 800;
 
 export async function pluginConnections(deps: ConnectDeps): Promise<PluginConnection[]> {
   const home = deps.home ?? homedir();
-  const [status, interpreters] = await Promise.all([pluginStatus(home), deps.interpreters().catch(() => [])]);
+  const [status, interpreters] = await Promise.all([
+    pluginStatus(home, { appVersion: deps.appVersion, updates: deps.updates?.() }),
+    deps.interpreters().catch(() => []),
+  ]);
   const source = installSource(status, deps.appRoot) ?? GITHUB_SOURCE;
 
   return Promise.all(
@@ -322,6 +365,24 @@ export function installSteps(harness: PluginHarnessStatus, source: string, marke
   return TOOLS[harness.harness].installSteps(harness, id, source, marketplaceKnown);
 }
 
+/** The tool's own commands that update an installed plugin; none for VS Code. */
+export function updateSteps(harness: PluginHarnessStatus): Step[] {
+  const { plugin, marketplace: defaultMarket } = PLUGIN_HARNESS_INFO[harness.harness];
+  const marketplace = harness.marketplace ?? defaultMarket;
+  return TOOLS[harness.harness].updateSteps(harness, `${plugin}@${marketplace}`, marketplace);
+}
+
+/** Behind what is on offer: the same test as the Plugins page's `update` verdict. */
+function behind(harness: PluginHarnessStatus): boolean {
+  return Boolean(
+    harness.installed &&
+      harness.enabled &&
+      harness.availableVersion &&
+      harness.installedVersion &&
+      harness.availableVersion !== harness.installedVersion,
+  );
+}
+
 /** Whether the tool already offers Anthill's marketplace, so adding it again is not needed. */
 function marketplaceKnown(home: string, harness: CheckedPluginHarness): Promise<boolean> {
   return TOOLS[harness].marketplaceKnown(home, PLUGIN_HARNESS_INFO[harness].marketplace);
@@ -334,8 +395,76 @@ function reason(outcome: { stderr: string; stdout: string; timedOut: boolean }, 
   return lines.at(-1) ?? `${label} stopped without saying why.`;
 }
 
+/**
+ * Run the tool's commands in order, stopping at the first that fails.
+ * `changed` says whether any of them had already finished by then.
+ */
+async function runSteps(
+  steps: Step[],
+  label: string,
+  fromGitHub: boolean,
+  spawnFn: SpawnFn | undefined,
+): Promise<PluginInstallResult> {
+  let changed = false;
+  for (const step of steps) {
+    const outcome = await runProcess({
+      command: step.command,
+      args: step.args,
+      timeoutMs: fromGitHub && step.args.includes("marketplace") ? CLONE_TIMEOUT_MS : COMMAND_TIMEOUT_MS,
+      spawnFn,
+    });
+    if (outcome.spawnError) {
+      return { ok: false, changed, error: `${label}'s command was not found on your PATH.` };
+    }
+    if (outcome.exitCode !== 0) {
+      return { ok: false, changed, error: reason(outcome, `${step.command} ${step.args.slice(0, 2).join(" ")}`) };
+    }
+    changed = true;
+  }
+  return { ok: true };
+}
+
+/**
+ * Bring an installed plugin up to what is on offer, with the tool's own
+ * commands, then read the tool's records again to see that it happened.
+ *
+ * A command that exits 0 is not proof: a marketplace that does not offer the
+ * new version yet leaves `update` with nothing to do, and it says so happily.
+ * So "updated" is only said when the record now shows a version that is no
+ * longer behind.
+ */
+async function updatePlugin(current: PluginHarnessStatus, home: string, deps: ConnectDeps): Promise<PluginInstallResult> {
+  const steps = updateSteps(current);
+  if (steps.length === 0) {
+    return {
+      ok: false,
+      changed: false,
+      error: `${current.label} has no command for updating a plugin. It updates the plugin by itself; Settings ▸ Plugins has the steps to do it now.`,
+    };
+  }
+  const ran = await runSteps(steps, current.label, !current.checkout, deps.spawnFn);
+  if (!ran.ok) return ran;
+  const after = (await pluginStatus(home, { appVersion: deps.appVersion })).harnesses.find(
+    (item) => item.harness === current.harness,
+  );
+  if (after && behind(after)) {
+    return {
+      ok: false,
+      changed: true,
+      error: `${current.label} still has ${after.installedVersion} after updating. Its marketplace may not offer ${after.availableVersion} yet.`,
+    };
+  }
+  return { ok: true };
+}
+
 export async function installPlugin(harness: CheckedPluginHarness, deps: ConnectDeps): Promise<PluginInstallResult> {
   const home = deps.home ?? homedir();
+  // The card's button on a plugin that is behind updates it — which is also
+  // how a failed update at startup is tried again (ANT-282).
+  const before = await pluginStatus(home, { appVersion: deps.appVersion });
+  const installed = before.harnesses.find((item) => item.harness === harness);
+  if (installed && behind(installed)) return updatePlugin(installed, home, deps);
+
   const links = PLUGIN_HARNESS_INFO[harness].installLinks;
   if (links) {
     // The tool installs it, after asking; Anthill only opens its links, which
@@ -362,8 +491,8 @@ export async function installPlugin(harness: CheckedPluginHarness, deps: Connect
       error: `${PLUGIN_HARNESS_INFO[harness].label} has no command for installing a plugin. Settings ▸ Plugins has the steps.`,
     };
   }
-  const status = await pluginStatus(home);
-  const current = status.harnesses.find((item) => item.harness === harness)!;
+  const status = before;
+  const current = installed!;
   const checkout = installSource(status, deps.appRoot);
   const source = checkout ?? GITHUB_SOURCE;
 
@@ -381,26 +510,83 @@ export async function installPlugin(harness: CheckedPluginHarness, deps: Connect
     };
   }
 
-  let changed = false;
-  for (const step of installSteps(current, source, await marketplaceKnown(home, harness))) {
-    const outcome = await runProcess({
-      command: step.command,
-      args: step.args,
-      timeoutMs: !checkout && step.args.includes("marketplace") ? CLONE_TIMEOUT_MS : COMMAND_TIMEOUT_MS,
-      spawnFn: deps.spawnFn,
-    });
-    if (outcome.spawnError) {
-      return { ok: false, changed, error: `${current.label}'s command was not found on your PATH.` };
-    }
-    if (outcome.exitCode !== 0) {
-      return { ok: false, changed, error: reason(outcome, `${step.command} ${step.args.slice(0, 2).join(" ")}`) };
-    }
-    changed = true;
-  }
+  const ran = await runSteps(
+    installSteps(current, source, await marketplaceKnown(home, harness)),
+    current.label,
+    !checkout,
+    deps.spawnFn,
+  );
+  if (!ran.ok) return ran;
 
   if (!serverOk) {
     await mkdir(dirname(status.server.settingsFile), { recursive: true });
     await writeFile(status.server.settingsFile, `${JSON.stringify({ server: built }, null, 2)}\n`, "utf8");
   }
   return { ok: true };
+}
+
+export type AutoUpdateDeps = ConnectDeps & {
+  appVersion: string;
+  /**
+   * Whether this is the installed app. A development build never updates the
+   * plugins: they are the developer's, installed however they chose.
+   */
+  packaged: boolean;
+  /** Told as each tool starts and finishes, so a card asked meanwhile can say so. */
+  report?: (harness: CheckedPluginHarness, update: PluginAutoUpdate) => void;
+};
+
+/**
+ * A new Anthill updates the plugins it finds behind it (ANT-282).
+ *
+ * Run once per launch of the installed app, in the background after the
+ * window is up. It keeps no record of which version last ran: a plugin that
+ * is already at the app's version is simply not behind, so running it every
+ * launch does nothing, and a launch after a failed update tries again by
+ * itself.
+ *
+ * Each tool is tried on its own, one after the other — a missing CLI or a
+ * refusal in one is reported for that one and the next is still tried — and
+ * nothing is thrown out of here: the app does not depend on any of it.
+ *
+ * Left alone: a plugin not installed or switched off (that is the author's
+ * choice), VS Code (it updates its own plugins and has no command), and a
+ * developer's setup — a plugin installed from a checkout, or every plugin
+ * when `~/.anthill/plugin.json` points them at a checkout's server.
+ */
+export async function autoUpdatePlugins(deps: AutoUpdateDeps): Promise<Partial<Record<CheckedPluginHarness, PluginAutoUpdate>>> {
+  const results: Partial<Record<CheckedPluginHarness, PluginAutoUpdate>> = {};
+  if (!deps.packaged) return results;
+  const home = deps.home ?? homedir();
+  const tell = (harness: CheckedPluginHarness, update: PluginAutoUpdate) => {
+    try {
+      deps.report?.(harness, update);
+    } catch {
+      // Whoever listens cannot stop the update.
+    }
+  };
+
+  let status: PluginStatus;
+  try {
+    status = await pluginStatus(home, { appVersion: deps.appVersion });
+  } catch {
+    return results;
+  }
+  if (status.server.configured) return results;
+
+  for (const harness of status.harnesses) {
+    if (harness.checkout || !behind(harness) || updateSteps(harness).length === 0) continue;
+    const version = harness.availableVersion!;
+    tell(harness.harness, { state: "updating", version });
+    let update: PluginAutoUpdate;
+    try {
+      const result = await updatePlugin(harness, home, deps);
+      update = result.ok ? { state: "updated", version } : { state: "failed", version, error: result.error };
+    } catch (error) {
+      update = { state: "failed", version, error: (error as Error)?.message ?? String(error) };
+    }
+    results[harness.harness] = update;
+    tell(harness.harness, update);
+  }
+  return results;
 }

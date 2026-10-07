@@ -85,4 +85,10 @@ ask.
 The user may edit the workflow while you work. That makes a new revision; the run
 you bound keeps the one it started from, so nothing changes underneath you.
 
-None of these tools reads your files, runs a command, or reaches the network.`;
+run_workflow is the user's command to run a saved workflow again: run "<path>".
+It does the handover, the bind and the prompt in one call, for the workflow.json
+the user named. Their command is the go-ahead: no questionnaire, no draft of
+your own, no asking whether to start. Carry out the prompt it returns.
+
+None of these tools runs a command or reaches the network, and run_workflow's
+workflow.json is the only file any of them reads.`;

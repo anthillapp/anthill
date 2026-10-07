@@ -1,6 +1,6 @@
 {
   "name": "@anthill/desktop",
-  "version": "0.8.9",
+  "version": "0.8.10",
   "private": true,
   "license": "MIT",
   "description": "Anthill desktop shell (Electron): visual workflow authoring, and passive observation of the sessions that do the work.",
@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "package": "npm run build && electron-builder --mac --dir",
-    "dist": "npm run build && electron-builder --mac"
+    "dist": "npm run build && electron-builder --mac --publish never"
   },
   "dependencies": {
     "@anthill/builder": "*",
@@ -31,6 +31,7 @@
     "@sentry/browser": "10.75.0",
     "@sentry/electron": "~7.20.0",
     "better-sqlite3": "^11.5.0",
+    "electron-updater": "~6.8.10",
     "posthog-node": "~5.54.1"
   },
   "devDependencies": {
@@ -84,6 +85,12 @@
           "arch": [
             "arm64"
           ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
         }
       ],
       "hardenedRuntime": true,
@@ -92,6 +99,14 @@
       "gatekeeperAssess": false,
       "notarize": true
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "anthillapp",
+        "repo": "anthill",
+        "releaseType": "release"
+      }
+    ],
     "npmRebuild": false,
     "electronVersion": "42.11.7",
     "dmg": {

@@ -214,6 +214,7 @@ describe("the built server over stdio", () => {
       "get_workflow",
       "open_workflow",
       "revise_workflow",
+      "run_workflow",
     ]);
   }, 20_000);
 

@@ -1,4 +1,4 @@
-// Anthill MCP server 0.8.9, built by scripts/build-plugin-server.mjs
+// Anthill MCP server 0.8.10, built by scripts/build-plugin-server.mjs
 // from https://github.com/anthillapp/anthill. Do not edit: run
 // `npm run plugin:bundle` to write it again. MIT licensed.
 import { createRequire as __anthillCreateRequire } from "node:module";
@@ -40796,7 +40796,7 @@ __name(registerExchangeTools, "registerExchangeTools");
 
 // apps/mcp/dist/server.js
 var SERVER_NAME = "anthill";
-var SERVER_VERSION = true ? "0.8.9" : String(createRequire(import.meta.url)("../package.json").version ?? "0.0.0");
+var SERVER_VERSION = true ? "0.8.10" : String(createRequire(import.meta.url)("../package.json").version ?? "0.0.0");
 var TRANSPORT_FAILURE_EXIT_CODE = 1;
 function transportFailureLine(error51) {
   const reason = error51 instanceof Error ? error51.message : String(error51);

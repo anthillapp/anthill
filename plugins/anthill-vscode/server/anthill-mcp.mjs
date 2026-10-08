@@ -1,4 +1,4 @@
-// Anthill MCP server 0.8.11, built by scripts/build-plugin-server.mjs
+// Anthill MCP server 0.8.12, built by scripts/build-plugin-server.mjs
 // from https://github.com/anthillapp/anthill. Do not edit: run
 // `npm run plugin:bundle` to write it again. MIT licensed.
 import { createRequire as __anthillCreateRequire } from "node:module";
@@ -40554,7 +40554,7 @@ var UPDATE = {
   // plugins list.
   vscode: "update or reinstall the Anthill agent plugin in VS Code, then start a new chat"
 };
-function pluginDriftNotice(installed, host, server) {
+function pluginDriftNotice(installed, host, server, checkoutServer) {
   if (!installed?.trim())
     return void 0;
   const have = release(installed);
@@ -40565,7 +40565,11 @@ function pluginDriftNotice(installed, host, server) {
   if (compare(have, want) < 0) {
     return `The Anthill plugin installed in this harness is ${have}, but the Anthill it is talking to is ${want}. Its skill and instructions are out of date and may describe behaviour Anthill no longer has. Before relying on them, tell the user: to update it, ${how}.`;
   }
-  return `The Anthill plugin installed in this harness is ${have}, newer than the Anthill it is talking to (${want}). Tell the user their Anthill checkout or app is behind the plugin; updating Anthill to ${have} makes the two agree.`;
+  const root = checkoutServer ? /^(.*)[\\/]apps[\\/]mcp[\\/]dist[\\/]server\.js$/.exec(checkoutServer)?.[1] : void 0;
+  if (root) {
+    return `The Anthill plugin installed in this harness is ${have}, but the server it starts is the Anthill checkout at ${root}, which is ${want}. Tell the user that checkout is behind the plugin, not the Anthill app: updating the app does not change it. To fix it, update the checkout and build its server again: \`cd ${root} && git pull && npm install && npm run build:deps && npm run build --workspace=@anthill/mcp\`, then start a new session.`;
+  }
+  return `The Anthill plugin installed in this harness is ${have}, newer than the Anthill server it is talking to (${want}${checkoutServer ? `, at ${checkoutServer}` : ""}). Tell the user the server this plugin starts is behind the plugin; updating it to ${have} makes the two agree.`;
 }
 __name(pluginDriftNotice, "pluginDriftNotice");
 
@@ -40796,7 +40800,7 @@ __name(registerExchangeTools, "registerExchangeTools");
 
 // apps/mcp/dist/server.js
 var SERVER_NAME = "anthill";
-var SERVER_VERSION = true ? "0.8.11" : String(createRequire(import.meta.url)("../package.json").version ?? "0.0.0");
+var SERVER_VERSION = true ? "0.8.12" : String(createRequire(import.meta.url)("../package.json").version ?? "0.0.0");
 var TRANSPORT_FAILURE_EXIT_CODE = 1;
 function transportFailureLine(error51) {
   const reason = error51 instanceof Error ? error51.message : String(error51);
@@ -40848,7 +40852,13 @@ async function runServer(argv) {
 `);
     return 2;
   }
-  const drift = pluginDriftNotice(process.env[PLUGIN_VERSION_ENV], process.env[PLUGIN_HOST_ENV], SERVER_VERSION);
+  const drift = pluginDriftNotice(
+    process.env[PLUGIN_VERSION_ENV],
+    process.env[PLUGIN_HOST_ENV],
+    SERVER_VERSION,
+    // A bundle has its version written in; a build read it from a checkout.
+    true ? void 0 : fileURLToPath2(import.meta.url)
+  );
   if (drift)
     process.stderr.write(`${SERVER_NAME} mcp server: ${drift}
 `);

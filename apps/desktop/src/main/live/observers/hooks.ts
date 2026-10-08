@@ -42,6 +42,7 @@ import { TIMING, isAnthillTool, parseDoneMarker, parseStepMarkers, type Evidence
 import type { ObservationEventDraft, PollResult } from "./types.js";
 import { newCursor, readRotatingLinesUpTo, skipRotationOlderThan, type TailCursor } from "./tail.js";
 import { minimalHookPayload } from "../hook-payload.js";
+import { commandLine } from "../tool-target.js";
 
 export const HOOK_LOG = join(homedir(), ".anthill", "live-hooks", "events.jsonl");
 
@@ -77,7 +78,10 @@ const TITLE: Record<string, string> = {
 /** The field of a tool's input that names what it is acting on. */
 function toolTarget(name: string | undefined, input: unknown): string | undefined {
   if (!isRecord(input)) return undefined;
-  if (name === "Bash") return str(input.description) ?? str(input.command);
+  if (name === "Bash") {
+    const command = str(input.command);
+    return str(input.description) ?? (command ? commandLine(command) : undefined);
+  }
   const path = str(input.file_path) ?? str(input.path) ?? str(input.notebook_path);
   if (path) return path.split("/").slice(-2).join("/");
   return str(input.pattern) ?? str(input.query) ?? str(input.description);

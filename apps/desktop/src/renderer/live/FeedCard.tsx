@@ -81,6 +81,8 @@ export type FeedCardProps = {
   block?: { name: string; color: string };
   /** What the reader knows each of a divider's announced steps by, in its order. */
   stepNames?: string[];
+  /** A divider's word on the plan: a step started while one drawn apart from it was at work (ANT-300). */
+  note?: string;
   /** Whether a divider's evidence is open. */
   open?: boolean;
   onToggle?: () => void;
@@ -97,6 +99,7 @@ export function FeedCardView({
   cli,
   block,
   stepNames,
+  note,
   open = false,
   onToggle,
   expanded = false,
@@ -137,6 +140,7 @@ export function FeedCardView({
           </button>
           <hr />
         </div>
+        {note ? <p className="feed-divider-note">⇉ {note}</p> : null}
         {open ? (
           <dl className="feed-evidence">
             <dt>Read from</dt>

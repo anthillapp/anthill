@@ -16,7 +16,7 @@ import {
   type PendingRun,
 } from "@anthill/live";
 
-import { LiveWorkflowGraph, ZOOM_MAX, ZOOM_MIN, wasDrag } from "./LiveWorkflowGraph.js";
+import { LiveWorkflowGraph, ZOOM_MAX, ZOOM_MIN, earlyNote, wasDrag } from "./LiveWorkflowGraph.js";
 
 const workflow: Workflow = {
   id: "workflow-1",
@@ -1372,5 +1372,68 @@ describe("one step that leads to the same end twice", () => {
     const edges = drawn("The workflow is complete.");
     expect(edges.agreed).toContain("tone-seen");
     expect(edges.limit).toContain("tone-seen");
+  });
+});
+
+/*
+  ANT-300. Two steps the workflow chains, the second announced while a
+  subagent still worked for the first: both drawn Working, and a chip over the
+  second saying it started early, rather than nothing at all.
+*/
+describe("a step started before the one drawn ahead of it was done", () => {
+  const chain: Workflow = {
+    ...workflow,
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {}, position: { x: 0, y: 0 } },
+      { id: "aster", type: "agent", name: "aster independent proposal", config: { actionKind: "design", task: "a" }, position: { x: 200, y: 0 } },
+      { id: "mira", type: "agent", name: "mira independent proposal", config: { actionKind: "design", task: "m" }, position: { x: 400, y: 0 } },
+      { id: "end", type: "end", name: "Done", config: {}, position: { x: 600, y: 0 } },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "aster" },
+      { id: "e2", source: "aster", target: "mira" },
+      { id: "e3", source: "mira", target: "end" },
+    ],
+  };
+  const at = "2026-10-08T04:36:04.692Z";
+
+  function draw(overlapping: boolean) {
+    const folded = foldLiveSession(chain, run, []);
+    const view = {
+      ...folded,
+      blocks: {
+        ...folded.blocks,
+        aster: { state: "running" as const, confidence: "exact" as const, passes: 1, enteredAt: "2026-10-08T04:35:54.081Z" },
+        mira: { state: "running" as const, confidence: "exact" as const, passes: 1, enteredAt: at },
+      },
+      overlaps: overlapping ? [{ step: "mira", alongside: "aster", at, pass: 1 }] : [],
+    };
+    return render(
+      <LiveWorkflowGraph workflow={chain} view={view} sessionState={run.state} onSelect={vi.fn()} />,
+    );
+  }
+
+  it("puts a chip over the step that started early, naming the step it ran beside", () => {
+    const { container, unmount } = draw(true);
+    const chips = container.querySelectorAll(".live-early-chip");
+    expect(chips).toHaveLength(1);
+    expect(chips[0].getAttribute("data-step")).toBe("mira");
+    expect(chips[0].textContent).toContain("started early");
+    expect(chips[0].querySelector("title")?.textContent).toBe(
+      "Started while aster independent proposal was still working – the workflow runs these one after the other, not side by side.",
+    );
+    unmount();
+  });
+
+  it("draws no chip when nothing overlapped", () => {
+    const { container, unmount } = draw(false);
+    expect(container.querySelectorAll(".live-early-chip")).toHaveLength(0);
+    unmount();
+  });
+
+  it("names several steps it ran beside in one sentence", () => {
+    expect(earlyNote(chain, ["aster", "mira"])).toBe(
+      "Started while aster independent proposal and mira independent proposal were still working – the workflow runs these one after the other, not side by side.",
+    );
   });
 });

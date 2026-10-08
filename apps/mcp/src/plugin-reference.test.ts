@@ -104,3 +104,28 @@ describe.each([
     expect(text()).toMatch(/report(s|ing)? (it|a missed one) (now, )?before (the next|moving on)/);
   });
 });
+
+/*
+  ANT-300. Codex drew three independent drafts as a chain, then started them
+  all at once: the user saw three blocks of one chain working together and no
+  word that the run had left the plan. Each plugin's skill now says to draw
+  work run at once as a fork, and not to start a chained block early.
+*/
+describe.each([
+  { plugin: "Claude Code", skill: "plugins/anthill-claude/skills/workflow/SKILL.md", reference: "plugins/anthill-claude/skills/workflow/reference/workflow-format.md" },
+  { plugin: "Codex", skill: "plugins/anthill-codex/skills/anthill/SKILL.md", reference: "plugins/anthill-codex/skills/anthill/reference/workflow-format.md" },
+  { plugin: "VS Code", skill: "plugins/anthill-vscode/skills/workflow/SKILL.md", reference: "plugins/anthill-vscode/skills/workflow/reference/workflow-format.md" },
+])("the $plugin skill on work run side by side", ({ skill, reference }) => {
+  const read = (path: string) => readFileSync(join(ROOT, path), "utf8").replace(/\s+/g, " ");
+
+  it("draws work run at the same time as branches of one fork", () => {
+    expect(read(skill)).toContain("branches of one fork");
+    expect(read(reference)).toContain("## Side by side");
+    expect(read(reference)).toContain("a chain of blocks means one after the other");
+  });
+
+  it("does not start a chained block before the one ahead of it finished", () => {
+    expect(read(skill)).toMatch(/Where it chains them, wait for the earlier one to finish/);
+    expect(read(skill)).toContain("the bound revision does not change under a running task");
+  });
+});

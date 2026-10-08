@@ -168,6 +168,25 @@ describe("a divider for steps announced together (ANT-296)", () => {
     expect(document.querySelector(".feed-divider span")?.textContent).toMatch(/^Fix count_words · /);
     expect(document.querySelector(".feed-divider span")?.textContent).not.toContain("reported again");
   });
+
+  it("says when the step started beside one the workflow runs apart from it (ANT-300)", () => {
+    render(
+      <FeedCardView
+        cli={cli}
+        card={divider(["mira-draft"])}
+        block={{ name: "mira independent proposal", color: "#000" }}
+        note="Started while aster independent proposal was still working – the workflow runs these one after the other, not side by side."
+      />,
+    );
+    expect(document.querySelector(".feed-divider-note")?.textContent).toContain(
+      "Started while aster independent proposal was still working",
+    );
+  });
+
+  it("adds nothing to a divider with no note", () => {
+    render(<FeedCardView cli={cli} card={divider(["fix"])} />);
+    expect(document.querySelector(".feed-divider-note")).toBeNull();
+  });
 });
 
 /** A tool call as the panel holds it, with its own expanded state. */

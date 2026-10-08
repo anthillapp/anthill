@@ -231,6 +231,12 @@ refused. The file is the plan; if it cannot be read, there is no plan to follow.
    is the only thing the user will have to read. Write the steps you will report
    against — not an idealised plan you will then depart from.
 
+   **Work you will run at the same time is drawn side by side.** Subagents
+   working at once — independent drafts, parallel reviews — are branches of one
+   fork: several plain connections out of one block, meeting again at the block
+   that needs all of them. A chain says one after the other, and that is how
+   Anthill reads it.
+
 4. **Submit it** with `create_workflow_draft`, carrying `idempotencyKey`, `mode`,
    `source` (`harness: "claude-code"`, the session id you established, and
    `taskText`), and `workflow` — and `build: "dev"` if the user wrote `--dev`
@@ -417,6 +423,12 @@ which tells the user a step was skipped when it was done.
 * **Work in parallel is still entering a block.** Starting the next block while
   another is still open — a review running in the background, a subagent not
   back yet — is entering it. Report it then, not when the other one finishes.
+* **Run side by side only what the workflow draws side by side.** Start a block
+  while another is still open only where the bound revision has them on
+  different branches of one fork. Where it chains them, wait for the earlier
+  one to finish before you enter the next: the bound revision does not change
+  under a running task, and Anthill marks a chained block started early as the
+  run leaving the plan.
 * **Coming back is entering again.** Returning to a block you left, even for a
   moment (answering that background review, say), report it again.
 * **Check before you move on.** Before reporting the next block, make sure each

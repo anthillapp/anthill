@@ -148,6 +148,15 @@ back to be redone is `rework`, never `switch`.
   name lowercased with non-alphanumerics collapsed to hyphens, so an agent named
   "Reviewer" is `reviewer`.
 
+## Side by side
+
+Two or more plain connections out of one block — `next`, no condition — are a
+**fork**: every branch starts at once. A block those branches all lead into is
+the **join**, and starts only once each of them has reached it. Draw work that
+will run at the same time this way, and only this way: a chain of blocks means
+one after the other, and a block of a chain started before the one ahead of it
+finished is shown to the user as the run leaving the plan.
+
 ## Loops
 
 A cycle is allowed and is how rework is expressed: a `rework` edge from a review

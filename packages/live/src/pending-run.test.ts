@@ -606,6 +606,49 @@ describe("a finished run and a claim of work", () => {
       kind: "completed", sessionId: "sess-1", channel: "anthill:report", at: later(10 * 60_000),
       detail: "The harness reported the work as finished.",
     });
+  /** Finished on Anthill's reading of the session, not on the harness's word. */
+  const inferred = () =>
+    applyEvidence(applyEvidence(run(), strongMatch), {
+      kind: "completed", sessionId: "sess-1", channel: "codex:rollout", at: later(10 * 60_000),
+    });
+
+  /*
+    ANT-303. Codex ran `anthill done`, wrote its final record sixteen seconds
+    later, ended its turn, and was then given another job in the same session.
+    The write revived the run, and nothing ever finished it again: Live on its
+    last step for good.
+  */
+  it("stays finished on the harness's word through work the harness does not report", () => {
+    let next = finished();
+    expect(next.doneReportedAt).toBe(later(10 * 60_000));
+    next = applyEvidence(next, { kind: "activity", sessionId: "sess-1", at: later(10 * 60_000 + 16_000), channel: "codex:hook" });
+    next = applyEvidence(next, { kind: "working", sessionId: "sess-1", at: later(11 * 60_000), since: later(10 * 60_000 + 30_000) });
+    next = applyEvidence(next, { kind: "activity", sessionId: "sess-1", at: later(13 * 60_000), resumes: true });
+    expect(next.state).toBe("completed");
+    expect(next.statusMessage).toBe("The harness reported the work as finished.");
+    expect(next.lastObservedAt).toBe(later(13 * 60_000));
+  });
+
+  it("is reopened when the harness reports through the CLI again", () => {
+    const next = applyEvidence(finished(), {
+      kind: "activity", sessionId: "sess-1", at: later(12 * 60_000), channel: "anthill:report",
+    });
+    expect(next.state).toBe("detected_live");
+    expect(next.doneReportedAt).toBeUndefined();
+    // And, reopened, the session's own work counts again.
+    const working = applyEvidence(
+      applyEvidence(next, { kind: "completed", sessionId: "sess-1", channel: "codex:rollout", at: later(13 * 60_000) }),
+      { kind: "activity", sessionId: "sess-1", at: later(14 * 60_000), resumes: true },
+    );
+    expect(working.state).toBe("detected_live");
+  });
+
+  it("keeps the harness's word over a later turn ending read from the session", () => {
+    const next = applyEvidence(finished(), {
+      kind: "completed", sessionId: "sess-1", channel: "codex:rollout", at: later(10 * 60_000 + 23_000),
+    });
+    expect(next.doneReportedAt).toBe(later(10 * 60_000));
+  });
 
   it("is not reopened by a call that was already open when it finished", () => {
     const next = applyEvidence(finished(), {
@@ -615,8 +658,8 @@ describe("a finished run and a claim of work", () => {
     expect(next.statusMessage).toContain("reported the work as finished");
   });
 
-  it("is reopened by work that started after it finished, which is a real revival", () => {
-    const next = applyEvidence(finished(), {
+  it("is reopened by work that started after it finished, when the finish was only inferred", () => {
+    const next = applyEvidence(inferred(), {
       kind: "working", sessionId: "sess-1", at: later(12 * 60_000), since: later(11 * 60_000),
     });
     expect(next.state).toBe("detected_live");
@@ -641,8 +684,8 @@ describe("a finished run and a claim of work", () => {
     expect(next.lastObservedAt).toBe(later(10 * 60_000 + 12_000));
   });
 
-  it("goes live again when the session is given more to do", () => {
-    const next = applyEvidence(finished(), {
+  it("goes live again when the session is given more to do, when the finish was only inferred", () => {
+    const next = applyEvidence(inferred(), {
       kind: "activity", sessionId: "sess-1", at: later(15 * 60_000), resumes: true,
     });
     expect(next.state).toBe("detected_live");

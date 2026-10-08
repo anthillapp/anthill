@@ -543,6 +543,11 @@ export function foldLiveSession(
    * ANT-161).
    */
   let finishedAt: string | undefined;
+  /**
+   * Whether that ending was the harness's own `anthill done`, not the
+   * session's turn record. Only another report takes it back (ANT-303).
+   */
+  let doneReported = false;
   let sessionOpenedAt: string | undefined;
   let startedAt: string | undefined;
   let lastSeenAt: string | undefined;
@@ -731,6 +736,7 @@ export function foldLiveSession(
     }
     announced = id;
     enteredByTag = viaTag;
+    doneReported = false;
     // A subagent already at work for the step is work in it.
     workSinceEntered = continuing;
     askedSinceEntered = false;
@@ -1021,7 +1027,10 @@ export function foldLiveSession(
     // Only a step line moves the graph. A tag and a subagent's work say which
     // step something belongs to; they are not the agent saying where it is.
     if (event.kind === "step.marker" && mapping.confidence === "exact" && mapping.blockId) {
-      if (mapping.blockId === announced && !enteredByTag) {
+      // The harness reporting, after its done, the step it finished on: the
+      // work was not over after all, and this is the step's next pass (ANT-303).
+      const reportedAgain = doneReported && event.channel === "anthill:report";
+      if (mapping.blockId === announced && !enteredByTag && !reportedAgain) {
         // The step the session is already on, said again — a Stop hook reads
         // the same line out of the last message long after the command that
         // printed it. Coming back to a step means coming from another one;
@@ -1153,6 +1162,9 @@ export function foldLiveSession(
     // the session ending does not prove every branch of the workflow ran.
     const completion = completionOf(event);
     if (completion) {
+      // A turn record after the harness's done is the same ending told again;
+      // the harness's word is the stronger one and stays.
+      if (event.channel === "anthill:report") doneReported = true;
       finishedAt = event.at;
       for (const id of [...pendingClose.keys()]) closePending(id);
       for (const id of Object.keys(blocks)) finish(id, event.at);
@@ -1181,7 +1193,22 @@ export function foldLiveSession(
 
     if (event.kind === "notification" && announced) askedSinceEntered = true;
 
-    if (finishedAt && announced && blocks[announced]?.state === "done") {
+    if (
+      finishedAt &&
+      announced &&
+      blocks[announced]?.state === "done" &&
+      // The harness reporting a step again is how it takes its done back.
+      !(doneReported && event.kind === "step.marker" && event.channel === "anthill:report")
+    ) {
+      /*
+        After the harness's own done, nothing the session does is this run's
+        until the harness reports again (ANT-303). Codex ran `anthill done`,
+        wrote its final record, and the person then gave the same session
+        another job: each of those reopened the last step, and the new job's
+        subagents left it "Unknown" when the run finally settled. A report
+        through the CLI is an `enter`, which clears this.
+      */
+      if (doneReported) continue;
       // After the ending: a turn ending again says nothing new, a real request
       // for a person is still one, and new work is the session going on.
       if (event.kind === "notification") {

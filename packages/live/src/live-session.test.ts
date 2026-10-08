@@ -2943,3 +2943,51 @@ describe("steps the workflow chains, started side by side", () => {
     expect(view.overlaps).toEqual([expect.objectContaining({ step: "mira-draft", alongside: "aster-draft" })]);
   });
 });
+
+/*
+  ANT-303, from run ANT-OM3MK6RK. Codex ran `anthill done` on the last step,
+  wrote its final record, ended its turn, and the person gave the same session
+  another job — with subagents of its own. Each of those reopened the last
+  step: Live on "Verify" for good, and "Unknown" once the run settled.
+*/
+describe("work in the session after the harness said it was done", () => {
+  const T = (s: number) => new Date(Date.parse("2026-10-08T04:50:43.000Z") + s * 1000).toISOString();
+  const rollout = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ cli: "codex", source: "rollout", channel: "codex:rollout", ...partial });
+  const report = (blockId: string, s: number) =>
+    event({ cli: "codex", kind: "step.marker", title: "Step announced", blockId, source: "anthill", channel: "anthill:report", at: T(s) });
+  const done = (s: number) =>
+    event({ cli: "codex", kind: "session.end", title: "The harness reported the work as finished", completion: "done", source: "anthill", channel: "anthill:report", at: T(s) });
+  const call = (id: string, s: number) => [
+    rollout({ kind: "tool.start", title: "exec", toolUseId: id, at: T(s) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: id, at: T(s + 0.4) }),
+  ];
+  const journal = [
+    report("implement", 0),
+    ...call("a", 8),
+    report("test", 20),
+    ...call("b", 30),
+    done(36),
+    ...call("c", 52),
+    rollout({ kind: "turn.end", title: "Codex finished the turn", at: T(59) }),
+    event({ cli: "codex", kind: "prompt.submit", title: "A prompt was submitted", source: "hook", channel: "codex:hook", at: T(192) }),
+    ...call("d", 197),
+    rollout({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "spawn", background: true, at: T(210) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: "spawn", background: true, at: T(210.3) }),
+  ];
+
+  it("keeps the last step done, live or settled", () => {
+    for (const state of ["detected_live", "completed"] as const) {
+      const view = foldLiveSession(workflow, run({ state }), journal);
+      expect(view.blocks.test.state).toBe("done");
+      expect(view.activeBlockIds).toEqual([]);
+      expect(view.endedAt).toBe(T(59));
+    }
+  });
+
+  it("reopens a step the harness reports again", () => {
+    const view = foldLiveSession(workflow, run(), [...journal, report("test", 240), ...call("e", 245)]);
+    expect(view.blocks.test.state).toBe("running");
+    expect(view.blocks.test.passes).toBe(2);
+  });
+});

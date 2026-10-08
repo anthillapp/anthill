@@ -202,6 +202,33 @@ describe("the server the plugin launches", () => {
     await put(join(dir, ".anthill/plugin.json"), { server });
     expect(await serverStatus(dir)).toMatchObject({ configured: true, exists: true, path: server });
   });
+
+  /*
+    ANT-302. plugin.json named a checkout's build still at 0.8.10 while the
+    app and the plugins were 0.8.11, and the row said only "Found".
+  */
+  it("reads a checkout build's version, and says what it is behind", async () => {
+    const dir = await home();
+    const server = join(dir, "anthill/apps/mcp/dist/server.js");
+    await put(server, "");
+    await put(join(dir, "anthill/apps/mcp/package.json"), { name: "@anthill/mcp", version: "0.8.10" });
+    await put(join(dir, ".anthill/plugin.json"), { server });
+    expect(await serverStatus(dir, ["0.8.11", "0.8.11+codex.20261008035407"])).toMatchObject({
+      exists: true,
+      version: "0.8.10",
+      behind: "0.8.11",
+    });
+    expect(await serverStatus(dir, ["0.8.10"])).not.toHaveProperty("behind");
+  });
+
+  it("reads a plugin bundle's version from its first line", async () => {
+    const dir = await home();
+    const server = join(dir, "anthill-mcp.mjs");
+    await put(server, "// Anthill MCP server 0.8.11, built by scripts/build-plugin-server.mjs\nimport x from 'y';\n");
+    await put(join(dir, ".anthill/plugin.json"), { server });
+    expect(await serverStatus(dir, ["0.8.11"])).toMatchObject({ version: "0.8.11" });
+    expect(await serverStatus(dir, ["0.8.11"])).not.toHaveProperty("behind");
+  });
 });
 
 it("answers for every tool and the server at once", async () => {

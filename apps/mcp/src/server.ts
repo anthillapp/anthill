@@ -167,6 +167,8 @@ async function runServer(argv: readonly string[]): Promise<number> {
     process.env[PLUGIN_VERSION_ENV],
     process.env[PLUGIN_HOST_ENV],
     SERVER_VERSION,
+    // A bundle has its version written in; a build read it from a checkout.
+    typeof __ANTHILL_MCP_VERSION__ === "string" ? undefined : fileURLToPath(import.meta.url),
   );
   if (drift) process.stderr.write(`${SERVER_NAME} mcp server: ${drift}\n`);
 

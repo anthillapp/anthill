@@ -179,6 +179,18 @@ describe("the Plugins page", () => {
     expect(await screen.findByText("Found")).toBeTruthy();
   });
 
+  // ANT-302: a checkout's build behind the app and plugins said only "Found".
+  it("says the server is behind, with its version and how to bring it up", async () => {
+    const api = stub();
+    api.pluginStatus.mockResolvedValue({ ...PLUGINS, server: { ...PLUGINS.server, version: "0.8.10", behind: "0.8.11" } });
+    open("Plugins");
+    expect(await screen.findByText("Behind")).toBeTruthy();
+    expect(screen.getByText(/version 0\.8\.10 · 0\.8\.11 expected/)).toBeTruthy();
+    expect(
+      screen.getByText("cd /Users/me/anthill && git pull && npm install && npm run build:deps && npm run build --workspace=@anthill/mcp"),
+    ).toBeTruthy();
+  });
+
   // ANT-282: without a checkout, what is on offer is this Anthill's own version.
   it("says a plugin from GitHub is behind this Anthill, and why the update at launch failed", async () => {
     const api = stub();

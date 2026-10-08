@@ -55,6 +55,12 @@ export function pluginDriftNotice(
   installed: string | undefined,
   host: string | undefined,
   server: string,
+  /**
+   * Where this server runs from, when it is a checkout's build rather than a
+   * plugin's bundled copy (ANT-302). Absent for a bundle, which is always the
+   * version of the plugin that carries it.
+   */
+  checkoutServer?: string,
 ): string | undefined {
   if (!installed?.trim()) return undefined;
   const have = release(installed);
@@ -71,8 +77,22 @@ export function pluginDriftNotice(
       `Before relying on them, tell the user: to update it, ${how}.`
     );
   }
+  /*
+    A checkout's build, named by ~/.anthill/plugin.json, is behind the plugin.
+    "Checkout or app" sent the agent to tell the user to update the app, which
+    was already newer and changes nothing: every plugin runs this file instead
+    of its own copy (ANT-302).
+  */
+  const root = checkoutServer ? /^(.*)[\\/]apps[\\/]mcp[\\/]dist[\\/]server\.js$/.exec(checkoutServer)?.[1] : undefined;
+  if (root) {
+    return (
+      `The Anthill plugin installed in this harness is ${have}, but the server it starts is the Anthill checkout at ${root}, which is ${want}. ` +
+      `Tell the user that checkout is behind the plugin, not the Anthill app: updating the app does not change it. ` +
+      `To fix it, update the checkout and build its server again: \`cd ${root} && git pull && npm install && npm run build:deps && npm run build --workspace=@anthill/mcp\`, then start a new session.`
+    );
+  }
   return (
-    `The Anthill plugin installed in this harness is ${have}, newer than the Anthill it is talking to (${want}). ` +
-    `Tell the user their Anthill checkout or app is behind the plugin; updating Anthill to ${have} makes the two agree.`
+    `The Anthill plugin installed in this harness is ${have}, newer than the Anthill server it is talking to (${want}${checkoutServer ? `, at ${checkoutServer}` : ""}). ` +
+    `Tell the user the server this plugin starts is behind the plugin; updating it to ${have} makes the two agree.`
   );
 }

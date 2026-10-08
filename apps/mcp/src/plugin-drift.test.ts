@@ -40,9 +40,32 @@ describe("an installed plugin measured against the server", () => {
     expect(pluginDriftNotice("0.7.9", "claude-code", "0.7.10")).toContain("out of date");
   });
 
-  it("says the checkout is behind when the plugin is newer", () => {
+  it("says the server is behind when the plugin is newer", () => {
     const notice = pluginDriftNotice("0.8.0", "claude-code", "0.7.8");
-    expect(notice).toContain("newer than the Anthill it is talking to (0.7.8)");
+    expect(notice).toContain("newer than the Anthill server it is talking to (0.7.8)");
     expect(notice).not.toContain("claude plugin update");
+  });
+
+  /*
+    ANT-302. ~/.anthill/plugin.json pointed every plugin at a checkout's build
+    still at 0.8.10, the plugins were 0.8.11, and the installed app was 0.8.11
+    too. "Checkout or app is behind" sent Codex to tell the user to update the
+    app, which changed nothing.
+  */
+  it("names a checkout's server, and never sends the user to update the app", () => {
+    const notice = pluginDriftNotice("0.8.11+codex.1", "codex", "0.8.10", "/Users/me/dev/apps/anthill/apps/mcp/dist/server.js");
+    expect(notice).toContain("the server it starts is the Anthill checkout at /Users/me/dev/apps/anthill, which is 0.8.10");
+    expect(notice).toContain("not the Anthill app");
+    expect(notice).toContain("cd /Users/me/dev/apps/anthill && git pull && npm install && npm run build:deps && npm run build --workspace=@anthill/mcp");
+    expect(notice).not.toMatch(/update(?:s|ing)? (?:the )?(?:Anthill )?app to/i);
+  });
+
+  it("names any other server it runs from by its path", () => {
+    const notice = pluginDriftNotice("0.8.11", "claude-code", "0.8.10", "/opt/anthill/server.js");
+    expect(notice).toContain("(0.8.10, at /opt/anthill/server.js)");
+  });
+
+  it("still says nothing when a checkout's server and the plugin agree", () => {
+    expect(pluginDriftNotice("0.8.11", "codex", "0.8.11", "/Users/me/dev/apps/anthill/apps/mcp/dist/server.js")).toBeUndefined();
   });
 });

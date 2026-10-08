@@ -19,7 +19,7 @@
 import type { Workflow } from "@anthill/workflow-schema";
 import { nodesOnCycles, parallelPlan } from "@anthill/workflow";
 
-import { attribute, buildWorkflowIndex, stepForAgent, type BlockMapping, type WorkflowIndex } from "./attribution.js";
+import { agentsNamedBy, attribute, buildWorkflowIndex, stepForAgent, type BlockMapping, type WorkflowIndex } from "./attribution.js";
 import { inRecordedOrder, projectJournal } from "./channels.js";
 import { completionOf, isAnthillTool, type ObservationEvent } from "./observation-event.js";
 import type { PendingRun } from "./pending-run.js";
@@ -585,6 +585,43 @@ export function foldLiveSession(
    * own is drawn as one (ANT-82).
    */
   const repeatable = nodesOnCycles(workflow);
+  /*
+    Where a spawn that names no step goes, when its own name names an agent
+    (ANT-307). Codex spawned three authors while the session was still on
+    the step before them and reported their steps only after, in one command:
+    every spawn went to that earlier step, which then stayed Working beside
+    them, and the authors read as started early. A spawn named after an agent
+    goes to that agent's nearest step on from where the session is — the
+    step itself included — and only a unique nearest one counts: the same
+    agent runs its review and its revision later on too.
+  */
+  const forwardOut = new Map<string, string[]>();
+  for (const edge of workflow.edges) {
+    if (edge.kind === "rework") continue;
+    forwardOut.set(edge.source, [...(forwardOut.get(edge.source) ?? []), edge.target]);
+  }
+  const nearestFor = (spawnName: string | undefined): string | undefined => {
+    if (!announced) return undefined;
+    const agents = agentsNamedBy(index, spawnName);
+    if (agents.size === 0) return undefined;
+    const runsIt = new Set(index.blocks.filter((block) => block.agentSlug && agents.has(block.agentSlug)).map((block) => block.id));
+    let frontier = [announced];
+    const seen = new Set(frontier);
+    while (frontier.length > 0) {
+      const here = frontier.filter((id) => runsIt.has(id));
+      if (here.length > 0) return here.length === 1 ? here[0] : undefined;
+      const next: string[] = [];
+      for (const id of frontier) {
+        for (const target of forwardOut.get(id) ?? []) {
+          if (seen.has(target)) continue;
+          seen.add(target);
+          next.push(target);
+        }
+      }
+      frontier = next;
+    }
+    return undefined;
+  };
   /** The Approval Gates: a person decides there, and nothing else settles one. */
   const gates = new Set(workflow.nodes.filter((node) => node.type === "approval").map((node) => node.id));
 
@@ -1145,6 +1182,9 @@ export function foldLiveSession(
       // The agent it runs, when exactly one step has that agent (ANT-217).
       const named = stepForAgent(index, event.agentName) ?? stepForAgent(index, event.detail, true);
       const late = announcedAsDispatched.get(event.toolUseId);
+      // The nearest step on whose agent the spawn is named after: Codex
+      // starts a step's subagent before it reports the step (ANT-307).
+      const near = !event.stepTag && !own && !named && !late ? nearestFor(event.agentName) : undefined;
       const target =
         event.stepTag && blocks[event.stepTag]
           ? event.stepTag
@@ -1154,7 +1194,9 @@ export function foldLiveSession(
               ? named
               : late && blocks[late]
                 ? late
-                : announced;
+                : near && blocks[near]
+                  ? near
+                  : announced;
       if (target && blocks[target]) {
         // The dispatch card belongs where its subagent's work goes.
         const card = attributed[attributed.length - 1];
@@ -1164,6 +1206,8 @@ export function foldLiveSession(
               ? { blockId: target, confidence: "likely", how: "the agent this subagent runs belongs to this step" }
               : target === late && !event.stepTag && !own
                 ? { blockId: target, confidence: "likely", how: "the session announced this step as it started this subagent" }
+                : target === near && near !== announced
+                  ? { blockId: target, confidence: "likely", how: "the next step of the agent this subagent is named after" }
                 : { blockId: target, confidence: "exact", how: "a subagent started for this step" };
         }
         delegations.set(event.toolUseId, {

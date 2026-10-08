@@ -3112,3 +3112,81 @@ describe("Codex's long-lived subagents", () => {
     expect(view.blocks["a-review"].state).toBe("running");
   });
 });
+
+/*
+  ANT-307, shaped like run ANT-4P5R899J. Codex spawned three authors while
+  the session was still on `context`, and reported their steps only after, in
+  one command. Every spawn went to `context`: it stayed Working, the authors
+  read as started early, and two of them as done in 0.4 s.
+*/
+describe("subagents Codex starts before it reports their steps", () => {
+  const council: Workflow = {
+    ...workflow,
+    target: "codex",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "context", type: "agent", name: "Freeze evidence", config: { actionKind: "agent-step", task: "c", agentId: "editor" } },
+      { id: "author-a", type: "agent", name: "Quill design", config: { actionKind: "design", task: "a", agentId: "quill" } },
+      { id: "author-b", type: "agent", name: "Rowan design", config: { actionKind: "design", task: "b", agentId: "rowan" } },
+      { id: "join", type: "agent", name: "Freeze drafts", config: { actionKind: "verify", task: "j", agentId: "editor" } },
+      { id: "quill-review", type: "agent", name: "Quill critiques Rowan", config: { actionKind: "verify", task: "qr", agentId: "quill" } },
+      { id: "end", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "context" },
+      { id: "e2", source: "context", target: "author-a" },
+      { id: "e3", source: "context", target: "author-b" },
+      { id: "e4", source: "author-a", target: "join" },
+      { id: "e5", source: "author-b", target: "join" },
+      { id: "e6", source: "join", target: "quill-review" },
+      { id: "e7", source: "quill-review", target: "end" },
+    ],
+    metadata: {
+      workflow: {
+        formatVersion: 4,
+        agents: [
+          { id: "editor", name: "Vale Council Editor" },
+          { id: "quill", name: "Quill Pooled-Score Objective Architect" },
+          { id: "rowan", name: "Rowan Reliability Gate Architect" },
+        ],
+      },
+    },
+  };
+  const T = (s: number) => new Date(Date.parse("2026-10-08T06:41:08.000Z") + s * 1000).toISOString();
+  const rollout = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ cli: "codex", source: "rollout", channel: "codex:rollout", ...partial });
+  const report = (blockId: string, s: number) =>
+    event({ cli: "codex", kind: "step.marker", title: "Step announced", blockId, source: "anthill", channel: "anthill:report", at: T(s) });
+  const spawn = (call: string, name: string, s: number) => [
+    rollout({ kind: "subagent.start", title: "Delegated to a subagent", toolName: "spawn_agent", toolUseId: call, agentName: name, background: true, at: T(s) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: call, background: true, at: T(s + 0.2) }),
+  ];
+  const journal = [
+    report("context", 0),
+    rollout({ kind: "tool.start", title: "exec", toolName: "exec", toolUseId: "ctx", at: T(5) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: "ctx", at: T(6) }),
+    ...spawn("call-q", "quill_wp1", 29),
+    ...spawn("call-r", "rowan_gate1", 33),
+    report("author-a", 42.4),
+    report("author-b", 42.8),
+    rollout({ kind: "tool.start", title: "exec", toolName: "exec", toolUseId: "q-1", parentToolUseId: "call-q", author: { kind: "subagent", name: "quill_wp1" }, at: T(50) }),
+  ];
+
+  it("gives each spawn to its agent's nearest step, not the step the session was on", () => {
+    const view = foldLiveSession(council, run({ selectedCli: "codex" }), journal);
+    expect(view.blocks.context.state).toBe("done");
+    expect(view.blocks["author-a"].state).toBe("running");
+    expect(view.blocks["author-b"].state).toBe("running");
+    expect(view.blocks["quill-review"].state).toBe("queued");
+    expect(view.overlaps).toEqual([]);
+    expect(view.events.find((item) => item.toolUseId === "q-1")?.mapping.blockId).toBe("author-a");
+  });
+
+  it("still gives a spawn named after no agent to the step the session is on", () => {
+    const view = foldLiveSession(council, run({ selectedCli: "codex" }), [
+      report("context", 0),
+      ...spawn("call-x", "helper_1", 10),
+    ]);
+    expect(view.events.find((item) => item.kind === "subagent.start")?.mapping.blockId).toBe("context");
+  });
+});

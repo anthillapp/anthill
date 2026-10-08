@@ -65,3 +65,30 @@ describe("what one of Codex's exec programs does", () => {
     expect(codexExecTarget("text(await tools.exec_command({cmd:`git ${x}`}));")).toBeUndefined();
   });
 });
+
+/*
+  ANT-301, from a later run: Codex put the patch in a variable first, then
+  called `apply_patch(patch)`; and a command can be passed as `{cmd}`.
+*/
+describe("what a program passes through a name", () => {
+  it("is the patch declared above the call", () => {
+    const program =
+      'const patch = "*** Begin Patch\\n*** Add File: /w/runs/x/EVALUATION-PROTOCOL.md\\n+# Protocol\\n*** End Patch";\ntext(await tools.apply_patch(patch));';
+    expect(codexExecTarget(program)).toBe("x/EVALUATION-PROTOCOL.md");
+  });
+
+  it("is whatever patch the program writes out, when the call's argument is built", () => {
+    const program =
+      'const body = "x";\nconst p = ["*** Begin Patch", "*** Update File: src/a.py", body, "*** End Patch"].join("\\n");\ntext(await tools.apply_patch(p));';
+    expect(codexExecTarget(program)).toBe("src/a.py");
+  });
+
+  it("is the command declared above a shorthand cmd", () => {
+    expect(codexExecTarget('const cmd = "git status";\ntext(await tools.exec_command({cmd, workdir:"/w"}));')).toBe("git status");
+    expect(codexExecTarget('text(await tools.exec_command({"cmd":"ls -la","workdir":"/w"}));')).toBe("ls -la");
+  });
+
+  it("is still nothing for a command computed as it runs", () => {
+    expect(codexExecTarget('const cmd = parts.join(" ");\ntext(await tools.exec_command({cmd}));')).toBeUndefined();
+  });
+});

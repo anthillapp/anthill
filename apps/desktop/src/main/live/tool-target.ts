@@ -31,13 +31,21 @@ export function commandLine(command: string): string | undefined {
   return redacted.length > COMMAND_MAX ? `${redacted.slice(0, COMMAND_MAX)}…` : `${redacted}${more}`;
 }
 
-/** The files a patch in Codex's format adds, changes or deletes, in order. */
-export function patchFiles(patch: string): string[] {
+/**
+ * The files a patch in Codex's format adds, changes or deletes, in order.
+ *
+ * `anywhere` reads a whole program rather than a patch: there the header may
+ * sit inside a string that does not start the line (ANT-301).
+ */
+export function patchFiles(patch: string, anywhere = false): string[] {
   // Read both as written and as a string literal in a program, where each
   // line break is the two characters `\n`.
   const text = patch.replace(/\\n/g, "\n");
   const files: string[] = [];
-  for (const match of text.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)) {
+  const header = anywhere
+    ? /\*\*\* (?:Add|Update|Delete) File: ([^\n"'`\\]+)/g
+    : /^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm;
+  for (const match of text.matchAll(header)) {
     const path = match[1]?.trim().replace(/["'`]+$/, "");
     if (path && !files.includes(path)) files.push(path);
   }
@@ -74,6 +82,21 @@ function stringLiteral(text: string): string | undefined {
 }
 
 /**
+ * The string a program passes, written out where it is passed or in the
+ * declaration of the name it passes: `apply_patch(patch)` with
+ * `const patch = "*** Begin Patch…"` above it, `exec_command({cmd})` with
+ * `const cmd = "…"` (ANT-301). Nothing for a value computed as it runs.
+ */
+function passedString(program: string, at: string): string | undefined {
+  const literal = stringLiteral(at);
+  if (literal !== undefined) return literal;
+  const name = /^([A-Za-z_$][\w$]*)/.exec(at)?.[1];
+  if (!name) return undefined;
+  const declared = new RegExp(`(?:const|let|var)\\s+${name.replace(/\$/g, "\\$")}\\s*=\\s*`).exec(program);
+  return declared ? stringLiteral(program.slice(declared.index + declared[0].length)) : undefined;
+}
+
+/**
  * What one of Codex's `exec` programs does, as a card's second line.
  *
  * The first command it runs, or the files its patch touches, or the tool it
@@ -86,15 +109,18 @@ export function codexExecTarget(program: string): string | undefined {
     const tool = call[1] ?? "";
     const rest = program.slice((call.index ?? 0) + call[0].length).trimStart();
     if (tool === "exec_command") {
-      const cmd = /^\{\s*cmd\s*:\s*/.exec(rest);
-      const literal = cmd ? stringLiteral(rest.slice(cmd[0].length)) : undefined;
-      const line = literal === undefined ? undefined : commandLine(literal);
+      // `{cmd: "…"}`, `{"cmd": "…"}`, `{cmd: name}` or the shorthand `{cmd}`.
+      const key = /^\{\s*["']?cmd\b["']?\s*(:\s*)?/.exec(rest);
+      const value = !key ? undefined : key[1] ? passedString(program, rest.slice(key[0].length)) : passedString(program, "cmd");
+      const line = value === undefined ? undefined : commandLine(value);
       if (line) parts.push(line);
       continue;
     }
     if (tool === "apply_patch") {
-      const literal = stringLiteral(rest);
-      const label = filesLabel(patchFiles(literal ?? ""));
+      // The patch, or failing that whatever patch the program writes out:
+      // the files it names are on lines of their own either way.
+      const files = patchFiles(passedString(program, rest) ?? "");
+      const label = filesLabel(files.length > 0 ? files : patchFiles(program, true));
       if (label) parts.push(label);
       continue;
     }

@@ -233,6 +233,24 @@ export function pluginSteps(status: PluginHarnessStatus, platform?: string): Plu
  */
 export function serverSteps(server: PluginServerStatus, checkout: string | undefined): PluginStep[] {
   if (!server.configured && !server.problem) return [];
+  /*
+    Found, but older than the app or a plugin it serves (ANT-302). A
+    checkout's build is brought up to date in the checkout itself: updating
+    the app changes nothing, because every plugin runs this file instead of
+    its own copy.
+  */
+  if (server.configured && server.exists && server.behind && server.path) {
+    const built = /^(.*)\/apps\/mcp\/dist\/server\.js$/.exec(server.path)?.[1];
+    if (!built) {
+      return [{ says: `The server ${server.settingsFile} names is ${server.version ?? "older"}, behind ${server.behind}. Point it at a newer build, or remove the file to let each plugin run its own copy.` }];
+    }
+    return [
+      {
+        says: `Bring the checkout up to ${server.behind} and build its server again. Updating the Anthill app does not change it: every plugin runs this file.`,
+        command: `cd ${shellPath(built)} && git pull && npm install && npm run build:deps && npm run build --workspace=@anthill/mcp`,
+      },
+    ];
+  }
   if (server.configured && server.exists) return [];
   const root = checkout ?? CHECKOUT_PLACEHOLDER;
   const path = `${root}/apps/mcp/dist/server.js`;

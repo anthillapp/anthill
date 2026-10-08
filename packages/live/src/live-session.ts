@@ -19,10 +19,19 @@
 import type { Workflow } from "@anthill/workflow-schema";
 import { nodesOnCycles, parallelPlan } from "@anthill/workflow";
 
-import { attribute, buildWorkflowIndex, stepForAgent, type BlockMapping, type WorkflowIndex } from "./attribution.js";
+import { agentsNamedBy, attribute, buildWorkflowIndex, stepForAgent, type BlockMapping, type WorkflowIndex } from "./attribution.js";
 import { inRecordedOrder, projectJournal } from "./channels.js";
 import { completionOf, isAnthillTool, type ObservationEvent } from "./observation-event.js";
 import type { PendingRun } from "./pending-run.js";
+
+/**
+ * Codex's name for one of its agents, as `spawn_agent`, `followup_task` and
+ * `send_message` write it: `sable`, `/root/sable`, or `/root` for the session.
+ */
+export function codexAgent(name: string): string {
+  const bare = name.trim().replace(/^\/?root\/?/, "");
+  return bare === "" ? "root" : bare;
+}
 
 /** How a block is drawn while a session is being observed. */
 export type BlockRunState =
@@ -91,6 +100,27 @@ export type Detour = {
   pass: number;
 };
 
+/**
+ * A step started while another was still at work, which the workflow does not
+ * run beside it (ANT-300).
+ *
+ * The agent announced `step` while a subagent was still working for
+ * `alongside`, and the workflow draws the two one after the other, not as
+ * branches of one fork. Running independent work at once can be the right
+ * call; it is still not the plan on the screen, and three steps of one chain
+ * drawn Working together read as Anthill's own mistake. A fan-out the
+ * workflow drew is not one of these.
+ */
+export type Overlap = {
+  step: string;
+  /** The step still working when `step` started. */
+  alongside: string;
+  /** When it became plain: the announcement, or the subagent confirming it. */
+  at: string;
+  /** Which pass through `step` this was. */
+  pass: number;
+};
+
 export type LiveSessionView = {
   /** Keyed by block id, covering every block in the workflow. */
   blocks: Record<string, BlockView>;
@@ -109,6 +139,8 @@ export type LiveSessionView = {
   spans: BlockSpanView[];
   /** Every move the workflow has no connection for, oldest first. */
   detours: Detour[];
+  /** Every step started beside one the workflow runs apart from it, oldest first. */
+  overlaps: Overlap[];
   /** Every event, oldest first, each with how it was attributed. */
   events: AttributedEvent[];
   /** Events no block could be claimed for. Shown as session-level activity. */
@@ -453,6 +485,14 @@ export function foldLiveSession(
       sentOff?: boolean;
       returned: boolean;
       delegateEnded: boolean;
+      /** The name the session calls the subagent by: Codex's task name (ANT-306). */
+      name?: string;
+      /** It reported to the session since its task began (ANT-306). */
+      reported?: boolean;
+      /** Reported, and now waiting for the session to say more (ANT-306). */
+      idle?: boolean;
+      /** When waiting closed the step it held, so more work can take that back. */
+      closedAt?: string;
     }
   >();
   /** The same, as attribution reads it: call id to step. */
@@ -520,12 +560,18 @@ export function foldLiveSession(
    * ANT-161).
    */
   let finishedAt: string | undefined;
+  /**
+   * Whether that ending was the harness's own `anthill done`, not the
+   * session's turn record. Only another report takes it back (ANT-303).
+   */
+  let doneReported = false;
   let sessionOpenedAt: string | undefined;
   let startedAt: string | undefined;
   let lastSeenAt: string | undefined;
   let unmappedCount = 0;
   const attributed: AttributedEvent[] = [];
   const detours: Detour[] = [];
+  const overlaps: Overlap[] = [];
   /** Every connection the workflow has, as "source→target". */
   const planned = new Set(workflow.edges.map((edge) => `${edge.source}→${edge.target}`));
   /** Which steps the workflow runs side by side: moving between them is no detour (ANT-166). */
@@ -539,15 +585,74 @@ export function foldLiveSession(
    * own is drawn as one (ANT-82).
    */
   const repeatable = nodesOnCycles(workflow);
+  /*
+    Where a spawn that names no step goes, when its own name names an agent
+    (ANT-307). Codex spawned three authors while the session was still on
+    the step before them and reported their steps only after, in one command:
+    every spawn went to that earlier step, which then stayed Working beside
+    them, and the authors read as started early. A spawn named after an agent
+    goes to that agent's nearest step on from where the session is — the
+    step itself included — and only a unique nearest one counts: the same
+    agent runs its review and its revision later on too.
+  */
+  const forwardOut = new Map<string, string[]>();
+  for (const edge of workflow.edges) {
+    if (edge.kind === "rework") continue;
+    forwardOut.set(edge.source, [...(forwardOut.get(edge.source) ?? []), edge.target]);
+  }
+  const nearestFor = (spawnName: string | undefined): string | undefined => {
+    if (!announced) return undefined;
+    const agents = agentsNamedBy(index, spawnName);
+    if (agents.size === 0) return undefined;
+    const runsIt = new Set(index.blocks.filter((block) => block.agentSlug && agents.has(block.agentSlug)).map((block) => block.id));
+    let frontier = [announced];
+    const seen = new Set(frontier);
+    while (frontier.length > 0) {
+      const here = frontier.filter((id) => runsIt.has(id));
+      if (here.length > 0) return here.length === 1 ? here[0] : undefined;
+      const next: string[] = [];
+      for (const id of frontier) {
+        for (const target of forwardOut.get(id) ?? []) {
+          if (seen.has(target)) continue;
+          seen.add(target);
+          next.push(target);
+        }
+      }
+      frontier = next;
+    }
+    return undefined;
+  };
   /** The Approval Gates: a person decides there, and nothing else settles one. */
   const gates = new Set(workflow.nodes.filter((node) => node.type === "approval").map((node) => node.id));
 
   const isOpen = (id: string) => blocks[id]?.state === "running" || blocks[id]?.state === "needsYou";
-  const settled = (d: { background: boolean; returned: boolean; delegateEnded: boolean }) =>
-    d.background ? d.delegateEnded : d.returned;
+  /*
+    A subagent sent off on its own is done with a step when its turn ends —
+    or, Codex's long-lived subagents, when it has reported to the session and
+    sits waiting for more (ANT-306): one of those lives the whole run as a
+    single turn, and its turn ending held every step it worked on open.
+  */
+  const settled = (d: { background: boolean; returned: boolean; delegateEnded: boolean; idle?: boolean }) =>
+    d.background ? d.delegateEnded || d.idle === true : d.returned;
   /** Whether a step still has a subagent working for it. */
   const outstanding = (id: string) =>
     [...delegations.values()].some((d) => d.blockId === id && !settled(d));
+
+  /**
+   * A step is under way while others are: each still held open by a subagent
+   * of its own, and not drawn beside it, is an overlap (ANT-300). Only a
+   * subagent's work counts as the other step going on — a step left with
+   * nothing done in it is the session announcing two at once, which says
+   * nothing yet about running them together.
+   */
+  const noteOverlaps = (id: string, at: string, pass: number) => {
+    for (const other of Object.keys(blocks)) {
+      if (other === id || !isOpen(other) || !outstanding(other)) continue;
+      if (parallelSteps.parallel(other, id)) continue;
+      if (overlaps.some((o) => o.step === id && o.pass === pass && o.alongside === other)) continue;
+      overlaps.push({ step: id, alongside: other, at, pass });
+    }
+  };
 
   /** A pass ends: the step's time is added up and its span closed. */
   const finish = (id: string, at: string, state: "done" | "failed" | "unknown" = "done", note?: string) => {
@@ -670,6 +775,7 @@ export function foldLiveSession(
       };
       spans.push({ blockId: id, pass, startedAt: at });
     }
+    noteOverlaps(id, at, pass);
     // Only a move between two steps can be one the plan lacks: the first
     // step came from nowhere the fold can see, a step announced again is not
     // a move at all, and a step started while the last one's subagents are
@@ -690,6 +796,7 @@ export function foldLiveSession(
     }
     announced = id;
     enteredByTag = viaTag;
+    doneReported = false;
     // A subagent already at work for the step is work in it.
     workSinceEntered = continuing;
     askedSinceEntered = false;
@@ -933,6 +1040,28 @@ export function foldLiveSession(
           release(via.blockId, event.at);
         }
       }
+      /*
+        Codex's long-lived subagents (ANT-306) never end a turn between tasks.
+        One reports to the session (send_message to root) and then waits
+        (wait_agent): that is the task handed back, and the step it held is
+        over. Work after that — not more messages or waiting — is the same
+        task going on after all: the step is taken back until it waits again.
+      */
+      if (via && event.cli === "codex" && event.kind === "tool.start") {
+        if (event.toolName === "send_message" && event.to === "root") via.reported = true;
+        else if (event.toolName === "wait_agent") {
+          if (via.reported && !via.idle) {
+            via.idle = true;
+            const open = isOpen(via.blockId);
+            release(via.blockId, event.at);
+            if (open && !isOpen(via.blockId)) via.closedAt = event.at;
+          }
+        } else if (event.toolName !== "send_message" && event.toolName !== "list_agents" && via.idle) {
+          via.idle = false;
+          if (via.closedAt && blocks[via.blockId]?.state === "done") reopen(via.blockId);
+          delete via.closedAt;
+        }
+      }
       if (via && event.kind === "turn.end" && canEnd(event.parentToolUseId ?? "")) {
         if (!via.delegateEnded && !endedByHook.has(event.parentToolUseId ?? "")) {
           hooksOwed += 1;
@@ -951,6 +1080,31 @@ export function foldLiveSession(
         release(via.blockId, event.at);
       }
       continue;
+    }
+
+    /*
+      The session giving one of Codex's long-lived subagents its next task
+      (ANT-306). The subagent now works for the step the session is on, and
+      the step it worked for before is over: it was held open for as long as
+      the subagent lived, which is the whole run, while the work it was given
+      for had long been reported.
+    */
+    if (event.cli === "codex" && event.kind === "tool.start" && event.toolName === "followup_task" && event.to) {
+      const name = event.to;
+      const call = [...delegations.entries()].reverse().find(([, d]) => d.name === name)?.[0];
+      const d = call ? delegations.get(call) : undefined;
+      if (call && d && announced && blocks[announced]) {
+        const from = d.blockId;
+        d.blockId = announced;
+        delegatedFrom.set(call, announced);
+        d.background = true;
+        d.delegateEnded = false;
+        d.idle = false;
+        d.reported = false;
+        delete d.closedAt;
+        handedBack.delete(call);
+        if (from !== announced) release(from, event.at);
+      }
     }
 
     // The session's own work. It is what tells a step left with nothing done
@@ -980,7 +1134,10 @@ export function foldLiveSession(
     // Only a step line moves the graph. A tag and a subagent's work say which
     // step something belongs to; they are not the agent saying where it is.
     if (event.kind === "step.marker" && mapping.confidence === "exact" && mapping.blockId) {
-      if (mapping.blockId === announced && !enteredByTag) {
+      // The harness reporting, after its done, the step it finished on: the
+      // work was not over after all, and this is the step's next pass (ANT-303).
+      const reportedAgain = doneReported && event.channel === "anthill:report";
+      if (mapping.blockId === announced && !enteredByTag && !reportedAgain) {
         // The step the session is already on, said again — a Stop hook reads
         // the same line out of the last message long after the command that
         // printed it. Coming back to a step means coming from another one;
@@ -1025,6 +1182,9 @@ export function foldLiveSession(
       // The agent it runs, when exactly one step has that agent (ANT-217).
       const named = stepForAgent(index, event.agentName) ?? stepForAgent(index, event.detail, true);
       const late = announcedAsDispatched.get(event.toolUseId);
+      // The nearest step on whose agent the spawn is named after: Codex
+      // starts a step's subagent before it reports the step (ANT-307).
+      const near = !event.stepTag && !own && !named && !late ? nearestFor(event.agentName) : undefined;
       const target =
         event.stepTag && blocks[event.stepTag]
           ? event.stepTag
@@ -1034,7 +1194,9 @@ export function foldLiveSession(
               ? named
               : late && blocks[late]
                 ? late
-                : announced;
+                : near && blocks[near]
+                  ? near
+                  : announced;
       if (target && blocks[target]) {
         // The dispatch card belongs where its subagent's work goes.
         const card = attributed[attributed.length - 1];
@@ -1044,6 +1206,8 @@ export function foldLiveSession(
               ? { blockId: target, confidence: "likely", how: "the agent this subagent runs belongs to this step" }
               : target === late && !event.stepTag && !own
                 ? { blockId: target, confidence: "likely", how: "the session announced this step as it started this subagent" }
+                : target === near && near !== announced
+                  ? { blockId: target, confidence: "likely", how: "the next step of the agent this subagent is named after" }
                 : { blockId: target, confidence: "exact", how: "a subagent started for this step" };
         }
         delegations.set(event.toolUseId, {
@@ -1052,12 +1216,17 @@ export function foldLiveSession(
           sentOff: event.background === true,
           returned: false,
           delegateEnded: false,
+          ...(event.agentName ? { name: codexAgent(event.agentName) } : {}),
         });
         delegatedFrom.set(event.toolUseId, target);
         // A new subagent for the step: the one cut off before is not its story.
         cutOffFor.delete(target);
         // A step announced in a batch, now started: a fan-out, not a move away.
-        pendingClose.delete(target);
+        // Its subagent is what makes it run beside the step announced after
+        // it, which may be one the workflow runs only once it is done.
+        if (pendingClose.delete(target) && announced && announced !== target && isOpen(announced)) {
+          noteOverlaps(announced, event.at, blocks[announced].passes);
+        }
         // A step left a moment before its subagent was started was not
         // finished: the same pass goes on. But once the session has worked in
         // the step it moved to, a subagent for a finished step is the session
@@ -1108,6 +1277,9 @@ export function foldLiveSession(
     // the session ending does not prove every branch of the workflow ran.
     const completion = completionOf(event);
     if (completion) {
+      // A turn record after the harness's done is the same ending told again;
+      // the harness's word is the stronger one and stays.
+      if (event.channel === "anthill:report") doneReported = true;
       finishedAt = event.at;
       for (const id of [...pendingClose.keys()]) closePending(id);
       for (const id of Object.keys(blocks)) finish(id, event.at);
@@ -1136,7 +1308,22 @@ export function foldLiveSession(
 
     if (event.kind === "notification" && announced) askedSinceEntered = true;
 
-    if (finishedAt && announced && blocks[announced]?.state === "done") {
+    if (
+      finishedAt &&
+      announced &&
+      blocks[announced]?.state === "done" &&
+      // The harness reporting a step again is how it takes its done back.
+      !(doneReported && event.kind === "step.marker" && event.channel === "anthill:report")
+    ) {
+      /*
+        After the harness's own done, nothing the session does is this run's
+        until the harness reports again (ANT-303). Codex ran `anthill done`,
+        wrote its final record, and the person then gave the same session
+        another job: each of those reopened the last step, and the new job's
+        subagents left it "Unknown" when the run finally settled. A report
+        through the CLI is an `enter`, which clears this.
+      */
+      if (doneReported) continue;
       // After the ending: a turn ending again says nothing new, a real request
       // for a person is still one, and new work is the session going on.
       if (event.kind === "notification") {
@@ -1270,6 +1457,7 @@ export function foldLiveSession(
   // A step left with nothing done, never started after: over as of leaving.
   if (run.state === "completed") for (const id of [...pendingClose.keys()]) closePending(id);
   detours.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  overlaps.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   // Steps a subagent was still holding open when the run settled: the run's
   // word goes for them too, not only for the step the session was last on.
   for (const id of Object.keys(blocks)) {
@@ -1302,6 +1490,7 @@ export function foldLiveSession(
     activeBlockIds,
     spans,
     detours,
+    overlaps,
     events: attributed,
     unmappedCount,
     ...(startedAt ? { startedAt } : {}),

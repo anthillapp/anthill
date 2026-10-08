@@ -36,7 +36,7 @@ export type BlockMapping = {
 
 /** The blocks a run could be on, and the agent names that point at them. */
 export type WorkflowIndex = {
-  blocks: { id: string; name: string; agentSlug?: string; agentName?: string }[];
+  blocks: { id: string; name: string; agentSlug?: string; agentName?: string; agentId?: string }[];
   /** Agent slug -> the blocks that use it. Only a single owner can attribute. */
   byAgent: Map<string, string[]>;
 };
@@ -52,7 +52,7 @@ export function buildWorkflowIndex(workflow: Workflow): WorkflowIndex {
       return {
         id: node.id,
         name: node.name,
-        ...(profile ? { agentSlug: agentSlug(profile), agentName: profile.name } : {}),
+        ...(profile ? { agentSlug: agentSlug(profile), agentName: profile.name, agentId: profile.id } : {}),
       };
     });
 
@@ -62,6 +62,26 @@ export function buildWorkflowIndex(workflow: Workflow): WorkflowIndex {
     byAgent.set(block.agentSlug, [...(byAgent.get(block.agentSlug) ?? []), block.id]);
   }
   return { blocks, byAgent };
+}
+
+/**
+ * The agents a spawn's own name names (ANT-307).
+ *
+ * Codex names a subagent after its agent and what it is for — `quill_wp1`
+ * for the agent Quill, id `quill`, named "Quill Pooled-Score Objective
+ * Architect". The name's first word is read against each agent's id and the
+ * first word of its name. Words shorter than three letters name nothing.
+ */
+export function agentsNamedBy(index: WorkflowIndex, name: string | undefined): Set<string> {
+  const word = name ? normalizeAgent(name).split("-")[0] ?? "" : "";
+  const found = new Set<string>();
+  if (word.length < 3) return found;
+  for (const block of index.blocks) {
+    if (!block.agentSlug) continue;
+    const id = block.agentId ? normalizeAgent(block.agentId) : "";
+    if (id === word || block.agentSlug.split("-")[0] === word) found.add(block.agentSlug);
+  }
+  return found;
 }
 
 /** Loosely comparable form of an agent name, so "Test Runner" matches `test-runner`. */

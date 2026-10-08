@@ -57,9 +57,27 @@ describe("reducing a hook payload", () => {
     });
   });
 
-  it("does not fall back to raw Bash commands when no description is supplied", () => {
-    expect(minimalHookPayload({ tool_name: "Bash", tool_input: { command: "echo personal-data > output.txt" } }))
-      .toEqual({ tool_name: "Bash" });
+  /*
+    ANT-301. Codex writes no description for a Bash call, so every Codex card
+    was a bare "Bash". The command is kept after all: its first line, cut
+    short, with anything shaped like a credential redacted.
+  */
+  it("keeps the first line of a command when no description is supplied, redacted and cut short", () => {
+    expect(minimalHookPayload({ tool_name: "Bash", tool_input: { command: "npm test -- --token=abc123 \nrm -rf /tmp/x" } }))
+      .toEqual({ tool_name: "Bash", tool_input: { command: "npm test -- --token=[redacted] …" } });
+    const long = minimalHookPayload({ tool_name: "Bash", tool_input: { command: `cat ${"a".repeat(300)}` } });
+    expect((long.tool_input as { command: string }).command).toHaveLength(121);
+  });
+
+  it("still prefers a description to the command", () => {
+    expect(minimalHookPayload({ tool_name: "Bash", tool_input: { description: "Run the tests", command: "npm test" } }))
+      .toEqual({ tool_name: "Bash", tool_input: { description: "Run the tests" } });
+  });
+
+  it("keeps the files a patch touches, and nothing of the patch", () => {
+    const patch = "*** Begin Patch\n*** Update File: src/app/main.py\n@@\n-old secret=hunter2\n+new\n*** Add File: docs/notes.md\n+hello\n*** End Patch";
+    expect(minimalHookPayload({ tool_name: "apply_patch", tool_input: { command: patch } }))
+      .toEqual({ tool_name: "apply_patch", tool_input: { description: "app/main.py, docs/notes.md" } });
   });
   it("keeps the identifiers the observer reads", () => {
     const out = minimalHookPayload({

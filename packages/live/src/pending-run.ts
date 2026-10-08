@@ -91,6 +91,16 @@ export type PendingRun = {
   confidence?: Confidence;
   /** When the session last produced evidence, not when Anthill last looked. */
   lastObservedAt?: string;
+  /**
+   * When the harness said the work was finished with `anthill done`, while
+   * that is still its last word on the run (ANT-303).
+   *
+   * Not Anthill's inference from a quiet turn, which work in the session can
+   * take back, but the harness's own report. Only another report through the
+   * CLI takes it back: the session writing its last files after it, or the
+   * person giving the same session another job, says nothing about this run.
+   */
+  doneReportedAt?: string;
   statusMessage?: string;
   /**
    * When Anthill gave up watching.
@@ -480,6 +490,8 @@ function foldEvidence(run: PendingRun, evidence: Evidence): PendingRun {
 
     case "working": {
       if (run.detectedSessionId && run.detectedSessionId !== evidence.sessionId) return run;
+      // The harness said it was done; a call it makes after is not this run.
+      if (run.state === "completed" && run.doneReportedAt) return run;
       // The same rule `activity` has, for the same reason: only work that
       // *started* after the finish disproves it. A call still open from before
       // the session said it was done is a record nothing closed, not work that
@@ -537,6 +549,19 @@ function foldEvidence(run: PendingRun, evidence: Evidence): PendingRun {
       if (run.state === "completed" && evidence.resumes === false) {
         return { ...run, expiresAt: windowFrom(run, evidence.at), lastObservedAt: evidence.at };
       }
+      /*
+        The harness said it was done, and only the harness can take that back
+        (ANT-303). Codex ran `anthill done`, then wrote its final record — an
+        apply_patch sixteen seconds later — and that write turned the finished
+        run back into a live one that no second done would ever settle; the
+        person's next request in the same session kept it Live on its last
+        step for good. Work the harness does not report is not this run's: the
+        prompt asks for a report on every step it works on, so a run that is
+        resumed says so through the CLI, and that report is what revives it.
+      */
+      if (run.state === "completed" && run.doneReportedAt && evidence.channel !== "anthill:report") {
+        return { ...run, expiresAt: windowFrom(run, evidence.at), lastObservedAt: evidence.at };
+      }
       // Work arriving from the session being followed says the session is
       // alive. It does not say it is the right session, so it keeps an
       // ambiguous run fresh without resolving it — only the field narrowing
@@ -548,8 +573,9 @@ function foldEvidence(run: PendingRun, evidence: Evidence): PendingRun {
       // A report is the harness talking to the CLI, not a local session
       // record: the message says what actually happened.
       const viaReport = evidence.channel === "anthill:report";
+      const { doneReportedAt: _done, ...reopened } = run;
       return {
-        ...run,
+        ...reopened,
         ...boundEvidence(run, evidence.channel),
         ...(viaReport ? { evidenceChannel: firstNamedChannel(run, evidence.channel), confidence: run.confidence ?? "strong" as const } : {}),
         state: "detected_live",
@@ -580,6 +606,7 @@ function foldEvidence(run: PendingRun, evidence: Evidence): PendingRun {
         state: "completed",
         expiresAt: windowFrom(run, latest),
         lastObservedAt: latest,
+        ...(evidence.channel === "anthill:report" ? { doneReportedAt: evidence.at } : {}),
         evidenceChannel: evidence.channel,
         statusMessage: evidence.detail ?? "The session recorded that it finished.",
       };

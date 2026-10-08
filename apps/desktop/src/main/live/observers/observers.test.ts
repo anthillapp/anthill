@@ -518,6 +518,52 @@ describe("the Codex observer", () => {
     as the session finishing, it closed the run: "Session finished", the gate
     Done and Present Not reached, with the chat open waiting for an answer.
   */
+  /*
+    ANT-301. Codex's exec tool takes a short program that calls its tools, and
+    every card it made was a bare "exec": the command it ran and the files it
+    patched were in the record, and nothing read them.
+  */
+  it("names what a Codex call runs or patches", async () => {
+    const at = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString();
+    const rows = [
+      { timestamp: at(0), type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx" } },
+      { timestamp: at(1), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: MARKED_PROMPT }] } },
+      { timestamp: at(2), type: "response_item", payload: { type: "custom_tool_call", name: "exec", call_id: "call-run", input: 'const r = await tools.exec_command({cmd:"npm test -- --token=abc123",max_output_tokens:30000});text(r.output);' } },
+      { timestamp: at(3), type: "response_item", payload: { type: "custom_tool_call", name: "exec", call_id: "call-patch", input: 'text(await tools.apply_patch("*** Begin Patch\\n*** Update File: src/app/main.py\\n@@\\n*** End Patch"));' } },
+      { timestamp: at(4), type: "response_item", payload: { type: "function_call", name: "exec_command", call_id: "call-old", arguments: JSON.stringify({ cmd: "git status" }) } },
+    ];
+    const dir = await root();
+    await writeCodex(dir, "sess-cx", rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const { events } = await new CodexObserver(dir).poll(
+      { ...pending("codex"), detectedSessionId: "sess-cx", state: "detected_live" as const },
+      new Date().toISOString(),
+    );
+    const detail = (call: string) => events.find((event) => event.kind === "tool.start" && event.toolUseId === call)?.detail;
+    expect(detail("call-run")).toBe("npm test -- --token=[redacted]");
+    expect(detail("call-patch")).toBe("app/main.py");
+    expect(detail("call-old")).toBe("git status");
+  });
+
+  // ANT-306: whom a follow-up or a message is for, which the fold needs to
+  // move a long-lived subagent to its next step.
+  it("records whom a Codex follow-up or message is addressed to", async () => {
+    const at = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString();
+    const rows = [
+      { timestamp: at(0), type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx" } },
+      { timestamp: at(1), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: MARKED_PROMPT }] } },
+      { timestamp: at(2), type: "response_item", payload: { type: "function_call", name: "followup_task", call_id: "call-fu", arguments: JSON.stringify({ target: "sable", message: "gAAAA" }) } },
+      { timestamp: at(3), type: "response_item", payload: { type: "function_call", name: "send_message", call_id: "call-msg", arguments: JSON.stringify({ target: "/root", message: "gAAAA" }) } },
+    ];
+    const dir = await root();
+    await writeCodex(dir, "sess-cx", rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const { events } = await new CodexObserver(dir).poll(
+      { ...pending("codex"), detectedSessionId: "sess-cx", state: "detected_live" as const },
+      new Date().toISOString(),
+    );
+    expect(events.find((event) => event.toolUseId === "call-fu")).toMatchObject({ to: "sable", detail: "to sable" });
+    expect(events.find((event) => event.toolUseId === "call-msg")).toMatchObject({ to: "root", detail: "to the session" });
+  });
+
   describe("a turn that ends at an Approval Gate", () => {
     const at = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString();
     const lines = (rows: unknown[]) => rows.map((row) => JSON.stringify(row)).join("\n") + "\n";

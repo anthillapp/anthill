@@ -112,6 +112,18 @@ describe("the server the plugin launches", () => {
     expect(serverSteps({ configured: true, settingsFile: file, path: "/x/server.js", exists: true }, "/x")).toEqual([]);
   });
 
+  it("brings a checkout's build up to date in the checkout, not through the app (ANT-302)", () => {
+    const steps = serverSteps(
+      { configured: true, settingsFile: file, path: "/Users/me/anthill/apps/mcp/dist/server.js", exists: true, version: "0.8.10", behind: "0.8.11" },
+      "/Users/me/anthill",
+    );
+    expect(steps).toHaveLength(1);
+    expect(steps[0].says).toContain("Updating the Anthill app does not change it");
+    expect(steps[0].command).toBe(
+      "cd /Users/me/anthill && git pull && npm install && npm run build:deps && npm run build --workspace=@anthill/mcp",
+    );
+  });
+
   it("needs nothing when nothing is configured, because the plugin starts the server it carries", () => {
     expect(serverSteps({ configured: false, settingsFile: file }, "/Users/me/anthill")).toEqual([]);
     expect(serverSteps({ configured: false, settingsFile: file }, undefined)).toEqual([]);

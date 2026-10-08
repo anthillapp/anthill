@@ -1425,6 +1425,10 @@ describe("a parallel branch announced again to report its result", () => {
       expect(view.blocks["chk-b"].spentMs).toBe(12_000);
     });
 
+    it("does not call checks the workflow forks into an overlap", () => {
+      expect(foldLiveSession(fork, run(), journal).overlaps).toEqual([]);
+    });
+
     it("draws a check working while its subagent is out", () => {
       const view = foldLiveSession(fork, run(), journal.slice(0, 12));
       expect(view.blocks["chk-a"].state).toBe("running");
@@ -2833,5 +2837,356 @@ describe("an unnamed SubagentStop just after a subagent's call", () => {
     ];
     expect(helperStops(events)(events[events.length - 1])).toBe(false);
     expect(foldLiveSession(workflow, run(), events).blocks.implement.state).toBe("done");
+  });
+});
+
+/*
+  ANT-300, from run ANT-OM3MK6RK. The workflow drew three drafts as one chain;
+  Codex announced the first, sent its subagent off in the background, and
+  announced the next while it was still at work — three blocks of one chain
+  drawn Working at once, with nothing saying the run had left the plan.
+*/
+describe("steps the workflow chains, started side by side", () => {
+  const chain: Workflow = {
+    ...workflow,
+    target: "codex",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "context", type: "agent", name: "Freeze questions", config: { actionKind: "agent-step", task: "c", agentId: "agent-dev" } },
+      { id: "aster-draft", type: "agent", name: "aster independent proposal", config: { actionKind: "design", task: "a", agentId: "agent-dev" } },
+      { id: "mira-draft", type: "agent", name: "mira independent proposal", config: { actionKind: "design", task: "m", agentId: "agent-dev" } },
+      { id: "cairn-draft", type: "agent", name: "cairn independent proposal", config: { actionKind: "design", task: "k", agentId: "agent-dev" } },
+      { id: "review", type: "agent", name: "Mira critiques Aster", config: { actionKind: "verify", task: "r", agentId: "agent-qa" } },
+      { id: "end", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "context" },
+      { id: "e2", source: "context", target: "aster-draft" },
+      { id: "e3", source: "aster-draft", target: "mira-draft" },
+      { id: "e4", source: "mira-draft", target: "cairn-draft" },
+      { id: "e5", source: "cairn-draft", target: "review" },
+      { id: "e6", source: "review", target: "end" },
+    ],
+  };
+  const T = (s: number) => new Date(Date.parse("2026-10-08T04:35:16.000Z") + s * 1000).toISOString();
+  const rollout = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ cli: "codex", source: "rollout", channel: "codex:rollout", ...partial });
+  const report = (blockId: string, s: number) =>
+    event({ cli: "codex", kind: "step.marker", title: "Step announced", blockId, source: "anthill", channel: "anthill:report", at: T(s) });
+  const spawn = (call: string, s: number) => [
+    rollout({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: call, background: true, at: T(s) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: call, background: true, at: T(s + 0.3) }),
+  ];
+  const works = (call: string, name: string, s: number) =>
+    rollout({ kind: "tool.start", title: "exec", toolUseId: `${call}-x${s}`, parentToolUseId: call, author: { kind: "subagent", name }, at: T(s) });
+  const ends = (call: string, name: string, s: number) =>
+    rollout({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: call, author: { kind: "subagent", name }, at: T(s) });
+
+  const journal = [
+    report("context", 0),
+    rollout({ kind: "tool.start", title: "exec", toolUseId: "own", at: T(5) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: "own", at: T(6) }),
+    report("aster-draft", 38),
+    ...spawn("call-aster", 46),
+    works("call-aster", "aster", 51),
+    report("mira-draft", 48),
+    ...spawn("call-mira", 56),
+    works("call-mira", "mira", 61),
+    report("cairn-draft", 58),
+    ...spawn("call-cairn", 66),
+    works("call-cairn", "cairn", 70),
+  ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+
+  it("marks each draft started while the one drawn before it was still at work", () => {
+    const view = foldLiveSession(chain, run({ selectedCli: "codex" }), journal);
+    for (const id of ["aster-draft", "mira-draft", "cairn-draft"]) expect(view.blocks[id].state).toBe("running");
+    expect(view.overlaps).toEqual([
+      { step: "mira-draft", alongside: "aster-draft", at: T(48), pass: 1 },
+      { step: "cairn-draft", alongside: "aster-draft", at: T(58), pass: 1 },
+      { step: "cairn-draft", alongside: "mira-draft", at: T(58), pass: 1 },
+    ]);
+    // Moves along the chain's own connections are no detour.
+    expect(view.detours).toEqual([]);
+  });
+
+  it("marks nothing when each draft's subagent is back before the next is announced", () => {
+    const view = foldLiveSession(chain, run({ selectedCli: "codex" }), [
+      report("context", 0),
+      rollout({ kind: "tool.start", title: "exec", toolUseId: "own", at: T(5) }),
+      rollout({ kind: "tool.end", title: "Tool finished", toolUseId: "own", at: T(6) }),
+      report("aster-draft", 10),
+      ...spawn("call-aster", 11),
+      works("call-aster", "aster", 12),
+      ends("call-aster", "aster", 20),
+      report("mira-draft", 21),
+      ...spawn("call-mira", 22),
+      works("call-mira", "mira", 23),
+      ends("call-mira", "mira", 30),
+    ]);
+    expect(view.overlaps).toEqual([]);
+  });
+
+  it("marks steps announced together once their subagents run them at once", () => {
+    const view = foldLiveSession(chain, run({ selectedCli: "codex" }), [
+      report("context", 0),
+      rollout({ kind: "tool.start", title: "exec", toolUseId: "own", at: T(5) }),
+      rollout({ kind: "tool.end", title: "Tool finished", toolUseId: "own", at: T(6) }),
+      report("aster-draft", 10),
+      report("mira-draft", 10.05),
+      ...spawn("call-aster", 12),
+      rollout({ kind: "message", title: "Message", detail: "Drafting.", stepTag: "aster-draft", parentToolUseId: "call-aster", author: { kind: "subagent", name: "aster" }, at: T(13) }),
+      ...spawn("call-mira", 14),
+      rollout({ kind: "message", title: "Message", detail: "Drafting.", stepTag: "mira-draft", parentToolUseId: "call-mira", author: { kind: "subagent", name: "mira" }, at: T(15) }),
+    ]);
+    expect(view.blocks["aster-draft"].state).toBe("running");
+    expect(view.blocks["mira-draft"].state).toBe("running");
+    expect(view.overlaps).toEqual([expect.objectContaining({ step: "mira-draft", alongside: "aster-draft" })]);
+  });
+});
+
+/*
+  ANT-303, from run ANT-OM3MK6RK. Codex ran `anthill done` on the last step,
+  wrote its final record, ended its turn, and the person gave the same session
+  another job — with subagents of its own. Each of those reopened the last
+  step: Live on "Verify" for good, and "Unknown" once the run settled.
+*/
+describe("work in the session after the harness said it was done", () => {
+  const T = (s: number) => new Date(Date.parse("2026-10-08T04:50:43.000Z") + s * 1000).toISOString();
+  const rollout = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ cli: "codex", source: "rollout", channel: "codex:rollout", ...partial });
+  const report = (blockId: string, s: number) =>
+    event({ cli: "codex", kind: "step.marker", title: "Step announced", blockId, source: "anthill", channel: "anthill:report", at: T(s) });
+  const done = (s: number) =>
+    event({ cli: "codex", kind: "session.end", title: "The harness reported the work as finished", completion: "done", source: "anthill", channel: "anthill:report", at: T(s) });
+  const call = (id: string, s: number) => [
+    rollout({ kind: "tool.start", title: "exec", toolUseId: id, at: T(s) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: id, at: T(s + 0.4) }),
+  ];
+  const journal = [
+    report("implement", 0),
+    ...call("a", 8),
+    report("test", 20),
+    ...call("b", 30),
+    done(36),
+    ...call("c", 52),
+    rollout({ kind: "turn.end", title: "Codex finished the turn", at: T(59) }),
+    event({ cli: "codex", kind: "prompt.submit", title: "A prompt was submitted", source: "hook", channel: "codex:hook", at: T(192) }),
+    ...call("d", 197),
+    rollout({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "spawn", background: true, at: T(210) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: "spawn", background: true, at: T(210.3) }),
+  ];
+
+  it("keeps the last step done, live or settled", () => {
+    for (const state of ["detected_live", "completed"] as const) {
+      const view = foldLiveSession(workflow, run({ state }), journal);
+      expect(view.blocks.test.state).toBe("done");
+      expect(view.activeBlockIds).toEqual([]);
+      expect(view.endedAt).toBe(T(59));
+    }
+  });
+
+  it("reopens a step the harness reports again", () => {
+    const view = foldLiveSession(workflow, run(), [...journal, report("test", 240), ...call("e", 245)]);
+    expect(view.blocks.test.state).toBe("running");
+    expect(view.blocks.test.passes).toBe(2);
+  });
+});
+
+/*
+  ANT-306, shaped like run ANT-LES4RGQD. Codex's subagents live the whole run
+  as one turn: each reports to the session (send_message to root), waits
+  (wait_agent), and is given its next task with followup_task. Its turn never
+  ended between tasks, so the drafts stayed Working for as long as the
+  subagents lived, beside the join and reviews already under way.
+*/
+describe("Codex's long-lived subagents", () => {
+  const council: Workflow = {
+    ...workflow,
+    target: "codex",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "context", type: "agent", name: "Freeze context", config: { actionKind: "agent-step", task: "c", agentId: "agent-dev" } },
+      { id: "a-draft", type: "agent", name: "Corin draft", config: { actionKind: "design", task: "a", agentId: "agent-dev" } },
+      { id: "b-draft", type: "agent", name: "Sable draft", config: { actionKind: "design", task: "b", agentId: "agent-dev" } },
+      { id: "join", type: "agent", name: "Accept drafts", config: { actionKind: "verify", task: "j", agentId: "agent-qa" } },
+      { id: "a-review", type: "agent", name: "Corin critiques Sable", config: { actionKind: "verify", task: "ar", agentId: "agent-qa" } },
+      { id: "b-review", type: "agent", name: "Sable critiques Corin", config: { actionKind: "verify", task: "br", agentId: "agent-qa" } },
+      { id: "end", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "context" },
+      { id: "e2", source: "context", target: "a-draft" },
+      { id: "e3", source: "context", target: "b-draft" },
+      { id: "e4", source: "a-draft", target: "join" },
+      { id: "e5", source: "b-draft", target: "join" },
+      { id: "e6", source: "join", target: "a-review" },
+      { id: "e7", source: "join", target: "b-review" },
+      { id: "e8", source: "a-review", target: "end" },
+      { id: "e9", source: "b-review", target: "end" },
+    ],
+  };
+  const T = (s: number) => new Date(Date.parse("2026-10-08T05:46:49.000Z") + s * 1000).toISOString();
+  const rollout = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ cli: "codex", source: "rollout", channel: "codex:rollout", ...partial });
+  const report = (blockId: string, s: number) =>
+    event({ cli: "codex", kind: "step.marker", title: "Step announced", blockId, source: "anthill", channel: "anthill:report", at: T(s) });
+  const own = (id: string, s: number) => [
+    rollout({ kind: "tool.start", title: "exec", toolName: "exec", toolUseId: id, at: T(s) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: id, at: T(s + 0.3) }),
+  ];
+  const spawn = (call: string, name: string, s: number) => [
+    rollout({ kind: "subagent.start", title: "Delegated to a subagent", toolName: "spawn_agent", toolUseId: call, agentName: name, background: true, at: T(s) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: call, background: true, at: T(s + 0.2) }),
+  ];
+  const sub = (call: string, name: string, toolName: string, s: number, to?: string) =>
+    rollout({ kind: "tool.start", title: toolName, toolName, toolUseId: `${call}-${toolName}-${s}`, parentToolUseId: call, author: { kind: "subagent", name }, ...(to ? { to } : {}), at: T(s) });
+  const followup = (to: string, s: number) =>
+    rollout({ kind: "tool.start", title: "followup_task", toolName: "followup_task", toolUseId: `fu-${to}-${s}`, to, at: T(s) });
+
+  const drafts = [
+    report("context", 0),
+    ...own("ctx", 2),
+    report("a-draft", 10),
+    ...spawn("call-a", "corin", 12),
+    report("b-draft", 14),
+    ...spawn("call-b", "sable", 16),
+    sub("call-a", "corin", "exec", 20),
+    sub("call-b", "sable", "exec", 22),
+    sub("call-a", "corin", "send_message", 200, "root"),
+    sub("call-a", "corin", "wait_agent", 203),
+    sub("call-b", "sable", "send_message", 260, "root"),
+    sub("call-b", "sable", "wait_agent", 262),
+  ];
+  const reviews = [
+    report("join", 300),
+    ...own("join-check", 302),
+    report("a-review", 310),
+    followup("corin", 312),
+    report("b-review", 320),
+    followup("sable", 322),
+    sub("call-a", "corin", "exec", 330),
+    sub("call-b", "sable", "exec", 332),
+  ];
+
+  it("ends a draft when its subagent has reported and waits", () => {
+    const view = foldLiveSession(council, run({ selectedCli: "codex" }), drafts);
+    expect(view.blocks["a-draft"].state).toBe("done");
+    expect(view.spans.find((span) => span.blockId === "a-draft")?.endedAt).toBe(T(203));
+    // The step the session itself is on waits for the session to move on.
+    expect(view.blocks["b-draft"].state).toBe("running");
+    expect(view.activeBlockIds).toEqual(["b-draft"]);
+  });
+
+  it("does not take a report alone, with no wait after it, for the task handed back", () => {
+    const view = foldLiveSession(council, run({ selectedCli: "codex" }), drafts.slice(0, 9));
+    expect(view.blocks["a-draft"].state).toBe("running");
+  });
+
+  it("gives a follow-up's subagent to the step the session is on, and the join was not early", () => {
+    const view = foldLiveSession(council, run({ selectedCli: "codex" }), [...drafts, ...reviews]);
+    expect(view.blocks.join.state).toBe("done");
+    expect(view.blocks["a-review"].state).toBe("running");
+    expect(view.blocks["b-review"].state).toBe("running");
+    expect(view.overlaps).toEqual([]);
+    const work = view.events.find((item) => item.toolUseId === "call-a-exec-330");
+    expect(work?.mapping.blockId).toBe("a-review");
+  });
+
+  it("takes a step back when its subagent works again after waiting, and ends it at the next wait", () => {
+    const more = [...drafts, sub("call-a", "corin", "exec", 230)];
+    expect(foldLiveSession(council, run({ selectedCli: "codex" }), more).blocks["a-draft"].state).toBe("running");
+    const again = foldLiveSession(council, run({ selectedCli: "codex" }), [...more, sub("call-a", "corin", "wait_agent", 240)]);
+    expect(again.blocks["a-draft"].state).toBe("done");
+    expect(again.blocks["a-draft"].passes).toBe(1);
+  });
+
+  it("ends a step a follow-up moves its subagent away from, even before it reported", () => {
+    const view = foldLiveSession(council, run({ selectedCli: "codex" }), [
+      ...drafts.slice(0, 8),
+      report("join", 300),
+      ...own("join-check", 302),
+      report("a-review", 310),
+      followup("corin", 312),
+    ]);
+    expect(view.blocks["a-draft"].state).toBe("done");
+    expect(view.blocks["a-review"].state).toBe("running");
+  });
+});
+
+/*
+  ANT-307, shaped like run ANT-4P5R899J. Codex spawned three authors while
+  the session was still on `context`, and reported their steps only after, in
+  one command. Every spawn went to `context`: it stayed Working, the authors
+  read as started early, and two of them as done in 0.4 s.
+*/
+describe("subagents Codex starts before it reports their steps", () => {
+  const council: Workflow = {
+    ...workflow,
+    target: "codex",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "context", type: "agent", name: "Freeze evidence", config: { actionKind: "agent-step", task: "c", agentId: "editor" } },
+      { id: "author-a", type: "agent", name: "Quill design", config: { actionKind: "design", task: "a", agentId: "quill" } },
+      { id: "author-b", type: "agent", name: "Rowan design", config: { actionKind: "design", task: "b", agentId: "rowan" } },
+      { id: "join", type: "agent", name: "Freeze drafts", config: { actionKind: "verify", task: "j", agentId: "editor" } },
+      { id: "quill-review", type: "agent", name: "Quill critiques Rowan", config: { actionKind: "verify", task: "qr", agentId: "quill" } },
+      { id: "end", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "context" },
+      { id: "e2", source: "context", target: "author-a" },
+      { id: "e3", source: "context", target: "author-b" },
+      { id: "e4", source: "author-a", target: "join" },
+      { id: "e5", source: "author-b", target: "join" },
+      { id: "e6", source: "join", target: "quill-review" },
+      { id: "e7", source: "quill-review", target: "end" },
+    ],
+    metadata: {
+      workflow: {
+        formatVersion: 4,
+        agents: [
+          { id: "editor", name: "Vale Council Editor" },
+          { id: "quill", name: "Quill Pooled-Score Objective Architect" },
+          { id: "rowan", name: "Rowan Reliability Gate Architect" },
+        ],
+      },
+    },
+  };
+  const T = (s: number) => new Date(Date.parse("2026-10-08T06:41:08.000Z") + s * 1000).toISOString();
+  const rollout = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ cli: "codex", source: "rollout", channel: "codex:rollout", ...partial });
+  const report = (blockId: string, s: number) =>
+    event({ cli: "codex", kind: "step.marker", title: "Step announced", blockId, source: "anthill", channel: "anthill:report", at: T(s) });
+  const spawn = (call: string, name: string, s: number) => [
+    rollout({ kind: "subagent.start", title: "Delegated to a subagent", toolName: "spawn_agent", toolUseId: call, agentName: name, background: true, at: T(s) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: call, background: true, at: T(s + 0.2) }),
+  ];
+  const journal = [
+    report("context", 0),
+    rollout({ kind: "tool.start", title: "exec", toolName: "exec", toolUseId: "ctx", at: T(5) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: "ctx", at: T(6) }),
+    ...spawn("call-q", "quill_wp1", 29),
+    ...spawn("call-r", "rowan_gate1", 33),
+    report("author-a", 42.4),
+    report("author-b", 42.8),
+    rollout({ kind: "tool.start", title: "exec", toolName: "exec", toolUseId: "q-1", parentToolUseId: "call-q", author: { kind: "subagent", name: "quill_wp1" }, at: T(50) }),
+  ];
+
+  it("gives each spawn to its agent's nearest step, not the step the session was on", () => {
+    const view = foldLiveSession(council, run({ selectedCli: "codex" }), journal);
+    expect(view.blocks.context.state).toBe("done");
+    expect(view.blocks["author-a"].state).toBe("running");
+    expect(view.blocks["author-b"].state).toBe("running");
+    expect(view.blocks["quill-review"].state).toBe("queued");
+    expect(view.overlaps).toEqual([]);
+    expect(view.events.find((item) => item.toolUseId === "q-1")?.mapping.blockId).toBe("author-a");
+  });
+
+  it("still gives a spawn named after no agent to the step the session is on", () => {
+    const view = foldLiveSession(council, run({ selectedCli: "codex" }), [
+      report("context", 0),
+      ...spawn("call-x", "helper_1", 10),
+    ]);
+    expect(view.events.find((item) => item.kind === "subagent.start")?.mapping.blockId).toBe("context");
   });
 });

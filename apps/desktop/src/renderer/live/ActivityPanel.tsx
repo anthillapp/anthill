@@ -32,6 +32,7 @@ import {
   type FeedFilter,
 } from "./feed.js";
 import { FeedCardView } from "./FeedCard.js";
+import { earlyNote } from "./LiveWorkflowGraph.js";
 import type { BlockUsage } from "./report.js";
 import { RestartRequired } from "./RestartRequired.js";
 
@@ -158,6 +159,27 @@ export function ActivityPanel({
   }, [cards, scope]);
   const filtered = useMemo(() => scoped.filter((card) => matchesFilter(card, filter)), [scoped, filter]);
   const shown = useMemo(() => (sort === "newest" ? [...filtered].reverse() : filtered), [filtered, sort]);
+  /*
+    A step started while one the workflow runs apart from it was still at
+    work, said on the divider that announced it (ANT-300): the latest divider
+    naming the step at or before the moment it became plain.
+  */
+  const earlyNotes = useMemo(() => {
+    const byCard = new Map<number, string[]>();
+    for (const overlap of view.overlaps) {
+      const at = Date.parse(overlap.at);
+      let divider: (typeof cards)[number] | undefined;
+      for (const card of cards) {
+        if (card.kind !== "session" || !card.steps?.includes(overlap.step) || Date.parse(card.at) > at) continue;
+        if (!divider || Date.parse(card.at) >= Date.parse(divider.at)) divider = card;
+      }
+      if (!divider) continue;
+      const alongside = byCard.get(divider.id) ?? [];
+      if (!alongside.includes(overlap.alongside)) alongside.push(overlap.alongside);
+      byCard.set(divider.id, alongside);
+    }
+    return new Map([...byCard].map(([id, alongside]) => [id, earlyNote(workflow, alongside)]));
+  }, [view.overlaps, cards, workflow]);
 
   /**
    * The newest arrival, held as one id rather than a flag on a card.
@@ -326,6 +348,7 @@ export function ActivityPanel({
           const speaker = speakers.get(card.id);
           const block = blockOf(card.blockId);
           const stepNames = card.steps?.map((id) => blockOf(id)?.name ?? id);
+          const note = earlyNotes.get(card.id);
           return (
             <FeedCardView
               key={card.id}
@@ -334,6 +357,7 @@ export function ActivityPanel({
               {...(speaker ? { speaker } : {})}
               {...(block ? { block } : {})}
               {...(stepNames ? { stepNames } : {})}
+              {...(note ? { note } : {})}
               open={openId === card.id}
               onToggle={() => setOpenId((id) => (id === card.id ? undefined : card.id))}
               expanded={moreId === card.id}

@@ -653,6 +653,17 @@ export type PluginServerStatus = {
   path?: string;
   exists?: boolean;
   problem?: string;
+  /**
+   * The version the named server is, as far as its files say: a checkout's
+   * `package.json`, or the line a plugin bundle opens with (ANT-302).
+   */
+  version?: string;
+  /**
+   * The release it is behind — the app's, or a newer installed plugin's —
+   * when it is older than either. Every plugin runs this server, so an old
+   * one is what an agent reports as "Anthill is behind the plugin".
+   */
+  behind?: string;
 };
 
 export type PluginStatus = {

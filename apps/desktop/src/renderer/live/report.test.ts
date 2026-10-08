@@ -30,6 +30,7 @@ const view = (states: Record<string, LiveSessionView["blocks"][string]["state"]>
   activeBlockIds: [],
   spans: [],
   detours: [],
+  overlaps: [],
   events: [],
   unmappedCount: 0,
   startedAt: "2026-08-29T10:00:00.000Z",

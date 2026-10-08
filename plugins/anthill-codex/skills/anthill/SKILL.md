@@ -239,6 +239,10 @@ the document. Submit a complete format-version 5 workflow with:
 - agent profiles referenced by id, with roles matching the actual work;
 - concrete tasks, expected outputs, and success criteria on agent blocks;
 - explicit connections, conditions, fallback branches, and bounded loops;
+- work you will run at the same time (subagents working at once, such as
+  independent drafts or parallel reviews) as branches of one fork: several
+  plain connections out of one block, meeting again at the block that needs
+  all of them. A chain means one after the other, and Anthill reads it so;
 - only steps this Codex task can honestly report while doing the work.
 
 Do not create decorative agents or pretend subagents will be used unless the
@@ -342,7 +346,11 @@ enter it. Anthill knows only what you report: a block worked on without a report
 is drawn as never reached, and the jump past it as the work moving on by itself.
 Starting a block while another is still open (a background review, a subagent
 not back yet) is entering it, so report it then; returning to a block you left
-is entering it again. Before reporting the next block, check that each block
+is entering it again. Start a block while another is still open only where the
+bound revision has them on different branches of one fork. Where it chains
+them, wait for the earlier one to finish before entering the next: the bound
+revision does not change under a running task, and Anthill marks a chained
+block started early as the run leaving the plan. Before reporting the next block, check that each block
 you worked on since the last report had its own, and report a missed one before
 moving on rather than jump past it. Report only blocks you worked on; say in the
 chat why one was not needed. Report each block with its own command,

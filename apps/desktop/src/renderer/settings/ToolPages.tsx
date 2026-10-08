@@ -608,19 +608,29 @@ export function PluginsPage() {
             <SettingRow
               label="MCP server"
               note={
-                <span className="mono">
-                  {status.server.configured
-                    ? status.server.path ?? status.server.settingsFile
-                    : "the plugin's own copy"}
-                </span>
+                <>
+                  <span className="mono">
+                    {status.server.configured
+                      ? status.server.path ?? status.server.settingsFile
+                      : "the plugin's own copy"}
+                  </span>
+                  {/* What the server is, and what it is behind: every plugin
+                      runs it, so an old one is what an agent reports as
+                      "Anthill is behind the plugin" (ANT-302). */}
+                  {status.server.configured && status.server.version
+                    ? ` · version ${status.server.version}${status.server.behind ? ` · ${status.server.behind} expected` : ""}`
+                    : ""}
+                </>
               }
             >
-              <StateChip tone={!status.server.configured || status.server.exists ? "on" : "quiet"}>
+              <StateChip tone={!status.server.configured || (status.server.exists && !status.server.behind) ? "on" : "quiet"}>
                 {!status.server.configured
                   ? "Built into the plugin"
-                  : status.server.exists
-                    ? "Found"
-                    : "Not found"}
+                  : status.server.behind
+                    ? "Behind"
+                    : status.server.exists
+                      ? "Found"
+                      : "Not found"}
               </StateChip>
             </SettingRow>
             {status.server.problem ? <p className="harness-warning">{status.server.problem}</p> : null}

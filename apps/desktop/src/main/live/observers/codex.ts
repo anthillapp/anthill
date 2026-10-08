@@ -25,6 +25,7 @@ import { join } from "node:path";
 import {
   TIMING,
   boundSessionId,
+  codexAgent,
   messageExcerpt,
   parseDoneMarker,
   parseStepMarkers,
@@ -44,6 +45,7 @@ import {
   type ReportedProgress,
 } from "./types.js";
 import { newCursor, readNewLines, type TailCursor } from "./tail.js";
+import { codexExecTarget, commandLine, filesLabel, patchFiles } from "../tool-target.js";
 
 const CHANNEL = "codex:rollout";
 
@@ -491,6 +493,26 @@ function messageText(payload: Record<string, unknown>): string {
 }
 
 /**
+ * What a Codex call acts on, for its card (ANT-301): the command it runs, the
+ * files its patch touches, or — for the \`exec\` tool, whose input is a short
+ * program — what that program calls. Nothing for a call that names neither.
+ */
+function codexCallTarget(name: string, input: unknown): string | undefined {
+  const raw = typeof input === "string" ? input : undefined;
+  if (name === "exec") return raw ? codexExecTarget(raw) : undefined;
+  if (name === "apply_patch") return raw ? filesLabel(patchFiles(raw)) : undefined;
+  const args = parseArguments(input);
+  if (name === "exec_command" && typeof args?.cmd === "string") return commandLine(args.cmd);
+  if (name === "shell" && Array.isArray(args?.command)) {
+    const words = args.command.filter((word): word is string => typeof word === "string");
+    // \`["bash", "-lc", "<script>"]\` is the script; anything else is the words.
+    const script = words.length === 3 && /^(?:ba|z)?sh$/.test(words[0] ?? "") && words[1]?.startsWith("-") ? words[2] : undefined;
+    return commandLine(script ?? words.join(" "));
+  }
+  return undefined;
+}
+
+/**
  * The text a tool call gave back. `function_call_output` carries a string;
  * `custom_tool_call_output` carries an array of `{ type, text }` parts, and
  * the exec tool nests the command's own stdout as JSON inside one of them.
@@ -763,12 +785,22 @@ function scan(
           });
           continue;
         }
+        const target = codexCallTarget(name, payload.arguments ?? payload.input);
+        // Whom a message or a follow-up goes to: how the fold tells a
+        // long-lived subagent's next task from its report (ANT-306).
+        const addressed =
+          name === "send_message" || name === "followup_task"
+            ? str(parseArguments(payload.arguments ?? payload.input)?.target)
+            : undefined;
+        const to = addressed ? codexAgent(addressed) : undefined;
         events.push({
           ...base,
           kind: "tool.start",
           title: name,
           toolName: name,
           ...(call ? { toolUseId: call } : {}),
+          ...(target ? { detail: target } : to ? { detail: to === "root" ? "to the session" : `to ${to}` } : {}),
+          ...(to ? { to } : {}),
         });
       }
       if (payload.type === "function_call_output" || payload.type === "custom_tool_call_output") {

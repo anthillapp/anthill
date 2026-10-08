@@ -395,15 +395,47 @@ const STATUS: Record<CheckedPluginHarness, (home: string, appVersion?: string) =
   vscode: (home, appVersion) => vscodeStatus(home, undefined, appVersion),
 };
 
+/**
+ * The version a server file is, from its own files (ANT-302).
+ *
+ * A checkout's build (`apps/mcp/dist/server.js`) reads its version from the
+ * package beside it at run time, so that is what it will report; a plugin
+ * bundle opens with "// Anthill MCP server X.Y.Z". Anything else says nothing.
+ */
+export async function serverVersion(path: string): Promise<string | undefined> {
+  const packaged = await readJson(resolve(path, "..", "..", "package.json"));
+  if (isRecord(packaged) && packaged.name === "@anthill/mcp" && typeof packaged.version === "string") return packaged.version;
+  try {
+    const head = (await readFile(path, "utf8")).slice(0, 200);
+    return /^\/\/ Anthill MCP server ([^\s,]+)/.exec(head)?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
 /** Whether the launcher both plugins ship can find the server it launches. */
-export async function serverStatus(home: string): Promise<PluginServerStatus> {
+export async function serverStatus(home: string, expected: readonly (string | undefined)[] = []): Promise<PluginServerStatus> {
   const file = join(home, ".anthill", "plugin.json");
   if (!existsSync(file)) return { configured: false, settingsFile: file };
   const value = await readJson(file);
   const path = isRecord(value) && typeof value.server === "string" ? value.server.trim() : "";
   if (!path) return { configured: false, settingsFile: file, problem: `${file} does not name a server.` };
   if (!isAbsolute(path)) return { configured: true, settingsFile: file, path, exists: false, problem: "The path is relative; it has to be absolute." };
-  return { configured: true, settingsFile: file, path, exists: existsSync(path) };
+  if (!existsSync(path)) return { configured: true, settingsFile: file, path, exists: false };
+  const version = await serverVersion(path);
+  // The newest release it should be at: the app's, or a plugin's newer still.
+  const newest = expected
+    .filter((candidate): candidate is string => Boolean(candidate))
+    .reduce<string | undefined>((best, candidate) => (!best || olderRelease(best, candidate) ? candidate : best), undefined);
+  const behind = version && newest && olderRelease(version, newest) ? releaseOf(newest) : undefined;
+  return {
+    configured: true,
+    settingsFile: file,
+    path,
+    exists: true,
+    ...(version ? { version } : {}),
+    ...(behind ? { behind } : {}),
+  };
 }
 
 export type PluginStatusOptions = {
@@ -418,10 +450,10 @@ export type PluginStatusOptions = {
 };
 
 export async function pluginStatus(home: string = homedir(), options: PluginStatusOptions = {}): Promise<PluginStatus> {
-  const [harnesses, server] = await Promise.all([
-    Promise.all(CHECKED_PLUGIN_HARNESSES.map((harness) => STATUS[harness](home, options.appVersion))),
-    serverStatus(home),
-  ]);
+  const harnesses = await Promise.all(CHECKED_PLUGIN_HARNESSES.map((harness) => STATUS[harness](home, options.appVersion)));
+  // Every plugin runs the server plugin.json names, so it should be at least
+  // as new as the app and each plugin it serves (ANT-302).
+  const server = await serverStatus(home, [options.appVersion, ...harnesses.map((harness) => harness.installedVersion)]);
   return {
     harnesses: harnesses.map((harness) => {
       const autoUpdate = options.updates?.[harness.harness];

@@ -160,6 +160,87 @@ function isClosing(event: AttributedEvent): boolean {
 }
 
 /**
+ * Codex's hook records of the tools an `exec` program called, tied to that
+ * `exec` call (ANT-305).
+ *
+ * Codex records a command twice: the rollout's `exec` call, whose input is a
+ * short program, and a PreToolUse/PostToolUse pair in the hook log for each
+ * tool that program calls — `Bash`, `apply_patch`, an MCP tool. The two carry
+ * different ids (`call_…` against `exec-…`), so pairing by id never joined
+ * them, and every command was drawn as two cards, one of them unlabelled.
+ * What ties them is time: the hook's record falls inside the `exec` call it
+ * belongs to. The journal is not strictly in time order — each channel is read
+ * on its own poll — so this is worked out over the whole of it first.
+ */
+export function codexHookCompanions(events: readonly AttributedEvent[]): {
+  /** Hook event seq → the `exec` call it belongs to. */
+  callOf: Map<number, string>;
+  /** `exec` call → what its hook records name, for a card that names nothing. */
+  detailOf: Map<string, string>;
+  /** The `exec` calls any hook record was tied to. */
+  withHooks: Set<string>;
+} {
+  const callOf = new Map<number, string>();
+  const withHooks = new Set<string>();
+  const detailOf = new Map<string, string>();
+  type Span = { call: string; from: number; to?: number };
+  const spans = new Map<string, Span[]>();
+  const byCall = new Map<string, Span>();
+  for (const event of events) {
+    if (event.cli !== "codex" || event.channel !== "codex:rollout" || !event.toolUseId) continue;
+    const at = Date.parse(event.at);
+    if (Number.isNaN(at)) continue;
+    if (event.kind === "tool.start" && event.toolName === "exec") {
+      const span: Span = { call: event.toolUseId, from: at };
+      byCall.set(event.toolUseId, span);
+      const session = event.sessionId ?? "";
+      spans.set(session, [...(spans.get(session) ?? []), span]);
+    } else if (event.kind === "tool.end") {
+      const span = byCall.get(event.toolUseId);
+      if (span) span.to = at;
+    }
+  }
+  for (const list of spans.values()) list.sort((a, b) => a.from - b.from);
+
+  // A little slack either side: the program's own record is written as it
+  // starts, its tools' hooks a moment later, and the clocks are not one.
+  const BEFORE = 500;
+  const AFTER = 1_000;
+  const within = (session: string, at: number): string | undefined => {
+    const list = spans.get(session) ?? [];
+    let found: string | undefined;
+    for (let index = 0; index < list.length; index += 1) {
+      const span = list[index] as Span;
+      const until = span.to ?? list[index + 1]?.from ?? Number.POSITIVE_INFINITY;
+      if (at >= span.from - BEFORE && at <= until + AFTER) found = span.call;
+    }
+    return found;
+  };
+
+  const startedIn = new Map<string, string>();
+  const named = new Map<string, string[]>();
+  for (const event of events) {
+    if (event.cli !== "codex" || event.channel !== "codex:hook") continue;
+    if (event.kind !== "tool.start" && event.kind !== "tool.end") continue;
+    const at = Date.parse(event.at);
+    const call =
+      (event.kind === "tool.end" && event.toolUseId ? startedIn.get(event.toolUseId) : undefined) ??
+      (Number.isNaN(at) ? undefined : within(event.sessionId ?? "", at));
+    if (!call) continue;
+    callOf.set(event.seq, call);
+    withHooks.add(call);
+    if (event.kind === "tool.start") {
+      if (event.toolUseId) startedIn.set(event.toolUseId, call);
+      if (event.detail) named.set(call, [...(named.get(call) ?? []), event.detail]);
+    }
+  }
+  for (const [call, details] of named) {
+    detailOf.set(call, details.length > 1 ? `${details[0]} (+${details.length - 1} more)` : (details[0] as string));
+  }
+  return { callOf, detailOf, withHooks };
+}
+
+/**
  * Fold the journal into cards, oldest first.
  *
  * `settled` says whether the session is over. It only changes what an
@@ -187,6 +268,10 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
   const explicitHandback = handsBack(events);
   const handedBack = new Set<string>();
   const ends = (call: string) => !explicitHandback || handedBack.has(call);
+  /** Codex hook records that are an `exec` call's own tools (ANT-305). */
+  const companions = codexHookCompanions(events);
+  /** Codex `exec` cards by their call, for those records to fold into. */
+  const execCards = new Map<string, FeedCard>();
 
   /** Another channel's record of this card's action, folded in rather than drawn twice. */
   const fold = (card: FeedCard, event: AttributedEvent) => {
@@ -209,6 +294,19 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
     if (event.kind === "usage") continue;
     const kind = kindOf(event);
     const pairKey = event.toolUseId;
+
+    // One of the tools a Codex `exec` program called: part of that call's
+    // card, not a card of its own (ANT-305). Read before the card exists, it
+    // is accounted for when the card is made.
+    const execCall = companions.callOf.get(event.seq);
+    if (execCall !== undefined) {
+      const card = execCards.get(execCall);
+      if (card) {
+        fold(card, event);
+        if (!card.detail && companions.detailOf.has(execCall)) card.detail = companions.detailOf.get(execCall);
+      }
+      continue;
+    }
 
     /*
       Steps announced one after another with nothing done between them: one
@@ -431,6 +529,14 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
     };
 
     if (event.background) card.background = true;
+    if (event.cli === "codex" && event.channel === "codex:rollout" && event.kind === "tool.start" && event.toolName === "exec" && pairKey) {
+      execCards.set(pairKey, card);
+      // What the hook saw it run, when the program's own text names nothing:
+      // the command was built as it ran (ANT-305).
+      const seen = companions.detailOf.get(pairKey);
+      if (!card.detail && seen) card.detail = seen;
+      if (companions.withHooks.has(pairKey) && !card.channels.includes("codex:hook")) card.channels.push("codex:hook");
+    }
     if (event.kind === "step.marker" && event.blockId) {
       card.steps = [event.blockId];
       burst = { card, at: Date.parse(event.at) };

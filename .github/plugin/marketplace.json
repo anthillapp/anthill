@@ -10,7 +10,7 @@
     {
       "name": "anthill",
       "description": "Hand the work of this chat to Anthill as a reviewable workflow, then report progress against the revision the user approved.",
-      "version": "0.8.10",
+      "version": "0.8.11",
       "source": "./plugins/anthill-vscode",
       "category": "productivity",
       "homepage": "https://github.com/anthillapp/anthill",

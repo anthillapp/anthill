@@ -808,3 +808,60 @@ describe("steps announced back to back (ANT-296)", () => {
     expect(cards.filter((card) => card.title === "Step announced")).toHaveLength(2);
   });
 });
+
+/*
+  ANT-305, shaped like run ANT-0M5JNK3W. Codex records each command twice: the
+  rollout's `exec` call (`call_…`) and the hook log's PreToolUse/PostToolUse
+  for the tool its program called (`exec-…`). They were two cards, one of them
+  a bare "Bash".
+*/
+describe("a Codex command recorded by the rollout and by the hooks", () => {
+  const T = (ms: number) => new Date(Date.parse("2026-10-08T05:58:00.000Z") + ms).toISOString();
+  const rollout = (partial: Partial<AttributedEvent> & Pick<AttributedEvent, "kind">) =>
+    event({ cli: "codex", source: "rollout", channel: "codex:rollout", ...partial });
+  const hook = (partial: Partial<AttributedEvent> & Pick<AttributedEvent, "kind">) =>
+    event({ cli: "codex", source: "hook", channel: "codex:hook", ...partial });
+
+  it("is one card, with both channels in its evidence", () => {
+    const cards = buildFeed(
+      [
+        rollout({ kind: "tool.start", toolName: "exec", title: "exec", toolUseId: "call_a", detail: "head -16 LICENSE", at: T(0) }),
+        rollout({ kind: "tool.end", title: "Tool finished", toolUseId: "call_a", at: T(320) }),
+        // The hooks are read on their own poll, after the rollout's records.
+        hook({ kind: "tool.start", toolName: "Bash", title: "Bash", toolUseId: "exec-1", at: T(120) }),
+        hook({ kind: "tool.end", toolName: "Bash", title: "Bash", toolUseId: "exec-1", ok: true, at: T(300) }),
+      ],
+      false,
+    );
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ title: "exec", detail: "head -16 LICENSE", state: "done" });
+    expect(cards[0].channels).toEqual(["codex:rollout", "codex:hook"]);
+  });
+
+  it("takes the command the hook saw when the program built it as it ran", () => {
+    const cards = buildFeed(
+      [
+        hook({ kind: "tool.start", toolName: "Bash", title: "Bash", toolUseId: "exec-2", detail: "cat > DESIGN.md <<'EOF' …", at: T(5_150) }),
+        rollout({ kind: "tool.start", toolName: "exec", title: "exec", toolUseId: "call_b", at: T(5_000) }),
+        hook({ kind: "tool.end", toolName: "Bash", title: "Bash", toolUseId: "exec-2", ok: true, at: T(5_250) }),
+        rollout({ kind: "tool.end", title: "Tool finished", toolUseId: "call_b", at: T(5_300) }),
+      ],
+      false,
+    );
+    expect(cards).toHaveLength(1);
+    expect(cards[0].detail).toBe("cat > DESIGN.md <<'EOF' …");
+  });
+
+  it("keeps a hook record outside any exec call, and other harnesses' hooks, as they were", () => {
+    const cards = buildFeed(
+      [
+        rollout({ kind: "tool.start", toolName: "exec", title: "exec", toolUseId: "call_c", at: T(10_000) }),
+        rollout({ kind: "tool.end", title: "Tool finished", toolUseId: "call_c", at: T(10_300) }),
+        hook({ kind: "tool.start", toolName: "Bash", title: "Bash", toolUseId: "exec-3", at: T(20_000) }),
+        event({ kind: "tool.start", toolName: "Bash", title: "Bash", toolUseId: "toolu_1", source: "hook", channel: "claude-code:hook", at: T(10_100) }),
+      ],
+      false,
+    );
+    expect(cards.map((card) => card.toolUseId)).toEqual(["call_c", "exec-3", "toolu_1"]);
+  });
+});

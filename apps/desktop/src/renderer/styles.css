@@ -5571,7 +5571,8 @@ button.state-chip {
   animation: live-walk 1.6s linear infinite;
 }
 
-.live-detour-chip text {
+.live-detour-chip text,
+.live-early-chip text {
   font-size: 11px;
   font-weight: 500;
 }
@@ -8468,6 +8469,19 @@ button.presence-chip {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+}
+
+/* A step started beside one the workflow runs apart from it (ANT-300), in the
+   colour the canvas gives what the agent did that the plan does not show. */
+.feed-divider-note {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  border: 1px dotted #7f77dd;
+  border-radius: 8px;
+  background: #eeedfe;
+  color: #3c3489;
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 .feed-evidence-toggle {

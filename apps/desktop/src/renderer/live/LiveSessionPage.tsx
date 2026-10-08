@@ -673,7 +673,7 @@ function LiveSessionContent({
                   : RUN_STATE[state].label}
               </span>
             ))}
-            <span className="live-legend-item" title="The agent announced a step the workflow has no connection to from where it was.">
+            <span className="live-legend-item" title="The agent announced a step the workflow has no connection to from where it was, or started one while a step the workflow runs before or after it was still working.">
               <i className="live-swatch live-swatch-detour" />
               Unplanned move
             </span>

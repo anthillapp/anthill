@@ -397,6 +397,25 @@ function trailLabel(detour: Detour, backwards: boolean): string {
   return `${backwards ? "↩ went back on its own" : "↷ moved on on its own"} · ${clock}`;
 }
 
+/** What a step started early is told by: which steps were still at work, and that the plan runs them apart. */
+export function earlyNote(workflow: Workflow, alongside: readonly string[]): string {
+  const names = alongside.map((id) => workflow.nodes.find((node) => node.id === id)?.name ?? id);
+  const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
+  return `Started while ${list} ${names.length > 1 ? "were" : "was"} still working – the workflow runs these one after the other, not side by side.`;
+}
+
+/** The steps still at work when each step's current pass began, drawn apart from it (ANT-300). */
+function startedEarly(view: LiveSessionView): Map<string, { alongside: string[]; at: string }> {
+  const out = new Map<string, { alongside: string[]; at: string }>();
+  for (const overlap of view.overlaps) {
+    if (view.blocks[overlap.step]?.passes !== overlap.pass) continue;
+    const seen = out.get(overlap.step);
+    if (seen) seen.alongside.push(overlap.alongside);
+    else out.set(overlap.step, { alongside: [overlap.alongside], at: overlap.at });
+  }
+  return out;
+}
+
 /**
  * Which connection most recently brought control to each step.
  *
@@ -512,10 +531,18 @@ export function LiveWorkflowGraph({
    * it without tracing the line.
    */
   const [hoveredTrail, setHoveredTrail] = useState<number | undefined>(undefined);
+  /** Steps started while one drawn apart from them was still at work (ANT-300). */
+  const early = useMemo(() => startedEarly(view), [view]);
+  /** The step whose "started early" chip is under the pointer. */
+  const [hoveredEarly, setHoveredEarly] = useState<string | undefined>(undefined);
   const trailEnds = useMemo(() => {
     const detour = hoveredTrail === undefined ? undefined : view.detours[hoveredTrail];
-    return new Set(detour ? [detour.from, detour.to] : []);
-  }, [hoveredTrail, view.detours]);
+    const overlap = hoveredEarly === undefined ? undefined : early.get(hoveredEarly);
+    return new Set([
+      ...(detour ? [detour.from, detour.to] : []),
+      ...(overlap && hoveredEarly ? [hoveredEarly, ...overlap.alongside] : []),
+    ]);
+  }, [hoveredTrail, view.detours, hoveredEarly, early]);
   const panFrom = useRef<{ x: number; y: number; origin: Viewport } | null>(null);
   /**
    * Whether the pointer travelled between going down and coming up.
@@ -823,7 +850,7 @@ export function LiveWorkflowGraph({
               if (event.key === "Enter" || event.key === " ") onSelect(selected ? undefined : node.id);
             }}
           >
-            <title>{`${node.name} – ${label}${block?.note ? `. ${block.note}` : ""}`}</title>
+            <title>{`${node.name} – ${label}${block?.note ? `. ${block.note}` : ""}${early.has(node.id) ? `. ${earlyNote(workflow, early.get(node.id)!.alongside)}` : ""}`}</title>
 
             {/*
               One border, and it is the block's own.
@@ -997,6 +1024,36 @@ export function LiveWorkflowGraph({
                 {label}
               </text>
             </g>
+          </g>
+        );
+      })}
+      {/*
+        Steps started side by side that the workflow runs one after the other
+        (ANT-300). A chip over the block in the trails' colour, since it is the
+        same kind of fact: what the agent did that the plan does not show.
+        Hovering it picks out the steps it ran beside.
+      */}
+      {[...early].map(([id, overlap]) => {
+        const node = workflow.nodes.find((candidate) => candidate.id === id);
+        if (!node) return null;
+        const rect = blockRect(node);
+        const clock = new Date(overlap.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        const label = `⇉ started early · ${clock}`;
+        const chipWidth = label.length * 6.1 + 20;
+        return (
+          <g
+            key={`early-${id}`}
+            className="live-early-chip"
+            data-step={id}
+            transform={`translate(${rect.left + rect.w / 2 - chipWidth / 2}, ${rect.top - 32})`}
+            onMouseEnter={() => setHoveredEarly(id)}
+            onMouseLeave={() => setHoveredEarly(undefined)}
+          >
+            <title>{earlyNote(workflow, overlap.alongside)}</title>
+            <rect width={chipWidth} height={24} rx={12} fill={TRAIL.chipFill} stroke={TRAIL.stroke} strokeWidth={0.8} strokeDasharray="1 3" />
+            <text x={chipWidth / 2} y={16} textAnchor="middle" fill={TRAIL.ink}>
+              {label}
+            </text>
           </g>
         );
       })}

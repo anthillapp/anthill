@@ -1,7 +1,7 @@
 ---
 name: workflow
 description: Use when the user wants the work of this session laid out as a workflow in Anthill — "show this in Anthill", "plan this out in Anthill", "/anthill:workflow design …" — or wants to watch this session do a job as a diagram, "/anthill:workflow watch …" — or wants to run a workflow it already has again, "/anthill:workflow run \"<path>\"". Covers handing a task over as a graph, asking the questions that make it complete, binding a run to the graph the user settled on, running a saved workflow.json again, and reporting progress against it. Not for work that is not going to be done in this session.
-version: 0.8.10
+version: 0.8.11
 user-invocable: true
 argument-hint: "[design|create · display|watch · run] [--dev] [task]"
 ---

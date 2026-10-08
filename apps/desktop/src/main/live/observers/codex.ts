@@ -25,6 +25,7 @@ import { join } from "node:path";
 import {
   TIMING,
   boundSessionId,
+  codexAgent,
   messageExcerpt,
   parseDoneMarker,
   parseStepMarkers,
@@ -785,13 +786,21 @@ function scan(
           continue;
         }
         const target = codexCallTarget(name, payload.arguments ?? payload.input);
+        // Whom a message or a follow-up goes to: how the fold tells a
+        // long-lived subagent's next task from its report (ANT-306).
+        const addressed =
+          name === "send_message" || name === "followup_task"
+            ? str(parseArguments(payload.arguments ?? payload.input)?.target)
+            : undefined;
+        const to = addressed ? codexAgent(addressed) : undefined;
         events.push({
           ...base,
           kind: "tool.start",
           title: name,
           toolName: name,
           ...(call ? { toolUseId: call } : {}),
-          ...(target ? { detail: target } : {}),
+          ...(target ? { detail: target } : to ? { detail: to === "root" ? "to the session" : `to ${to}` } : {}),
+          ...(to ? { to } : {}),
         });
       }
       if (payload.type === "function_call_output" || payload.type === "custom_tool_call_output") {

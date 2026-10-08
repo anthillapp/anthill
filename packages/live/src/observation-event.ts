@@ -126,6 +126,12 @@ export type ObservationEvent = {
   /** The agent or subagent the record named. Not inferred. */
   agentName?: string;
   /**
+   * Whom a message or a follow-up is addressed to, in the CLI's own name for
+   * that agent: Codex's `send_message` and `followup_task` (ANT-306). `root`
+   * is the session itself.
+   */
+  to?: string;
+  /**
    * The CLI's own id for the subagent a record is from or about: Claude
    * Code's `agentId` on every row of a delegate's transcript, and the
    * `agent_id` its SubagentStop hook names. An identifier, never shown.

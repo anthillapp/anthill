@@ -24,6 +24,15 @@ import { inRecordedOrder, projectJournal } from "./channels.js";
 import { completionOf, isAnthillTool, type ObservationEvent } from "./observation-event.js";
 import type { PendingRun } from "./pending-run.js";
 
+/**
+ * Codex's name for one of its agents, as `spawn_agent`, `followup_task` and
+ * `send_message` write it: `sable`, `/root/sable`, or `/root` for the session.
+ */
+export function codexAgent(name: string): string {
+  const bare = name.trim().replace(/^\/?root\/?/, "");
+  return bare === "" ? "root" : bare;
+}
+
 /** How a block is drawn while a session is being observed. */
 export type BlockRunState =
   /** Not reached, as far as anything Anthill can read. */
@@ -476,6 +485,14 @@ export function foldLiveSession(
       sentOff?: boolean;
       returned: boolean;
       delegateEnded: boolean;
+      /** The name the session calls the subagent by: Codex's task name (ANT-306). */
+      name?: string;
+      /** It reported to the session since its task began (ANT-306). */
+      reported?: boolean;
+      /** Reported, and now waiting for the session to say more (ANT-306). */
+      idle?: boolean;
+      /** When waiting closed the step it held, so more work can take that back. */
+      closedAt?: string;
     }
   >();
   /** The same, as attribution reads it: call id to step. */
@@ -572,8 +589,14 @@ export function foldLiveSession(
   const gates = new Set(workflow.nodes.filter((node) => node.type === "approval").map((node) => node.id));
 
   const isOpen = (id: string) => blocks[id]?.state === "running" || blocks[id]?.state === "needsYou";
-  const settled = (d: { background: boolean; returned: boolean; delegateEnded: boolean }) =>
-    d.background ? d.delegateEnded : d.returned;
+  /*
+    A subagent sent off on its own is done with a step when its turn ends —
+    or, Codex's long-lived subagents, when it has reported to the session and
+    sits waiting for more (ANT-306): one of those lives the whole run as a
+    single turn, and its turn ending held every step it worked on open.
+  */
+  const settled = (d: { background: boolean; returned: boolean; delegateEnded: boolean; idle?: boolean }) =>
+    d.background ? d.delegateEnded || d.idle === true : d.returned;
   /** Whether a step still has a subagent working for it. */
   const outstanding = (id: string) =>
     [...delegations.values()].some((d) => d.blockId === id && !settled(d));
@@ -980,6 +1003,28 @@ export function foldLiveSession(
           release(via.blockId, event.at);
         }
       }
+      /*
+        Codex's long-lived subagents (ANT-306) never end a turn between tasks.
+        One reports to the session (send_message to root) and then waits
+        (wait_agent): that is the task handed back, and the step it held is
+        over. Work after that — not more messages or waiting — is the same
+        task going on after all: the step is taken back until it waits again.
+      */
+      if (via && event.cli === "codex" && event.kind === "tool.start") {
+        if (event.toolName === "send_message" && event.to === "root") via.reported = true;
+        else if (event.toolName === "wait_agent") {
+          if (via.reported && !via.idle) {
+            via.idle = true;
+            const open = isOpen(via.blockId);
+            release(via.blockId, event.at);
+            if (open && !isOpen(via.blockId)) via.closedAt = event.at;
+          }
+        } else if (event.toolName !== "send_message" && event.toolName !== "list_agents" && via.idle) {
+          via.idle = false;
+          if (via.closedAt && blocks[via.blockId]?.state === "done") reopen(via.blockId);
+          delete via.closedAt;
+        }
+      }
       if (via && event.kind === "turn.end" && canEnd(event.parentToolUseId ?? "")) {
         if (!via.delegateEnded && !endedByHook.has(event.parentToolUseId ?? "")) {
           hooksOwed += 1;
@@ -998,6 +1043,31 @@ export function foldLiveSession(
         release(via.blockId, event.at);
       }
       continue;
+    }
+
+    /*
+      The session giving one of Codex's long-lived subagents its next task
+      (ANT-306). The subagent now works for the step the session is on, and
+      the step it worked for before is over: it was held open for as long as
+      the subagent lived, which is the whole run, while the work it was given
+      for had long been reported.
+    */
+    if (event.cli === "codex" && event.kind === "tool.start" && event.toolName === "followup_task" && event.to) {
+      const name = event.to;
+      const call = [...delegations.entries()].reverse().find(([, d]) => d.name === name)?.[0];
+      const d = call ? delegations.get(call) : undefined;
+      if (call && d && announced && blocks[announced]) {
+        const from = d.blockId;
+        d.blockId = announced;
+        delegatedFrom.set(call, announced);
+        d.background = true;
+        d.delegateEnded = false;
+        d.idle = false;
+        d.reported = false;
+        delete d.closedAt;
+        handedBack.delete(call);
+        if (from !== announced) release(from, event.at);
+      }
     }
 
     // The session's own work. It is what tells a step left with nothing done
@@ -1102,6 +1172,7 @@ export function foldLiveSession(
           sentOff: event.background === true,
           returned: false,
           delegateEnded: false,
+          ...(event.agentName ? { name: codexAgent(event.agentName) } : {}),
         });
         delegatedFrom.set(event.toolUseId, target);
         // A new subagent for the step: the one cut off before is not its story.

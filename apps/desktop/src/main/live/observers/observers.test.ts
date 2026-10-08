@@ -544,6 +544,26 @@ describe("the Codex observer", () => {
     expect(detail("call-old")).toBe("git status");
   });
 
+  // ANT-306: whom a follow-up or a message is for, which the fold needs to
+  // move a long-lived subagent to its next step.
+  it("records whom a Codex follow-up or message is addressed to", async () => {
+    const at = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString();
+    const rows = [
+      { timestamp: at(0), type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx" } },
+      { timestamp: at(1), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: MARKED_PROMPT }] } },
+      { timestamp: at(2), type: "response_item", payload: { type: "function_call", name: "followup_task", call_id: "call-fu", arguments: JSON.stringify({ target: "sable", message: "gAAAA" }) } },
+      { timestamp: at(3), type: "response_item", payload: { type: "function_call", name: "send_message", call_id: "call-msg", arguments: JSON.stringify({ target: "/root", message: "gAAAA" }) } },
+    ];
+    const dir = await root();
+    await writeCodex(dir, "sess-cx", rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const { events } = await new CodexObserver(dir).poll(
+      { ...pending("codex"), detectedSessionId: "sess-cx", state: "detected_live" as const },
+      new Date().toISOString(),
+    );
+    expect(events.find((event) => event.toolUseId === "call-fu")).toMatchObject({ to: "sable", detail: "to sable" });
+    expect(events.find((event) => event.toolUseId === "call-msg")).toMatchObject({ to: "root", detail: "to the session" });
+  });
+
   describe("a turn that ends at an Approval Gate", () => {
     const at = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString();
     const lines = (rows: unknown[]) => rows.map((row) => JSON.stringify(row)).join("\n") + "\n";

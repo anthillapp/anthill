@@ -151,7 +151,10 @@ export function ActivityPanel({
   const scoped = useMemo(() => {
     if (!scope) return cards.slice(-FEED_LIMIT);
     const ids = new Set(scope.kind === "block" ? [scope.blockId] : scope.blockIds);
-    return cards.filter((card) => card.blockId !== undefined && ids.has(card.blockId)).slice(-FEED_LIMIT);
+    // A divider for steps announced together belongs to each of them (ANT-296).
+    const tied = (card: (typeof cards)[number]) =>
+      (card.blockId !== undefined && ids.has(card.blockId)) || (card.steps?.some((id) => ids.has(id)) ?? false);
+    return cards.filter(tied).slice(-FEED_LIMIT);
   }, [cards, scope]);
   const filtered = useMemo(() => scoped.filter((card) => matchesFilter(card, filter)), [scoped, filter]);
   const shown = useMemo(() => (sort === "newest" ? [...filtered].reverse() : filtered), [filtered, sort]);
@@ -322,6 +325,7 @@ export function ActivityPanel({
         {shown.map((card) => {
           const speaker = speakers.get(card.id);
           const block = blockOf(card.blockId);
+          const stepNames = card.steps?.map((id) => blockOf(id)?.name ?? id);
           return (
             <FeedCardView
               key={card.id}
@@ -329,6 +333,7 @@ export function ActivityPanel({
               cli={cli}
               {...(speaker ? { speaker } : {})}
               {...(block ? { block } : {})}
+              {...(stepNames ? { stepNames } : {})}
               open={openId === card.id}
               onToggle={() => setOpenId((id) => (id === card.id ? undefined : card.id))}
               expanded={moreId === card.id}

@@ -1,7 +1,7 @@
 ---
 name: workflow
 description: Use when the user wants the work of this session laid out as a workflow in Anthill — "show this in Anthill", "plan this out in Anthill", "/anthill:workflow design …" — or wants to watch this session do a job as a diagram, "/anthill:workflow watch …" — or wants to run a workflow it already has again, "/anthill:workflow run \"<path>\"". Covers handing a task over as a graph, asking the questions that make it complete, binding a run to the graph the user settled on, running a saved workflow.json again, and reporting progress against it. Not for work that is not going to be done in this session.
-version: 0.8.10
+version: 0.8.11
 user-invocable: true
 argument-hint: "[design|create · display|watch · run] [--dev] [task]"
 ---
@@ -424,6 +424,11 @@ which tells the user a step was skipped when it was done.
   missed, report it now, before the next, rather than jump past it.
 * **Only blocks you worked on.** A block the work made unnecessary is not
   reported; say in the chat why it was not needed.
+* **One block, one report, at the moment you enter it.** Report each block on
+  its own, immediately before you start it — also one that turns out to need no
+  change, once you go through it. Never report several blocks after the fact in
+  one command, and never repeat reports that already went through: if one
+  failed, run only that one again. Run `done` on its own, at the very end.
 
 This is the whole of what `watch` shows. A watched session that never reports a
 step is a Live Session page with a graph nobody is moving through, which is the

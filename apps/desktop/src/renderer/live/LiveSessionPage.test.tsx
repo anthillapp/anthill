@@ -13,6 +13,7 @@ import type { Workflow } from "@anthill/workflow-schema";
 import type { ObservationEvent, PendingRun } from "@anthill/live";
 
 import { IPC_CONTRACT, LIVE_SESSION_CHANNELS } from "../../shared/ipc.js";
+import { OUTPUT_NOTE } from "./feed.js";
 import { LiveSessionPage } from "./LiveSessionPage.js";
 import { WorkspaceTabs } from "../workflow/WorkspaceTabs.js";
 
@@ -421,7 +422,7 @@ describe("the activity feed", () => {
     expect(screen.getByText("nothing in the record names a step")).toBeTruthy();
   });
 
-  it("opens a tool call to its output, never to evidence rows", async () => {
+  it("shows a tool call as a row that does not open, with the reason in its tooltip", async () => {
     await show([
       event({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "t1", detail: "npm test" }),
       event({ kind: "tool.end", title: "Tool finished", toolUseId: "t1", ok: false, durationMs: 900 }),
@@ -429,9 +430,10 @@ describe("the activity feed", () => {
     expect(screen.queryByRole("button", { name: "Evidence" })).toBeNull();
     const box = document.querySelector(".feed-tool") as HTMLElement;
     expect(box.textContent).toContain("Failed · 900ms");
-    fireEvent.click(box);
-    expect(box.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("No output recorded.")).toBeTruthy();
+    // Anthill never records what a call printed, so there is nothing to open.
+    expect(box.tagName).not.toBe("BUTTON");
+    expect(box.hasAttribute("aria-expanded")).toBe(false);
+    expect(box.getAttribute("title")).toBe(OUTPUT_NOTE.failed);
     fireEvent.click(box);
     expect(screen.queryByText("No output recorded.")).toBeNull();
   });

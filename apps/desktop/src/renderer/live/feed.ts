@@ -89,7 +89,25 @@ export type FeedCard = {
    * is not the subagent finishing — its own turn ending is (ANT-173).
    */
   background?: boolean;
+  /**
+   * The steps a run of back-to-back announcements named, in the order they
+   * were first named, when that run is folded into this one divider (ANT-296).
+   */
+  steps?: string[];
+  /** Whether that run named one of its steps more than once. */
+  repeated?: boolean;
 };
+
+/**
+ * How close two step announcements must be to read as one burst (ANT-296).
+ *
+ * A burst is one command printing several step lines: in ANT-3J482BUO each
+ * report followed the last within 60ms. Nothing else between them is not
+ * enough on its own — where Anthill reads only the reports and none of the
+ * work, every step of a session arrives with nothing between, minutes apart,
+ * and would all have folded into one line.
+ */
+export const STEP_BURST_MS = 1_000;
 
 const AGENT_KINDS = new Set(["subagent.start", "subagent.end"]);
 
@@ -178,6 +196,12 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
     }
   };
 
+  /**
+   * The divider of the step announcements arriving back to back, while nothing
+   * else has happened since the first of them.
+   */
+  let burst: { card: FeedCard; at: number } | undefined;
+
   for (const event of events) {
     // Usage is metadata about things that happened, not a thing that happened.
     // It lives in the journal for the metrics fold; a card per turn saying
@@ -185,6 +209,32 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
     if (event.kind === "usage") continue;
     const kind = kindOf(event);
     const pairKey = event.toolUseId;
+
+    /*
+      Steps announced one after another with nothing done between them: one
+      divider naming them all, not a row each (ANT-296). An agent that reports
+      its steps after the fact in a single command — or twice, the first try
+      having failed — drew a column of identical "Step announced" rows at the
+      same second, which read as Anthill misbehaving. The record is unchanged
+      and so is the graph, which folds the journal itself: this is how the
+      list shows it. A step named again after work in between is a second
+      pass and keeps its own row, and so does one announced a while after
+      the last (STEP_BURST_MS).
+    */
+    if (event.kind === "step.marker" && event.blockId) {
+      const at = Date.parse(event.at);
+      if (burst && at - burst.at < STEP_BURST_MS) {
+        const { card } = burst;
+        if (card.steps?.includes(event.blockId)) card.repeated = true;
+        else card.steps?.push(event.blockId);
+        if ((card.steps?.length ?? 0) > 1) card.title = "Steps announced together";
+        fold(card, event);
+        burst.at = at;
+        continue;
+      }
+    } else {
+      burst = undefined;
+    }
 
     /*
       The agent ended its turn, so the calls it made in that turn are over.
@@ -381,6 +431,10 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
     };
 
     if (event.background) card.background = true;
+    if (event.kind === "step.marker" && event.blockId) {
+      card.steps = [event.blockId];
+      burst = { card, at: Date.parse(event.at) };
+    }
     // A session-level record is a moment, not a span, so it never sits open.
     if (isOpening(event) && pairKey) open.set(pairKey, card);
     if (event.kind === "subagent.start" && pairKey) dispatched.set(pairKey, card);
@@ -495,11 +549,11 @@ export function toolStatus(card: Pick<FeedCard, "state" | "durationMs">): string
 }
 
 /**
- * The line under an opened tool call.
+ * A tool call's tooltip.
  *
  * Anthill keeps that a call ran and how it ended, never what it printed — the
- * output is where a file's contents or a credential would be — so the box
- * says which of those it is rather than "output as recorded" over nothing.
+ * output is where a file's contents or a credential would be — so the card
+ * does not open, and its tooltip says why there is no output to see.
  */
 export const OUTPUT_NOTE: Record<CardState, string> = {
   done: "Anthill records that the call ran and how it ended, not what it printed.",
@@ -554,3 +608,21 @@ export function readDuration(ms: number | undefined): string {
  * that holds at any length.
  */
 export const MESSAGE_CLAMP = 336;
+
+/**
+ * A tool call's input, as the collapsed card shows it: one paragraph.
+ *
+ * A heredoc or a script keeps its lines only when opened; collapsed, its
+ * newlines would spend the three lines the card has on indentation.
+ */
+export function flattenToolInput(input: string): string {
+  return input.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Whether a tool call's input gets Show more: past what three lines of the
+ * card hold, by length or by lines of its own.
+ */
+export function isLongToolInput(input: string): boolean {
+  return flattenToolInput(input).length > 180 || input.split("\n").length > 3;
+}

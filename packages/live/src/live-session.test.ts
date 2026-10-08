@@ -1425,6 +1425,10 @@ describe("a parallel branch announced again to report its result", () => {
       expect(view.blocks["chk-b"].spentMs).toBe(12_000);
     });
 
+    it("does not call checks the workflow forks into an overlap", () => {
+      expect(foldLiveSession(fork, run(), journal).overlaps).toEqual([]);
+    });
+
     it("draws a check working while its subagent is out", () => {
       const view = foldLiveSession(fork, run(), journal.slice(0, 12));
       expect(view.blocks["chk-a"].state).toBe("running");
@@ -2833,6 +2837,110 @@ describe("an unnamed SubagentStop just after a subagent's call", () => {
     ];
     expect(helperStops(events)(events[events.length - 1])).toBe(false);
     expect(foldLiveSession(workflow, run(), events).blocks.implement.state).toBe("done");
+  });
+});
+
+/*
+  ANT-300, from run ANT-OM3MK6RK. The workflow drew three drafts as one chain;
+  Codex announced the first, sent its subagent off in the background, and
+  announced the next while it was still at work — three blocks of one chain
+  drawn Working at once, with nothing saying the run had left the plan.
+*/
+describe("steps the workflow chains, started side by side", () => {
+  const chain: Workflow = {
+    ...workflow,
+    target: "codex",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "context", type: "agent", name: "Freeze questions", config: { actionKind: "agent-step", task: "c", agentId: "agent-dev" } },
+      { id: "aster-draft", type: "agent", name: "aster independent proposal", config: { actionKind: "design", task: "a", agentId: "agent-dev" } },
+      { id: "mira-draft", type: "agent", name: "mira independent proposal", config: { actionKind: "design", task: "m", agentId: "agent-dev" } },
+      { id: "cairn-draft", type: "agent", name: "cairn independent proposal", config: { actionKind: "design", task: "k", agentId: "agent-dev" } },
+      { id: "review", type: "agent", name: "Mira critiques Aster", config: { actionKind: "verify", task: "r", agentId: "agent-qa" } },
+      { id: "end", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "context" },
+      { id: "e2", source: "context", target: "aster-draft" },
+      { id: "e3", source: "aster-draft", target: "mira-draft" },
+      { id: "e4", source: "mira-draft", target: "cairn-draft" },
+      { id: "e5", source: "cairn-draft", target: "review" },
+      { id: "e6", source: "review", target: "end" },
+    ],
+  };
+  const T = (s: number) => new Date(Date.parse("2026-10-08T04:35:16.000Z") + s * 1000).toISOString();
+  const rollout = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ cli: "codex", source: "rollout", channel: "codex:rollout", ...partial });
+  const report = (blockId: string, s: number) =>
+    event({ cli: "codex", kind: "step.marker", title: "Step announced", blockId, source: "anthill", channel: "anthill:report", at: T(s) });
+  const spawn = (call: string, s: number) => [
+    rollout({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: call, background: true, at: T(s) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: call, background: true, at: T(s + 0.3) }),
+  ];
+  const works = (call: string, name: string, s: number) =>
+    rollout({ kind: "tool.start", title: "exec", toolUseId: `${call}-x${s}`, parentToolUseId: call, author: { kind: "subagent", name }, at: T(s) });
+  const ends = (call: string, name: string, s: number) =>
+    rollout({ kind: "turn.end", title: "The agent finished its turn", parentToolUseId: call, author: { kind: "subagent", name }, at: T(s) });
+
+  const journal = [
+    report("context", 0),
+    rollout({ kind: "tool.start", title: "exec", toolUseId: "own", at: T(5) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: "own", at: T(6) }),
+    report("aster-draft", 38),
+    ...spawn("call-aster", 46),
+    works("call-aster", "aster", 51),
+    report("mira-draft", 48),
+    ...spawn("call-mira", 56),
+    works("call-mira", "mira", 61),
+    report("cairn-draft", 58),
+    ...spawn("call-cairn", 66),
+    works("call-cairn", "cairn", 70),
+  ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+
+  it("marks each draft started while the one drawn before it was still at work", () => {
+    const view = foldLiveSession(chain, run({ selectedCli: "codex" }), journal);
+    for (const id of ["aster-draft", "mira-draft", "cairn-draft"]) expect(view.blocks[id].state).toBe("running");
+    expect(view.overlaps).toEqual([
+      { step: "mira-draft", alongside: "aster-draft", at: T(48), pass: 1 },
+      { step: "cairn-draft", alongside: "aster-draft", at: T(58), pass: 1 },
+      { step: "cairn-draft", alongside: "mira-draft", at: T(58), pass: 1 },
+    ]);
+    // Moves along the chain's own connections are no detour.
+    expect(view.detours).toEqual([]);
+  });
+
+  it("marks nothing when each draft's subagent is back before the next is announced", () => {
+    const view = foldLiveSession(chain, run({ selectedCli: "codex" }), [
+      report("context", 0),
+      rollout({ kind: "tool.start", title: "exec", toolUseId: "own", at: T(5) }),
+      rollout({ kind: "tool.end", title: "Tool finished", toolUseId: "own", at: T(6) }),
+      report("aster-draft", 10),
+      ...spawn("call-aster", 11),
+      works("call-aster", "aster", 12),
+      ends("call-aster", "aster", 20),
+      report("mira-draft", 21),
+      ...spawn("call-mira", 22),
+      works("call-mira", "mira", 23),
+      ends("call-mira", "mira", 30),
+    ]);
+    expect(view.overlaps).toEqual([]);
+  });
+
+  it("marks steps announced together once their subagents run them at once", () => {
+    const view = foldLiveSession(chain, run({ selectedCli: "codex" }), [
+      report("context", 0),
+      rollout({ kind: "tool.start", title: "exec", toolUseId: "own", at: T(5) }),
+      rollout({ kind: "tool.end", title: "Tool finished", toolUseId: "own", at: T(6) }),
+      report("aster-draft", 10),
+      report("mira-draft", 10.05),
+      ...spawn("call-aster", 12),
+      rollout({ kind: "message", title: "Message", detail: "Drafting.", stepTag: "aster-draft", parentToolUseId: "call-aster", author: { kind: "subagent", name: "aster" }, at: T(13) }),
+      ...spawn("call-mira", 14),
+      rollout({ kind: "message", title: "Message", detail: "Drafting.", stepTag: "mira-draft", parentToolUseId: "call-mira", author: { kind: "subagent", name: "mira" }, at: T(15) }),
+    ]);
+    expect(view.blocks["aster-draft"].state).toBe("running");
+    expect(view.blocks["mira-draft"].state).toBe("running");
+    expect(view.overlaps).toEqual([expect.objectContaining({ step: "mira-draft", alongside: "aster-draft" })]);
   });
 });
 

@@ -91,6 +91,27 @@ export type Detour = {
   pass: number;
 };
 
+/**
+ * A step started while another was still at work, which the workflow does not
+ * run beside it (ANT-300).
+ *
+ * The agent announced `step` while a subagent was still working for
+ * `alongside`, and the workflow draws the two one after the other, not as
+ * branches of one fork. Running independent work at once can be the right
+ * call; it is still not the plan on the screen, and three steps of one chain
+ * drawn Working together read as Anthill's own mistake. A fan-out the
+ * workflow drew is not one of these.
+ */
+export type Overlap = {
+  step: string;
+  /** The step still working when `step` started. */
+  alongside: string;
+  /** When it became plain: the announcement, or the subagent confirming it. */
+  at: string;
+  /** Which pass through `step` this was. */
+  pass: number;
+};
+
 export type LiveSessionView = {
   /** Keyed by block id, covering every block in the workflow. */
   blocks: Record<string, BlockView>;
@@ -109,6 +130,8 @@ export type LiveSessionView = {
   spans: BlockSpanView[];
   /** Every move the workflow has no connection for, oldest first. */
   detours: Detour[];
+  /** Every step started beside one the workflow runs apart from it, oldest first. */
+  overlaps: Overlap[];
   /** Every event, oldest first, each with how it was attributed. */
   events: AttributedEvent[];
   /** Events no block could be claimed for. Shown as session-level activity. */
@@ -531,6 +554,7 @@ export function foldLiveSession(
   let unmappedCount = 0;
   const attributed: AttributedEvent[] = [];
   const detours: Detour[] = [];
+  const overlaps: Overlap[] = [];
   /** Every connection the workflow has, as "source→target". */
   const planned = new Set(workflow.edges.map((edge) => `${edge.source}→${edge.target}`));
   /** Which steps the workflow runs side by side: moving between them is no detour (ANT-166). */
@@ -553,6 +577,22 @@ export function foldLiveSession(
   /** Whether a step still has a subagent working for it. */
   const outstanding = (id: string) =>
     [...delegations.values()].some((d) => d.blockId === id && !settled(d));
+
+  /**
+   * A step is under way while others are: each still held open by a subagent
+   * of its own, and not drawn beside it, is an overlap (ANT-300). Only a
+   * subagent's work counts as the other step going on — a step left with
+   * nothing done in it is the session announcing two at once, which says
+   * nothing yet about running them together.
+   */
+  const noteOverlaps = (id: string, at: string, pass: number) => {
+    for (const other of Object.keys(blocks)) {
+      if (other === id || !isOpen(other) || !outstanding(other)) continue;
+      if (parallelSteps.parallel(other, id)) continue;
+      if (overlaps.some((o) => o.step === id && o.pass === pass && o.alongside === other)) continue;
+      overlaps.push({ step: id, alongside: other, at, pass });
+    }
+  };
 
   /** A pass ends: the step's time is added up and its span closed. */
   const finish = (id: string, at: string, state: "done" | "failed" | "unknown" = "done", note?: string) => {
@@ -675,6 +715,7 @@ export function foldLiveSession(
       };
       spans.push({ blockId: id, pass, startedAt: at });
     }
+    noteOverlaps(id, at, pass);
     // Only a move between two steps can be one the plan lacks: the first
     // step came from nowhere the fold can see, a step announced again is not
     // a move at all, and a step started while the last one's subagents are
@@ -1066,7 +1107,11 @@ export function foldLiveSession(
         // A new subagent for the step: the one cut off before is not its story.
         cutOffFor.delete(target);
         // A step announced in a batch, now started: a fan-out, not a move away.
-        pendingClose.delete(target);
+        // Its subagent is what makes it run beside the step announced after
+        // it, which may be one the workflow runs only once it is done.
+        if (pendingClose.delete(target) && announced && announced !== target && isOpen(announced)) {
+          noteOverlaps(announced, event.at, blocks[announced].passes);
+        }
         // A step left a moment before its subagent was started was not
         // finished: the same pass goes on. But once the session has worked in
         // the step it moved to, a subagent for a finished step is the session
@@ -1297,6 +1342,7 @@ export function foldLiveSession(
   // A step left with nothing done, never started after: over as of leaving.
   if (run.state === "completed") for (const id of [...pendingClose.keys()]) closePending(id);
   detours.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  overlaps.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   // Steps a subagent was still holding open when the run settled: the run's
   // word goes for them too, not only for the step the session was last on.
   for (const id of Object.keys(blocks)) {
@@ -1329,6 +1375,7 @@ export function foldLiveSession(
     activeBlockIds,
     spans,
     detours,
+    overlaps,
     events: attributed,
     unmappedCount,
     ...(startedAt ? { startedAt } : {}),

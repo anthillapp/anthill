@@ -3345,6 +3345,33 @@ describe("subagents Claude Code starts after announcing their steps together", (
     expect(view.events.find((item) => item.toolUseId === "r-2")?.mapping.blockId).toBe("rowan-review");
   });
 
+  it("keeps a sibling announced together open while the session works before waking its author", () => {
+    const view = foldLiveSession(council, run(), [
+      report("context", 0),
+      report("author-a", 0.3),
+      report("author-b", 0.6),
+      transcript({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "notes", at: T(30) }),
+      transcript({ kind: "tool.end", title: "Tool finished", toolUseId: "notes", at: T(31) }),
+    ]);
+    expect(view.blocks["author-a"].state).toBe("running");
+    expect(view.blocks["author-b"].state).toBe("running");
+  });
+
+  it("closes a sibling nothing ever started once the session goes on past the fork", () => {
+    const view = foldLiveSession(council, run(), [
+      report("context", 0),
+      report("author-a", 0.3),
+      report("author-b", 0.6),
+      transcript({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "notes", at: T(30) }),
+      transcript({ kind: "tool.end", title: "Tool finished", toolUseId: "notes", at: T(31) }),
+      report("join", 60),
+    ]);
+    expect(view.blocks["author-a"].state).toBe("done");
+    expect(view.spans.find((span) => span.blockId === "author-a")?.endedAt).toBe(T(0.6));
+    expect(view.blocks["author-b"].state).toBe("done");
+    expect(view.blocks.join.state).toBe("running");
+  });
+
   it("still leaves a step the session works in alone open when a helper comes back", () => {
     const view = foldLiveSession(council, run(), [
       report("context", 0),

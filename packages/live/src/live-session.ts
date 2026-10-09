@@ -767,6 +767,11 @@ export function foldLiveSession(
     }
     const fanOut = announced !== undefined && announced !== id && outstanding(announced);
     const left = announced && announced !== id ? leave(announced, at) : "closed";
+    // Steps announced beside the one left, never started: the session going
+    // on to a step the plan runs after them means they are over (ANT-309).
+    for (const other of [...pendingClose.keys()]) {
+      if (other !== id && other !== announced && !parallelSteps.parallel(other, id)) closePending(other);
+    }
     /*
       A step its subagent opened before its line was read: this is the line
       for that same pass. Claude Code starts the subagent in the same message
@@ -1183,7 +1188,14 @@ export function foldLiveSession(
       !(event.toolUseId && plumbing.has(event.toolUseId))
     ) {
       workSinceEntered = true;
-      for (const id of [...pendingClose.keys()]) closePending(id);
+      for (const id of [...pendingClose.keys()]) {
+        // A step the plan runs beside the one the session is on is not over
+        // because the session works: announced with it, it waits for its own
+        // subagent. Three rework steps went Done the moment the session wrote
+        // its notes, before it woke their authors (ANT-309).
+        if (announced && id !== announced && parallelSteps.parallel(id, announced)) continue;
+        closePending(id);
+      }
     }
     // Starting a subagent, or saying something, is work in the step too — a
     // step done in words alone was done — but neither closes a batch-announced

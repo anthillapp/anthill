@@ -715,15 +715,30 @@ export function foldLiveSession(
     fourth. Only a single match counts.
   */
   const announcedTogetherFor = (name: string | undefined): string | undefined => {
-    const agents = agentsNamedBy(index, name);
-    if (agents.size === 0) return undefined;
-    const found = index.blocks.filter(
+    const on = announced;
+    if (!name || !on) return undefined;
+    // The batch: the step the session is on and those the plan runs beside
+    // it, announced with it and not worked in yet. A step announced just
+    // before the fork, and closed empty by it, is not one of them.
+    const batch = index.blocks.filter(
       (block) =>
         block.agentSlug !== undefined &&
-        agents.has(block.agentSlug) &&
-        (pendingClose.has(block.id) || closedEmpty.has(block.id) || block.id === announced),
+        (block.id === on ||
+          ((pendingClose.has(block.id) || closedEmpty.has(block.id)) && parallelSteps.parallel(block.id, on))),
     );
-    return found.length === 1 ? found[0].id : undefined;
+    // Named first, as an agent is: "Corin drafts three architectures".
+    const agents = agentsNamedBy(index, name);
+    const first = batch.filter((block) => agents.has(block.agentSlug as string));
+    if (first.length > 0) return first.length === 1 ? first[0].id : undefined;
+    // Or named anywhere, when only one agent of the batch is: "Council
+    // member Wren assesses all". Two named — "Arden reviews Corin" — is none.
+    const words = new Set(name.toLowerCase().split(/[^a-z0-9]+/));
+    const anywhere = batch.filter((block) => {
+      const own = (block.agentSlug as string).split("-")[0];
+      const id = block.agentId?.toLowerCase();
+      return words.has(own) || (id !== undefined && words.has(id));
+    });
+    return anywhere.length === 1 ? anywhere[0].id : undefined;
   };
 
   /*

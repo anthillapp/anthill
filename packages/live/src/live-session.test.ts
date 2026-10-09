@@ -3345,6 +3345,26 @@ describe("subagents Claude Code starts after announcing their steps together", (
     expect(view.events.find((item) => item.toolUseId === "r-2")?.mapping.blockId).toBe("rowan-review");
   });
 
+  it("finds the agent named anywhere in the description when it is the only one of the batch", () => {
+    const view = foldLiveSession(council, run(), [
+      report("context", 0),
+      report("author-a", 0.3),
+      report("author-b", 0.6),
+      start("call-q", "Council member Quill assesses all", 16),
+    ]);
+    expect(view.events.find((item) => item.kind === "subagent.start")?.mapping.blockId).toBe("author-a");
+  });
+
+  it("takes a description naming two agents of the batch as naming neither", () => {
+    const view = foldLiveSession(council, run(), [
+      report("context", 0),
+      report("author-a", 0.3),
+      report("author-b", 0.6),
+      start("call-x", "Compare Quill and Rowan", 16),
+    ]);
+    expect(view.events.find((item) => item.kind === "subagent.start")?.mapping.blockId).toBe("author-b");
+  });
+
   it("keeps a sibling announced together open while the session works before waking its author", () => {
     const view = foldLiveSession(council, run(), [
       report("context", 0),

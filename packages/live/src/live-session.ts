@@ -703,6 +703,28 @@ export function foldLiveSession(
   const closedEmpty = new Set<string>();
 
   /*
+    The step of the agent a subagent is named after, among the steps the
+    session announced together and has not worked in yet (ANT-309). Claude
+    Code announced four authors' steps in one second and only then started
+    their subagents, untagged and all `general-purpose`, each described as
+    "<Author> drafts …". Every author has later steps too, so the agent alone
+    names none, and the nearest one on from the last announced step is never
+    a sibling: three were drawn Done after 300 ms and all the work went to the
+    fourth. Only a single match counts.
+  */
+  const announcedTogetherFor = (name: string | undefined): string | undefined => {
+    const agents = agentsNamedBy(index, name);
+    if (agents.size === 0) return undefined;
+    const found = index.blocks.filter(
+      (block) =>
+        block.agentSlug !== undefined &&
+        agents.has(block.agentSlug) &&
+        (pendingClose.has(block.id) || closedEmpty.has(block.id) || block.id === announced),
+    );
+    return found.length === 1 ? found[0].id : undefined;
+  };
+
+  /*
     Tool calls that failed in a step's current pass and were not made to work
     after: by step, the tools whose last call there failed. A step whose Write
     was refused, and the file never written, was settled Done when the run
@@ -1194,9 +1216,14 @@ export function foldLiveSession(
       // The agent it runs, when exactly one step has that agent (ANT-217).
       const named = stepForAgent(index, event.agentName) ?? stepForAgent(index, event.detail, true);
       const late = announcedAsDispatched.get(event.toolUseId);
+      // Its agent's step among those just announced together (ANT-309).
+      const together =
+        !event.stepTag && !own && !named && !late
+          ? (announcedTogetherFor(event.agentName) ?? announcedTogetherFor(event.detail))
+          : undefined;
       // The nearest step on whose agent the spawn is named after: Codex
       // starts a step's subagent before it reports the step (ANT-307).
-      const near = !event.stepTag && !own && !named && !late ? nearestFor(event.agentName) : undefined;
+      const near = !event.stepTag && !own && !named && !late && !together ? nearestFor(event.agentName) : undefined;
       const target =
         event.stepTag && blocks[event.stepTag]
           ? event.stepTag
@@ -1206,9 +1233,11 @@ export function foldLiveSession(
               ? named
               : late && blocks[late]
                 ? late
-                : near && blocks[near]
-                  ? near
-                  : announced;
+                : together && blocks[together]
+                  ? together
+                  : near && blocks[near]
+                    ? near
+                    : announced;
       if (target && blocks[target]) {
         // The dispatch card belongs where its subagent's work goes.
         const card = attributed[attributed.length - 1];
@@ -1218,6 +1247,8 @@ export function foldLiveSession(
               ? { blockId: target, confidence: "likely", how: "the agent this subagent runs belongs to this step" }
               : target === late && !event.stepTag && !own
                 ? { blockId: target, confidence: "likely", how: "the session announced this step as it started this subagent" }
+                : target === together && together !== announced
+                  ? { blockId: target, confidence: "likely", how: "the step of the agent this subagent is named after, announced with its siblings" }
                 : target === near && near !== announced
                   ? { blockId: target, confidence: "likely", how: "the next step of the agent this subagent is named after" }
                 : { blockId: target, confidence: "exact", how: "a subagent started for this step" };

@@ -3228,3 +3228,91 @@ describe("subagents Codex starts before it reports their steps", () => {
     expect(view.events.find((item) => item.kind === "subagent.start")?.mapping.blockId).toBe("context");
   });
 });
+
+/*
+  ANT-309, shaped like run ANT-M6GEV6OS. Claude Code announced the authors'
+  steps in one second, worked a little, and only then started their
+  subagents — untagged, all `general-purpose`, each described after its
+  author. Every author has a later step too. All but the last author were
+  drawn Done after 300 ms, and all the work went to the last one.
+*/
+describe("subagents Claude Code starts after announcing their steps together", () => {
+  const council: Workflow = {
+    ...workflow,
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "context", type: "agent", name: "Freeze evidence", config: { actionKind: "agent-step", task: "c", agentId: "editor" } },
+      { id: "author-a", type: "agent", name: "Quill design", config: { actionKind: "design", task: "a", agentId: "quill" } },
+      { id: "author-b", type: "agent", name: "Rowan design", config: { actionKind: "design", task: "b", agentId: "rowan" } },
+      { id: "join", type: "agent", name: "Freeze drafts", config: { actionKind: "verify", task: "j", agentId: "editor" } },
+      { id: "quill-review", type: "agent", name: "Quill critiques Rowan", config: { actionKind: "verify", task: "qr", agentId: "quill" } },
+      { id: "rowan-review", type: "agent", name: "Rowan critiques Quill", config: { actionKind: "verify", task: "rr", agentId: "rowan" } },
+      { id: "end", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "context" },
+      { id: "e2", source: "context", target: "author-a" },
+      { id: "e3", source: "context", target: "author-b" },
+      { id: "e4", source: "author-a", target: "join" },
+      { id: "e5", source: "author-b", target: "join" },
+      { id: "e6", source: "join", target: "quill-review" },
+      { id: "e7", source: "join", target: "rowan-review" },
+      { id: "e8", source: "quill-review", target: "end" },
+      { id: "e9", source: "rowan-review", target: "end" },
+    ],
+    metadata: {
+      workflow: {
+        formatVersion: 4,
+        agents: [
+          { id: "editor", name: "Vale Council Editor" },
+          { id: "quill", name: "Quill Pooled-Score Objective Architect" },
+          { id: "rowan", name: "Rowan Reliability Gate Architect" },
+        ],
+      },
+    },
+  };
+  const T = (s: number) => new Date(Date.parse("2026-10-09T05:47:59.000Z") + s * 1000).toISOString();
+  const transcript = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ source: "transcript", channel: "claude-code:transcript", ...partial });
+  const report = (blockId: string, s: number) =>
+    event({ kind: "step.marker", title: "Step announced", blockId, source: "anthill", channel: "anthill:report", at: T(s) });
+  const start = (call: string, description: string, s: number) =>
+    transcript({
+      kind: "subagent.start",
+      title: "Delegated to a subagent",
+      toolName: "Agent",
+      toolUseId: call,
+      agentName: "general-purpose",
+      detail: description,
+      at: T(s),
+    });
+  const journal = [
+    report("context", 0),
+    report("author-a", 0.3),
+    report("author-b", 0.6),
+    transcript({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "setup", at: T(5) }),
+    transcript({ kind: "tool.end", title: "Tool finished", toolUseId: "setup", at: T(6) }),
+    start("call-q", "Quill drafts three architectures", 16),
+    start("call-r", "Rowan drafts three architectures", 23),
+    transcript({ kind: "tool.start", title: "Write", toolName: "Write", toolUseId: "q-1", parentToolUseId: "call-q", author: { kind: "subagent", name: "general-purpose" }, at: T(40) }),
+  ];
+
+  it("gives each subagent its author's step, and keeps both running", () => {
+    const view = foldLiveSession(council, run(), journal);
+    expect(view.blocks.context.state).toBe("done");
+    expect(view.blocks["author-a"].state).toBe("running");
+    expect(view.blocks["author-b"].state).toBe("running");
+    expect(view.blocks["quill-review"].state).toBe("queued");
+    expect(view.events.find((item) => item.toolUseId === "q-1")?.mapping.blockId).toBe("author-a");
+  });
+
+  it("still gives a subagent named after no agent to the step the session is on", () => {
+    const view = foldLiveSession(council, run(), [
+      report("context", 0),
+      report("author-a", 0.3),
+      report("author-b", 0.6),
+      start("call-x", "Collect the sources", 10),
+    ]);
+    expect(view.events.find((item) => item.kind === "subagent.start")?.mapping.blockId).toBe("author-b");
+  });
+});

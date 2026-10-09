@@ -487,6 +487,8 @@ export function foldLiveSession(
       delegateEnded: boolean;
       /** The name the session calls the subagent by: Codex's task name (ANT-306). */
       name?: string;
+      /** What the call that started it said it was for: Claude Code's description (ANT-309). */
+      described?: string;
       /** It reported to the session since its task began (ANT-306). */
       reported?: boolean;
       /** Reported, and now waiting for the session to say more (ANT-306). */
@@ -835,6 +837,8 @@ export function foldLiveSession(
     const span = index >= 0 ? spans[index] : undefined;
     if (!block || !span?.endedAt || !block.enteredAt) return;
     const counted = Date.parse(span.endedAt) - Date.parse(block.enteredAt);
+    // Open again, so no longer a step closed with nothing done (ANT-309).
+    closedEmpty.delete(id);
     // The move that closed this pass was not a move away after all, so it is
     // not a detour either.
     for (let i = detours.length - 1; i >= 0; i -= 1) {
@@ -891,9 +895,22 @@ export function foldLiveSession(
   const CUT_OFF_NOTE =
     "The session ended while a subagent was still working on this step, and the subagent never handed back.";
 
+  /*
+    A step handed to a subagent while a sibling the workflow runs beside it
+    was handed to another: the session fanned out, and is waiting on them
+    rather than working in either (ANT-309). The last of the batch is still
+    the step the session announced last, and its subagent coming back left it
+    Working: Ione drawn at work for minutes after the session said Ione was
+    done, while Corin, announced before it, went green.
+  */
+  const fannedOut = (id: string) => {
+    const all = [...delegations.values()];
+    return all.some((d) => d.blockId === id) && all.some((d) => d.blockId !== id && parallelSteps.parallel(d.blockId, id));
+  };
+
   /** A delegation came back: its step is done if nothing else holds it open. */
   const release = (id: string, at: string) => {
-    if (id !== announced && isOpen(id) && !outstanding(id)) {
+    if ((id !== announced || fannedOut(id)) && isOpen(id) && !outstanding(id)) {
       if (stoppedFor.has(id)) finish(id, at, "failed", STOPPED_NOTE);
       else if (cutOffFor.has(id)) finish(id, at, "unknown", CUT_OFF_NOTE);
       else finish(id, at);
@@ -972,9 +989,18 @@ export function foldLiveSession(
       endedByHook.delete(event.parentToolUseId as string);
       // And it has to hand back again before that ending counts.
       handedBack.delete(event.parentToolUseId as string);
-      if (announced && blocks[announced] && reused.blockId !== announced) {
-        reused.blockId = announced;
-        delegatedFrom.set(event.parentToolUseId as string, announced);
+      // Its agent's step among those just announced together, when the
+      // session woke several authors for steps it announced at once — not
+      // just the last one it announced (ANT-309).
+      const own = announcedTogetherFor(reused.name) ?? announcedTogetherFor(reused.described);
+      const to = own && blocks[own] ? own : announced;
+      if (to && blocks[to] && reused.blockId !== to) {
+        reused.blockId = to;
+        delegatedFrom.set(event.parentToolUseId as string, to);
+        if (to !== announced) {
+          pendingClose.delete(to);
+          if (blocks[to].state === "done" && closedEmpty.has(to)) reopen(to);
+        }
       }
       // The session's turn ending before the reused agent began was the
       // session waiting for it, not for a person.
@@ -1260,6 +1286,7 @@ export function foldLiveSession(
           returned: false,
           delegateEnded: false,
           ...(event.agentName ? { name: codexAgent(event.agentName) } : {}),
+          ...(event.detail ? { described: event.detail } : {}),
         });
         delegatedFrom.set(event.toolUseId, target);
         // A new subagent for the step: the one cut off before is not its story.

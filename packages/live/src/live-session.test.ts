@@ -3110,9 +3110,11 @@ describe("Codex's long-lived subagents", () => {
     const view = foldLiveSession(council, run({ selectedCli: "codex" }), drafts);
     expect(view.blocks["a-draft"].state).toBe("done");
     expect(view.spans.find((span) => span.blockId === "a-draft")?.endedAt).toBe(T(203));
-    // The step the session itself is on waits for the session to move on.
-    expect(view.blocks["b-draft"].state).toBe("running");
-    expect(view.activeBlockIds).toEqual(["b-draft"]);
+    // So does the step the session announced last: it handed both drafts out
+    // and only waits on them (ANT-309).
+    expect(view.blocks["b-draft"].state).toBe("done");
+    expect(view.spans.find((span) => span.blockId === "b-draft")?.endedAt).toBe(T(262));
+    expect(view.activeBlockIds).toEqual([]);
   });
 
   it("does not take a report alone, with no wait after it, for the task handed back", () => {
@@ -3304,6 +3306,52 @@ describe("subagents Claude Code starts after announcing their steps together", (
     expect(view.blocks["author-b"].state).toBe("running");
     expect(view.blocks["quill-review"].state).toBe("queued");
     expect(view.events.find((item) => item.toolUseId === "q-1")?.mapping.blockId).toBe("author-a");
+  });
+
+  it("finishes the last announced step when its subagent comes back, while its sibling works on", () => {
+    // The session is still "on" author-b, the step it announced last, but it
+    // handed both out and only waits now.
+    const view = foldLiveSession(council, run(), [
+      ...journal,
+      transcript({ kind: "tool.end", title: "Tool finished", toolUseId: "call-r", at: T(900) }),
+    ]);
+    expect(view.blocks["author-b"].state).toBe("done");
+    expect(view.blocks["author-a"].state).toBe("running");
+  });
+
+  it("gives authors woken again with SendMessage their own steps announced together", () => {
+    const sub = (call: string) => ({ parentToolUseId: call, author: { kind: "subagent" as const, name: "general-purpose" } });
+    const view = foldLiveSession(council, run(), [
+      ...journal,
+      transcript({ kind: "turn.end", title: "The agent finished its turn", ...sub("call-q"), at: T(900) }),
+      transcript({ kind: "tool.end", title: "Tool finished", toolUseId: "call-q", at: T(900.5) }),
+      transcript({ kind: "turn.end", title: "The agent finished its turn", ...sub("call-r"), at: T(950) }),
+      transcript({ kind: "tool.end", title: "Tool finished", toolUseId: "call-r", at: T(950.5) }),
+      report("join", 1000),
+      transcript({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "freeze", at: T(1001) }),
+      transcript({ kind: "tool.end", title: "Tool finished", toolUseId: "freeze", at: T(1002) }),
+      report("quill-review", 1010),
+      report("rowan-review", 1010.5),
+      transcript({ kind: "tool.start", title: "SendMessage", toolName: "SendMessage", toolUseId: "send-q", at: T(1020) }),
+      transcript({ kind: "tool.end", title: "Tool finished", toolUseId: "send-q", at: T(1020.1) }),
+      transcript({ kind: "tool.start", title: "SendMessage", toolName: "SendMessage", toolUseId: "send-r", at: T(1025) }),
+      transcript({ kind: "tool.end", title: "Tool finished", toolUseId: "send-r", at: T(1025.1) }),
+      transcript({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "q-2", ...sub("call-q"), at: T(1030) }),
+      transcript({ kind: "tool.start", title: "Bash", toolName: "Bash", toolUseId: "r-2", ...sub("call-r"), at: T(1031) }),
+    ]);
+    expect(view.blocks["quill-review"].state).toBe("running");
+    expect(view.blocks["rowan-review"].state).toBe("running");
+    expect(view.events.find((item) => item.toolUseId === "q-2")?.mapping.blockId).toBe("quill-review");
+    expect(view.events.find((item) => item.toolUseId === "r-2")?.mapping.blockId).toBe("rowan-review");
+  });
+
+  it("still leaves a step the session works in alone open when a helper comes back", () => {
+    const view = foldLiveSession(council, run(), [
+      report("context", 0),
+      start("call-h", "Quill drafts three architectures", 5),
+      transcript({ kind: "tool.end", title: "Tool finished", toolUseId: "call-h", at: T(60) }),
+    ]);
+    expect(view.blocks.context.state).toBe("running");
   });
 
   it("still gives a subagent named after no agent to the step the session is on", () => {

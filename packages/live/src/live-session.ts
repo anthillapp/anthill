@@ -530,6 +530,8 @@ export function foldLiveSession(
   const pendingClose = new Map<string, { leftAt: string; detour?: Detour }>();
   /** Steps a subagent opened that no step line has named yet (ANT-184). */
   const openedByDispatch = new Set<string>();
+  /** Background commands started and not yet reported ended, by call id (ANT-308). */
+  const backgroundCommands = new Set<string>();
   /**
    * Whether the hook channel wrote anything for this run.
    *
@@ -918,6 +920,16 @@ export function foldLiveSession(
   }
   const announcedAsDispatched = stepsAnnouncedAsDispatched(journal, index);
   for (const event of journal) {
+    // A command sent to run in the background is at work until its own
+    // notification says it ended (ANT-308). That end is only bookkeeping: it
+    // is not the session doing anything, so it goes no further.
+    if (event.kind === "tool.start" && event.background && event.toolUseId && !delegations.has(event.toolUseId)) {
+      backgroundCommands.add(event.toolUseId);
+    }
+    if (event.kind === "task.end") {
+      if (event.toolUseId) backgroundCommands.delete(event.toolUseId);
+      continue;
+    }
     /*
       A subagent that had handed back, at work again: the session reused it —
       Claude Code's SendMessage, Codex's send_message — and what it does now is
@@ -1354,8 +1366,12 @@ export function foldLiveSession(
     // A turn ending while subagents it started are still out is the session
     // waiting for them, not for a person: it will be prompted again when they
     // report back (ANT-163). Its own request for a person still counts.
+    // So is one ending while a command it sent to the background still runs:
+    // the step is that command at work, not a question put to a person
+    // (ANT-308).
     const waitingOnSubagents =
-      event.kind === "turn.end" && [...delegations.values()].some((d) => !settled(d));
+      event.kind === "turn.end" &&
+      ([...delegations.values()].some((d) => !settled(d)) || backgroundCommands.size > 0);
     if (
       yieldsToYou(event) &&
       !waitingOnSubagents &&

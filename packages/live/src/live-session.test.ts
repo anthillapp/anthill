@@ -335,6 +335,44 @@ describe("folding a session", () => {
   });
 
   /**
+   * ANT-308. The session sent a long evaluation to run in the background,
+   * said so and ended its turn. The step was put down as waiting on the person
+   * while the command was still at work, and nothing ever moved it on.
+   */
+  describe("a turn that ends with a background command still running", () => {
+    const turnEnd = () => event({ kind: "turn.end", title: "The agent finished its turn" });
+    const sentOff = () =>
+      event({
+        kind: "tool.start",
+        title: "Bash",
+        toolName: "Bash",
+        toolUseId: "toolu_bg",
+        background: true,
+        source: "transcript",
+        channel: "claude-code:transcript",
+      });
+    const ended = () =>
+      event({
+        kind: "task.end",
+        title: "Background task finished",
+        toolUseId: "toolu_bg",
+        ok: true,
+        source: "transcript",
+        channel: "claude-code:transcript",
+      });
+
+    it("keeps the step working while the command runs", () => {
+      const view = foldLiveSession(workflow, run(), [step("implement"), sentOff(), turnEnd()]);
+      expect(view.blocks.implement.state).toBe("running");
+    });
+
+    it("hands the step over once the command has ended and the turn ends again", () => {
+      const view = foldLiveSession(workflow, run(), [step("implement"), sentOff(), turnEnd(), ended(), turnEnd()]);
+      expect(view.blocks.implement.state).toBe("needsYou");
+    });
+  });
+
+  /**
    * ANT-47. The agent announced a step, found it could not proceed, asked the
    * person a question and ended its turn. The record of the turn ending was
    * read, filed in the feed, and then ignored: the diagram said "Working"

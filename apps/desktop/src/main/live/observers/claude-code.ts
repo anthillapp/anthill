@@ -107,6 +107,29 @@ const INTERRUPTED = /^\[Request interrupted by user[^\]]*\]$/;
 const AWAITED_DELEGATION = new Set(["Task", "Agent"]);
 const BACKGROUND_DELEGATION = new Set(["SendMessage"]);
 
+/**
+ * The call a `<task-notification>` is about, and how it ended.
+ *
+ * Claude Code writes one as a user record when a background task exits:
+ * `<tool-use-id>` names the call that started it, `<status>` how it ended. It
+ * fires for background agents too, so the caller decides which calls it is
+ * waiting to hear about (ANT-308).
+ */
+function taskNotification(
+  content: unknown,
+  blocks: readonly unknown[],
+): { toolUseId: string; status?: string } | undefined {
+  const text =
+    typeof content === "string"
+      ? content
+      : blocks.map((block) => (isRecord(block) ? (str(block.text) ?? "") : "")).join("\n");
+  if (!text.trimStart().startsWith("<task-notification>")) return undefined;
+  const toolUseId = /<tool-use-id>\s*([^<\s]+)\s*<\/tool-use-id>/.exec(text)?.[1];
+  if (!toolUseId) return undefined;
+  const status = /<status>\s*([^<\s]+)\s*<\/status>/.exec(text)?.[1];
+  return { toolUseId, ...(status ? { status } : {}) };
+}
+
 /** Whether this call hands work off somewhere this transcript will not follow. */
 function goesToBackground(name: string, input: Record<string, unknown>): boolean {
   if (BACKGROUND_DELEGATION.has(name)) return true;
@@ -183,6 +206,15 @@ type FileState = {
    * cannot see what is happening", which is not the same as "nothing is".
    */
   dispatched: boolean;
+  /**
+   * Commands the session sent to run in the background and that have not
+   * ended yet, by tool-use id (ANT-308).
+   *
+   * Unlike a backgrounded delegation, these do end in this file: Claude Code
+   * writes a `<task-notification>` naming the call when the command exits. So
+   * the claim of work is held only until that notification, not for good.
+   */
+  backgroundTasks: Set<string>;
   lastStopReason?: string;
   /**
    * When the agent printed the done marker, if it has.
@@ -293,6 +325,7 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
           settled: false,
           awaiting: new Set<string>(),
           dispatched: false,
+          backgroundTasks: new Set<string>(),
           usageSeen: new Set<string>(),
           ...(delegate ? { delegate: true } : {}),
           ...(label ? { delegateName: label } : {}),
@@ -514,7 +547,11 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
         });
       }
       const handedOff =
-        state.awaiting.size > 0 || (state.dispatched && !context?.hooksWatching);
+        state.awaiting.size > 0 ||
+        // A background command still running: its own notification ends it,
+        // so silence before that is the command at work (ANT-308).
+        state.backgroundTasks.size > 0 ||
+        (state.dispatched && !context?.hooksWatching);
       if (
         !state.settled &&
         // A delegate ending its turn is not the session ending. These files
@@ -716,6 +753,20 @@ function scan(
         continue;
       }
 
+      // A background command this session started has exited. Claude Code
+      // says so in a notification that names the call; only the call and the
+      // status are read, never the command's output (ANT-308).
+      const notified = taskNotification(message?.content, blocks);
+      if (notified && state.backgroundTasks.delete(notified.toolUseId)) {
+        events.push({
+          ...base,
+          kind: "task.end",
+          title: "Background task finished",
+          toolUseId: notified.toolUseId,
+          ok: notified.status === "completed",
+        });
+      }
+
       // Somebody typed something: the session goes on, and a done said before
       // it no longer describes the session — the next one will (ANT-188).
       const prompted =
@@ -891,6 +942,10 @@ function scan(
           // work is still ahead.
           if (isDelegation && id && !background) state.awaiting.add(id);
           if (background) state.dispatched = true;
+          // A command sent to run in the background: its result is a receipt,
+          // and the command's end comes later as a notification (ANT-308).
+          const backgroundCommand = name === "Bash" && input.run_in_background === true;
+          if (backgroundCommand && id) state.backgroundTasks.add(id);
           events.push({
             ...base,
             kind: isDelegation ? "subagent.start" : "tool.start",
@@ -904,7 +959,7 @@ function scan(
             ...(str(row.parent_tool_use_id) && !state.delegateVia
               ? { parentToolUseId: str(row.parent_tool_use_id) as string }
               : {}),
-            ...(isDelegation && background ? { background: true } : {}),
+            ...((isDelegation && background) || backgroundCommand ? { background: true } : {}),
             // The step the session named in what it handed the subagent — the
             // tag it was asked to pass on (ANT-163).
             ...(isDelegation && delegationTag(input) ? { stepTag: delegationTag(input) as string } : {}),

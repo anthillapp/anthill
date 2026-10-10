@@ -5533,6 +5533,42 @@ button.state-chip {
   margin-top: 2px;
 }
 
+/* The kicker's row also carries a subagent's todo count (ANT-310). */
+.live-node-lines > .live-node-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: visible;
+}
+
+.live-node-top .live-node-kicker {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Sized to sit in the kicker's row without moving the lines below it. */
+.live-todo-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: -3px 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f3f2f2;
+  color: #444141;
+  font-size: 11px;
+  line-height: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.live-todo-chip.is-done { background: #e6f3ec; color: #2f6b48; }
+.live-todo-chip svg { flex: none; }
+
 /* A live block breathes on its own border. There is no second outline: the
    animated ring that used to sit outside the block made the active step look
    heavier than everything around it, for no information gained. */
@@ -5639,6 +5675,7 @@ button.state-chip {
   .feed-glyph.state-working,
   .feed-glyph.state-done,
   .feed-agent-foot .feed-state.state-working i,
+  .todo-glyph.is-now,
   .recent-chip.is-pulsing::before {
     animation: none;
   }
@@ -8440,6 +8477,117 @@ button.presence-chip {
 .feed-agent-foot .feed-state.state-done { color: #2f6b48; }
 .feed-agent-foot .feed-state.state-unknown { color: var(--ink-dim); }
 
+/* A Codex program's actions (ANT-311): how many, and how many failed. */
+.feed-tool-actions {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.feed-fail-badge {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid #f3d0c7;
+  background: #fff1ed;
+  color: var(--accent-700);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* One row per thing the program did, in the order each finished. */
+.feed-exec-kids {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid #efeded;
+}
+
+.feed-exec-kid {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 7px 0;
+  border-bottom: 1px solid #f3f2f2;
+}
+
+.feed-exec-glyph {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-top: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+.feed-exec-glyph.is-ok { color: #2f6b48; background: #e6f3ec; }
+.feed-exec-glyph.is-failed { color: var(--accent-700); background: #fff1ed; }
+
+.feed-exec-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.feed-exec-line {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.feed-exec-verb {
+  flex: none;
+}
+
+.feed-exec-target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.feed-exec-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.feed-exec-result {
+  flex: none;
+  padding-top: 1px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+.feed-exec-result.is-failed { font-weight: 600; color: var(--accent-700); }
+
+.feed-exec-more {
+  padding-top: 7px;
+}
+
 /* Session started, prompt submitted, session ended: a line, not an item. */
 .feed-divider {
   display: flex;
@@ -10538,6 +10686,108 @@ button.presence-chip {
 .usage-agents button:hover strong { text-decoration: underline; }
 .usage-agent-blocks { font-size: 11.5px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .usage-note { margin: 0; font-size: 11.5px; line-height: 1.55; color: var(--ink-dim); }
+
+/* The Todo list tab (ANT-310): a subagent's own list, as it reported it. */
+.todo-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.todo-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.todo-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.todo-who b {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.todo-who span {
+  font-size: 11.5px;
+  color: var(--ink-dim);
+}
+
+.todo-count {
+  flex: none;
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid #efeded;
+}
+
+.todo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid #efeded;
+}
+
+.todo-glyph {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin-top: 1px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1.5px solid #d7d3d3;
+  background: var(--surface);
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+.todo-glyph.is-done { color: #2f6b48; background: #e6f3ec; border-color: #e6f3ec; }
+.todo-glyph.is-now { background: #eaf4fb; border-color: #56aee0; animation: feed-pulse 1.8s ease-in-out infinite; }
+.todo-glyph.is-open { border-style: dashed; border-color: #d8a21a; }
+
+.todo-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.todo-title.is-done { color: #7d7979; }
+.todo-title.is-now { color: var(--ink); font-weight: 600; }
+
+.todo-tail {
+  flex: none;
+  padding-top: 1px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.todo-tail.is-now { font-weight: 600; color: #2f6d99; }
+.todo-tail.is-open { color: #8a6a08; }
+
+.todo-note {
+  font-size: 11.5px;
+  color: var(--ink-dim);
+}
 
 /* The Block tab: one step as designed and as it ran, over the feed. */
 .block-tab {

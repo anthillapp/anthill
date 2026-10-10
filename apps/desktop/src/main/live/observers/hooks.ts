@@ -43,6 +43,7 @@ import type { ObservationEventDraft, PollResult } from "./types.js";
 import { newCursor, readRotatingLinesUpTo, skipRotationOlderThan, type TailCursor } from "./tail.js";
 import { minimalHookPayload } from "../hook-payload.js";
 import { commandLine } from "../tool-target.js";
+import { CLAUDE_TODO_TOOLS, todoCallTarget } from "../todo-record.js";
 
 export const HOOK_LOG = join(homedir(), ".anthill", "live-hooks", "events.jsonl");
 
@@ -82,6 +83,8 @@ function toolTarget(name: string | undefined, input: unknown): string | undefine
     const command = str(input.command);
     return str(input.description) ?? (command ? commandLine(command) : undefined);
   }
+  // A todo call is named by its task, not its description (ANT-310).
+  if (name && CLAUDE_TODO_TOOLS.has(name)) return todoCallTarget(name, input);
   const path = str(input.file_path) ?? str(input.path) ?? str(input.notebook_path);
   if (path) return path.split("/").slice(-2).join("/");
   return str(input.pattern) ?? str(input.query) ?? str(input.description);

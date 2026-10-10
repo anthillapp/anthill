@@ -56,6 +56,13 @@ export type ObservationKind =
   | "subagent.start"
   | "subagent.end"
   | "notification"
+  /**
+   * A command the session sent to run in the background has exited — Claude
+   * Code's `<task-notification>` for it. `toolUseId` names the call; `ok` is
+   * whether it completed. Not a card in the feed: it closes the call's claim
+   * of work, nothing more (ANT-308).
+   */
+  | "task.end"
   | "turn.end"
   /**
    * Token usage the harness recorded for its own work.
@@ -116,7 +123,11 @@ export type ObservationEvent = {
    * through the step (ANT-163).
    */
   stepTag?: string;
-  /** For a delegation: it was dispatched to run in the background. */
+  /**
+   * For a delegation: it was dispatched to run in the background. For a
+   * command (`tool.start`): it was sent to run in the background, and its end
+   * comes later as a `task.end` (ANT-308).
+   */
   background?: boolean;
   /**
    * For a step line printed by a command, that command's call id. The call is

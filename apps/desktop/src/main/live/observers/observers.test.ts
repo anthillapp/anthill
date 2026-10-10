@@ -1910,6 +1910,81 @@ describe("a session that delegates and then waits", () => {
     expect(evidence.some((item) => item.kind === "completed")).toBe(false);
   });
 
+  /**
+   * ANT-308. A command sent to the background returns a receipt at once and
+   * runs on writing nothing here — until Claude Code writes a
+   * `<task-notification>` naming the call when it exits.
+   */
+  function backgroundCommand(sessionId: string, finished: boolean) {
+    return transcript(sessionId, [
+      assistant(
+        sessionId,
+        4_000,
+        [
+          {
+            type: "tool_use",
+            id: "toolu_sh",
+            name: "Bash",
+            input: { command: "python train.py", description: "Train C1", run_in_background: true },
+          },
+        ],
+        "tool_use",
+      ),
+      {
+        type: "user",
+        sessionId,
+        timestamp: at(5_000),
+        message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_sh", is_error: false }] },
+      },
+      assistant(sessionId, 6_000, [{ type: "text", text: "Training is running in the background." }], "end_turn"),
+      ...(finished
+        ? [
+            {
+              type: "user",
+              sessionId,
+              timestamp: at(60_000),
+              message: {
+                role: "user",
+                content:
+                  "<task-notification>\n<task-id>b1</task-id>\n<tool-use-id>toolu_sh</tool-use-id>\n<status>completed</status>\n<summary>Background command finished</summary>\n</task-notification>",
+              },
+            },
+            assistant(sessionId, 61_000, [{ type: "text", text: "Training finished." }], "end_turn"),
+          ]
+        : []),
+    ]);
+  }
+
+  it("is not called finished while a background command is running", async () => {
+    const { evidence } = await look(backgroundCommand("sess-1", false), 37 * 60_000);
+    expect(evidence.some((item) => item.kind === "completed")).toBe(false);
+    const { events } = await lookSinceStart(backgroundCommand("sess-1", false), 37 * 60_000);
+    expect(events.find((item) => item.kind === "tool.start")?.background).toBe(true);
+    expect(events.some((item) => item.kind === "task.end")).toBe(false);
+  });
+
+  /** A run created before the transcript, so its records are this run's events. */
+  async function lookSinceStart(body: string, quietMs: number) {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-scratch", "sess-1", body);
+    const run = createPendingRun({
+      anthillRunId: RUN_ID,
+      correlationNonce: NONCE,
+      selectedCli: "claude-code",
+      promptVersion: "1",
+      bootstrapPromptHash: "abcd1234",
+      now: at(-5_000),
+    });
+    return new ClaudeCodeObserver(dir).poll(run, at(quietMs));
+  }
+
+  it("hears the background command end from its notification", async () => {
+    const { events } = await lookSinceStart(backgroundCommand("sess-1", true), 37 * 60_000);
+    const ended = events.filter((item) => item.kind === "task.end");
+    expect(ended).toHaveLength(1);
+    expect(ended[0]).toMatchObject({ toolUseId: "toolu_sh", ok: true });
+  });
+
   it("is not fooled by the instant result the dispatch returns", async () => {
     // The result came back, so the old rule had nothing left to wait on. It is
     // a receipt for the dispatch, not the delegate's work.

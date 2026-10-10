@@ -292,6 +292,8 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
     // It lives in the journal for the metrics fold; a card per turn saying
     // "tokens were spent" would drown the feed in bookkeeping.
     if (event.kind === "usage") continue;
+    // A background command's end only closes its claim of work (ANT-308).
+    if (event.kind === "task.end") continue;
     const kind = kindOf(event);
     const pairKey = event.toolUseId;
 

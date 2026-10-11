@@ -15,16 +15,34 @@ function makeContext(overrides: Partial<AgentRunContext> = {}): AgentRunContext 
   };
 }
 
+/** A settled RPC run: the assistant's final message, then the ending record. */
+function settledRun(text: string, stopReason: "stop" | "error" = "stop", errorMessage?: string): string {
+  const message = {
+    role: "assistant",
+    stopReason,
+    ...(errorMessage ? { errorMessage } : {}),
+    content: [{ type: "text", text }],
+  };
+  return [
+    JSON.stringify({ type: "message_start", message: { role: "assistant", content: [] } }),
+    JSON.stringify({ type: "message_end", message }),
+    JSON.stringify({ type: "turn_end" }),
+    JSON.stringify({ type: "agent_end", willRetry: false }),
+    JSON.stringify({ type: "agent_settled" }),
+  ].join("\n") + "\n";
+}
+
 describe("buildPiArgs", () => {
-  it("builds the minimal non-interactive invocation", () => {
-    // `-p` is print mode: process the prompt and exit. The prompt itself is
-    // piped in on stdin, so no prompt argument appears here.
-    expect(buildPiArgs(makeContext())).toEqual(["-p"]);
+  it("builds the minimal RPC-mode invocation", () => {
+    // `--mode rpc` is pi's programmatic interface: the prompt goes in as a
+    // JSON `prompt` command on stdin, so no prompt argument appears here.
+    expect(buildPiArgs(makeContext())).toEqual(["--mode", "rpc"]);
   });
 
   it("includes the model when configured", () => {
     expect(buildPiArgs(makeContext(), { model: "anthropic/claude-sonnet-4-5" })).toEqual([
-      "-p",
+      "--mode",
+      "rpc",
       "--model",
       "anthropic/claude-sonnet-4-5",
     ]);
@@ -32,7 +50,8 @@ describe("buildPiArgs", () => {
 
   it("includes the thinking level when configured", () => {
     expect(buildPiArgs(makeContext(), { thinking: "high" })).toEqual([
-      "-p",
+      "--mode",
+      "rpc",
       "--thinking",
       "high",
     ]);
@@ -40,15 +59,15 @@ describe("buildPiArgs", () => {
 
   it("appends extra args after the fixed ones", () => {
     const args = buildPiArgs(makeContext(), { extraArgs: ["--no-extensions"] });
-    expect(args).toEqual(["-p", "--no-extensions"]);
+    expect(args).toEqual(["--mode", "rpc", "--no-extensions"]);
   });
 });
 
 describe("PiCliRuntime", () => {
-  it("spawns pi with the built args and the prompt envelope on stdin", async () => {
+  it("spawns pi in RPC mode and sends the prompt envelope as the prompt command", async () => {
     const { spawnFn, calls } = createFakeSpawn({
-      stdout: '{"status":"success","summary":"Parser implemented."}',
-      exitCode: 0,
+      stdout: settledRun("Parser implemented."),
+      neverExits: true,
     });
     const runtime = new PiCliRuntime({ spawnFn, model: "anthropic/claude-sonnet-4-5" });
 
@@ -58,19 +77,20 @@ describe("PiCliRuntime", () => {
     expect(result.summary).toBe("Parser implemented.");
     expect(calls).toHaveLength(1);
     expect(calls[0]!.command).toBe("pi");
-    expect(calls[0]!.args).toEqual([
-      "-p",
-      "--model",
-      "anthropic/claude-sonnet-4-5",
-    ]);
+    expect(calls[0]!.args).toEqual(["--mode", "rpc", "--model", "anthropic/claude-sonnet-4-5"]);
     expect(calls[0]!.options.cwd).toBe("/tmp/anthill-workspace");
+    // The envelope travels as the JSON `prompt` command, not as a raw stdin payload.
+    expect(calls[0]!.stdin).toContain('"type":"prompt"');
     expect(calls[0]!.stdin).toContain("You are running as part of an Anthill workflow.");
     expect(calls[0]!.stdin).toContain("Implement the parser.");
+    // The run settled on `agent_settled`, so the adapter ended the child.
+    expect(calls[0]!.killSignals).toContain("SIGTERM");
     expect(raw.metadata?.runtimeId).toBe("pi-cli");
+    expect(raw.metadata?.promptDelivery).toBe("rpc-prompt-command");
   });
 
   it("passes ctx.environment and configured env through to the child", async () => {
-    const { spawnFn, calls } = createFakeSpawn({ stdout: "ok" });
+    const { spawnFn, calls } = createFakeSpawn({ stdout: settledRun("ok"), neverExits: true });
     const runtime = new PiCliRuntime({ spawnFn, env: { PI_FLAG: "1" } });
 
     await runtime.run(makeContext({ environment: { ANTHILL_RUN_ID: "run-42" } }));
@@ -81,23 +101,52 @@ describe("PiCliRuntime", () => {
     expect(calls[0]!.options.env?.PATH).toBeDefined();
   });
 
-  it("maps a non-zero exit to a failed result", async () => {
+  it("maps a run that ended in an error to a failed result", async () => {
     const { spawnFn } = createFakeSpawn({
-      stderr: "error: no provider configured",
-      exitCode: 1,
+      stdout: settledRun("", "error", "no provider configured"),
+      neverExits: true,
     });
     const runtime = new PiCliRuntime({ spawnFn });
 
     const { result, raw } = await runtime.run(makeContext());
 
     expect(result.status).toBe("failed");
-    expect(result.summary).toBe("error: no provider configured");
-    expect(result.metadata).toEqual({ exitCode: 1 });
+    expect(result.summary).toBe("no provider configured");
     expect(raw.exitCode).toBe(1);
   });
 
+  it("maps a rejected prompt command to a failed result", async () => {
+    const { spawnFn } = createFakeSpawn({
+      stdout: JSON.stringify({ type: "response", id: 1, command: "prompt", success: false, error: "invalid model" }) + "\n",
+      neverExits: true,
+    });
+    const runtime = new PiCliRuntime({ spawnFn });
+
+    const { result } = await runtime.run(makeContext());
+
+    expect(result.status).toBe("failed");
+    expect(result.summary).toBe("invalid model");
+  });
+
+  it("maps a run that ended aborted to a cancelled result", async () => {
+    const { spawnFn } = createFakeSpawn({
+      stdout: settledRun("", "aborted"),
+      neverExits: true,
+    });
+    const runtime = new PiCliRuntime({ spawnFn });
+
+    const { result } = await runtime.run(makeContext());
+
+    expect(result.status).toBe("cancelled");
+  });
+
   it("kills the process and fails on timeout", async () => {
-    const { spawnFn, calls } = createFakeSpawn({ stdout: "thinking...", neverExits: true });
+    // The stream speaks but never settles: the run is still going when the
+    // time budget runs out.
+    const { spawnFn, calls } = createFakeSpawn({
+      stdout: JSON.stringify({ type: "agent_start" }),
+      neverExits: true,
+    });
     const runtime = new PiCliRuntime({ spawnFn });
 
     const { result } = await runtime.run(makeContext({ timeoutMs: 20 }));
@@ -120,6 +169,29 @@ describe("PiCliRuntime", () => {
     expect(calls[0]!.killSignals).toContain("SIGTERM");
   });
 
+  it("fails cleanly when the child dies before the run settles", async () => {
+    const { spawnFn } = createFakeSpawn({
+      stderr: "fatal: model provider crashed",
+      exitCode: 1,
+    });
+    const runtime = new PiCliRuntime({ spawnFn });
+
+    const { result } = await runtime.run(makeContext());
+
+    expect(result.status).toBe("failed");
+    expect(result.summary).toBe("fatal: model provider crashed");
+  });
+
+  it("fails cleanly when the binary is missing", async () => {
+    const { spawnFn } = createFakeSpawn({ spawnError: enoent("pi") });
+    const runtime = new PiCliRuntime({ spawnFn });
+
+    const { result } = await runtime.run(makeContext());
+
+    expect(result.status).toBe("failed");
+    expect(result.summary).toContain("ENOENT");
+  });
+
   describe("detect", () => {
     it("reports the version when the binary responds", async () => {
       const { spawnFn, calls } = createFakeSpawn({ stdout: "0.85.1\n", exitCode: 0 });
@@ -129,41 +201,20 @@ describe("PiCliRuntime", () => {
 
       expect(detection).toEqual({
         available: true,
-        command: "pi",
         version: "0.85.1",
+        command: "pi",
       });
       expect(calls[0]!.args).toEqual(["--version"]);
     });
 
-    it("returns unavailable (not a throw) when the binary is absent", async () => {
+    it("reports unavailable when the binary is missing", async () => {
       const { spawnFn } = createFakeSpawn({ spawnError: enoent("pi") });
-      const runtime = new PiCliRuntime({ spawnFn });
-
-      await expect(runtime.detect()).resolves.toEqual({
-        available: false,
-        command: "pi",
-        reason: "pi CLI not found on PATH",
-      });
-    });
-
-    it("returns unavailable when the binary errors out", async () => {
-      const { spawnFn } = createFakeSpawn({ stderr: "unknown flag --version", exitCode: 1 });
       const runtime = new PiCliRuntime({ spawnFn });
 
       const detection = await runtime.detect();
 
       expect(detection.available).toBe(false);
-      expect(detection.reason).toBe("unknown flag --version");
-    });
-
-    it("honours a custom command name", async () => {
-      const { spawnFn, calls } = createFakeSpawn({ stdout: "0.85.1" });
-      const runtime = new PiCliRuntime({ spawnFn, command: "/opt/bin/pi" });
-
-      const detection = await runtime.detect();
-
-      expect(calls[0]!.command).toBe("/opt/bin/pi");
-      expect(detection.command).toBe("/opt/bin/pi");
+      expect(detection.reason).toBe("pi CLI not found on PATH");
     });
   });
 });

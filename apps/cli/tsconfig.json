@@ -17,6 +17,7 @@
     "src/bridge.ts",
     "src/paths.ts",
     "src/report.ts",
+    "src/workflow-command.ts",
     "../desktop/src/main/live/hook-handler.ts"
   ]
 }

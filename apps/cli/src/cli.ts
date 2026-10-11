@@ -11,6 +11,7 @@ import { startServer } from "./server.js";
 import { createBridge } from "./bridge.js";
 import { extractDataDir, reportMain, runReportCommand } from "./report-command.js";
 import { observationCommand } from "./observation.js";
+import { workflowCommand } from "./workflow-command.js";
 import { reportFatal, startCliDiagnostics } from "./diagnostics.js";
 import { PLATFORM_HELP, platformWarning } from "./platform.js";
 
@@ -59,6 +60,7 @@ function usage(): string {
     "       anthill step <runId> <nonce> <stepId>",
     "       anthill done <runId> <nonce>",
     "       anthill observation status|enable|skip",
+    "       anthill workflow export <id> [--format svg] [--out <path>]",
     "",
     "  --port <n>       listen on this port (default 4173)",
     "  --host <h>       bind to this interface (default 127.0.0.1)",
@@ -504,6 +506,10 @@ export async function main(): Promise<void> {
     const reply = await observationCommand(process.argv.length === 4 ? process.argv[3] : undefined);
     console.log(JSON.stringify(reply.result));
     process.exitCode = reply.exitCode;
+    return;
+  }
+  if (process.argv[2] === "workflow") {
+    process.exitCode = await workflowCommand(process.argv.slice(3));
     return;
   }
   const argv = process.argv.slice(2);

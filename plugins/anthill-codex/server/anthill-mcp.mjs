@@ -1,4 +1,4 @@
-// Anthill MCP server 0.8.12, built by scripts/build-plugin-server.mjs
+// Anthill MCP server 0.8.13, built by scripts/build-plugin-server.mjs
 // from https://github.com/anthillapp/anthill. Do not edit: run
 // `npm run plugin:bundle` to write it again. MIT licensed.
 import { createRequire as __anthillCreateRequire } from "node:module";
@@ -35385,6 +35385,70 @@ var ACTION_CATEGORY_LABELS = {
   deliver: "Deliver"
 };
 
+// packages/workflow/dist/id-counter.js
+var NAMESPACE2 = "workflow";
+var KEY = "idSeq";
+function isRecord2(value) {
+  return typeof value === "object" && value !== null;
+}
+__name(isRecord2, "isRecord");
+function stored(workflow) {
+  const metadata = workflow.metadata;
+  if (!isRecord2(metadata))
+    return {};
+  const bag = metadata[NAMESPACE2];
+  if (!isRecord2(bag))
+    return {};
+  const seq = bag[KEY];
+  if (!isRecord2(seq))
+    return {};
+  const out = {};
+  for (const [prefix, value] of Object.entries(seq)) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      out[prefix] = Math.floor(value);
+    }
+  }
+  return out;
+}
+__name(stored, "stored");
+function numberOf(id, prefix) {
+  if (!id.startsWith(`${prefix}-`))
+    return void 0;
+  const tail = id.slice(prefix.length + 1);
+  if (!/^\d+$/.test(tail))
+    return void 0;
+  const value = Number(tail);
+  return Number.isSafeInteger(value) && value > 0 ? value : void 0;
+}
+__name(numberOf, "numberOf");
+function rememberIdsUnder(workflow, counter, ids) {
+  const seq = { ...stored(workflow) };
+  let changed = false;
+  for (const id of ids) {
+    const dash = id.lastIndexOf("-");
+    if (dash <= 0)
+      continue;
+    const prefix = id.slice(0, dash);
+    const value = numberOf(id, prefix);
+    if (value === void 0)
+      continue;
+    const key = counter ?? prefix;
+    if ((seq[key] ?? 0) >= value)
+      continue;
+    seq[key] = value;
+    changed = true;
+  }
+  if (!changed)
+    return workflow;
+  const metadata = isRecord2(workflow.metadata) ? workflow.metadata : {};
+  const bag = isRecord2(metadata[NAMESPACE2]) ? { ...metadata[NAMESPACE2] } : {};
+  return {
+    ...workflow,
+    metadata: { ...metadata, [NAMESPACE2]: { ...bag, [KEY]: seq } }
+  };
+}
+__name(rememberIdsUnder, "rememberIdsUnder");
+
 // packages/workflow/dist/node-config.js
 var WORKFLOWNER_NODE_TYPES = ["start", "agent", "approval", "end"];
 function readString(config2, key) {
@@ -35510,15 +35574,15 @@ var OUTCOME_LABELS = {
   switch: "Switch"
 };
 var DEFAULT_OUTCOME_KIND = "next";
-function isRecord2(value) {
+function isRecord3(value) {
   return typeof value === "object" && value !== null;
 }
-__name(isRecord2, "isRecord");
+__name(isRecord3, "isRecord");
 function readPending(node) {
   const raw = node.config.pendingOutputs;
   if (!Array.isArray(raw))
     return [];
-  return raw.filter(isRecord2).flatMap((item) => {
+  return raw.filter(isRecord3).flatMap((item) => {
     const id = item.id;
     if (typeof id !== "string" || id.length === 0)
       return [];
@@ -35537,7 +35601,7 @@ function readPending(node) {
 }
 __name(readPending, "readPending");
 function readAnchorPoint(value) {
-  if (!isRecord2(value))
+  if (!isRecord3(value))
     return void 0;
   const { u, v } = value;
   if (typeof u !== "number" || typeof v !== "number")
@@ -35546,7 +35610,7 @@ function readAnchorPoint(value) {
 }
 __name(readAnchorPoint, "readAnchorPoint");
 function readBend(value) {
-  if (!isRecord2(value))
+  if (!isRecord3(value))
     return void 0;
   const { along, across } = value;
   if (typeof along !== "number" || typeof across !== "number")
@@ -35955,18 +36019,18 @@ function validateWorkflow(workflow) {
 __name(validateWorkflow, "validateWorkflow");
 
 // packages/workflow/dist/agents.js
-var NAMESPACE2 = "workflow";
-var KEY = "agents";
-function isRecord3(value) {
+var NAMESPACE3 = "workflow";
+var KEY2 = "agents";
+function isRecord4(value) {
   return typeof value === "object" && value !== null;
 }
-__name(isRecord3, "isRecord");
+__name(isRecord4, "isRecord");
 function readString2(value) {
   return typeof value === "string" && value.trim().length > 0 ? value : void 0;
 }
 __name(readString2, "readString");
 function readProfile(value) {
-  if (!isRecord3(value))
+  if (!isRecord4(value))
     return void 0;
   const id = readString2(value.id);
   if (!id)
@@ -35974,8 +36038,8 @@ function readProfile(value) {
   const role = readString2(value.role);
   const description = readString2(value.description);
   const libraryId = readString2(value.libraryId);
-  const stored = readAgentModels(value.models);
-  const migrated = stored ? { models: stored } : migrateModels(value.models ?? value.model);
+  const stored2 = readAgentModels(value.models);
+  const migrated = stored2 ? { models: stored2 } : migrateModels(value.models ?? value.model);
   return {
     id,
     name: typeof value.name === "string" ? value.name : "",
@@ -35984,19 +36048,19 @@ function readProfile(value) {
     ...role ? { role } : {},
     ...description ? { description } : {},
     ...libraryId ? { libraryId } : {},
-    ...isRecord3(value.settings) ? { settings: value.settings } : {}
+    ...isRecord4(value.settings) ? { settings: value.settings } : {}
   };
 }
 __name(readProfile, "readProfile");
 function duplicateAgentProfileIds(workflow) {
-  const bag = workflow.metadata?.[NAMESPACE2];
-  const raw = isRecord3(bag) ? bag[KEY] : void 0;
+  const bag = workflow.metadata?.[NAMESPACE3];
+  const raw = isRecord4(bag) ? bag[KEY2] : void 0;
   if (!Array.isArray(raw))
     return [];
   const seen = /* @__PURE__ */ new Set();
   const duplicates = /* @__PURE__ */ new Set();
   for (const item of raw) {
-    const id = isRecord3(item) ? readString2(item.id) : void 0;
+    const id = isRecord4(item) ? readString2(item.id) : void 0;
     if (!id)
       continue;
     if (seen.has(id))
@@ -36008,12 +36072,12 @@ function duplicateAgentProfileIds(workflow) {
 __name(duplicateAgentProfileIds, "duplicateAgentProfileIds");
 function agentProfiles(workflow) {
   const metadata = workflow.metadata;
-  if (!isRecord3(metadata))
+  if (!isRecord4(metadata))
     return [];
-  const bag = metadata[NAMESPACE2];
-  if (!isRecord3(bag))
+  const bag = metadata[NAMESPACE3];
+  if (!isRecord4(bag))
     return [];
-  const raw = bag[KEY];
+  const raw = bag[KEY2];
   if (!Array.isArray(raw))
     return [];
   const seen = /* @__PURE__ */ new Set();
@@ -36036,6 +36100,19 @@ function agentSlug(profile) {
   return slugify2(profile.name) || slugify2(profile.id);
 }
 __name(agentSlug, "agentSlug");
+var PROFILE_COUNTER = "agentProfile";
+function withProfiles(workflow, profiles) {
+  workflow = rememberIdsUnder(workflow, PROFILE_COUNTER, profiles.map((profile) => profile.id));
+  const metadata = isRecord4(workflow.metadata) ? workflow.metadata : {};
+  const bag = isRecord4(metadata[NAMESPACE3]) ? { ...metadata[NAMESPACE3] } : {};
+  const next = { ...bag };
+  if (profiles.length === 0)
+    delete next[KEY2];
+  else
+    next[KEY2] = profiles;
+  return { ...workflow, metadata: { ...metadata, [NAMESPACE3]: next } };
+}
+__name(withProfiles, "withProfiles");
 function assignedAgents(workflow, nodeOrder) {
   const nodes = nodeOrder ?? workflow.nodes;
   const byId = /* @__PURE__ */ new Map();
@@ -36055,6 +36132,20 @@ function assignedAgents(workflow, nodeOrder) {
   return [...byId.values()];
 }
 __name(assignedAgents, "assignedAgents");
+function retargetWorkflow(workflow, target) {
+  if (workflow.target === target)
+    return { workflow, changed: false, sessionModel: [] };
+  const profiles = agentProfiles(workflow);
+  const missing = profiles.filter((profile) => !isConfiguredFor(profile.models, target));
+  const withModels = missing.length === 0 ? workflow : withProfiles(workflow, profiles.map((profile) => isConfiguredFor(profile.models, target) ? profile : { ...profile, models: { ...profile.models, [target]: { id: HARNESS_DEFAULT } } }));
+  return {
+    workflow: { ...withModels, target },
+    ...workflow.target ? { from: workflow.target } : {},
+    changed: true,
+    sessionModel: missing.map((profile) => profile.name || profile.id)
+  };
+}
+__name(retargetWorkflow, "retargetWorkflow");
 
 // packages/workflow/dist/compile.js
 var WorkflowCompileError = class extends Error {
@@ -36217,7 +36308,7 @@ function startTogether(targets, byId, stepNumbers, usesSubagents) {
     return step === void 0 ? block?.name ?? id : `${step} (${block?.name ?? id})`;
   });
   const all = targets.every((id) => stepNumbers.has(id)) ? `steps ${joinList(names)}` : joinList(names);
-  return usesSubagents ? `continue to ${all} at the same time \u2013 they are independent. Hand each to its own subagent in one go, and do not wait for one before starting the next.` : `continue to ${all} \u2013 they are independent, so do all of them, in whichever order suits.`;
+  return usesSubagents ? `continue to ${all} at the same time \u2013 they are independent. Hand each to its own subagent in one go, without waiting for one before starting the next. If your harness runs fewer subagents at a time than this, start as many as it allows and each of the rest as soon as one finishes; do not carry any of them out yourself instead.` : `continue to ${all} \u2013 they are independent, so do all of them, in whichever order suits.`;
 }
 __name(startTogether, "startTogether");
 function renderTransitions(workflow, node, stepNumbers, plan, usesSubagents) {
@@ -36517,7 +36608,12 @@ function buildPrompt(workflow, harness, ordered, options) {
   sections.push([
     "## Rules",
     "",
-    plan.forks.size > 0 ? usesSubagents ? "- Follow the steps in the order given \u2013 steps marked to run at the same time start together; do not skip ahead." : "- Follow the steps in the order given \u2013 steps marked as independent can be done in any order; do not skip ahead." : "- Follow the steps in the order given; do not skip ahead.",
+    plan.forks.size > 0 ? usesSubagents ? "- Follow the steps in the order given \u2013 steps marked to run at the same time start together; do not skip ahead." : harness.target === "pi" ? (
+      // Pi runs sequentially — no subagent files, no parallelism — so its
+      // step lines say "in whichever order suits" and the Rules section
+      // must not say "in any order" beside them (ANT-7FA8152F).
+      "- Follow the steps; do not skip ahead."
+    ) : "- Follow the steps in the order given \u2013 steps marked as independent can be done in any order; do not skip ahead." : "- Follow the steps in the order given; do not skip ahead.",
     "- After each step, state which branch you are taking and why.",
     "- If a step's result is ambiguous, ask rather than guessing which branch to take.",
     "- The constraints in the shared context apply throughout, not only to the step being worked on."
@@ -36687,7 +36783,7 @@ function checkSessionId(value, field) {
 }
 __name(checkSessionId, "checkSessionId");
 function readSubmission(value) {
-  if (!isRecord4(value)) {
+  if (!isRecord5(value)) {
     return {
       ok: false,
       problems: [
@@ -36744,7 +36840,7 @@ function readSubmission(value) {
 }
 __name(readSubmission, "readSubmission");
 function readSource(value, problems) {
-  if (!isRecord4(value)) {
+  if (!isRecord5(value)) {
     problems.push(fieldProblem(value, "source", "an object", "It says who handed this over: which tool, which session of it, and what the user asked for."));
     return void 0;
   }
@@ -36795,7 +36891,7 @@ function readWorkflow(value, problems) {
         pending.push({ value: child, depth: item.depth + 1 });
     }
   }
-  if (isRecord4(value) && (Array.isArray(value.nodes) && value.nodes.length > 1e3 || Array.isArray(value.edges) && value.edges.length > 5e3)) {
+  if (isRecord5(value) && (Array.isArray(value.nodes) && value.nodes.length > 1e3 || Array.isArray(value.edges) && value.edges.length > 5e3)) {
     problems.push({
       code: EXCHANGE_PROBLEM_CODES.WORKFLOW_MALFORMED,
       message: "A handover supports at most 1000 blocks and 5000 connections.",
@@ -36804,7 +36900,7 @@ function readWorkflow(value, problems) {
     return void 0;
   }
   const compatibility = checkWorkflowCompatibility(value);
-  if (isRecord4(value) && !compatibility.ok) {
+  if (isRecord5(value) && !compatibility.ok) {
     problems.push({
       code: EXCHANGE_PROBLEM_CODES.WORKFLOW_MALFORMED,
       message: compatibility.message,
@@ -36826,10 +36922,10 @@ function readWorkflow(value, problems) {
   return void 0;
 }
 __name(readWorkflow, "readWorkflow");
-function isRecord4(value) {
+function isRecord5(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-__name(isRecord4, "isRecord");
+__name(isRecord5, "isRecord");
 function readNonBlankString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value : void 0;
 }
@@ -37365,6 +37461,7 @@ function parseBinding(text, where) {
   const nonce = str(value.nonce);
   const at = when(value.at);
   const sessionId = str(value.sessionId);
+  const harness = isSourceHarness(value.harness) ? value.harness : void 0;
   if (!runId || !workflowId || !revision || !nonce || !at) {
     return unreadable(where, "it does not describe a run holding a revision");
   }
@@ -37380,6 +37477,7 @@ function parseBinding(text, where) {
       nonce,
       at,
       ...sessionId ? { sessionId } : {},
+      ...harness ? { harness } : {},
       ...str(value.requestKey) ? { requestKey: str(value.requestKey) } : {},
       ...str(value.digest) ? { digest: str(value.digest) } : {}
     }
@@ -37413,7 +37511,7 @@ function openEnvelope(text, where) {
   } catch {
     return unreadable(where, "it is not JSON");
   }
-  if (!isRecord5(value))
+  if (!isRecord6(value))
     return unreadable(where, "it is not a JSON object");
   if (typeof value.version !== "number" || !Number.isInteger(value.version)) {
     return unreadable(where, "it does not say what version it is");
@@ -37438,7 +37536,7 @@ function unreadable(where, why) {
 }
 __name(unreadable, "unreadable");
 function readSource2(value) {
-  if (!isRecord5(value))
+  if (!isRecord6(value))
     return void 0;
   const harness = isSourceHarness(value.harness) ? value.harness : void 0;
   const sessionId = str(value.sessionId);
@@ -37448,10 +37546,10 @@ function readSource2(value) {
   return { harness, sessionId, taskText };
 }
 __name(readSource2, "readSource");
-function isRecord5(value) {
+function isRecord6(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-__name(isRecord5, "isRecord");
+__name(isRecord6, "isRecord");
 function str(value) {
   return typeof value === "string" && value.length > 0 ? value : void 0;
 }
@@ -37667,13 +37765,13 @@ var ExchangeStore = class {
    * validation. The completeness problems come back with the result, and
    * eligibility is where they bite.
    */
-  async addRevision(workflowId, workflow, by) {
+  async addRevision(workflowId, workflow, by, runner) {
     const parsed = readWorkflowDocument(workflow);
     if (!parsed.ok)
       return { outcome: "conflict", problems: parsed.problems };
-    return withWorkflowLock(identityPath(this.root, workflowId), () => this.addRevisionLocked(workflowId, parsed.workflow, by));
+    return withWorkflowLock(identityPath(this.root, workflowId), () => this.addRevisionLocked(workflowId, parsed.workflow, by, runner));
   }
-  async addRevisionLocked(workflowId, workflow, by) {
+  async addRevisionLocked(workflowId, workflow, by, runner) {
     const misaddressed = addressingProblem(workflowId, workflow.id);
     if (misaddressed)
       return { outcome: "conflict", problems: [misaddressed] };
@@ -37684,7 +37782,7 @@ var ExchangeStore = class {
       return { outcome: "conflict", problems: [identity.problem] };
     }
     const digest = revisionDigest(workflow);
-    const problems = checkCompleteness(workflow, identity.record.source);
+    const problems = checkCompleteness(workflow, runBy(identity.record.source, runner));
     const carry = problems.length > 0 ? { problems } : {};
     for (let attempt = 0; attempt < MAX_REVISION_ATTEMPTS; attempt += 1) {
       const history = await this.readRevisions(workflowId);
@@ -37773,7 +37871,7 @@ var ExchangeStore = class {
    * a new name: it says the diagram cannot be compiled into a prompt, which is
    * a fact about the graph rather than a decision about permission.
    */
-  async eligibleRevision(workflowId) {
+  async eligibleRevision(workflowId, runner) {
     const workflow = await this.readWorkflow(workflowId);
     if (!workflow) {
       return {
@@ -37789,7 +37887,8 @@ var ExchangeStore = class {
     const chosen = this.headRevision(workflow, workflowId);
     if ("refusal" in chosen)
       return { ...chosen.refusal, mode };
-    const problems = checkCompleteness(chosen.revision.workflow, identity.source);
+    const boundBy = runner ?? [...workflow.bindings].reverse().find((binding) => binding.revision === chosen.revision.revision && binding.harness)?.harness;
+    const problems = checkCompleteness(chosen.revision.workflow, runBy(identity.source, boundBy));
     if (problems.length > 0) {
       return {
         eligible: false,
@@ -37821,7 +37920,7 @@ var ExchangeStore = class {
     return withWorkflowLock(identityPath(this.root, workflowId), () => this.bindLocked(workflowId, revision, snapshot));
   }
   /** Idempotency is scoped to this workflow and the external caller's request key. */
-  async bindRequest(workflowId, revision, digest, requestKey, sessionId, mint) {
+  async bindRequest(workflowId, revision, digest, requestKey, sessionId, mint, runner) {
     return withWorkflowLock(identityPath(this.root, workflowId), async () => {
       const workflow = await this.readWorkflow(workflowId);
       if (!workflow)
@@ -37840,7 +37939,13 @@ var ExchangeStore = class {
           problems: [storeProblem(EXCHANGE_STORE_PROBLEM_CODES.STORE_BINDING_CONFLICT, "This binding request key was already used for different content or a different session.")]
         };
       }
-      return this.bindLocked(workflowId, revision, { ...mint(), sessionId: session, digest, requestKey });
+      return this.bindLocked(workflowId, revision, {
+        ...mint(),
+        sessionId: session,
+        digest,
+        requestKey,
+        ...runner ? { harness: runner } : {}
+      });
     });
   }
   async bindLocked(workflowId, revision, run) {
@@ -37870,7 +37975,7 @@ var ExchangeStore = class {
         problems: [storeProblem(EXCHANGE_STORE_PROBLEM_CODES.STORE_BINDING_CONFLICT, `Run ${run.runId} already has a different or unreadable binding. Nothing was overwritten.`)]
       };
     }
-    const eligible = await this.eligibleRevision(workflowId);
+    const eligible = await this.eligibleRevision(workflowId, run.harness ?? identity.record.source.harness);
     if (!eligible.eligible) {
       return {
         outcome: eligible.reason === "no_such_workflow" ? "no_such_workflow" : "not_eligible",
@@ -37900,7 +38005,8 @@ var ExchangeStore = class {
       at: this.now(),
       digest: eligible.revision.digest,
       ...run.requestKey ? { requestKey: run.requestKey } : {},
-      ...sessionId ? { sessionId } : {}
+      ...sessionId ? { sessionId } : {},
+      ...run.harness ? { harness: run.harness } : {}
     };
     const claim = await createExclusive(bindingPath(this.root, workflowId, run.runId), encodeRecord(binding));
     if (claim.outcome === "created")
@@ -38301,6 +38407,10 @@ function sameDrop(left, right) {
   return left.key === right.key && left.kind === right.kind && left.workflowId === right.workflowId && left.revision === right.revision && left.runId === right.runId;
 }
 __name(sameDrop, "sameDrop");
+function runBy(source, runner) {
+  return runner && runner !== source.harness ? { ...source, harness: runner } : source;
+}
+__name(runBy, "runBy");
 
 // packages/exchange-store/dist/data-dir.js
 import { homedir } from "node:os";
@@ -38512,10 +38622,14 @@ function buildBootstrapPrompt(workflow, marker, options = {}) {
       "",
       "Your own list of callable agents was fixed when this session started, so the",
       "files you create now may not be callable here \u2013 they are for later sessions",
-      "in this repository. Where a step below says to delegate to one of these",
-      "agents and your harness does not recognise it, do not substitute a different",
-      "agent. Carry the step out yourself, following that agent's file above as if",
-      "you were it, and say plainly that you did so."
+      "in this repository. Where a step below says to delegate to one of these agents",
+      "and your harness does not recognise it, do not pick some other agent of yours",
+      "instead. Start a general-purpose subagent and make it that agent: give it the",
+      "whole of that agent's file above as its instructions, the agent's model if",
+      "your tool lets you choose one, and the agent's name at the start of its task",
+      "name or description, so Anthill can tie its work to the step. Say plainly",
+      "that you did so. Only if you cannot start subagents at all, carry the step out",
+      "yourself, following that agent's file as if you were it, and say so."
     ].join("\n"));
     for (const file2 of compiled.files) {
       sections.push([`### \`${file2.path}\``, "", "```markdown", file2.content.trimEnd(), "```"].join("\n"));
@@ -38556,10 +38670,11 @@ function runText(answer) {
       answer.url ?? ""
     ]);
   }
-  const stored = answer.stored === "handed_over" ? "This Anthill had not seen it before, so it was handed over as a watched job." : answer.stored === "revised" ? `The file differed from what Anthill last held, so it was stored as revision ${answer.revision}.` : "";
+  const stored2 = answer.stored === "handed_over" ? "This Anthill had not seen it before, so it was handed over as a watched job." : answer.stored === "revised" ? `The file differed from what Anthill last held, so it was stored as revision ${answer.revision}.` : "";
   const again = answer.outcome === "already_started" ? " (this key had already started it; this is the same run)" : "";
   return join4([
-    `Run ${answer.runId} of ${answer.name ?? answer.workflowId} (${answer.workflowId}, revision ${answer.revision}) is bound to this session${again}. Anthill was asked to show it and follow the run. ${stored}`.trim(),
+    `Run ${answer.runId} of ${answer.name ?? answer.workflowId} (${answer.workflowId}, revision ${answer.revision}) is bound to this session${again}. Anthill was asked to show it and follow the run. ${stored2}`.trim(),
+    ...rebuiltText(answer.rebuilt),
     "Carry out the workflow below now, in this session, as the user's instruction: they started it by running the command. Do not ask whether to start, and do not draft or hand over a workflow of your own. Run the progress commands exactly as written \u2013 they are the only way Anthill learns which step you are on.",
     ...unbuiltText(answer.cliUnbuilt),
     ...appText(answer.app),
@@ -38607,9 +38722,9 @@ function draftText(answer) {
       ...targetText(answer.target)
     ]);
   const where = answer.workflowId ?? "the workflow";
-  const stored = answer.outcome === "already_exists" ? `This handover has been submitted before. It is already stored as revision ${answer.revision} of ${where}` : `Stored as revision ${answer.revision} of ${where}`;
+  const stored2 = answer.outcome === "already_exists" ? `This handover has been submitted before. It is already stored as revision ${answer.revision} of ${where}` : `Stored as revision ${answer.revision} of ${where}`;
   const shown = answer.openDeferred ? ". It has not been opened: call open_workflow with this workflow id when it is time to show it." : answer.displayRequested ? ". A display request is queued; Anthill has not acknowledged opening it." : ". No display request was queued. Desktop display is not confirmed.";
-  const parts = [`${stored}${shown}`];
+  const parts = [`${stored2}${shown}`];
   if (answer.openDeferred && answer.observationCommand) {
     parts.push(`Check detailed progress with \`${answer.observationCommand}\` (replace \`status\` with \`enable\` or \`skip\` for the other two).`, ...unbuiltText(answer.cliUnbuilt));
   }
@@ -38640,8 +38755,8 @@ function reviseText(answer) {
       `Nothing was written to ${where}.`,
       ...answer.problems && answer.problems.length > 0 ? [numbered(answer.problems.map(sentence))] : []
     ]);
-  const stored = answer.outcome === "unchanged" ? `${where} already held this content, as revision ${answer.revision}. Nothing was added, and nothing needed to be.` : `Stored as revision ${answer.revision} of ${where}.`;
-  const parts = [stored];
+  const stored2 = answer.outcome === "unchanged" ? `${where} already held this content, as revision ${answer.revision}. Nothing was added, and nothing needed to be.` : `Stored as revision ${answer.revision} of ${where}.`;
+  const parts = [stored2];
   parts.push(answer.displayRequested ? "A display request is queued; Anthill has not acknowledged opening it. The user will be asked before it replaces anything they have not saved." : "No display request was queued, so the user is still looking at whatever they had open.");
   if (answer.boundRevision !== void 0) {
     parts.push(`A run is bound to revision ${answer.boundRevision} and stays on it. This revision does not reach that run; nothing about the work already under way has changed.`);
@@ -38908,6 +39023,21 @@ function join4(parts) {
   return parts.filter((part) => part.trim().length > 0).join("\n\n");
 }
 __name(join4, "join");
+function rebuiltText(rebuilt) {
+  if (!rebuilt)
+    return [];
+  const to = harnessProfile(rebuilt.to).displayName;
+  const from = rebuilt.from ? `It was written for ${harnessProfile(rebuilt.from).displayName}, so it` : "It named no tool, so it";
+  const models = rebuilt.sessionModel.length === 0 ? "" : ` ${listed2(rebuilt.sessionModel)} had no model chosen for ${to} and ${rebuilt.sessionModel.length === 1 ? "uses" : "use"} this session's.`;
+  return [`${from} was rebuilt for ${to} before it was stored; the file itself was not changed.${models} Tell the user in one line.`];
+}
+__name(rebuiltText, "rebuiltText");
+function listed2(names) {
+  if (names.length <= 1)
+    return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+__name(listed2, "listed");
 
 // apps/mcp/dist/launch.js
 import { spawn } from "node:child_process";
@@ -39683,7 +39813,7 @@ function createHandlers(dependencies) {
       if (revision === void 0) {
         throw new Error(`${created.workflowId} was stored but no revision came back.`);
       }
-      const stored = await store.readWorkflow(created.workflowId);
+      const stored2 = await store.readWorkflow(created.workflowId);
       if (input.open === false) {
         const reporting = reach.resolved ? invocation(reach.resolved) : {};
         return result(draftText, {
@@ -39691,7 +39821,7 @@ function createHandlers(dependencies) {
           workflowId: created.workflowId,
           url: url2,
           revision,
-          ...stored?.identity ? { mode: stored.identity.mode } : {},
+          ...stored2?.identity ? { mode: stored2.identity.mode } : {},
           displayed: false,
           displayRequested: false,
           openDeferred: true,
@@ -39717,7 +39847,7 @@ function createHandlers(dependencies) {
         // Read again: a web shell this handover started has a port by now.
         url: app.link ?? reach.link(created.workflowId),
         revision,
-        ...stored?.identity ? { mode: stored.identity.mode } : {},
+        ...stored2?.identity ? { mode: stored2.identity.mode } : {},
         displayed: false,
         displayRequested: drop.outcome !== "conflict",
         app,
@@ -39752,8 +39882,8 @@ function createHandlers(dependencies) {
       if ("problem" in reach)
         return result(reviseText, { outcome: "invalid", workflowId, problems: [reach.problem] });
       const { store } = reach;
-      const stored = await store.readWorkflow(workflowId);
-      if (!stored?.identity) {
+      const stored2 = await store.readWorkflow(workflowId);
+      if (!stored2?.identity) {
         return result(reviseText, { outcome: "no_such_workflow", workflowId });
       }
       const read = readWorkflowDocument(input.workflow);
@@ -39769,7 +39899,7 @@ function createHandlers(dependencies) {
           ]
         });
       }
-      const problems = checkCompleteness(read.workflow, stored.identity.source);
+      const problems = checkCompleteness(read.workflow, stored2.identity.source);
       if (problems.length > 0) {
         return result(reviseText, {
           outcome: "incomplete",
@@ -39796,7 +39926,7 @@ function createHandlers(dependencies) {
         workflowId,
         revision
       });
-      const bound = stored.bindings.at(-1)?.revision;
+      const bound = stored2.bindings.at(-1)?.revision;
       const app = await bringUp(reach, workflowId);
       return result(reviseText, {
         outcome: added.outcome === "added" ? "revised" : "unchanged",
@@ -39829,9 +39959,9 @@ function createHandlers(dependencies) {
       if ("problem" in reach)
         return result(callText, invalidCall([reach.problem]));
       const { store } = reach;
-      const stored = await store.readWorkflow(workflowId);
-      const revision = stored?.head?.revision;
-      if (!stored || revision === void 0)
+      const stored2 = await store.readWorkflow(workflowId);
+      const revision = stored2?.head?.revision;
+      if (!stored2 || revision === void 0)
         return result(openText, { outcome: "not_found", workflowId });
       const drop = await store.dropInbox({
         kind: "display",
@@ -39863,12 +39993,12 @@ function createHandlers(dependencies) {
       if ("problem" in reach)
         return result(callText, invalidCall([reach.problem]));
       const { store } = reach;
-      const stored = await store.readWorkflow(workflowId);
-      if (!stored)
+      const stored2 = await store.readWorkflow(workflowId);
+      if (!stored2)
         return result(workflowText, { outcome: "not_found", workflowId });
       const url2 = reach.link(workflowId);
       const eligibility = await store.eligibleRevision(workflowId);
-      const problems = [...stored.problems];
+      const problems = [...stored2.problems];
       if (!eligibility.eligible && eligibility.reason === "incomplete") {
         problems.push(...eligibility.problems);
       }
@@ -39876,17 +40006,17 @@ function createHandlers(dependencies) {
         outcome: "found",
         workflowId,
         url: url2,
-        ...identityFields(stored),
-        ...stored.head ? {
+        ...identityFields(stored2),
+        ...stored2.head ? {
           head: {
-            revision: stored.head.revision,
-            digest: stored.head.digest,
-            createdAt: stored.head.createdAt,
-            by: stored.head.by
+            revision: stored2.head.revision,
+            digest: stored2.head.digest,
+            createdAt: stored2.head.createdAt,
+            by: stored2.head.by
           }
         } : {},
-        revisions: stored.revisions,
-        bindings: stored.bindings,
+        revisions: stored2.revisions,
+        bindings: stored2.bindings,
         ...eligibilityFields(eligibility),
         ...problems.length > 0 ? { problems } : {}
       });
@@ -40001,9 +40131,9 @@ function createHandlers(dependencies) {
         revision: binding.revision,
         runId: binding.runId
       });
-      const stored = await store.readWorkflow(workflowId);
+      const stored2 = await store.readWorkflow(workflowId);
       const snapshot = await store.readRevision(workflowId, binding.revision);
-      if (!snapshot || !stored?.identity || snapshot.digest !== binding.digest) {
+      if (!snapshot || !stored2?.identity || snapshot.digest !== binding.digest) {
         throw new Error("The bound snapshot cannot be verified. No running state is implied.");
       }
       const steps = workflowSteps(snapshot.workflow);
@@ -40012,7 +40142,7 @@ function createHandlers(dependencies) {
         runId: binding.runId,
         nonce: binding.nonce,
         workflowId: binding.workflowId,
-        cli: stored?.identity?.source.harness ?? "claude-code",
+        cli: binding.harness ?? stored2?.identity?.source.harness ?? "claude-code",
         promptVersion: MARKER_VERSION,
         issuedAt: binding.at
       }, steps, reporting);
@@ -40021,7 +40151,7 @@ function createHandlers(dependencies) {
         outcome: bound.outcome,
         workflowId,
         url: app.link ?? reach.link(workflowId),
-        mode: stored.identity.mode,
+        mode: stored2.identity.mode,
         revision: binding.revision,
         digest: snapshot.digest,
         runId: binding.runId,
@@ -40083,18 +40213,20 @@ function createHandlers(dependencies) {
       });
       if (!file2.ok)
         return result(runText, { outcome: "invalid", path: file2.path, ...problemFields(file2.problems) });
-      const workflow = file2.workflow;
+      const retargeted = retargetWorkflow(file2.workflow, harness);
+      const workflow = retargeted.workflow;
       const workflowId = workflow.id;
+      const rebuilt = retargeted.changed ? { ...retargeted.from ? { from: retargeted.from } : {}, to: harness, sessionModel: retargeted.sessionModel } : void 0;
       const reach = targets.handover(build.request);
       if ("problem" in reach) {
         return result(runText, { outcome: "invalid", path: file2.path, workflowId, ...problemFields([reach.problem]) });
       }
       const { store } = reach;
-      const refusedWith = /* @__PURE__ */ __name((answer) => result(runText, { path: file2.path, ...answer }), "refusedWith");
-      let stored;
+      const refusedWith = /* @__PURE__ */ __name((answer) => result(runText, { path: file2.path, ...rebuilt ? { rebuilt } : {}, ...answer }), "refusedWith");
+      let stored2;
       const existing = await store.readWorkflow(workflowId);
       if (existing?.identity) {
-        const added = await store.addRevision(workflowId, workflow, "user");
+        const added = await store.addRevision(workflowId, workflow, "user", harness);
         if (added.outcome !== "added" && added.outcome !== "unchanged") {
           return refusedWith({
             outcome: added.outcome === "no_such_workflow" ? "no_such_workflow" : "conflict",
@@ -40102,7 +40234,7 @@ function createHandlers(dependencies) {
             ...problemFields(added.problems, workflow)
           });
         }
-        stored = added.outcome === "added" ? "revised" : "unchanged";
+        stored2 = added.outcome === "added" ? "revised" : "unchanged";
       } else {
         const read = readSubmission({
           exchangeVersion: EXCHANGE_VERSION,
@@ -40121,9 +40253,9 @@ function createHandlers(dependencies) {
             ...problemFields(created.problems, workflow)
           });
         }
-        stored = "handed_over";
+        stored2 = "handed_over";
       }
-      const eligibility = await store.eligibleRevision(workflowId);
+      const eligibility = await store.eligibleRevision(workflowId, harness);
       if (!eligibility.eligible) {
         const refused = await incompleteRevision(store, workflowId, eligibility.reason, eligibility.revision);
         return refusedWith({
@@ -40168,7 +40300,7 @@ function createHandlers(dependencies) {
         workflowId,
         revision: chosen.revision
       });
-      const bound = await store.bindRequest(workflowId, chosen.revision, chosen.digest, runKey, session, () => ({ runId: mintRunId(), nonce: mintNonce() }));
+      const bound = await store.bindRequest(workflowId, chosen.revision, chosen.digest, runKey, session, () => ({ runId: mintRunId(), nonce: mintNonce() }), harness);
       if (bound.outcome !== "bound" && bound.outcome !== "already_bound") {
         const refused = await incompleteRevision(store, workflowId, bound.reason, bound.revision);
         return refusedWith({
@@ -40210,7 +40342,8 @@ function createHandlers(dependencies) {
         workflowId,
         name: snapshot.workflow.name,
         url: app.link ?? reach.link(workflowId),
-        stored,
+        stored: stored2,
+        ...rebuilt ? { rebuilt } : {},
         revision: binding.revision,
         digest: snapshot.digest,
         runId: binding.runId,
@@ -40295,13 +40428,13 @@ function invalidDraft(problems, workflow) {
   };
 }
 __name(invalidDraft, "invalidDraft");
-function identityFields(stored) {
-  if (!stored.identity)
+function identityFields(stored2) {
+  if (!stored2.identity)
     return {};
   return {
-    mode: stored.identity.mode,
-    source: stored.identity.source,
-    createdAt: stored.identity.createdAt
+    mode: stored2.identity.mode,
+    source: stored2.identity.source,
+    createdAt: stored2.identity.createdAt
   };
 }
 __name(identityFields, "identityFields");
@@ -40778,6 +40911,11 @@ Returns an outcome of:
   conflict          nothing was started: something else is in the way, and the
                     message says what.
 
+Any harness may run any workflow. One written for another tool is rebuilt
+for yours before it is stored: its target becomes yours, and an agent with no
+model chosen for your tool uses the session's. The result says so; the file
+itself is not changed.
+
 Every run carries path, harness, sessionId and idempotencyKey. Mint a new
 idempotencyKey for each run command and repeat it only to retry the same call.`,
     inputSchema: {
@@ -40800,7 +40938,7 @@ __name(registerExchangeTools, "registerExchangeTools");
 
 // apps/mcp/dist/server.js
 var SERVER_NAME = "anthill";
-var SERVER_VERSION = true ? "0.8.12" : String(createRequire(import.meta.url)("../package.json").version ?? "0.0.0");
+var SERVER_VERSION = true ? "0.8.13" : String(createRequire(import.meta.url)("../package.json").version ?? "0.0.0");
 var TRANSPORT_FAILURE_EXIT_CODE = 1;
 function transportFailureLine(error51) {
   const reason = error51 instanceof Error ? error51.message : String(error51);

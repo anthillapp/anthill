@@ -843,7 +843,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
           runId: binding.runId,
           nonce: binding.nonce,
           workflowId: binding.workflowId,
-          cli: stored?.identity?.source.harness ?? "claude-code",
+          cli: binding.harness ?? stored?.identity?.source.harness ?? "claude-code",
           promptVersion: MARKER_VERSION,
           issuedAt: binding.at,
         },

@@ -11,6 +11,7 @@ import {
   findAgentProfile,
   newAgentId,
   removeAgentProfile,
+  retargetWorkflow,
   stepsUsingAgent,
   updateAgentProfile,
   usesLibraryAgent,
@@ -539,5 +540,53 @@ describe("agents that came from the library", () => {
     // Names are editable on both sides and prove nothing about identity.
     const { workflow } = addAgentProfile(makeWorkflow(), { name: "Reviewer" });
     expect(usesLibraryAgent(workflow, "lib-1")).toBe(false);
+  });
+});
+
+/*
+  ANT-312. Any harness may run any workflow: one written for another tool is
+  rebuilt for the tool about to run it, never translated.
+*/
+describe("rebuilding a workflow for another tool", () => {
+  const written = (target: Workflow["target"], agents: Record<string, unknown>[]): Workflow =>
+    parseWorkflow({
+      id: "w", name: "W", version: "1", ...(target ? { target } : {}), nodes: [], edges: [],
+      metadata: { workflow: { formatVersion: WORKFLOW_FORMAT_VERSION, agents } },
+    });
+
+  it("leaves a workflow written for that tool exactly as it is", () => {
+    const workflow = written("codex", [{ id: "a", name: "Author" }]);
+    const result = retargetWorkflow(workflow, "codex");
+    expect(result).toEqual({ workflow, changed: false, sessionModel: [] });
+  });
+
+  it("targets the new tool, keeps every other tool's model, and gives the rest the session's", () => {
+    const workflow = written("claude-code", [
+      { id: "a", name: "Author", models: { "claude-code": { id: "opus" } } },
+      { id: "b", name: "Reviewer", models: { "claude-code": { id: "sonnet" }, codex: { id: "gpt-6-sol", reasoningEffort: "high" } } },
+    ]);
+    const result = retargetWorkflow(workflow, "codex");
+    expect(result.changed).toBe(true);
+    expect(result.from).toBe("claude-code");
+    expect(result.workflow.target).toBe("codex");
+    expect(result.sessionModel).toEqual(["Author"]);
+    expect(agentProfiles(result.workflow).map((profile) => profile.models)).toEqual([
+      { "claude-code": { id: "opus" }, codex: { id: "__default__" } },
+      { "claude-code": { id: "sonnet" }, codex: { id: "gpt-6-sol", reasoningEffort: "high" } },
+    ]);
+    // The original is not edited in place.
+    expect(workflow.target).toBe("claude-code");
+  });
+
+  it("gives a workflow that named no tool the one about to run it", () => {
+    const result = retargetWorkflow(written(undefined, []), "pi");
+    expect(result).toMatchObject({ changed: true, sessionModel: [] });
+    expect(result.from).toBeUndefined();
+    expect(result.workflow.target).toBe("pi");
+  });
+
+  it("is the same rebuild every time, so the same file makes the same revision", () => {
+    const workflow = written("claude-code", [{ id: "a", name: "Author", models: { "claude-code": { id: "opus" } } }]);
+    expect(retargetWorkflow(workflow, "codex").workflow).toEqual(retargetWorkflow(workflow, "codex").workflow);
   });
 });

@@ -33,7 +33,7 @@
  * working copy — knows how to read.
  */
 
-import type { ExchangeProblem, ExchangeSource, HandoverMode } from "@anthill/workflow-exchange";
+import type { ExchangeProblem, ExchangeSource, HandoverMode, SourceHarness } from "@anthill/workflow-exchange";
 import { checkExchangeVersion, isHandoverMode, isSourceHarness, readStoredWorkflowDocument, revisionDigest } from "@anthill/workflow-exchange";
 import type { Workflow } from "@anthill/workflow-schema";
 
@@ -156,6 +156,12 @@ export type Binding = {
   revision: number;
   nonce: string;
   sessionId?: string;
+  /**
+   * The tool that bound the run, when it said (ANT-312). Any harness may run
+   * a workflow another one handed over, so this is not always the identity's
+   * own source.
+   */
+  harness?: SourceHarness;
   at: string;
 };
 
@@ -290,6 +296,7 @@ export function parseBinding(text: string, where: string): RecordRead<Binding> {
   const nonce = str(value.nonce);
   const at = when(value.at);
   const sessionId = str(value.sessionId);
+  const harness = isSourceHarness(value.harness) ? value.harness : undefined;
 
   if (!runId || !workflowId || !revision || !nonce || !at) {
     return unreadable(where, "it does not describe a run holding a revision");
@@ -301,7 +308,7 @@ export function parseBinding(text: string, where: string): RecordRead<Binding> {
 
   return {
     ok: true,
-    record: { runId, workflowId, revision, nonce, at, ...(sessionId ? { sessionId } : {}),
+    record: { runId, workflowId, revision, nonce, at, ...(sessionId ? { sessionId } : {}), ...(harness ? { harness } : {}),
       ...(str(value.requestKey) ? { requestKey: str(value.requestKey) } : {}),
       ...(str(value.digest) ? { digest: str(value.digest) } : {}) },
   };

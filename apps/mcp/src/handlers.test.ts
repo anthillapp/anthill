@@ -17,7 +17,7 @@
 import { ExchangeStore, type InboxDrop } from "@anthill/exchange-store";
 import { revisionDigest, WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-exchange";
 import type { Workflow } from "@anthill/workflow-schema";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -1227,6 +1227,113 @@ describe("run_workflow", () => {
     expect(answer).toMatchObject({ outcome: "started", stored: "revised", revision: 2 });
     expect((await store.readRevision("workflow-1", 2))?.by).toBe("user");
     expect(answer.digest).toBe(revisionDigest(edited));
+  });
+
+  /*
+    ANT-312. Any harness may run any workflow. One handed over by Claude Code
+    and run from Codex was refused with "Claude Code is handing it over";
+    left unchanged, it was started for Codex over a graph written for Claude
+    Code. It is now rebuilt for the tool running it.
+  */
+  describe("from another harness than the one that handed it over", () => {
+    it("rebuilds a Claude Code workflow for Codex, keeping its Claude Code model, and starts it", async () => {
+      const { handlers, store } = await openTools();
+      await handlers.createWorkflowDraft(draftInput());
+      const { path } = await workflowFile(completeWorkflow());
+
+      const result = await handlers.runWorkflow(runInput(path, { harness: "codex" }));
+      const answer = answerOf(result);
+
+      expect(answer).toMatchObject({
+        outcome: "started",
+        stored: "revised",
+        revision: 2,
+        rebuilt: { from: "claude-code", to: "codex", sessionModel: ["Developer"] },
+      });
+      const stored = (await store.readRevision("workflow-1", 2))?.workflow;
+      expect(stored?.target).toBe("codex");
+      const agents = (stored?.metadata as { workflow: { agents: { models: unknown }[] } }).workflow.agents;
+      expect(agents[0]?.models).toEqual({ "claude-code": { id: "sonnet" }, codex: { id: "__default__" } });
+      expect(await store.readBinding("workflow-1", "ANT-RUN1")).toMatchObject({ revision: 2, harness: "codex" });
+      // The file the user named is theirs, and is not rewritten.
+      expect(JSON.parse(await readFile(path, "utf8")).target).toBe("claude-code");
+      const text = textOf(result);
+      expect(text).toContain("It was written for Claude Code, so it was rebuilt for OpenAI Codex CLI");
+      expect(text).toContain("Developer had no model chosen for OpenAI Codex CLI and uses this session's.");
+    });
+
+    it("starts a copy the user already retargeted to Codex, which used to be refused", async () => {
+      const { handlers } = await openTools();
+      await handlers.createWorkflowDraft(draftInput());
+      const retargeted = completeWorkflow({ target: "codex" });
+      const agents = (retargeted.metadata as { workflow: { agents: Record<string, unknown>[] } }).workflow.agents;
+      agents[0] = { ...agents[0], models: { codex: { id: "gpt-6-sol", reasoningEffort: "high" } } };
+      const { path } = await workflowFile(retargeted);
+
+      const result = await handlers.runWorkflow(runInput(path, { harness: "codex" }));
+      const answer = answerOf(result);
+
+      expect(answer).toMatchObject({ outcome: "started", stored: "revised", revision: 2 });
+      expect(answer.rebuilt).toBeUndefined();
+      expect(problemCodes(answer)).not.toContain("HANDOVER_TARGET_MISMATCH");
+      expect(textOf(result)).not.toContain("is handing it over");
+    });
+
+    it("rebuilds a Codex workflow for Claude Code the other way round", async () => {
+      const { handlers, store } = await openTools();
+      await handlers.createWorkflowDraft(
+        draftInput({ source: { harness: "codex", sessionId: "session-cx", taskText: "Fix the crash on startup." }, workflow: completeWorkflow({ target: "codex" }) }),
+      );
+      // Its one agent has a model for Claude Code already: nothing to default.
+      const { path } = await workflowFile(completeWorkflow({ target: "codex" }));
+
+      const answer = answerOf(await handlers.runWorkflow(runInput(path)));
+
+      expect(answer).toMatchObject({ outcome: "started", rebuilt: { from: "codex", to: "claude-code", sessionModel: [] } });
+      expect((await store.readRevision("workflow-1", answer.revision as number))?.workflow.target).toBe("claude-code");
+    });
+
+    it("rebuilds the same file the same way each time, so running it again adds no revision", async () => {
+      const { handlers, store } = await openTools();
+      await handlers.createWorkflowDraft(draftInput());
+      const { path } = await workflowFile(completeWorkflow());
+
+      const first = answerOf(await handlers.runWorkflow(runInput(path, { harness: "codex" })));
+      const again = answerOf(await handlers.runWorkflow(runInput(path, { harness: "codex", idempotencyKey: "run-2" })));
+
+      expect(first).toMatchObject({ outcome: "started", stored: "revised", revision: 2 });
+      expect(again).toMatchObject({ outcome: "started", stored: "unchanged", revision: 2 });
+      expect((await store.readWorkflow("workflow-1"))?.revisions).toHaveLength(2);
+    });
+
+    it("reads as ready, not as written for the wrong tool, once Codex has run it", async () => {
+      const { handlers, store } = await openTools();
+      await handlers.createWorkflowDraft(draftInput());
+      const { path } = await workflowFile(completeWorkflow());
+      const run = answerOf(await handlers.runWorkflow(runInput(path, { harness: "codex" })));
+      expect(run.outcome).toBe("started");
+
+      const status = await handlers.getWorkflow({ workflowId: "workflow-1" });
+      expect(problemCodes(answerOf(status))).not.toContain("HANDOVER_TARGET_MISMATCH");
+      expect(textOf(status)).not.toContain("is handing it over");
+      expect(await store.eligibleRevision("workflow-1")).toMatchObject({ eligible: true, revision: { revision: 2 } });
+
+      // The Claude Code session that drafted it still cannot bind the Codex revision as its own.
+      const bound = answerOf(await handlers.bindRun(bindInput({ revision: 2, digest: run.digest as string, idempotencyKey: "bind-cc" })));
+      expect(bound.outcome).not.toBe("bound");
+      expect(problemCodes(bound)).toContain("HANDOVER_TARGET_MISMATCH");
+    });
+
+    it("still refuses, in the drafting session, a revision written for another tool", async () => {
+      const { handlers, store } = await openTools();
+      await handlers.createWorkflowDraft(draftInput());
+      await store.addRevision("workflow-1", completeWorkflow({ target: "codex" }), "harness");
+
+      const eligibility = await store.eligibleRevision("workflow-1");
+
+      expect(eligibility.eligible).toBe(false);
+      expect(!eligibility.eligible && eligibility.problems.map((problem) => problem.code)).toContain("HANDOVER_TARGET_MISMATCH");
+    });
   });
 
   it("hands over a workflow this Anthill has never seen, as a watched job", async () => {

@@ -1437,3 +1437,60 @@ describe("a step started before the one drawn ahead of it was done", () => {
     );
   });
 });
+
+/*
+  ANT-310. A step whose subagent kept a todo list shows how far through it
+  the agent says it is — and nothing at all when no list was reported.
+*/
+describe("a step's todo chip", () => {
+  const T = (s: number) => new Date(Date.parse("2026-08-29T10:00:00.000Z") + s * 1000).toISOString();
+  let n = 0;
+  const tx = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">): ObservationEvent => {
+    n += 1;
+    return {
+      runId: "ANT-1",
+      seq: n,
+      at: T(n),
+      recordedAt: T(n),
+      cli: "claude-code",
+      source: "transcript",
+      channel: "claude-code:transcript",
+      sessionId: "sess-1",
+      ...partial,
+    };
+  };
+  const events = (items: { title: string; status: "pending" | "in_progress" | "completed" }[]) => [
+    tx({ kind: "step.marker", title: "Step", blockId: "implement", at: T(1) }),
+    tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "call-dev", background: true, at: T(2) }),
+    tx({
+      kind: "todo",
+      title: "Todo list changed",
+      toolUseId: "t1",
+      parentToolUseId: "call-dev",
+      author: { kind: "subagent", name: "Developer" },
+      todo: { op: "replace", items },
+      at: T(3),
+    }),
+  ];
+
+  it("counts done items of all items, with the list in its tooltip", () => {
+    const view = foldLiveSession(workflow, run, events([
+      { title: "Read the spec", status: "completed" },
+      { title: "Edit the parser", status: "in_progress" },
+      { title: "Add a test", status: "pending" },
+    ]));
+    const { unmount } = render(<LiveWorkflowGraph workflow={workflow} view={view} sessionState={run.state} onSelect={vi.fn()} />);
+    const chip = document.querySelector(".live-todo-chip") as HTMLElement;
+    expect(chip.textContent).toBe("1/3");
+    expect(chip.getAttribute("title")).toBe("Developer's todo list:\n✓ Read the spec\n◐ Edit the parser\n○ Add a test");
+    expect(chip.classList.contains("is-done")).toBe(false);
+    unmount();
+  });
+
+  it("is absent when no list was reported, never 0/0", () => {
+    const view = foldLiveSession(workflow, run, events([]));
+    const { unmount } = render(<LiveWorkflowGraph workflow={workflow} view={view} sessionState={run.state} onSelect={vi.fn()} />);
+    expect(document.querySelector(".live-todo-chip")).toBeNull();
+    unmount();
+  });
+});

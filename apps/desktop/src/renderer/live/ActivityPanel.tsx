@@ -6,8 +6,9 @@
  *
  * - **Whole session**, with nothing selected on the canvas: every item.
  * - **Scoped to a block**, once a block is clicked: the header names it, the
- *   feed narrows to it, and an Activity | Block switcher appears — the
- *   block's own items, or the block as designed and as it ran.
+ *   feed narrows to it, and an Activity | Todo list | Block Info switcher
+ *   appears — the block's own items, its subagent's own todo list (ANT-310),
+ *   or the block as designed and as it ran.
  *
  * Nothing that states the current scope lives inside the scrolling area. A
  * live feed grows, and it would scroll away exactly when the feed is long
@@ -35,6 +36,15 @@ import { FeedCardView } from "./FeedCard.js";
 import { earlyNote } from "./LiveWorkflowGraph.js";
 import type { BlockUsage } from "./report.js";
 import { RestartRequired } from "./RestartRequired.js";
+import { TodoTab } from "./TodoTab.js";
+
+/** The block switcher's tabs, in their order. Todo list is always there, so they never shift. */
+const BLOCK_TABS = [
+  { key: "activity", label: "Activity" },
+  { key: "todo", label: "Todo list" },
+  { key: "block", label: "Block Info" },
+] as const;
+type BlockTabKey = (typeof BLOCK_TABS)[number]["key"];
 
 /**
  * Why the activity list looks the way it does.
@@ -118,11 +128,13 @@ export function ActivityPanel({
    * the latest thing that happened off the bottom of the panel.
    */
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
-  const [tab, setTab] = useState<"activity" | "block">("activity");
+  const [tab, setTab] = useState<BlockTabKey>("activity");
   /** The one item whose tool output, or divider evidence, is open. */
   const [openId, setOpenId] = useState<number | undefined>();
   /** The one message showing all of itself. */
   const [moreId, setMoreId] = useState<number | undefined>();
+  /** The one Codex program listing every one of its actions (ANT-311). */
+  const [groupId, setGroupId] = useState<number | undefined>();
 
   const blockId = scope?.kind === "block" ? scope.blockId : undefined;
   // A different block starts on its activity, not on whichever tab the last one was left on.
@@ -212,13 +224,31 @@ export function ActivityPanel({
 
   const scopeName =
     scope?.kind === "agent" ? scope.name : blockId ? (node(blockId)?.name ?? blockId) : undefined;
-  const showBlock = tab === "block" && blockId !== undefined && runsWorkflow;
-  /** What the Block tab covers is out of reach of the keyboard as well as the eye. */
+  const switching = blockId !== undefined && runsWorkflow;
+  const showBlock = tab === "block" && switching;
+  const showTodo = tab === "todo" && switching;
+  /** The Todo list and Block Info tabs cover the feed rather than replace it. */
+  const overlaid = showBlock || showTodo;
+  /** What a tab covers is out of reach of the keyboard as well as the eye. */
   const covered = useCallback(
     (element: HTMLElement | null) => {
-      if (element) element.inert = showBlock;
+      if (element) element.inert = overlaid;
     },
-    [showBlock],
+    [overlaid],
+  );
+
+  /**
+   * Who kept a todo list: the name the feed gives the subagent its call
+   * started, so the tab and the feed agree on it.
+   */
+  const todoOwner = useCallback(
+    (list: { owner: string; ownerName?: string }) => {
+      const started = cards.find((card) => card.kind === "agent" && card.toolUseId === list.owner);
+      const speaker = started ? speakers.get(started.id) : undefined;
+      if (speaker?.kind === "agent") return speaker.name;
+      return list.ownerName ?? profileOf(blockId) ?? "Subagent";
+    },
+    [cards, speakers, profileOf, blockId],
   );
   const filters = filter === "unmapped" ? [...FEED_FILTERS, UNMAPPED_FILTER] : FEED_FILTERS;
 
@@ -248,9 +278,9 @@ export function ActivityPanel({
         )}
       </header>
 
-      {blockId !== undefined && runsWorkflow ? (
+      {switching ? (
         <div className="activity-switch" role="tablist" aria-label="What to show for this block">
-          {(["activity", "block"] as const).map((key) => (
+          {BLOCK_TABS.map(({ key, label }) => (
             <button
               key={key}
               type="button"
@@ -258,10 +288,21 @@ export function ActivityPanel({
               aria-selected={tab === key}
               onClick={() => setTab(key)}
             >
-              {key === "activity" ? "Activity" : "Block"}
+              {label}
             </button>
           ))}
         </div>
+      ) : null}
+
+      {showTodo ? (
+        <TodoTab
+          lists={view.todos[blockId]}
+          state={view.blocks[blockId]?.state ?? "queued"}
+          passes={view.blocks[blockId]?.passes ?? 0}
+          ended={ended}
+          agent={profileOf(blockId) ?? "The agent"}
+          nameOf={todoOwner}
+        />
       ) : null}
 
       {showBlock ? (
@@ -276,10 +317,11 @@ export function ActivityPanel({
         />
       ) : null}
 
-      {/* Covered by the Block tab rather than unmounted or hidden: hiding it
-          would restart every animation in the feed each time the tab closed,
-          and the reader comes back to the scroll position they left. */}
-      <div ref={covered} className="feed-filters" role="group" aria-label="Filter activity" aria-hidden={showBlock || undefined}>
+      {/* Covered by the Todo list and Block Info tabs rather than unmounted
+          or hidden: hiding it would restart every animation in the feed each
+          time the tab closed, and the reader comes back to the scroll
+          position they left. */}
+      <div ref={covered} className="feed-filters" role="group" aria-label="Filter activity" aria-hidden={overlaid || undefined}>
         {filters.map((item) => (
           <button
             key={item.key}
@@ -300,7 +342,7 @@ export function ActivityPanel({
         </select>
       </div>
 
-      <div ref={covered} className="live-feed" aria-hidden={showBlock || undefined}>
+      <div ref={covered} className="live-feed" aria-hidden={overlaid || undefined}>
         {feed.kind === "restart-required" && health.status === "stale" ? (
           <RestartRequired health={health} feature="Live Session" />
         ) : null}
@@ -362,6 +404,8 @@ export function ActivityPanel({
               onToggle={() => setOpenId((id) => (id === card.id ? undefined : card.id))}
               expanded={moreId === card.id}
               onExpand={() => setMoreId((id) => (id === card.id ? undefined : card.id))}
+              groupOpen={groupId === card.id}
+              onGroup={() => setGroupId((id) => (id === card.id ? undefined : card.id))}
               // Only newest-first: under oldest-first the arrival lands at
               // the bottom and a drop-in would point the wrong way.
               isNew={card.id === arrived && sort === "newest"}

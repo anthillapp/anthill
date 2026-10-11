@@ -28,6 +28,7 @@ const view = (states: Record<string, LiveSessionView["blocks"][string]["state"]>
     Object.entries(states).map(([id, state]) => [id, { state, confidence: "exact", passes: state === "queued" ? 0 : 1 }]),
   ),
   activeBlockIds: [],
+  todos: {},
   spans: [],
   detours: [],
   overlaps: [],

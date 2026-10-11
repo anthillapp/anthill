@@ -252,3 +252,72 @@ describe("telling a long tool input", () => {
     expect(isLongToolInput(`x${" ".repeat(400)}y`)).toBe(false);
   });
 });
+
+/*
+  ANT-311. A Codex program's card lists what it did, each with its own
+  outcome, and says when something inside it failed although the program
+  itself finished.
+*/
+describe("a Codex program's card", () => {
+  const kid = (id: string, ok: boolean, item: NonNullable<FeedCard["children"]>[number]["item"], durationMs?: number) => ({
+    id,
+    at: "2026-10-10T14:26:23.000Z",
+    item,
+    ok,
+    ...(durationMs !== undefined ? { durationMs } : {}),
+  });
+  const program: FeedCard = {
+    id: 7,
+    kind: "tool",
+    state: "done",
+    title: "exec",
+    detail: "cat skills/anthill/SKILL.md (+5 more)",
+    at: "2026-10-10T14:26:23.000Z",
+    durationMs: 6800,
+    confidence: "exact",
+    how: "the session announced this step",
+    channels: ["codex:rollout"],
+    events: ["tool.start", "tool.item", "tool.end"],
+    children: [
+      kid("a", true, { kind: "command", verb: "Read", target: "SKILL.md", sub: "skills/anthill/" }, 12),
+      kid("b", true, { kind: "command", verb: "Searched", target: "“count_words”", sub: "src/" }, 48),
+      kid("c", true, { kind: "command", verb: "Listed", target: "tests/rate_limit/" }, 9),
+      kid("d", true, { kind: "file", verb: "Changed", target: "wordcount.py", sub: "src/wordcount.py" }),
+      kid("e", false, { kind: "command", target: "npm test -- tests/rate_limit", exitCode: 1 }, 5900),
+      kid("f", true, { kind: "mcp", target: "get_issue", sub: "linear" }, 420),
+    ],
+  };
+
+  function Grouped() {
+    const [open, setOpen] = useState(false);
+    return <FeedCardView card={program} cli={{ label: "Codex", logo: "none" }} groupOpen={open} onGroup={() => setOpen((value) => !value)} />;
+  }
+
+  it("counts its actions, says how many failed, and keeps its own outcome", () => {
+    render(<Grouped />);
+    expect(screen.getByText("6 actions")).toBeTruthy();
+    const badge = screen.getByText("1 of 6 failed");
+    expect(badge.getAttribute("title")).toBe("The program finished, but a command inside it failed.");
+    // The program finished: its own status is its duration, not a failure.
+    expect(screen.getByText("6.8s")).toBeTruthy();
+    // A group has no input row of its own.
+    expect(screen.queryByText("cat skills/anthill/SKILL.md (+5 more)")).toBeNull();
+  });
+
+  it("shows four actions, then the rest on request, without opening anything else", () => {
+    render(<Grouped />);
+    expect(screen.getAllByRole("listitem").filter((item) => item.classList.contains("feed-exec-kid"))).toHaveLength(4);
+    expect(screen.getByText("SKILL.md")).toBeTruthy();
+    expect(screen.getByText("skills/anthill/")).toBeTruthy();
+    expect(screen.queryByText("npm test -- tests/rate_limit")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "+2 more" }));
+    expect(screen.getAllByRole("listitem").filter((item) => item.classList.contains("feed-exec-kid"))).toHaveLength(6);
+    expect(screen.getByText("exit 1 · 5.9s")).toBeTruthy();
+    // An MCP call is named by its server, then its tool.
+    expect(screen.getByText("linear ·")).toBeTruthy();
+    expect(screen.getByText("get_issue")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show less" }));
+    expect(screen.getAllByRole("listitem").filter((item) => item.classList.contains("feed-exec-kid"))).toHaveLength(4);
+  });
+});

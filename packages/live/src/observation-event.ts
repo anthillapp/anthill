@@ -63,6 +63,21 @@ export type ObservationKind =
    * of work, nothing more (ANT-308).
    */
   | "task.end"
+  /**
+   * A subagent's own todo list changed, and its tool said the change was
+   * made: Claude Code's `TaskCreate`/`TaskUpdate`/`TodoWrite`, Codex's
+   * `update_plan` (ANT-310). Read only after a successful result, so a
+   * rejected "completed" is never recorded. Not a card in the feed: the list
+   * is shown on its own tab, and it never changes a step's state.
+   */
+  | "todo"
+  /**
+   * One command, file change or MCP call a Codex `exec` program made, from
+   * the record Codex writes as each finishes (`item_completed`, ANT-311). A
+   * row inside the program's card, not a card of its own, and nothing the
+   * diagram's fold reads: the program's own call is the work.
+   */
+  | "tool.item"
   | "turn.end"
   /**
    * Token usage the harness recorded for its own work.
@@ -200,6 +215,11 @@ export type ObservationEvent = {
    */
   completion?: "task_complete" | "done";
 
+  /** For `todo`: what changed in the list. */
+  todo?: TodoChange;
+  /** For `tool.item`: what the command, file change or MCP call was. */
+  item?: ExecItem;
+
   /**
    * Other channels that recorded this same action.
    *
@@ -208,6 +228,46 @@ export type ObservationEvent = {
    * read from both places rather than picking one and hiding the other.
    */
   alsoFrom?: string[];
+};
+
+/** Where an item of an agent's own todo list stands, in the agent's words. */
+export type TodoStatus = "pending" | "in_progress" | "completed";
+
+/** One item of an agent's todo list. Its title is the agent's, redacted and cut short. */
+export type TodoItem = { id?: string; title: string; status: TodoStatus };
+
+/**
+ * A confirmed change to an agent's todo list (ANT-310).
+ *
+ * `replace` is a whole list: `TodoWrite`, `update_plan`, a `TaskList` read.
+ * `upsert` is one task by its id: `TaskCreate` (with a title), `TaskUpdate`
+ * and `TaskGet`. `deleted` takes the task off the list — withdrawn, which is
+ * not the same as done.
+ */
+export type TodoChange =
+  | { op: "replace"; items: TodoItem[] }
+  | { op: "upsert"; id: string; title?: string; status?: TodoStatus | "deleted" };
+
+/**
+ * What one finished thing inside a Codex `exec` program was (ANT-311).
+ *
+ * Only what the record states, and only the allowed fields of it: never a
+ * command's output, a file's contents, or an MCP call's arguments or result.
+ */
+export type ExecItem = {
+  kind: "command" | "file" | "mcp";
+  /**
+   * Codex's own word for what a command did — `parsed_cmd` read, search or
+   * list — or what a file change was. Absent for a command Codex could not
+   * classify, which shows its own first line instead.
+   */
+  verb?: "Read" | "Searched" | "Listed" | "Changed" | "Added" | "Deleted";
+  /** A file name, a search, a folder, the command's first line, or an MCP tool. */
+  target: string;
+  /** A second line: the folder or path, or for MCP the server. */
+  sub?: string;
+  /** A command's exit code, when the record has one. */
+  exitCode?: number;
 };
 
 /** A stable identity for an event, so a re-read of a file cannot duplicate it. */

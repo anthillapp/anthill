@@ -336,8 +336,12 @@ function startTogether(
     return step === undefined ? (block?.name ?? id) : `${step} (${block?.name ?? id})`;
   });
   const all = targets.every((id) => stepNumbers.has(id)) ? `steps ${joinList(names)}` : joinList(names);
+  // "All at once, wait for none" had no way through a harness that runs fewer
+  // subagents at a time than the fork has branches: Codex stopped at its
+  // thread limit rather than break the instruction (ANT-313). Waves keep the
+  // branches apart; doing one in the session itself would not.
   return usesSubagents
-    ? `continue to ${all} at the same time – they are independent. Hand each to its own subagent in one go, and do not wait for one before starting the next.`
+    ? `continue to ${all} at the same time – they are independent. Hand each to its own subagent in one go, without waiting for one before starting the next. If your harness runs fewer subagents at a time than this, start as many as it allows and each of the rest as soon as one finishes; do not carry any of them out yourself instead.`
     : `continue to ${all} – they are independent, so do all of them, in whichever order suits.`;
 }
 
@@ -775,7 +779,12 @@ function buildPrompt(
       plan.forks.size > 0
         ? usesSubagents
           ? "- Follow the steps in the order given – steps marked to run at the same time start together; do not skip ahead."
-          : "- Follow the steps in the order given – steps marked as independent can be done in any order; do not skip ahead."
+          : harness.target === "pi"
+            ? // Pi runs sequentially — no subagent files, no parallelism — so its
+              // step lines say "in whichever order suits" and the Rules section
+              // must not say "in any order" beside them (ANT-7FA8152F).
+              "- Follow the steps; do not skip ahead."
+            : "- Follow the steps in the order given – steps marked as independent can be done in any order; do not skip ahead."
         : "- Follow the steps in the order given; do not skip ahead.",
       "- After each step, state which branch you are taking and why.",
       "- If a step's result is ambiguous, ask rather than guessing which branch to take.",

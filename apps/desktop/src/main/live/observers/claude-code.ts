@@ -50,6 +50,7 @@ import {
   type PollResult,
 } from "./types.js";
 import { newCursor, readNewLines, type TailCursor } from "./tail.js";
+import { CLAUDE_TODO_TOOLS, claudeTodoCall, claudeTodoChange, todoCallTarget, type PendingTodoCall } from "../todo-record.js";
 
 /**
  * How quiet a matched session must be before its last turn counts as finished.
@@ -215,6 +216,11 @@ type FileState = {
    * the claim of work is held only until that notification, not for good.
    */
   backgroundTasks: Set<string>;
+  /**
+   * Todo calls whose result has not come back, by tool-use id (ANT-310). The
+   * list changes only when the result says it did.
+   */
+  pendingTodos: Map<string, PendingTodoCall>;
   lastStopReason?: string;
   /**
    * When the agent printed the done marker, if it has.
@@ -326,6 +332,7 @@ export class ClaudeCodeObserver implements LiveSessionObserver {
           awaiting: new Set<string>(),
           dispatched: false,
           backgroundTasks: new Set<string>(),
+          pendingTodos: new Map<string, PendingTodoCall>(),
           usageSeen: new Set<string>(),
           ...(delegate ? { delegate: true } : {}),
           ...(label ? { delegateName: label } : {}),
@@ -675,6 +682,8 @@ function str(value: unknown): string | undefined {
 /** Tools whose input names the thing being acted on, and which field says so. */
 function toolTarget(name: string, input: Record<string, unknown>): string | undefined {
   if (name === "Bash") return str(input.description) ?? str(input.command);
+  // A todo call is named by its task, not its description (ANT-310).
+  if (CLAUDE_TODO_TOOLS.has(name)) return todoCallTarget(name, input);
   const path = str(input.file_path) ?? str(input.path) ?? str(input.notebook_path);
   if (path) return path.split("/").slice(-2).join("/");
   return str(input.pattern) ?? str(input.query) ?? str(input.description);
@@ -811,6 +820,22 @@ function scan(
               ...(id ? { toolUseId: id } : {}),
               ...(launched ? { background: true } : {}),
             });
+            // A todo call that went through: the list it changed (ANT-310).
+            const todoCall = id ? state.pendingTodos.get(id) : undefined;
+            if (id && todoCall) {
+              state.pendingTodos.delete(id);
+              const change = block.is_error === true ? undefined : claudeTodoChange(todoCall, row.toolUseResult, resultText(block.content));
+              if (change) {
+                events.push({
+                  ...base,
+                  kind: "todo",
+                  title: "Todo list changed",
+                  toolUseId: id,
+                  todo: change,
+                  ...(state.delegate ? { author: { kind: "subagent" as const, ...(state.delegateName ? { name: state.delegateName } : {}) } } : {}),
+                });
+              }
+            }
             // The prompt tells an agent that cannot put a line in its reply to
             // print it with a command, so a result is read for the markers too
             // — and for nothing else; the body stays where Claude Code wrote
@@ -944,6 +969,12 @@ function scan(
           if (background) state.dispatched = true;
           // A command sent to run in the background: its result is a receipt,
           // and the command's end comes later as a notification (ANT-308).
+          // A todo call is only a request until its result arrives (ANT-310).
+          const todoCall = id ? claudeTodoCall(name, input) : undefined;
+          if (id && todoCall) {
+            state.pendingTodos.set(id, todoCall);
+            if (state.pendingTodos.size > 64) state.pendingTodos.delete(state.pendingTodos.keys().next().value as string);
+          }
           const backgroundCommand = name === "Bash" && input.run_in_background === true;
           if (backgroundCommand && id) state.backgroundTasks.add(id);
           events.push({

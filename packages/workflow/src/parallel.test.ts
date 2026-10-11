@@ -251,12 +251,13 @@ describe("a fork in a prompt for a tool with no subagents", () => {
     return { ...workflow, target: "pi" as const };
   };
 
-  it("never says the branches run in parallel or at the same time", () => {
+  it("never says the branches run in parallel, at the same time, or in any order (ANT-7FA8152F)", () => {
     const { prompt } = compile(pi());
     expect(prompt).toContain("in whichever order suits");
     expect(prompt).toContain("they are independent branches and meet here");
-    expect(prompt).toContain("steps marked as independent can be done in any order");
+    expect(prompt).not.toContain("in any order");
     expect(prompt).not.toContain("run in parallel");
+    expect(prompt).not.toContain("in parallel");
     expect(prompt).not.toContain("at the same time");
   });
 

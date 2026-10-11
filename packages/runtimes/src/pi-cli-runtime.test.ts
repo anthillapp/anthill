@@ -16,7 +16,7 @@ function makeContext(overrides: Partial<AgentRunContext> = {}): AgentRunContext 
 }
 
 /** A settled RPC run: the assistant's final message, then the ending record. */
-function settledRun(text: string, stopReason: "stop" | "error" = "stop", errorMessage?: string): string {
+function settledRun(text: string, stopReason: "stop" | "error" | "aborted" = "stop", errorMessage?: string): string {
   const message = {
     role: "assistant",
     stopReason,

@@ -49,7 +49,7 @@ import {
   newRunId,
   workflowSteps,
 } from "@anthill/live";
-import { WorkflowCompileError, compile } from "@anthill/workflow";
+import { WorkflowCompileError, compile, retargetWorkflow } from "@anthill/workflow";
 import {
   EXCHANGE_PROBLEM_CODES,
   EXCHANGE_VERSION,
@@ -932,15 +932,27 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         ...(dependencies.cwd !== undefined ? { cwd: dependencies.cwd } : {}),
       });
       if (!file.ok) return result(runText, { outcome: "invalid", path: file.path, ...problemFields(file.problems) });
-      const workflow = file.workflow;
+      /*
+        Any harness may run any workflow (ANT-312). One written for another
+        tool is rebuilt for this one — its target, and "the session's model"
+        for an agent with no model chosen here — rather than refused, or run
+        as though this tool were the other. The user's file is not touched:
+        the rebuilt workflow is what Anthill stores and runs.
+      */
+      const retargeted = retargetWorkflow(file.workflow, harness);
+      const workflow = retargeted.workflow;
       const workflowId = workflow.id;
+      const rebuilt: RunAnswer["rebuilt"] = retargeted.changed
+        ? { ...(retargeted.from ? { from: retargeted.from } : {}), to: harness, sessionModel: retargeted.sessionModel }
+        : undefined;
 
       const reach = targets.handover(build.request);
       if ("problem" in reach) {
         return result(runText, { outcome: "invalid", path: file.path, workflowId, ...problemFields([reach.problem]) });
       }
       const { store } = reach;
-      const refusedWith = (answer: Omit<RunAnswer, "path">) => result(runText, { path: file.path, ...answer });
+      const refusedWith = (answer: Omit<RunAnswer, "path">) =>
+        result(runText, { path: file.path, ...(rebuilt ? { rebuilt } : {}), ...answer });
 
       /*
         The file's content becomes the workflow's latest revision. A workflow
@@ -952,7 +964,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       let stored: RunAnswer["stored"];
       const existing = await store.readWorkflow(workflowId);
       if (existing?.identity) {
-        const added = await store.addRevision(workflowId, workflow, "user");
+        const added = await store.addRevision(workflowId, workflow, "user", harness);
         if (added.outcome !== "added" && added.outcome !== "unchanged") {
           return refusedWith({
             outcome: added.outcome === "no_such_workflow" ? "no_such_workflow" : "conflict",
@@ -984,7 +996,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       // Asked of the store, as every bind is, and then checked against the
       // file: a revision saved by somebody else between the two writes is
       // content the user did not name, and binding it would run the wrong plan.
-      const eligibility = await store.eligibleRevision(workflowId);
+      const eligibility = await store.eligibleRevision(workflowId, harness);
       if (!eligibility.eligible) {
         const refused = await incompleteRevision(store, workflowId, eligibility.reason, eligibility.revision);
         return refusedWith({
@@ -1036,7 +1048,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
       });
 
       const bound = await store.bindRequest(workflowId, chosen.revision, chosen.digest, runKey, session,
-        () => ({ runId: mintRunId(), nonce: mintNonce() }));
+        () => ({ runId: mintRunId(), nonce: mintNonce() }), harness);
       if (bound.outcome !== "bound" && bound.outcome !== "already_bound") {
         const refused = await incompleteRevision(store, workflowId, bound.reason, bound.revision);
         return refusedWith({
@@ -1086,6 +1098,7 @@ export function createHandlers(dependencies: HandlerDependencies): Handlers {
         name: snapshot.workflow.name,
         url: app.link ?? reach.link(workflowId),
         stored,
+        ...(rebuilt ? { rebuilt } : {}),
         revision: binding.revision,
         digest: snapshot.digest,
         runId: binding.runId,

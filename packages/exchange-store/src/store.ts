@@ -34,8 +34,10 @@ import { createHash } from "node:crypto";
 import type {
   DraftSubmission,
   ExchangeProblem,
+  ExchangeSource,
   HandoverMode,
   RevisionState,
+  SourceHarness,
 } from "@anthill/workflow-exchange";
 import type { Workflow } from "@anthill/workflow-schema";
 
@@ -136,6 +138,11 @@ export type BindRun = {
    * given; the refusal belongs where the sender can still hear it.
    */
   sessionId?: string;
+  /**
+   * The tool binding the run, when it is not the one that handed the
+   * workflow over (ANT-312). The revision is judged for that tool.
+   */
+  harness?: SourceHarness;
 };
 
 export type BindResult = {
@@ -382,14 +389,21 @@ export class ExchangeStore {
     workflowId: string,
     workflow: Workflow,
     by: RevisionAuthor,
+    /** The tool about to run it, when that is not the one that handed it over (ANT-312). */
+    runner?: SourceHarness,
   ): Promise<AddRevisionResult> {
     const parsed = readWorkflowDocument(workflow);
     if (!parsed.ok) return { outcome: "conflict", problems: parsed.problems };
     return withWorkflowLock(identityPath(this.root, workflowId), () =>
-      this.addRevisionLocked(workflowId, parsed.workflow, by));
+      this.addRevisionLocked(workflowId, parsed.workflow, by, runner));
   }
 
-  private async addRevisionLocked(workflowId: string, workflow: Workflow, by: RevisionAuthor): Promise<AddRevisionResult> {
+  private async addRevisionLocked(
+    workflowId: string,
+    workflow: Workflow,
+    by: RevisionAuthor,
+    runner?: SourceHarness,
+  ): Promise<AddRevisionResult> {
     const misaddressed = addressingProblem(workflowId, workflow.id);
     if (misaddressed) return { outcome: "conflict", problems: [misaddressed] };
 
@@ -400,7 +414,7 @@ export class ExchangeStore {
     }
 
     const digest = revisionDigest(workflow);
-    const problems = checkCompleteness(workflow, identity.record.source);
+    const problems = checkCompleteness(workflow, runBy(identity.record.source, runner));
     const carry = problems.length > 0 ? { problems } : {};
 
     for (let attempt = 0; attempt < MAX_REVISION_ATTEMPTS; attempt += 1) {
@@ -503,7 +517,15 @@ export class ExchangeStore {
    * a new name: it says the diagram cannot be compiled into a prompt, which is
    * a fact about the graph rather than a decision about permission.
    */
-  async eligibleRevision(workflowId: string): Promise<Eligibility> {
+  async eligibleRevision(
+    workflowId: string,
+    /**
+     * The tool that will run it, when that is not the one that handed it over
+     * (ANT-312): whether the revision was written for the tool about to run it
+     * is asked of that tool.
+     */
+    runner?: SourceHarness,
+  ): Promise<Eligibility> {
     const workflow = await this.readWorkflow(workflowId);
     if (!workflow) {
       return {
@@ -520,7 +542,7 @@ export class ExchangeStore {
     const chosen = this.headRevision(workflow, workflowId);
     if ("refusal" in chosen) return { ...chosen.refusal, mode };
 
-    const problems = checkCompleteness(chosen.revision.workflow, identity.source);
+    const problems = checkCompleteness(chosen.revision.workflow, runBy(identity.source, runner));
     if (problems.length > 0) {
       return {
         eligible: false,
@@ -558,7 +580,7 @@ export class ExchangeStore {
 
   /** Idempotency is scoped to this workflow and the external caller's request key. */
   async bindRequest(workflowId: string, revision: number, digest: string, requestKey: string,
-    sessionId: string | undefined, mint: () => BindRun): Promise<BindResult> {
+    sessionId: string | undefined, mint: () => BindRun, runner?: SourceHarness): Promise<BindResult> {
     return withWorkflowLock(identityPath(this.root, workflowId), async () => {
       const workflow = await this.readWorkflow(workflowId);
       if (!workflow) return { outcome: "no_such_workflow", problems: [unknownWorkflow(workflowId)] };
@@ -573,7 +595,13 @@ export class ExchangeStore {
           problems: [storeProblem(EXCHANGE_STORE_PROBLEM_CODES.STORE_BINDING_CONFLICT,
             "This binding request key was already used for different content or a different session.")] };
       }
-      return this.bindLocked(workflowId, revision, { ...mint(), sessionId: session, digest, requestKey });
+      return this.bindLocked(workflowId, revision, {
+        ...mint(),
+        sessionId: session,
+        digest,
+        requestKey,
+        ...(runner ? { harness: runner } : {}),
+      });
     });
   }
 
@@ -608,7 +636,7 @@ export class ExchangeStore {
         problems: [storeProblem(EXCHANGE_STORE_PROBLEM_CODES.STORE_BINDING_CONFLICT,
           `Run ${run.runId} already has a different or unreadable binding. Nothing was overwritten.`)] };
     }
-    const eligible = await this.eligibleRevision(workflowId);
+    const eligible = await this.eligibleRevision(workflowId, run.harness);
     if (!eligible.eligible) {
       return {
         outcome: eligible.reason === "no_such_workflow" ? "no_such_workflow" : "not_eligible",
@@ -644,6 +672,7 @@ export class ExchangeStore {
       digest: eligible.revision.digest,
       ...(run.requestKey ? { requestKey: run.requestKey } : {}),
       ...(sessionId ? { sessionId } : {}),
+      ...(run.harness ? { harness: run.harness } : {}),
     };
 
     const claim = await createExclusive(
@@ -1183,4 +1212,14 @@ function submissionFingerprint(submission: DraftSubmission): string {
 function sameDrop(left: InboxDropInput, right: InboxDropInput): boolean {
   return left.key === right.key && left.kind === right.kind && left.workflowId === right.workflowId &&
     left.revision === right.revision && left.runId === right.runId;
+}
+
+/**
+ * The handover's source, as the tool about to run it (ANT-312).
+ *
+ * Any harness may run any workflow, so "is this written for the tool handing
+ * it over" is asked of the one running it now, not always of the first.
+ */
+function runBy(source: ExchangeSource, runner: SourceHarness | undefined): ExchangeSource {
+  return runner && runner !== source.harness ? { ...source, harness: runner } : source;
 }

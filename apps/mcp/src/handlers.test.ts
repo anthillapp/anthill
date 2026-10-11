@@ -1306,6 +1306,24 @@ describe("run_workflow", () => {
       expect((await store.readWorkflow("workflow-1"))?.revisions).toHaveLength(2);
     });
 
+    it("reads as ready, not as written for the wrong tool, once Codex has run it", async () => {
+      const { handlers, store } = await openTools();
+      await handlers.createWorkflowDraft(draftInput());
+      const { path } = await workflowFile(completeWorkflow());
+      const run = answerOf(await handlers.runWorkflow(runInput(path, { harness: "codex" })));
+      expect(run.outcome).toBe("started");
+
+      const status = await handlers.getWorkflow({ workflowId: "workflow-1" });
+      expect(problemCodes(answerOf(status))).not.toContain("HANDOVER_TARGET_MISMATCH");
+      expect(textOf(status)).not.toContain("is handing it over");
+      expect(await store.eligibleRevision("workflow-1")).toMatchObject({ eligible: true, revision: { revision: 2 } });
+
+      // The Claude Code session that drafted it still cannot bind the Codex revision as its own.
+      const bound = answerOf(await handlers.bindRun(bindInput({ revision: 2, digest: run.digest as string, idempotencyKey: "bind-cc" })));
+      expect(bound.outcome).not.toBe("bound");
+      expect(problemCodes(bound)).toContain("HANDOVER_TARGET_MISMATCH");
+    });
+
     it("still refuses, in the drafting session, a revision written for another tool", async () => {
       const { handlers, store } = await openTools();
       await handlers.createWorkflowDraft(draftInput());

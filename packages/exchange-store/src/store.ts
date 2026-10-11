@@ -522,7 +522,9 @@ export class ExchangeStore {
     /**
      * The tool that will run it, when that is not the one that handed it over
      * (ANT-312): whether the revision was written for the tool about to run it
-     * is asked of that tool.
+     * is asked of that tool. Without one, a revision a run is already bound to
+     * is judged for the tool that bound it — a status read after Codex ran a
+     * Claude Code workflow must not say it was written for the wrong tool.
      */
     runner?: SourceHarness,
   ): Promise<Eligibility> {
@@ -542,7 +544,10 @@ export class ExchangeStore {
     const chosen = this.headRevision(workflow, workflowId);
     if ("refusal" in chosen) return { ...chosen.refusal, mode };
 
-    const problems = checkCompleteness(chosen.revision.workflow, runBy(identity.source, runner));
+    const boundBy = runner ?? [...workflow.bindings]
+      .reverse()
+      .find((binding) => binding.revision === chosen.revision.revision && binding.harness)?.harness;
+    const problems = checkCompleteness(chosen.revision.workflow, runBy(identity.source, boundBy));
     if (problems.length > 0) {
       return {
         eligible: false,
@@ -636,7 +641,9 @@ export class ExchangeStore {
         problems: [storeProblem(EXCHANGE_STORE_PROBLEM_CODES.STORE_BINDING_CONFLICT,
           `Run ${run.runId} already has a different or unreadable binding. Nothing was overwritten.`)] };
     }
-    const eligible = await this.eligibleRevision(workflowId, run.harness);
+    // Always said: a bind with no tool of its own is the drafting session's,
+    // and is judged for that session even where another tool bound before.
+    const eligible = await this.eligibleRevision(workflowId, run.harness ?? identity.record.source.harness);
     if (!eligible.eligible) {
       return {
         outcome: eligible.reason === "no_such_workflow" ? "no_such_workflow" : "not_eligible",

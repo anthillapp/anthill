@@ -23,6 +23,7 @@ import { agentsNamedBy, attribute, buildWorkflowIndex, stepForAgent, type BlockM
 import { inRecordedOrder, projectJournal } from "./channels.js";
 import { completionOf, isAnthillTool, type ObservationEvent } from "./observation-event.js";
 import type { PendingRun } from "./pending-run.js";
+import { blockTodos, type BlockTodoList } from "./todos.js";
 
 /**
  * Codex's name for one of its agents, as `spawn_agent`, `followup_task` and
@@ -158,6 +159,11 @@ export type LiveSessionView = {
    * only went quiet, which has no end moment of its own to show.
    */
   endedAt?: string;
+  /**
+   * The todo lists subagents kept, by the step they kept them for (ANT-310).
+   * Reported by the agents themselves; a step without one is absent.
+   */
+  todos: Record<string, BlockTodoList[]>;
   /** True while nothing has been observed at all. Drives the empty state. */
   empty: boolean;
 };
@@ -1032,6 +1038,10 @@ export function foldLiveSession(
     }
     const mapping = attribute(event, index, announced, delegatedFrom);
     attributed.push({ ...event, mapping });
+    // Detail of work the fold already counts: a subagent's list changing,
+    // a command inside a Codex program finishing. Attributed, so the page
+    // can place them, and nothing more — they move no step (ANT-310, ANT-311).
+    if (event.kind === "todo" || event.kind === "tool.item") continue;
     // Anthill's own notes — the session it found, a session that wrote
     // nothing — are shown in the feed and are nothing the session did. Read
     // as a request for a person, the note that a VS Code chat was found,
@@ -1597,6 +1607,7 @@ export function foldLiveSession(
     ...(startedAt ? { startedAt } : {}),
     ...(lastSeenAt ? { lastSeenAt } : {}),
     ...(finishedAt ? { endedAt: finishedAt } : {}),
+    todos: blockTodos(attributed, spans),
     empty: events.length === 0,
   };
 }

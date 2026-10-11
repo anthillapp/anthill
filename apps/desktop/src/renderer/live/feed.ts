@@ -23,6 +23,7 @@ import {
   stoppedWithSession,
   subagentStops,
   type AttributedEvent,
+  type ExecItem,
   type MappingConfidence,
   type ObservationEvent,
 } from "@anthill/live";
@@ -96,6 +97,27 @@ export type FeedCard = {
   steps?: string[];
   /** Whether that run named one of its steps more than once. */
   repeated?: boolean;
+  /**
+   * For a Codex `exec` program: each command, file change and MCP call it
+   * made, in the order they finished (ANT-311). Absent where Codex wrote no
+   * such records, and the program stays one card as before.
+   */
+  children?: ExecChild[];
+  /**
+   * A call's own command exit code, when Codex recorded the call's command
+   * finishing under the call's own id (ANT-311).
+   */
+  exitCode?: number;
+};
+
+/** One thing a Codex `exec` program did, as its card lists it (ANT-311). */
+export type ExecChild = {
+  id: string;
+  /** When it finished. */
+  at: string;
+  item: ExecItem;
+  ok: boolean;
+  durationMs?: number;
 };
 
 /**
@@ -241,6 +263,64 @@ export function codexHookCompanions(events: readonly AttributedEvent[]): {
 }
 
 /**
+ * The `exec` program each finished Codex item belongs to (ANT-311).
+ *
+ * A command run inside a program is recorded under an id of its own
+ * (`exec-…`) that names no call, so what ties it to its program is time: it
+ * finished while that program was running. Programs of the session and of
+ * each of its subagents are told apart, since Codex gives a subagent's
+ * records the session's own id. Two programs running at once leave an item
+ * between them unplaced, rather than guessed into either.
+ */
+export function execItemPrograms(events: readonly AttributedEvent[]): Map<number, string> {
+  type Span = { call: string; from: number; to?: number };
+  const spans = new Map<string, Span[]>();
+  const byCall = new Map<string, Span>();
+  const lane = (event: AttributedEvent) => `${event.sessionId ?? ""}|${event.parentToolUseId ?? ""}`;
+  for (const event of events) {
+    if (event.cli !== "codex" || event.channel !== "codex:rollout" || !event.toolUseId) continue;
+    const at = Date.parse(event.at);
+    if (Number.isNaN(at)) continue;
+    if (event.kind === "tool.start" && event.toolName === "exec") {
+      const span: Span = { call: event.toolUseId, from: at };
+      byCall.set(event.toolUseId, span);
+      spans.set(lane(event), [...(spans.get(lane(event)) ?? []), span]);
+    } else if (event.kind === "tool.end") {
+      const span = byCall.get(event.toolUseId);
+      if (span) span.to = at;
+    }
+  }
+
+  // The program's call is stamped as it starts and its items as each ends,
+  // by the same clock; a little slack covers the rounding between them.
+  const SLACK = 1_000;
+  const placed = new Map<number, string>();
+  for (const event of events) {
+    if (event.kind !== "tool.item" || !event.toolUseId || byCall.has(event.toolUseId)) continue;
+    const at = Date.parse(event.at);
+    if (Number.isNaN(at)) continue;
+    const holding = (spans.get(lane(event)) ?? []).filter(
+      (span) => at >= span.from - SLACK && at <= (span.to ?? Number.POSITIVE_INFINITY) + SLACK,
+    );
+    if (holding.length === 1) placed.set(event.seq, (holding[0] as Span).call);
+  }
+  return placed;
+}
+
+/** What an item that belongs to no program is called on a card of its own. */
+function itemTitle(item: ExecItem): string {
+  if (item.kind === "file") return "File change";
+  if (item.kind === "mcp") return item.sub ?? "MCP call";
+  return "Command";
+}
+
+/** An item's label as one line: its verb and target. */
+export function execItemLabel(item: ExecItem): string {
+  if (item.kind === "mcp") return item.target;
+  return item.verb ? `${item.verb} ${item.target}` : item.target;
+}
+
+/**
  * Fold the journal into cards, oldest first.
  *
  * `settled` says whether the session is over. It only changes what an
@@ -272,6 +352,12 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
   const companions = codexHookCompanions(events);
   /** Codex `exec` cards by their call, for those records to fold into. */
   const execCards = new Map<string, FeedCard>();
+  /** The program each finished Codex item ran in (ANT-311). */
+  const programOf = execItemPrograms(events);
+  /** Tool cards by their call, open or closed: a finished item may be the call's own. */
+  const callCards = new Map<string, FeedCard>();
+  /** What a call's own finished item said, applied once the call has ended. */
+  const callOutcome = new Map<FeedCard, boolean>();
 
   /** Another channel's record of this card's action, folded in rather than drawn twice. */
   const fold = (card: FeedCard, event: AttributedEvent) => {
@@ -294,6 +380,58 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
     if (event.kind === "usage") continue;
     // A background command's end only closes its claim of work (ANT-308).
     if (event.kind === "task.end") continue;
+    // A subagent's todo list is shown on its own tab (ANT-310).
+    if (event.kind === "todo") continue;
+
+    /*
+      One thing a Codex program did, finished (ANT-311). Under the call's own
+      id it is that call — a command run directly — and tells its card how
+      the command really ended. Otherwise it is a row in the program it ran
+      in, or, when that cannot be told, a card of its own.
+    */
+    if (event.kind === "tool.item" && event.item) {
+      const child: ExecChild = {
+        id: event.toolUseId ?? String(event.seq),
+        at: event.at,
+        item: event.item,
+        ok: event.ok !== false,
+        ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+      };
+      const own = event.toolUseId ? callCards.get(event.toolUseId) : undefined;
+      if (own) {
+        if (event.item.exitCode !== undefined) own.exitCode = event.item.exitCode;
+        if (event.item.verb) own.detail = execItemLabel(event.item);
+        callOutcome.set(own, child.ok);
+        fold(own, event);
+        continue;
+      }
+      const program = programOf.get(event.seq);
+      const parent = program ? execCards.get(program) : undefined;
+      if (parent) {
+        (parent.children ??= []).push(child);
+        fold(parent, event);
+        continue;
+      }
+      cards.push({
+        id: event.seq,
+        kind: "tool",
+        state: child.ok ? "done" : "failed",
+        at: event.at,
+        title: itemTitle(event.item),
+        detail: execItemLabel(event.item),
+        ...(child.durationMs !== undefined ? { durationMs: child.durationMs } : {}),
+        ...(event.item.exitCode !== undefined ? { exitCode: event.item.exitCode } : {}),
+        confidence: event.mapping.confidence,
+        ...(event.mapping.blockId ? { blockId: event.mapping.blockId } : {}),
+        how: event.mapping.how,
+        channels: [event.channel, ...(event.alsoFrom ?? [])],
+        ...(event.parentToolUseId ? { parentToolUseId: event.parentToolUseId } : {}),
+        ...(event.author ? { author: event.author } : {}),
+        ...(event.sessionId ? { sessionId: event.sessionId } : {}),
+        events: [event.kind],
+      });
+      continue;
+    }
     const kind = kindOf(event);
     const pairKey = event.toolUseId;
 
@@ -531,6 +669,7 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
     };
 
     if (event.background) card.background = true;
+    if (kind === "tool" && pairKey) callCards.set(pairKey, card);
     if (event.cli === "codex" && event.channel === "codex:rollout" && event.kind === "tool.start" && event.toolName === "exec" && pairKey) {
       execCards.set(pairKey, card);
       // What the hook saw it run, when the program's own text names nothing:
@@ -552,6 +691,12 @@ export function buildFeed(events: AttributedEvent[], settled: boolean): FeedCard
   if (settled) {
     for (const card of open.values()) card.state = "unknown";
   }
+  // A call Codex recorded its command failing: failed, whatever its own end
+  // said — Codex's end of a call carries no outcome (ANT-311).
+  for (const [card, ok] of callOutcome) {
+    if (!ok && card.state === "done") card.state = "failed";
+  }
+  for (const card of cards) card.children?.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   return cards;
 }
 
@@ -642,15 +787,17 @@ export function speakersOf(
  * A finished call shows only how long it took: the tick beside it already
  * says it finished.
  */
-export function toolStatus(card: Pick<FeedCard, "state" | "durationMs">): string {
+export function toolStatus(card: Pick<FeedCard, "state" | "durationMs" | "exitCode">): string {
   const duration = readDuration(card.durationMs);
   switch (card.state) {
     case "working":
       return "Running";
     case "done":
       return duration || "Done";
-    case "failed":
-      return duration ? `Failed · ${duration}` : "Failed";
+    case "failed": {
+      const exit = card.exitCode !== undefined && card.exitCode !== 0 ? `exit ${card.exitCode}` : "";
+      return ["Failed", exit, duration].filter(Boolean).join(" · ");
+    }
     case "unknown":
       return "No result";
   }

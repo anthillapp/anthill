@@ -19,16 +19,18 @@ import {
   CONFIDENCE_LABEL,
   MESSAGE_CLAMP,
   OUTPUT_NOTE,
+  execItemLabel,
   flattenToolInput,
   isLongToolInput,
   readDuration,
   toolStatus,
+  type ExecChild,
   type FeedCard as Card,
   type Speaker,
 } from "./feed.js";
 import { MessageMarkup, clampMarkup } from "./message-markup.js";
 
-function clock(at: string): string {
+export function clock(at: string): string {
   const date = new Date(at);
   return Number.isNaN(date.getTime())
     ? "--:--:--"
@@ -46,6 +48,8 @@ const TOOL_ICONS: Record<string, string[]> = {
     "M12 2a15 15 0 0 0 0 20",
   ],
   Edit: ["M12 20h9", "M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"],
+  // A Codex program: Lucide code-xml.
+  exec: ["m18 16 4-4-4-4", "m6 8-4 4 4 4", "m14.5 4-5 16"],
 };
 const WRENCH = [
   "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z",
@@ -89,6 +93,9 @@ export type FeedCardProps = {
   /** Whether a long message, or a tool call's long input, shows all of itself. */
   expanded?: boolean;
   onExpand?: () => void;
+  /** Whether a Codex program's card lists every one of its actions (ANT-311). */
+  groupOpen?: boolean;
+  onGroup?: () => void;
   /** Marks the newest arrival, for the drop-in. Only ever newest-first. */
   isNew?: boolean;
 };
@@ -104,6 +111,8 @@ export function FeedCardView({
   onToggle,
   expanded = false,
   onExpand,
+  groupOpen = false,
+  onGroup,
   isNew,
 }: FeedCardProps) {
   const unmapped = card.confidence === "unmapped";
@@ -212,7 +221,13 @@ export function FeedCardView({
           ) : card.kind === "agent" ? (
             <AgentBubble card={card} />
           ) : (
-            <ToolBox card={card} expanded={expanded} {...(onExpand ? { onExpand } : {})} />
+            <ToolBox
+              card={card}
+              expanded={expanded}
+              {...(onExpand ? { onExpand } : {})}
+              groupOpen={groupOpen}
+              {...(onGroup ? { onGroup } : {})}
+            />
           )}
         </div>
       </div>
@@ -272,15 +287,35 @@ function AgentBubble({ card }: { card: Card }) {
   );
 }
 
+/** How many of a program's actions a card lists before "+K more". */
+export const GROUP_SHOWN = 4;
+
 /** A tool call. Opening it shows what the call printed, when that was recorded. */
-function ToolBox({ card, expanded, onExpand }: { card: Card; expanded: boolean; onExpand?: () => void }) {
+function ToolBox({
+  card,
+  expanded,
+  onExpand,
+  groupOpen,
+  onGroup,
+}: {
+  card: Card;
+  expanded: boolean;
+  onExpand?: () => void;
+  groupOpen: boolean;
+  onGroup?: () => void;
+}) {
   // Not a toggle: Anthill records that a call happened and how it ended, not
   // what it printed — the output is the part a credential or a file's contents
   // would be in — so there is nothing to open it onto (ANT-297). The reason is
   // one hover away instead.
-  const input = card.detail ?? "";
+  const children = card.children ?? [];
+  const group = children.length > 0;
+  // A program's card lists what it did instead of its own text (ANT-311).
+  const input = group ? "" : (card.detail ?? "");
   const long = isLongToolInput(input);
   const full = long && expanded;
+  const failed = children.filter((child) => !child.ok).length;
+  const shown = groupOpen ? children : children.slice(0, GROUP_SHOWN);
   return (
     <div className={`feed-tool state-${card.state}`} title={OUTPUT_NOTE[card.state]}>
       {/* The input has a row of its own: beside a long tool name it was
@@ -290,7 +325,19 @@ function ToolBox({ card, expanded, onExpand }: { card: Card; expanded: boolean; 
           <ToolIcon tool={card.title} />
           <span>{card.title}</span>
         </span>
+        {group ? (
+          <span className="feed-tool-actions">
+            {children.length} {children.length === 1 ? "action" : "actions"}
+          </span>
+        ) : null}
         <span className="feed-tool-spacer" />
+        {failed > 0 ? (
+          // The program's own outcome stays its own; this is what keeps a
+          // program that finished from reading as all green.
+          <span className="feed-fail-badge" title="The program finished, but a command inside it failed.">
+            {failed} of {children.length} failed
+          </span>
+        ) : null}
         <i className={`feed-glyph state-${card.state}`} aria-hidden="true">
           {CARD_STATE_GLYPH[card.state]}
         </i>
@@ -306,6 +353,48 @@ function ToolBox({ card, expanded, onExpand }: { card: Card; expanded: boolean; 
           {expanded ? "Show less" : "Show more"}
         </button>
       ) : null}
+      {group ? (
+        <ul className="feed-exec-kids" aria-label="What the program did">
+          {shown.map((child) => (
+            <ExecChildRow key={child.id} child={child} />
+          ))}
+          {children.length > GROUP_SHOWN ? (
+            <li className="feed-exec-more">
+              <button type="button" className="feed-more" aria-expanded={groupOpen} onClick={onGroup}>
+                {groupOpen ? "Show less" : `+${children.length - GROUP_SHOWN} more`}
+              </button>
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
     </div>
+  );
+}
+
+/** One thing a program did: what, where, and how it ended. */
+function ExecChildRow({ child }: { child: ExecChild }) {
+  const { item } = child;
+  const duration = readDuration(child.durationMs);
+  // An MCP call is named by its server, then its tool.
+  const verb = item.kind === "mcp" ? (item.sub ? `${item.sub} ·` : undefined) : item.verb;
+  const sub = item.kind === "mcp" ? undefined : item.sub;
+  const exit = child.ok
+    ? duration
+    : [item.exitCode !== undefined ? `exit ${item.exitCode}` : "failed", duration].filter(Boolean).join(" · ");
+  return (
+    <li className={`feed-exec-kid${child.ok ? "" : " is-failed"}`} title={execItemLabel(item)}>
+      <i className={`feed-exec-glyph ${child.ok ? "is-ok" : "is-failed"}`} aria-hidden="true">
+        {child.ok ? "✓" : "×"}
+      </i>
+      <span className="feed-exec-main">
+        <span className="feed-exec-line">
+          {verb ? <span className="feed-exec-verb">{verb}</span> : null}
+          <b className="feed-exec-target">{item.target}</b>
+        </span>
+        {sub ? <span className="feed-exec-sub">{sub}</span> : null}
+      </span>
+      {exit ? <span className={`feed-exec-result${child.ok ? "" : " is-failed"}`}>{exit}</span> : null}
+      <span className="sr-label">{child.ok ? "succeeded" : "failed"}</span>
+    </li>
   );
 }

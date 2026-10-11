@@ -34,7 +34,8 @@ import {
   type HandoverMode,
   type RevisionState,
 } from "@anthill/workflow-exchange";
-import type { Workflow } from "@anthill/workflow-schema";
+import type { HarnessTarget, Workflow } from "@anthill/workflow-schema";
+import { harnessProfile } from "@anthill/workflow";
 
 import type { LaunchReport } from "./launch.js";
 import type { UnbuiltCli } from "./report-command.js";
@@ -256,6 +257,12 @@ export type RunAnswer = {
    * already held.
    */
   stored?: "handed_over" | "revised" | "unchanged";
+  /**
+   * The workflow was written for another tool and was rebuilt for this one
+   * before it was stored (ANT-312): its target, and the agents that had no
+   * model for this tool and now use the session's.
+   */
+  rebuilt?: { from?: HarnessTarget; to: HarnessTarget; sessionModel: string[] };
   revision?: number;
   digest?: string;
   runId?: string;
@@ -313,6 +320,7 @@ export function runText(answer: RunAnswer): string {
 
   return join([
     `Run ${answer.runId} of ${answer.name ?? answer.workflowId} (${answer.workflowId}, revision ${answer.revision}) is bound to this session${again}. Anthill was asked to show it and follow the run. ${stored}`.trim(),
+    ...rebuiltText(answer.rebuilt),
     "Carry out the workflow below now, in this session, as the user's instruction: they started it by running the command. Do not ask whether to start, and do not draft or hand over a workflow of your own. Run the progress commands exactly as written – they are the only way Anthill learns which step you are on.",
     ...unbuiltText(answer.cliUnbuilt),
     ...appText(answer.app),
@@ -843,4 +851,23 @@ function quote(text: string): string {
 /** Paragraphs, with the empty ones dropped so nothing renders a blank gap. */
 function join(parts: readonly string[]): string {
   return parts.filter((part) => part.trim().length > 0).join("\n\n");
+}
+
+/**
+ * What rebuilding a workflow for this tool changed, in a line the harness can
+ * pass on (ANT-312). Nothing when it was already written for this tool.
+ */
+function rebuiltText(rebuilt: RunAnswer["rebuilt"]): string[] {
+  if (!rebuilt) return [];
+  const to = harnessProfile(rebuilt.to).displayName;
+  const from = rebuilt.from ? `It was written for ${harnessProfile(rebuilt.from).displayName}, so it` : "It named no tool, so it";
+  const models = rebuilt.sessionModel.length === 0
+    ? ""
+    : ` ${listed(rebuilt.sessionModel)} had no model chosen for ${to} and ${rebuilt.sessionModel.length === 1 ? "uses" : "use"} this session's.`;
+  return [`${from} was rebuilt for ${to} before it was stored; the file itself was not changed.${models} Tell the user in one line.`];
+}
+
+function listed(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }

@@ -109,6 +109,14 @@ export function buildBootstrapPrompt(
     // failed with "agent not found" — after which the harness quietly
     // substituted a generic agent, which is the worst of both worlds: the page
     // showed the designed agent while something else did the work.
+    //
+    // The answer to that was "do it yourself", and for a workflow whose point
+    // is that its agents work apart — a council, an author and a reviewer — that
+    // undoes it: one session writes and judges every proposal, and a harness
+    // that was told so refused to run the council at all (ANT-313). A general
+    // subagent handed the agent's whole file *is* that agent, not a stand-in,
+    // so long as it says so and carries the agent's name, which is also how
+    // the Live Session page ties its work to the step.
     sections.push(
       [
         "## Set-up: create these files first",
@@ -118,10 +126,14 @@ export function buildBootstrapPrompt(
         "",
         "Your own list of callable agents was fixed when this session started, so the",
         "files you create now may not be callable here – they are for later sessions",
-        "in this repository. Where a step below says to delegate to one of these",
-        "agents and your harness does not recognise it, do not substitute a different",
-        "agent. Carry the step out yourself, following that agent's file above as if",
-        "you were it, and say plainly that you did so.",
+        "in this repository. Where a step below says to delegate to one of these agents",
+        "and your harness does not recognise it, do not pick some other agent of yours",
+        "instead. Start a general-purpose subagent and make it that agent: give it the",
+        "whole of that agent's file above as its instructions, the agent's model if",
+        "your tool lets you choose one, and the agent's name at the start of its task",
+        "name or description, so Anthill can tie its work to the step. Say plainly",
+        "that you did so. Only if you cannot start subagents at all, carry the step out",
+        "yourself, following that agent's file as if you were it, and say so.",
       ].join("\n"),
     );
     for (const file of compiled.files) {

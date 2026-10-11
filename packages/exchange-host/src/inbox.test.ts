@@ -462,6 +462,25 @@ describe("a run the server bound", () => {
     expect(await settled(store)).toEqual(["bind-run-1.json"]);
   });
 
+  /* ANT-312. Codex ran a workflow Claude Code had handed over. Registered as
+     Claude Code's, its run was looked for in Claude Code's transcripts, and
+     the feed stayed empty while the council worked. */
+  it("is registered as the tool that bound it, not the one that handed the workflow over", async () => {
+    const store = await openStore();
+    await store.createWorkflow(submission());
+    const forCodex = workflow({ target: "codex" });
+    const agents = (forCodex.metadata as { workflow: { agents: Record<string, unknown>[] } }).workflow.agents;
+    agents[0] = { ...agents[0], models: { "claude-code": { id: "sonnet" }, codex: { id: "__default__" } } };
+    expect((await store.addRevision("workflow-1", forCodex, "user", "codex")).outcome).toBe("added");
+    expect((await store.bind("workflow-1", 2, { runId: "run-cx", nonce: "nonce-cx", sessionId: "session-cx", harness: "codex" })).outcome).toBe("bound");
+    await store.dropInbox({ kind: "bind", key: "bind-run-cx", workflowId: "workflow-1", revision: 2, runId: "run-cx" });
+    const window = watcher();
+
+    await new ExchangeInbox(store, window.effects).read();
+
+    expect(window.registered[0]).toMatchObject({ runId: "run-cx", sessionId: "session-cx", harness: "codex" });
+  });
+
   /* A bind asks the user nothing, so it has no reason to wait behind a
      workflow nobody has looked at yet. */
   it("is registered even while the workflow itself waits for a window", async () => {

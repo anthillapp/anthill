@@ -1,5 +1,5 @@
 import { ExchangeStore } from "@anthill/exchange-store";
-import { WORKFLOW_FORMAT_VERSION, type HandoverMode } from "@anthill/workflow-exchange";
+import { revisionDigest, WORKFLOW_FORMAT_VERSION, type HandoverMode } from "@anthill/workflow-exchange";
 import type { Workflow } from "@anthill/workflow-schema";
 import { createPendingRun } from "@anthill/live";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -112,4 +112,31 @@ it("uses a frozen snapshot after save and restart, and fails closed on a damaged
   expect(await boundWorkflow(reopened, run)).toMatchObject({ ok: true, revision: 1 });
   await writeFile(join(store.root, "workflows", workflow.id, "revisions", "0001.json"), "{}");
   expect(await boundWorkflow(reopened, run)).toMatchObject({ ok: false });
+});
+
+/*
+  ANT-312. A workflow handed over by Claude Code and then run by Codex holds a
+  revision written for Codex. The view judges a bound revision for the tool
+  that bound it, so it is not drawn as asking which tool should do the work.
+*/
+it("judges a revision another harness bound for that harness", async () => {
+  const { store, path, workflow } = await fixture("watch");
+  const forCodex: Workflow = {
+    ...workflow,
+    target: "codex",
+    metadata: { workflow: { ...(workflow.metadata as { workflow: object }).workflow, agents: [{ id: "dev", name: "Developer", description: "Reads the code around the change, makes the smallest fix that holds, and hands back a diff with a test that fails without it.", models: { "claude-code": { id: "sonnet" }, codex: { id: "__default__" } } }] } },
+  };
+  const added = await store.addRevision(workflow.id, forCodex, "user", "codex");
+  expect(added.outcome).toBe("added");
+  expect((await readExchangeView(store, path, workflow.id))?.problems.map((problem) => problem.code)).toContain("HANDOVER_TARGET_MISMATCH");
+
+  const bound = await store.bindRequest(workflow.id, 2, revisionDigest(forCodex), "run-1", "session-cx",
+    () => ({ runId: "ANT-CX1", nonce: "n1" }), "codex");
+  expect(bound).toMatchObject({ outcome: "bound", binding: { harness: "codex", sessionId: "session-cx" } });
+
+  const view = await readExchangeView(store, path, workflow.id);
+  expect(view).toMatchObject({ revision: 2, state: "bound" });
+  expect(view?.problems.map((problem) => problem.code)).not.toContain("HANDOVER_TARGET_MISMATCH");
+  // The record of who handed it over first is unchanged.
+  expect(view?.source.harness).toBe("claude-code");
 });

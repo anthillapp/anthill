@@ -336,8 +336,12 @@ function startTogether(
     return step === undefined ? (block?.name ?? id) : `${step} (${block?.name ?? id})`;
   });
   const all = targets.every((id) => stepNumbers.has(id)) ? `steps ${joinList(names)}` : joinList(names);
+  // "All at once, wait for none" had no way through a harness that runs fewer
+  // subagents at a time than the fork has branches: Codex stopped at its
+  // thread limit rather than break the instruction (ANT-313). Waves keep the
+  // branches apart; doing one in the session itself would not.
   return usesSubagents
-    ? `continue to ${all} at the same time – they are independent. Hand each to its own subagent in one go, and do not wait for one before starting the next.`
+    ? `continue to ${all} at the same time – they are independent. Hand each to its own subagent in one go, without waiting for one before starting the next. If your harness runs fewer subagents at a time than this, start as many as it allows and each of the rest as soon as one finishes; do not carry any of them out yourself instead.`
     : `continue to ${all} – they are independent, so do all of them, in whichever order suits.`;
 }
 

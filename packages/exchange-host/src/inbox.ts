@@ -344,7 +344,11 @@ export class ExchangeInbox {
     const revision = binding
       ? await this.store.readRevision(drop.workflowId, binding.revision)
       : undefined;
-    const harness = stored?.identity?.source.harness;
+    // The tool that bound the run, which is not always the one that handed the
+    // workflow over: any harness may run any workflow (ANT-312). Followed as
+    // the other one, a Codex run was read for in Claude Code's transcripts and
+    // its feed stayed empty.
+    const harness = binding?.harness ?? stored?.identity?.source.harness;
 
     if (!binding || !revision || !harness || drop.revision !== binding.revision ||
         (binding.digest && binding.digest !== revision.digest)) {

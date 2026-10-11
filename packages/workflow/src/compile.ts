@@ -775,7 +775,12 @@ function buildPrompt(
       plan.forks.size > 0
         ? usesSubagents
           ? "- Follow the steps in the order given – steps marked to run at the same time start together; do not skip ahead."
-          : "- Follow the steps in the order given – steps marked as independent can be done in any order; do not skip ahead."
+          : harness.target === "pi"
+            ? // Pi runs sequentially — no subagent files, no parallelism — so its
+              // step lines say "in whichever order suits" and the Rules section
+              // must not say "in any order" beside them (ANT-7FA8152F).
+              "- Follow the steps; do not skip ahead."
+            : "- Follow the steps in the order given – steps marked as independent can be done in any order; do not skip ahead."
         : "- Follow the steps in the order given; do not skip ahead.",
       "- After each step, state which branch you are taking and why.",
       "- If a step's result is ambiguous, ask rather than guessing which branch to take.",

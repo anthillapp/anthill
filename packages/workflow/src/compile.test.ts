@@ -700,3 +700,91 @@ describe("compile – switcher", () => {
     expect(compile(workflow).prompt).toContain('- if `reviewer.decision` is "approved" (approved)');
   });
 });
+
+/**
+ * Two independent steps out of Start that meet again — the fork shape that
+ * puts the ordering clause in the Rules section (ANT-7FA8152F).
+ */
+function forked(target: Workflow["target"] = "claude-code"): Workflow {
+  return {
+    id: "forked",
+    name: "Two at once",
+    version: "1",
+    target,
+    brief: {
+      goal: "Do both pieces of work.",
+      verification: "Both steps report done.",
+      doneCriteria: ["Both steps are done."],
+    },
+    metadata: {
+      workflow: {
+        agents: [
+          { id: "agent-a", name: "Worker A", model: "sonnet" },
+          { id: "agent-b", name: "Worker B", model: "sonnet" },
+          { id: "agent-c", name: "Worker C", model: "sonnet" },
+        ],
+      },
+    },
+    nodes: [
+      { id: "s", type: "start", name: "Start", config: {} },
+      {
+        id: "a",
+        type: "agent",
+        name: "First piece",
+        config: { actionKind: "agent-step", agentId: "agent-a", task: "Do the first piece." },
+      },
+      {
+        id: "b",
+        type: "agent",
+        name: "Second piece",
+        config: { actionKind: "agent-step", agentId: "agent-b", task: "Do the second piece." },
+      },
+      {
+        id: "c",
+        type: "agent",
+        name: "Wrap up",
+        config: { actionKind: "agent-step", agentId: "agent-c", task: "Wrap up both pieces." },
+      },
+      { id: "e", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "s", target: "a" },
+      { id: "e2", source: "s", target: "b" },
+      { id: "e3", source: "a", target: "c" },
+      { id: "e4", source: "b", target: "c" },
+      { id: "e5", source: "c", target: "e" },
+    ],
+  };
+}
+
+describe("compile – Rules section (ANT-7FA8152F)", () => {
+  /** The Rules section, from its heading to the next section — it contains blank lines of its own. */
+  const rulesOf = (target: Workflow["target"]) => {
+    const prompt = compile(forked(target)).prompt;
+    const start = prompt.indexOf("## Rules");
+    const rest = prompt.slice(start);
+    const next = rest.indexOf("## ", 3);
+    return next === -1 ? rest : rest.slice(0, next);
+  };
+
+  it("never says \"in any order\" / \"in parallel\" / \"at the same time\" for Pi", () => {
+    const rules = rulesOf("pi");
+    expect(rules).not.toContain("in any order");
+    expect(rules).not.toContain("in parallel");
+    expect(rules).not.toContain("at the same time");
+  });
+
+  it("keeps the subagent wording for Claude Code and Codex", () => {
+    for (const target of ["claude-code", "codex"] as const) {
+      expect(rulesOf(target)).toContain(
+        "- Follow the steps in the order given – steps marked to run at the same time start together; do not skip ahead.",
+      );
+    }
+  });
+
+  it("keeps the inlined wording for VS Code", () => {
+    expect(rulesOf("vscode")).toContain(
+      "- Follow the steps in the order given – steps marked as independent can be done in any order; do not skip ahead.",
+    );
+  });
+});

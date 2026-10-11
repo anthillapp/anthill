@@ -38,6 +38,7 @@ const NEUTRAL_VIEW: LiveSessionView = {
   detours: [],
   overlaps: [],
   events: [],
+  todos: {},
   unmappedCount: 0,
   empty: true,
 };

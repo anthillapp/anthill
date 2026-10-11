@@ -46,6 +46,9 @@ import {
 } from "./types.js";
 import { newCursor, readNewLines, type TailCursor } from "./tail.js";
 import { codexExecTarget, commandLine, filesLabel, patchFiles } from "../tool-target.js";
+import { codexExecItem } from "../exec-item.js";
+import { codexPlanAccepted, codexPlanCall } from "../todo-record.js";
+import type { TodoItem } from "@anthill/live";
 
 const CHANNEL = "codex:rollout";
 
@@ -123,6 +126,10 @@ type FileState = {
   inheriting?: boolean;
   /** The calls this file made, by call id: which were `spawn_agent`. */
   spawnCalls?: Set<string>;
+  /** The folder the session works in, which paths inside a program are shown under (ANT-311). */
+  cwd?: string;
+  /** `update_plan` calls whose output has not come back, by call id (ANT-310). */
+  pendingPlans?: Map<string, TodoItem[]>;
 };
 
 /** Where a subagent's events wait until the spawn that started it is known. */
@@ -662,6 +669,7 @@ function scan(
         if (state.ownFrom === undefined) state.inheriting = true;
         continue;
       }
+      if (str(payload.cwd)) state.cwd = str(payload.cwd);
       const session = str(payload.session_id);
       const thread = str(payload.id);
       /*
@@ -785,6 +793,11 @@ function scan(
           });
           continue;
         }
+        // A plan is only a request until Codex says it took it (ANT-310).
+        if (name === "update_plan" && call) {
+          const plan = codexPlanCall(payload.arguments ?? payload.input);
+          if (plan) (state.pendingPlans ??= new Map()).set(call, plan);
+        }
         const target = codexCallTarget(name, payload.arguments ?? payload.input);
         // Whom a message or a follow-up goes to: how the fold tells a
         // long-lived subagent's next task from its report (ANT-306).
@@ -819,6 +832,13 @@ function scan(
           ...(call ? { toolUseId: call } : {}),
           ...(spawnReceipt ? { background: true } : {}),
         });
+        const plan = call ? state.pendingPlans?.get(call) : undefined;
+        if (call && plan) {
+          state.pendingPlans?.delete(call);
+          if (codexPlanAccepted(outputText(payload.output))) {
+            events.push({ ...base, kind: "todo", title: "Todo list changed", toolUseId: call, todo: { op: "replace", items: plan } });
+          }
+        }
         // Asked to "print" a marker, an agent whose only way to print is a
         // shell prints it with one: Codex Desktop writes `printf 'ANTHILL-STEP
         // …'`, and the line exists only in the command's output (ANT-147).
@@ -855,6 +875,25 @@ function scan(
             },
           });
         }
+      }
+      // One command, file change or MCP call a program made, finished: a row
+      // in the program's card (ANT-311). Only the allowed fields are read.
+      if (payload.type === "item_completed") {
+        const found = codexExecItem(payload.item, state.cwd);
+        if (found) {
+          const done = typeof payload.completed_at_ms === "number" ? new Date(payload.completed_at_ms) : undefined;
+          events.push({
+            ...base,
+            ...(done && !Number.isNaN(done.getTime()) ? { at: done.toISOString() } : {}),
+            kind: "tool.item",
+            title: found.item.kind === "file" ? "File changed" : found.item.kind === "mcp" ? "MCP call finished" : "Command finished",
+            toolUseId: found.id,
+            ok: found.ok,
+            ...(found.durationMs !== undefined ? { durationMs: found.durationMs } : {}),
+            item: found.item,
+          });
+        }
+        continue;
       }
       if (payload.type === "task_started" && !state.delegate) state.awaitingAt = undefined;
       // A turn that ended on an Approval Gate, with no done line: the gate's

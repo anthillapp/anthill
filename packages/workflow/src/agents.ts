@@ -19,9 +19,9 @@
  * reasoning that keeps `pendingOutputs` in node config.
  */
 
-import type { Workflow, WorkflowNode } from "@anthill/workflow-schema";
+import type { HarnessTarget, Workflow, WorkflowNode } from "@anthill/workflow-schema";
 
-import { migrateModels, readAgentModels, type AgentModels } from "./agent-models.js";
+import { HARNESS_DEFAULT, isConfiguredFor, migrateModels, readAgentModels, type AgentModels } from "./agent-models.js";
 import { nextIdFor, rememberIdsUnder } from "./id-counter.js";
 import { agentConfig, slugify } from "./workflow.js";
 
@@ -377,4 +377,50 @@ export function assignedAgents(
   }
 
   return [...byId.values()];
+}
+
+/** A workflow rebuilt for the tool about to run it, and what that changed. */
+export type RetargetResult = {
+  workflow: Workflow;
+  /** The tool it was written for before, when it named one. */
+  from?: HarnessTarget;
+  /** Whether anything changed at all. */
+  changed: boolean;
+  /** The agents that had no model for the new tool, and now use the session's. */
+  sessionModel: string[];
+};
+
+/**
+ * The same workflow, for another coding tool (ANT-312).
+ *
+ * Any harness may run any workflow. One written for Claude Code and run from
+ * Codex is not refused, nor run as though Codex were Claude Code: it is
+ * rebuilt for Codex. Its target becomes Codex, and an agent with no model
+ * chosen for Codex gets "whatever the session is on" — the same answer the
+ * tool's own default gives, stated so the workflow is complete. A model chosen
+ * for another tool stays where it is, for that tool, and is never translated:
+ * the two tools share no model vocabulary.
+ *
+ * Nothing changes for a workflow that already targets the tool.
+ */
+export function retargetWorkflow(workflow: Workflow, target: HarnessTarget): RetargetResult {
+  if (workflow.target === target) return { workflow, changed: false, sessionModel: [] };
+  const profiles = agentProfiles(workflow);
+  const missing = profiles.filter((profile) => !isConfiguredFor(profile.models, target));
+  const withModels = missing.length === 0
+    ? workflow
+    : withProfiles(
+        workflow,
+        profiles.map((profile) =>
+          isConfiguredFor(profile.models, target)
+            ? profile
+            : { ...profile, models: { ...profile.models, [target]: { id: HARNESS_DEFAULT } } },
+        ),
+      );
+  return {
+    workflow: { ...withModels, target },
+    ...(workflow.target ? { from: workflow.target } : {}),
+    changed: true,
+    sessionModel: missing.map((profile) => profile.name || profile.id),
+  };
 }

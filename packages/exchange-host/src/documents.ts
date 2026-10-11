@@ -46,7 +46,11 @@ export async function readExchangeView(store: ExchangeStore, path: string, workf
   const stored = await store.readWorkflow(workflowId);
   if (!stored?.identity || !stored.head) throw new Error("The exchange revision cannot be read.");
   const { identity, head } = stored;
-  const problems = [...stored.problems, ...checkCompleteness(head.workflow, identity.source)];
+  // A revision a run is bound to is judged for the tool that bound it: any
+  // harness may run a workflow another one handed over (ANT-312).
+  const runner = [...stored.bindings].reverse().find((binding) => binding.revision === head.revision && binding.harness)?.harness;
+  const source = runner && runner !== identity.source.harness ? { ...identity.source, harness: runner } : identity.source;
+  const problems = [...stored.problems, ...checkCompleteness(head.workflow, source)];
   const bound = stored.bindings.some((binding) => binding.revision === head.revision);
   return {
     workflowId, source: identity.source, mode: identity.mode,

@@ -184,7 +184,9 @@ quotes off it if it has them, and leave `~` as it is: the server expands it. A
 2. Call `run_workflow` with `path`, `harness: "codex"`, `sessionId`, a new
    `idempotencyKey` of your own for this run (`run-` and a fresh UUID will do),
    and `build: "dev"` if the user wrote `--dev`. Repeat the same key only to
-   retry this same call after a lost reply.
+   retry this same call after a lost reply. A workflow written for another
+   tool runs here too: Anthill rebuilds it for Codex and says so in the
+   result. Do not copy or edit the file to change its target yourself.
 3. Read the outcome.
    - `started`: a new run of exactly what the file says is bound to this task,
      and Anthill was asked to show it. Tell the user in one line which workflow

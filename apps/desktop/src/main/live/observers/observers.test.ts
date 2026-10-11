@@ -3063,3 +3063,193 @@ describe("a Codex step line printed by a command (ANT-164)", () => {
     expect(events.find((event) => event.kind === "step.marker")?.printedBy).toBe("call_p1");
   });
 });
+
+/*
+  ANT-310. A subagent's own todo list, read only from what its tool confirmed:
+  a call is a request, and a refused "completed" must never show as done.
+*/
+describe("a subagent's todo list", () => {
+  const at = (ms: number) => new Date(Date.parse("2026-08-29T10:00:00.000Z") + ms).toISOString();
+  const lines = (rows: unknown[]) => rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+
+  it("is read from a Claude Code delegate's confirmed task calls", async () => {
+    const dir = await root();
+    await writeClaude(dir, "-tmp-scratch", "sess-1", claudeTranscript("sess-1", { marked: true }));
+    const call = (id: string, name: string, input: Record<string, unknown>, ms: number) => ({
+      type: "assistant",
+      sessionId: "sess-1",
+      isSidechain: true,
+      agentId: "a1",
+      timestamp: at(ms),
+      message: { role: "assistant", content: [{ type: "tool_use", id, name, input }] },
+    });
+    const result = (id: string, text: string, ms: number, record?: unknown, error = false) => ({
+      type: "user",
+      sessionId: "sess-1",
+      isSidechain: true,
+      agentId: "a1",
+      timestamp: at(ms),
+      ...(record ? { toolUseResult: record } : {}),
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: text, ...(error ? { is_error: true } : {}) }] },
+    });
+    await mkdir(join(dir, "-tmp-scratch", "sess-1", "subagents"), { recursive: true });
+    await writeFile(
+      join(dir, "-tmp-scratch", "sess-1", "subagents", "agent-a1.jsonl"),
+      lines([
+        call("t1", "TaskCreate", { subject: "Run the suite", description: "PRIVATE-DESCRIPTION" }, 1_000),
+        result("t1", "Task #1 created successfully: Run the suite", 1_100, { task: { id: "1", subject: "Run the suite" } }),
+        call("t2", "TaskUpdate", { taskId: "1", status: "completed" }, 2_000),
+        // Refused: never the list's news.
+        result("t2", "Error: permission denied", 2_100, undefined, true),
+        call("t3", "TaskUpdate", { taskId: "1", status: "in_progress" }, 3_000),
+        result("t3", "Updated task #1 status", 3_100, { success: true, taskId: "1", updatedFields: ["status"], statusChange: { from: "pending", to: "in_progress" } }),
+        // Asked, and never answered: still only a request.
+        call("t4", "TaskUpdate", { taskId: "1", status: "completed" }, 4_000),
+      ]),
+      "utf8",
+    );
+    await writeFile(
+      join(dir, "-tmp-scratch", "sess-1", "subagents", "agent-a1.meta.json"),
+      JSON.stringify({ agentType: "general-purpose", description: "Run tests", toolUseId: "toolu_qa" }),
+      "utf8",
+    );
+    const run = {
+      ...createPendingRun({ anthillRunId: RUN_ID, correlationNonce: NONCE, selectedCli: "claude-code", promptVersion: "1", bootstrapPromptHash: "abcd1234", now: at(0) }),
+      detectedSessionId: "sess-1",
+      state: "detected_live" as const,
+    };
+    const { events } = await new ClaudeCodeObserver(dir).poll(run, at(60_000));
+    const todos = events.filter((event) => event.kind === "todo");
+    expect(todos.map((event) => event.todo)).toEqual([
+      { op: "upsert", id: "1", title: "Run the suite", status: "pending" },
+      { op: "upsert", id: "1", status: "in_progress" },
+    ]);
+    for (const event of todos) {
+      expect(event.parentToolUseId).toBe("toolu_qa");
+      expect(event.author).toEqual(expect.objectContaining({ kind: "subagent" }));
+    }
+    expect(JSON.stringify(events)).not.toContain("PRIVATE-DESCRIPTION");
+  });
+
+  it("is read from a Codex subagent's plan, once Codex says it took it", async () => {
+    const dir = await root();
+    const now = Date.now();
+    const t = (s: number) => new Date(now - 60_000 + s * 1000).toISOString();
+    await writeCodex(
+      dir,
+      "sess-cx",
+      lines([
+        { timestamp: t(0), type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx", cwd: "/tmp/scratch" } },
+        { timestamp: t(1), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: MARKED_PROMPT }] } },
+        { timestamp: t(2), type: "response_item", payload: { type: "function_call", name: "spawn_agent", call_id: "call-spawn", arguments: JSON.stringify({ task_name: "tester" }) } },
+        { timestamp: t(2), type: "response_item", payload: { type: "function_call_output", call_id: "call-spawn", output: JSON.stringify({ task_name: "/root/tester" }) } },
+      ]),
+    );
+    const plan = (call: string, steps: [string, string][], s: number) => ({
+      timestamp: t(s),
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        name: "update_plan",
+        call_id: call,
+        arguments: JSON.stringify({ explanation: "PRIVATE-EXPLANATION", plan: steps.map(([step, status]) => ({ step, status })) }),
+      },
+    });
+    const out = (call: string, output: string, s: number) => ({ timestamp: t(s), type: "response_item", payload: { type: "function_call_output", call_id: call, output } });
+    await writeCodex(
+      dir,
+      "sub-t",
+      lines([
+        {
+          timestamp: t(3),
+          type: "session_meta",
+          payload: {
+            session_id: "sess-cx",
+            id: "sub-t",
+            cwd: "/tmp/scratch",
+            thread_source: "subagent",
+            agent_path: "/root/tester",
+            source: { subagent: { thread_spawn: { parent_thread_id: "sess-cx", agent_path: "/root/tester" } } },
+          },
+        },
+        plan("p1", [["Run the suite", "in_progress"], ["Report", "pending"]], 4),
+        out("p1", "Plan updated", 4),
+        plan("p2", [["Run the suite", "completed"], ["Report", "completed"]], 5),
+        out("p2", "failed to parse function arguments", 5),
+      ]),
+    );
+    const run = { ...pending("codex"), detectedSessionId: "sess-cx", state: "detected_live" as const };
+    const { events } = await new CodexObserver(dir).poll(run, new Date().toISOString());
+    const todos = events.filter((event) => event.kind === "todo");
+    expect(todos).toHaveLength(1);
+    expect(todos[0]?.todo).toEqual({
+      op: "replace",
+      items: [
+        { title: "Run the suite", status: "in_progress" },
+        { title: "Report", status: "pending" },
+      ],
+    });
+    expect(todos[0]?.parentToolUseId).toBe("call-spawn");
+    expect(JSON.stringify(events)).not.toContain("PRIVATE-EXPLANATION");
+  });
+});
+
+/*
+  ANT-311. What a Codex program did, one record per command, file change and
+  MCP call — read for what it was and how it ended, never for its output.
+*/
+describe("what a Codex program did", () => {
+  it("is read from item_completed, keeping only the allowed fields", async () => {
+    const dir = await root();
+    const now = Date.now();
+    const t = (s: number) => new Date(now - 60_000 + s * 1000).toISOString();
+    const ms = (s: number) => now - 60_000 + s * 1000;
+    const item = (s: number, value: Record<string, unknown>) => ({
+      timestamp: t(s),
+      type: "event_msg",
+      payload: { type: "item_completed", thread_id: "sess-cx", turn_id: "turn-1", completed_at_ms: ms(s), item: value },
+    });
+    await writeCodex(
+      dir,
+      "sess-cx",
+      [
+        { timestamp: t(0), type: "session_meta", payload: { session_id: "sess-cx", id: "sess-cx", cwd: "/tmp/scratch" } },
+        { timestamp: t(1), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: MARKED_PROMPT }] } },
+        { timestamp: t(2), type: "response_item", payload: { type: "custom_tool_call", name: "exec", call_id: "call-exec", input: "await tools.exec_command({cmd: 'npm test'});" } },
+        item(3, {
+          type: "CommandExecution",
+          id: "exec-1",
+          command: ["/bin/zsh", "-lc", "npm test"],
+          cwd: "/tmp/scratch",
+          status: "failed",
+          exit_code: 1,
+          duration: { secs: 5, nanos: 900_000_000 },
+          parsed_cmd: [{ type: "unknown", cmd: "npm test" }],
+          aggregated_output: "PRIVATE-OUTPUT",
+          stdout: "PRIVATE-OUTPUT",
+        }),
+        item(3.5, {
+          type: "FileChange",
+          id: "patch-1",
+          status: "completed",
+          changes: { "/tmp/scratch/src/a.py": { type: "update", diff: "PRIVATE-CONTENT" } },
+        }),
+        item(3.6, { type: "Reasoning", id: "r1", raw_content: "PRIVATE-REASONING-SHOULD-NEVER-BE-READ" }),
+        { timestamp: t(4), type: "response_item", payload: { type: "custom_tool_call_output", call_id: "call-exec", output: "done" } },
+      ]
+        .map((row) => JSON.stringify(row))
+        .join("\n") + "\n",
+    );
+    const run = { ...pending("codex"), detectedSessionId: "sess-cx", state: "detected_live" as const };
+    const { events } = await new CodexObserver(dir).poll(run, new Date().toISOString());
+    const items = events.filter((event) => event.kind === "tool.item");
+    expect(items.map((event) => [event.toolUseId, event.ok, event.durationMs, event.item, event.at])).toEqual([
+      ["exec-1", false, 5900, { kind: "command", target: "npm test", exitCode: 1 }, t(3)],
+      ["patch-1", true, undefined, { kind: "file", verb: "Changed", target: "a.py", sub: "src/a.py" }, t(3.5)],
+    ]);
+    const all = JSON.stringify(events);
+    expect(all).not.toContain("PRIVATE-OUTPUT");
+    expect(all).not.toContain("PRIVATE-CONTENT");
+    expect(all).not.toContain("PRIVATE-REASONING");
+  });
+});

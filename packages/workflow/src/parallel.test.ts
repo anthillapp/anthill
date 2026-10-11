@@ -122,6 +122,16 @@ describe("the compiled prompt", () => {
     expect(steps).not.toContain("otherwise");
   });
 
+  /* ANT-313. A fork wider than the harness's subagent slots: Codex stopped at
+     its thread limit rather than break "all at once". Waves are allowed;
+     doing a branch in the session is not. */
+  it("lets the branches run in waves under a subagent limit, and never in the session itself", () => {
+    const steps = stepsOf(fanOutFromStep());
+    expect(steps).toContain(
+      "If your harness runs fewer subagents at a time than this, start as many as it allows and each of the rest as soon as one finishes; do not carry any of them out yourself instead.",
+    );
+  });
+
   it("makes the step where they meet wait for both", () => {
     const steps = stepsOf(fanOutFromStep());
     const merge = steps.slice(steps.indexOf("### 4. Merge"));

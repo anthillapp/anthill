@@ -509,14 +509,20 @@ describe("the activity panel scoped to a block", () => {
     fireEvent.click(within(graph).getByText(name).closest("g") as Element);
   };
 
-  it("offers Activity and Block only while a block is selected", async () => {
+  it("offers Activity, Todo list and Block Info only while a block is selected", async () => {
     await show([step("implement"), step("test")]);
     expect(screen.queryByRole("tablist", { name: BLOCK_SWITCH })).toBeNull();
     expect(screen.getByText("Whole session")).toBeTruthy();
 
     pick("Run tests");
     expect(screen.getByRole("tab", { name: "Activity" }).getAttribute("aria-selected")).toBe("true");
-    fireEvent.click(screen.getByRole("tab", { name: "Block" }));
+    // In this order, and Todo list is there even with no list to show (ANT-310).
+    expect(screen.getAllByRole("tab").filter((tab) => tab.closest(".activity-switch")).map((tab) => tab.textContent)).toEqual([
+      "Activity",
+      "Todo list",
+      "Block Info",
+    ]);
+    fireEvent.click(screen.getByRole("tab", { name: "Block Info" }));
 
     const block = screen.getByRole("tabpanel");
     expect(within(block).getByRole("heading", { name: "Run tests" })).toBeTruthy();
@@ -535,7 +541,7 @@ describe("the activity panel scoped to a block", () => {
   it("starts a newly selected block on its activity", async () => {
     await show([step("implement"), step("test")]);
     pick("Run tests");
-    fireEvent.click(screen.getByRole("tab", { name: "Block" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Block Info" }));
     pick("Make the change");
     expect(screen.getByRole("tab", { name: "Activity" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.queryByRole("tabpanel")).toBeNull();
@@ -544,16 +550,49 @@ describe("the activity panel scoped to a block", () => {
   it("goes back to the block's events from how it ran", async () => {
     await show([step("test"), event({ kind: "tool.start", title: "Bash", toolName: "Bash" })]);
     pick("Run tests");
-    fireEvent.click(screen.getByRole("tab", { name: "Block" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Block Info" }));
     fireEvent.click(screen.getByRole("button", { name: "Show its 2 events" }));
     expect(screen.getByRole("tab", { name: "Activity" }).getAttribute("aria-selected")).toBe("true");
     expect(document.querySelectorAll(".feed-card").length).toBe(2);
   });
 
+  it("shows the step's subagent's own todo list, named as the feed names it (ANT-310)", async () => {
+    await show([
+      step("test"),
+      event({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: "call-qa", agentName: "general-purpose", background: true }),
+      event({
+        kind: "todo",
+        title: "Todo list changed",
+        toolUseId: "t1",
+        parentToolUseId: "call-qa",
+        author: { kind: "subagent", name: "general-purpose" },
+        todo: { op: "replace", items: [{ title: "Run the suite", status: "completed" }, { title: "Report", status: "in_progress" }] },
+      }),
+    ]);
+    // Not a card in the feed.
+    expect(document.querySelectorAll(".feed-card").length).toBe(2);
+    pick("Run tests");
+    fireEvent.click(screen.getByRole("tab", { name: "Todo list" }));
+    const panel = screen.getByRole("tabpanel", { name: "Todo list" });
+    expect(within(panel).getByText("Reported by Test Runner")).toBeTruthy();
+    expect(within(panel).getByText("1 of 2")).toBeTruthy();
+    expect(within(panel).getByText("Report")).toBeTruthy();
+    // And the step's card on the canvas counts it.
+    expect(document.querySelector(".live-todo-chip")?.textContent).toBe("1/2");
+  });
+
+  it("says no todo list was reported for a step without one", async () => {
+    await show([step("implement")]);
+    pick("Make the change");
+    fireEvent.click(screen.getByRole("tab", { name: "Todo list" }));
+    expect(screen.getByText("No todo list reported")).toBeTruthy();
+    expect(document.querySelector(".live-todo-chip")).toBeNull();
+  });
+
   it("says a step a running session has not reached has not started, not that it never will", async () => {
     await show([step("implement")]);
     pick("Run tests");
-    fireEvent.click(screen.getByRole("tab", { name: "Block" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Block Info" }));
     expect(screen.getByText(/has not started yet/)).toBeTruthy();
   });
 });
@@ -1174,7 +1213,7 @@ describe("an ended session's report", () => {
     await show(looped(), run({ state: "completed", lastObservedAt: at(10) }));
     openReport();
     fireEvent.click(within(report()).getByRole("button", { name: "Run tests ran 2 passes" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Block" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Block Info" }));
     const ran = screen.getByRole("region", { name: "How Run tests ran" });
     expect(within(ran).getByText("passes").previousElementSibling?.textContent).toBe("2");
     expect(ran.querySelectorAll("li")).toHaveLength(2);
@@ -1192,7 +1231,7 @@ describe("an ended session's report", () => {
     await show([marker("implement", at(1))], run({ state: "failed", lastObservedAt: at(2) }));
     openReport();
     fireEvent.click(within(report()).getByRole("button", { name: "1 not reached" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Block" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Block Info" }));
     expect(screen.getByText(/never reached this step, so there is nothing recorded for it/)).toBeTruthy();
   });
 

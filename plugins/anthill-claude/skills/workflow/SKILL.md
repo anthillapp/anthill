@@ -1,7 +1,7 @@
 ---
 name: workflow
 description: Use when the user wants the work of this session laid out as a workflow in Anthill — "show this in Anthill", "plan this out in Anthill", "/anthill:workflow design …" — or wants to watch this session do a job as a diagram, "/anthill:workflow watch …" — or wants to run a workflow it already has again, "/anthill:workflow run \"<path>\"". Covers handing a task over as a graph, asking the questions that make it complete, binding a run to the graph the user settled on, running a saved workflow.json again, and reporting progress against it. Not for work that is not going to be done in this session.
-version: 0.8.12
+version: 0.8.13
 user-invocable: true
 argument-hint: "[design|create · display|watch · run] [--dev] [task]"
 ---
@@ -148,7 +148,9 @@ which workflow they meant.
    new `idempotencyKey` of your own for this run (`run-` and a fresh UUID will
    do), and `build: "dev"` if the user wrote `--dev`. Repeat the same key only
    to retry this same call after a lost reply; never reuse one from an earlier
-   run.
+   run. A workflow written for another tool runs here too: Anthill rebuilds it
+   for Claude Code and says so in the result. Do not copy or edit the file to
+   change its target yourself.
 3. Read the outcome.
    * `started` — a new run of exactly what the file says is bound to this
      session, and Anthill was asked to show it. Tell the user in one line which

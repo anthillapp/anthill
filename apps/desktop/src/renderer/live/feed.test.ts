@@ -865,3 +865,112 @@ describe("a Codex command recorded by the rollout and by the hooks", () => {
     expect(cards.map((card) => card.toolUseId)).toEqual(["call_c", "exec-3", "toolu_1"]);
   });
 });
+
+/*
+  ANT-311. A Codex program is one call whose input is a program; Codex writes
+  a record as each command, file change and MCP call inside it finishes. The
+  program's card lists them, each with its own outcome.
+*/
+describe("what a Codex program did", () => {
+  const T = (s: number) => new Date(Date.parse("2026-10-10T10:00:00.000Z") + s * 1000).toISOString();
+  const rollout = (partial: Partial<AttributedEvent> & Pick<AttributedEvent, "kind">) =>
+    event({ cli: "codex", source: "rollout", channel: "codex:rollout", sessionId: "sess-cx", ...partial });
+  const program = (call: string, from: number, to: number, extra: Partial<AttributedEvent> = {}) => [
+    rollout({ kind: "tool.start", toolName: "exec", title: "exec", toolUseId: call, detail: "cat SKILL.md (+3 more)", at: T(from), ...extra }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: call, at: T(to), ...extra }),
+  ];
+  const item = (id: string, s: number, value: NonNullable<AttributedEvent["item"]>, ok = true, durationMs?: number, extra: Partial<AttributedEvent> = {}) =>
+    rollout({
+      kind: "tool.item",
+      title: "Command finished",
+      toolUseId: id,
+      at: T(s),
+      item: value,
+      ok,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+      ...extra,
+    });
+
+  it("lists every action in the program's card, in the order each finished", () => {
+    const [start, end] = program("call-1", 0, 10);
+    const cards = buildFeed(
+      [
+        start!,
+        item("exec-2", 3, { kind: "command", verb: "Searched", target: "“count_words”", sub: "src" }, true, 48),
+        item("exec-1", 2, { kind: "command", verb: "Read", target: "SKILL.md", sub: "skills/anthill/", exitCode: 0 }, true, 12),
+        item("exec-3", 6, { kind: "command", target: "npm test", exitCode: 1 }, false, 5900),
+        item("patch-1", 7, { kind: "file", verb: "Changed", target: "wordcount.py", sub: "src/wordcount.py" }),
+        end!,
+      ],
+      false,
+    );
+    expect(cards).toHaveLength(1);
+    const [card] = cards;
+    // The program's own outcome stays its own.
+    expect(card?.state).toBe("done");
+    expect(card?.children?.map((child) => [child.id, child.ok])).toEqual([
+      ["exec-1", true],
+      ["exec-2", true],
+      ["exec-3", false],
+      ["patch-1", true],
+    ]);
+    expect(card?.children?.[2]?.item.exitCode).toBe(1);
+    expect(card?.events).toContain("tool.item");
+  });
+
+  it("keeps a program with no such records the one card it was", () => {
+    const cards = buildFeed(program("call-1", 0, 10), false);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.children).toBeUndefined();
+    expect(cards[0]?.detail).toBe("cat SKILL.md (+3 more)");
+  });
+
+  it("does not guess between two programs running at once", () => {
+    const [a1, a2] = program("call-a", 0, 10);
+    const [b1, b2] = program("call-b", 1, 10);
+    const cards = buildFeed([a1!, b1!, item("exec-1", 5, { kind: "command", target: "npm test" }), a2!, b2!], false);
+    expect(cards.find((card) => card.toolUseId === "call-a")?.children).toBeUndefined();
+    expect(cards.find((card) => card.toolUseId === "call-b")?.children).toBeUndefined();
+    // Shown under the session, on a card of its own.
+    const own = cards.find((card) => card.events.includes("tool.item"));
+    expect(own).toEqual(expect.objectContaining({ title: "Command", detail: "npm test", state: "done" }));
+  });
+
+  it("keeps a subagent's programs apart from the session's", () => {
+    const [main1, main2] = program("call-main", 0, 10);
+    const [sub1, sub2] = program("call-sub", 1, 10, { parentToolUseId: "call-spawn" });
+    const cards = buildFeed(
+      [main1!, sub1!, item("exec-s", 5, { kind: "command", target: "ls" }, true, 3, { parentToolUseId: "call-spawn" }), main2!, sub2!],
+      false,
+    );
+    expect(cards.find((card) => card.toolUseId === "call-sub")?.children?.map((child) => child.id)).toEqual(["exec-s"]);
+    expect(cards.find((card) => card.toolUseId === "call-main")?.children).toBeUndefined();
+  });
+
+  it("tells a command run directly how it really ended, without a group", () => {
+    const cards = buildFeed(
+      [
+        rollout({ kind: "tool.start", toolName: "exec_command", title: "exec_command", toolUseId: "call-x", detail: "cat README.md", at: T(0) }),
+        item("call-x", 1, { kind: "command", verb: "Read", target: "README.md", exitCode: 0 }, true, 4),
+        rollout({ kind: "tool.end", title: "Tool finished", toolUseId: "call-x", at: T(2) }),
+        rollout({ kind: "tool.start", toolName: "exec_command", title: "exec_command", toolUseId: "call-y", detail: "npm test", at: T(3) }),
+        item("call-y", 4, { kind: "command", target: "npm test", exitCode: 1 }, false, 900),
+        rollout({ kind: "tool.end", title: "Tool finished", toolUseId: "call-y", at: T(5) }),
+      ],
+      false,
+    );
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toEqual(expect.objectContaining({ detail: "Read README.md", state: "done", exitCode: 0 }));
+    expect(cards[0]?.children).toBeUndefined();
+    expect(cards[1]).toEqual(expect.objectContaining({ state: "failed", exitCode: 1 }));
+    expect(toolStatus(cards[1]!)).toBe("Failed · exit 1 · 2.0s");
+  });
+
+  it("draws no card for a todo list change, which has a tab of its own", () => {
+    const cards = buildFeed(
+      [event({ kind: "todo", title: "Todo list changed", toolUseId: "t1", todo: { op: "replace", items: [] } })],
+      false,
+    );
+    expect(cards).toEqual([]);
+  });
+});

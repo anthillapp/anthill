@@ -173,8 +173,19 @@ describe("the promise made about agent files", () => {
   it("says the files may not be callable in this session, and what to do instead", () => {
     const { bootstrapPrompt } = buildBootstrapPrompt(workflow("claude-code"), marker);
     expect(bootstrapPrompt).toContain("fixed when this session started");
-    expect(bootstrapPrompt).toContain("do not substitute a different");
-    expect(bootstrapPrompt).toContain("Carry the step out yourself");
+    expect(bootstrapPrompt).toContain("do not pick some other agent of yours");
+  });
+
+  /* ANT-313. "Do it yourself" undid a council: one session writing and
+     judging every proposal. The agent's file, handed to a general subagent
+     named after it, keeps the agents apart. */
+  it("has a general subagent carry the agent's file, and the session itself only as a last resort", () => {
+    const { bootstrapPrompt } = buildBootstrapPrompt(workflow("claude-code"), marker);
+    const fallback = bootstrapPrompt.slice(bootstrapPrompt.indexOf("Your own list of callable agents")).replace(/\s+/g, " ");
+    expect(fallback).toContain("Start a general-purpose subagent and make it that agent");
+    expect(fallback).toContain("the whole of that agent's file above as its instructions");
+    expect(fallback).toContain("the agent's name at the start of its task");
+    expect(fallback.indexOf("general-purpose subagent")).toBeLessThan(fallback.indexOf("Only if you cannot start subagents at all"));
   });
 
   it("makes no such claim for a workflow with no agent files", () => {

@@ -30,9 +30,11 @@ import {
   zoomAbout,
   type Workflow,
 } from "@anthill/builder";
-import { agentConfig, parallelPlan } from "@anthill/workflow";
+import { agentConfig, agentProfiles, parallelPlan } from "@anthill/workflow";
 import {
   hasStepEvidence,
+  todoProgress,
+  type BlockTodoList,
   type BlockView,
   type Detour,
   type LiveSessionState,
@@ -95,6 +97,34 @@ export function kicker(node: Workflow["nodes"][number]): string {
   if (node.type === "approval") return "APPROVAL";
   const kind = agentConfig(node).actionKind;
   return kind ? actionDefinition(kind).label.toUpperCase() : "STEP";
+}
+
+/**
+ * A step's subagent todo lists, as the chip on its card shows them (ANT-310):
+ * how many items are done of how many, and one line per item for the tooltip.
+ * Nothing when no list was reported — never "0/0", never a percentage.
+ */
+export function todoChip(
+  workflow: Workflow,
+  node: Workflow["nodes"][number],
+  lists: readonly BlockTodoList[] | undefined,
+): { done: number; total: number; tip: string } | undefined {
+  if (!lists || lists.length === 0) return undefined;
+  const agentId = agentConfig(node).agentId;
+  const profile = agentId ? agentProfiles(workflow).find((agent) => agent.id === agentId)?.name : undefined;
+  let done = 0;
+  let total = 0;
+  const lines: string[] = [];
+  for (const list of lists) {
+    const progress = todoProgress(list.items);
+    done += progress.done;
+    total += progress.total;
+    lines.push(`${profile ?? list.ownerName ?? "The agent"}'s todo list:`);
+    for (const item of list.items) {
+      lines.push(`${item.status === "completed" ? "✓" : item.status === "in_progress" ? "◐" : "○"} ${item.title}`);
+    }
+  }
+  return total > 0 ? { done, total, tip: lines.join("\n") } : undefined;
 }
 
 /**
@@ -837,6 +867,7 @@ export function LiveWorkflowGraph({
           state === "queued" && (over || passedBy.has(node.id)) && !structural ? "Not reached" : style.label;
         const selected = selectedBlockId === node.id;
         const passes = block?.passes ?? 0;
+        const todos = structural ? undefined : todoChip(workflow, node, view.todos[node.id]);
 
         return (
           <g
@@ -900,7 +931,23 @@ export function LiveWorkflowGraph({
                 className="live-node-text"
               >
                 <div className="live-node-lines" style={{ color: style.ink }}>
-                  <span className="live-node-kicker">{kicker(node)}</span>
+                  <span className="live-node-top">
+                    <span className="live-node-kicker">{kicker(node)}</span>
+                    {todos ? (
+                      <span
+                        className={`live-todo-chip${state === "done" ? " is-done" : ""}`}
+                        title={todos.tip}
+                        aria-label={`Todo list: ${todos.done} of ${todos.total} done`}
+                      >
+                        {/* Lucide square-check. */}
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M9 11l3 3L22 4" />
+                          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                        </svg>
+                        {todos.done}/{todos.total}
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="live-node-name">{node.name}</span>
                   <span className="live-node-state">
                     {label}

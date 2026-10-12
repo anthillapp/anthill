@@ -377,6 +377,11 @@ Returns an outcome of:
   conflict          nothing was started: something else is in the way, and the
                     message says what.
 
+Any harness may run any workflow. One written for another tool is rebuilt
+for yours before it is stored: its target becomes yours, and an agent with no
+model chosen for your tool uses the session's. The result says so; the file
+itself is not changed.
+
 Every run carries path, harness, sessionId and idempotencyKey. Mint a new
 idempotencyKey for each run command and repeat it only to retry the same call.`,
       inputSchema: {

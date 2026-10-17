@@ -637,6 +637,28 @@ export function foldLiveSession(
 
   const isOpen = (id: string) => blocks[id]?.state === "running" || blocks[id]?.state === "needsYou";
   /*
+    Where a follow-up's subagent goes (ANT-330). Codex reported two steps in
+    one command and then gave each author its task with followup_task: every
+    follow-up went to the step announced last, so one author's work landed on
+    the other's step and its own read "took 0ms". A follow-up goes to the step
+    its subagent's agent runs — the one announced last, else its step among
+    those announced with it, else the one open step it runs other than the one
+    it is leaving, else its nearest step on — and to
+    the step announced last when its name names no agent, as before.
+  */
+  const agentOf = new Map(index.blocks.map((block) => [block.id, block.agentSlug]));
+  const followupStep = (name: string, leaving: string): string | undefined => {
+    if (!announced) return undefined;
+    const agents = agentsNamedBy(index, name);
+    const runs = (id: string) => agents.has(agentOf.get(id) ?? "");
+    if (agents.size === 0 || runs(announced)) return announced;
+    const together = announcedTogetherFor(name);
+    if (together) return together;
+    const open = Object.keys(blocks).filter((id) => id !== leaving && isOpen(id) && runs(id));
+    if (open.length === 1) return open[0];
+    return nearestFor(name) ?? announced;
+  };
+  /*
     A subagent sent off on its own is done with a step when its turn ends —
     or, Codex's long-lived subagents, when it has reported to the session and
     sits waiting for more (ANT-306): one of those lives the whole run as a
@@ -799,7 +821,11 @@ export function foldLiveSession(
       as the command that prints the line, and the line is recorded only when
       the command returns — seconds after the subagent began (ANT-184).
     */
-    const continuing = openedByDispatch.delete(id) && isOpen(id);
+    const dispatched = openedByDispatch.delete(id);
+    // Its subagent came and went before the line was read — Codex spawns one
+    // to wait for its task and gives the task later (ANT-330): still that pass.
+    if (dispatched && blocks[id]?.state === "done") reopen(id);
+    const continuing = dispatched && isOpen(id);
     let pass: number;
     if (continuing) {
       pass = blocks[id].passes;
@@ -849,8 +875,9 @@ export function foldLiveSession(
     announced = id;
     enteredByTag = viaTag;
     doneReported = false;
-    // A subagent already at work for the step is work in it.
-    workSinceEntered = continuing;
+    // A subagent already at work for the step is work in it; one that only
+    // waited for its task and stopped is not (ANT-330).
+    workSinceEntered = continuing && outstanding(id);
     askedSinceEntered = false;
     stoppedHere = false;
     finishedAt = undefined;
@@ -1183,17 +1210,21 @@ export function foldLiveSession(
       const name = event.to;
       const call = [...delegations.entries()].reverse().find(([, d]) => d.name === name)?.[0];
       const d = call ? delegations.get(call) : undefined;
-      if (call && d && announced && blocks[announced]) {
+      const to = d ? followupStep(name, d.blockId) : undefined;
+      if (call && d && to && blocks[to]) {
         const from = d.blockId;
-        d.blockId = announced;
-        delegatedFrom.set(call, announced);
+        d.blockId = to;
+        delegatedFrom.set(call, to);
         d.background = true;
         d.delegateEnded = false;
         d.idle = false;
         d.reported = false;
         delete d.closedAt;
         handedBack.delete(call);
-        if (from !== announced) release(from, event.at);
+        // A step announced in a batch, now given its task: not over after all.
+        pendingClose.delete(to);
+        if (to !== announced && blocks[to].state === "done" && closedEmpty.has(to)) reopen(to);
+        if (from !== to) release(from, event.at);
       }
     }
 

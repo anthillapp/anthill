@@ -3253,6 +3253,115 @@ describe("subagents Codex starts before it reports their steps", () => {
 });
 
 /*
+  ANT-330, shaped like run ANT-FC0DC40E. Codex spawned the authors first,
+  reported both their steps in one command, and gave each author its task
+  with followup_task — then did the same for the two reviews. A follow-up went
+  to the step announced last, so Quill's proposal and review both landed on
+  Rowan's steps, and Quill's own read "took 0ms".
+*/
+describe("Codex follow-ups after steps announced together", () => {
+  const council: Workflow = {
+    ...workflow,
+    target: "codex",
+    nodes: [
+      { id: "start", type: "start", name: "Start", config: {} },
+      { id: "context", type: "agent", name: "Frame the question", config: { actionKind: "research", task: "c", agentId: "lead" } },
+      { id: "author-a", type: "agent", name: "Proposal A", config: { actionKind: "research", task: "a", agentId: "quill" } },
+      { id: "author-b", type: "agent", name: "Proposal B", config: { actionKind: "research", task: "b", agentId: "rowan" } },
+      { id: "compare", type: "agent", name: "Compare", config: { actionKind: "research", task: "j", agentId: "lead" } },
+      { id: "quill-review", type: "agent", name: "Quill reviews B", config: { actionKind: "research", task: "qr", agentId: "quill" } },
+      { id: "rowan-review", type: "agent", name: "Rowan reviews A", config: { actionKind: "research", task: "rr", agentId: "rowan" } },
+      { id: "end", type: "end", name: "Done", config: {} },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "context" },
+      { id: "e2", source: "context", target: "author-a" },
+      { id: "e3", source: "context", target: "author-b" },
+      { id: "e4", source: "author-a", target: "compare" },
+      { id: "e5", source: "author-b", target: "compare" },
+      { id: "e6", source: "compare", target: "quill-review" },
+      { id: "e7", source: "compare", target: "rowan-review" },
+      { id: "e8", source: "quill-review", target: "end" },
+      { id: "e9", source: "rowan-review", target: "end" },
+    ],
+    metadata: {
+      workflow: {
+        formatVersion: 5,
+        agents: [
+          { id: "lead", name: "Lead" },
+          { id: "quill", name: "Quill" },
+          { id: "rowan", name: "Rowan" },
+        ],
+      },
+    },
+  };
+  const T = (s: number) => new Date(Date.parse("2026-10-17T23:21:18.000Z") + s * 1000).toISOString();
+  const rollout = (partial: Partial<ObservationEvent> & Pick<ObservationEvent, "kind" | "title">) =>
+    event({ cli: "codex", source: "rollout", channel: "codex:rollout", ...partial });
+  const marker = (blockId: string, s: number) =>
+    rollout({ kind: "step.marker", title: "Step announced", blockId, at: T(s) });
+  const own = (id: string, s: number) => [
+    rollout({ kind: "tool.start", title: "exec", toolName: "exec", toolUseId: id, at: T(s) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: id, at: T(s + 0.3) }),
+  ];
+  const spawn = (call: string, name: string, s: number) => [
+    rollout({ kind: "subagent.start", title: "Delegated to a subagent", toolName: "spawn_agent", toolUseId: call, agentName: name, background: true, at: T(s) }),
+    rollout({ kind: "tool.end", title: "Tool finished", toolUseId: call, background: true, at: T(s + 0.2) }),
+  ];
+  const sub = (call: string, name: string, toolName: string, s: number) =>
+    rollout({ kind: "tool.start", title: toolName, toolName, toolUseId: `${call}-${toolName}-${s}`, parentToolUseId: call, author: { kind: "subagent", name }, at: T(s) });
+  const turnEnd = (call: string, name: string, s: number) =>
+    rollout({ kind: "turn.end", title: "Codex finished the turn", parentToolUseId: call, author: { kind: "subagent", name }, completion: "task_complete", at: T(s) });
+  const followup = (to: string, s: number) =>
+    rollout({ kind: "tool.start", title: "followup_task", toolName: "followup_task", toolUseId: `fu-${to}-${s}`, to, at: T(s) });
+
+  const journal = [
+    marker("context", 0),
+    ...own("ctx", 2),
+    ...spawn("call-q", "quill", 5),
+    ...spawn("call-r", "rowan", 6),
+    // Both wake, look around and wait to be told what to do.
+    sub("call-q", "quill", "exec", 8),
+    turnEnd("call-q", "quill", 9),
+    sub("call-r", "rowan", "exec", 8.5),
+    sub("call-r", "rowan", "wait_agent", 9.5),
+    marker("author-a", 12),
+    marker("author-b", 12),
+    followup("quill", 14),
+    sub("call-q", "quill", "exec", 15),
+    followup("rowan", 16),
+    sub("call-r", "rowan", "exec", 17),
+    turnEnd("call-q", "quill", 20),
+    turnEnd("call-r", "rowan", 22),
+    marker("compare", 25),
+    ...own("cmp", 26),
+    marker("quill-review", 30),
+    marker("rowan-review", 30),
+    followup("quill", 31),
+    followup("rowan", 32),
+    sub("call-q", "quill", "exec", 33),
+    sub("call-r", "rowan", "exec", 34),
+    turnEnd("call-q", "quill", 38),
+    turnEnd("call-r", "rowan", 40),
+  ];
+
+  it("gives each follow-up to the announced step its subagent's agent runs", () => {
+    const view = foldLiveSession(council, run({ selectedCli: "codex" }), journal);
+    const step = (id: string) => view.events.find((item) => item.toolUseId === id)?.mapping.blockId;
+    expect(step("call-q-exec-15")).toBe("author-a");
+    expect(step("call-r-exec-17")).toBe("author-b");
+    expect(step("call-q-exec-33")).toBe("quill-review");
+    expect(step("call-r-exec-34")).toBe("rowan-review");
+    expect(view.spans.find((span) => span.blockId === "author-a")?.endedAt).toBe(T(20));
+    expect(view.spans.find((span) => span.blockId === "quill-review")?.endedAt).toBe(T(38));
+    expect(view.blocks["author-b"].state).toBe("done");
+    expect(view.blocks["rowan-review"].state).toBe("done");
+    // Quill waited for its task before the step's line: one pass, not two.
+    expect(view.blocks["author-a"].passes).toBe(1);
+  });
+});
+
+/*
   ANT-309, shaped like run ANT-M6GEV6OS. Claude Code announced the authors'
   steps in one second, worked a little, and only then started their
   subagents — untagged, all `general-purpose`, each described after its

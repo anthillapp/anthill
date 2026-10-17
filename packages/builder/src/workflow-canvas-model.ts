@@ -21,6 +21,7 @@ import {
   ENTRY_LEAD,
   LABEL_CLEARANCE,
   entryPoint,
+  pointedEntryPoint,
   labelHalfSize,
   labelSpot,
   loopBelow,
@@ -580,7 +581,9 @@ export function buildCanvasModel(workflow: Workflow): CanvasModel {
         // blocks is drawn straight through them.
         blocks,
       };
-      let landing = entryPoint(targetRect, port, output.anchor ?? (loop ? { u: loop.arrive, v: 1 } : undefined));
+      let landing = output.anchor
+        ? pointedEntryPoint(targetRect, port, output.anchor)
+        : entryPoint(targetRect, port, loop ? { u: loop.arrive, v: 1 } : undefined);
       // A finger to the block in line with the hub is a straight line: in the
       // short gap after the hub a curve kinks backwards. Not when a block
       // stands between them, though: a switcher's exit to the second of two

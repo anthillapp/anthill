@@ -221,6 +221,28 @@ describe("buildCanvasModel", () => {
     const path = model.connected.find((item) => item.output.id === "e2");
     expect(path?.geometry.to.side).toBe("top");
   });
+
+  /*
+    ANT-326. A connection made by clicking a block below its source, in the
+    block's lower half, landed on its bottom: the line ran down through the
+    card to an arrowhead pointing back up into it.
+  */
+  it("lands a pointed arrow on the side facing its source, never across the block", () => {
+    const workflow = makeWorkflow();
+    workflow.nodes[2].position = { x: 200, y: 500 };
+    workflow.edges[1].anchor = { u: 0.5, v: 0.9 };
+    const path = buildCanvasModel(workflow).connected.find((item) => item.output.id === "e2");
+    expect(path?.geometry.to.side).toBe("top");
+  });
+
+  it("keeps a pointed side that faces the source", () => {
+    const workflow = makeWorkflow();
+    workflow.nodes[2].position = { x: 200, y: 500 };
+    // The source's port is on its right, out past this block's right side.
+    workflow.edges[1].anchor = { u: 0.95, v: 0.5 };
+    const path = buildCanvasModel(workflow).connected.find((item) => item.output.id === "e2");
+    expect(path?.geometry.to.side).toBe("right");
+  });
 });
 
 describe("snapToGrid", () => {

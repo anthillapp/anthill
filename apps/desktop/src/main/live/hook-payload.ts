@@ -107,6 +107,12 @@ export function minimalHookPayload(data: unknown): Record<string, unknown> {
   if (typeof data.reason === "string" && /^[a-z_]{1,40}$/.test(data.reason)) {
     out.reason = data.reason;
   }
+  // What started a SessionStart — `startup`, `resume`, `clear`, `compact` —
+  // the same kind of token. A compaction fires one, and since 2.1.299 a long
+  // idle session compacts by itself an hour after its last word (ANT-315).
+  if (typeof data.source === "string" && /^[a-z_]{1,40}$/.test(data.source)) {
+    out.source = data.source;
+  }
 
   // Keep only complete announcements, wherever they occur in the message:
   // which step the agent is on, and that it has finished. Truncating prose

@@ -690,6 +690,44 @@ function toolTarget(name: string, input: Record<string, unknown>): string | unde
 }
 
 /**
+ * Records Claude Code writes with a timestamp that say nothing about the
+ * session working.
+ *
+ * Since 2.1.300 every API request is logged into the transcript —
+ * `api-request`, with its `-shape` and `-blob` — including the ones Claude
+ * Code makes on its own after a turn has ended: a prompt suggestion, a title,
+ * an idle compaction. Each carries a timestamp, so read as activity they kept
+ * a finished run looking alive and moved the clock past a person's stop
+ * (ANT-316). `fork-context-ref` stands in a fork's file for the parent's
+ * history it inherited.
+ */
+const REQUEST_LOG = new Set(["api-request", "api-request-shape", "api-request-blob", "fork-context-ref"]);
+
+/**
+ * Whether a parsed transcript row is bookkeeping rather than the session's
+ * own work.
+ *
+ * A compaction writes its summary as a `user` row with a string body, a
+ * timestamp and no `isMeta`: read as somebody typing, it cleared a done the
+ * session had said and, when the summary quoted the workflow, matched the run
+ * again. Since 2.1.299 a long session left idle compacts by itself an hour
+ * later, so this reopened finished runs on its own (ANT-315). The boundary row
+ * that goes with it is the same event.
+ *
+ * And in a subagent's file, a row not marked `isSidechain` is not the
+ * subagent's: every row a subagent writes is. A fork starts from its parent's
+ * conversation, and what it carries over, the pasted workflow included, was
+ * the parent's work already read from the parent's own file (ANT-317).
+ */
+function isBookkeeping(row: Record<string, unknown>, state: FileState): boolean {
+  if (typeof row.type === "string" && REQUEST_LOG.has(row.type)) return true;
+  if (row.isCompactSummary === true) return true;
+  if (row.type === "system" && row.subtype === "compact_boundary") return true;
+  if (state.delegate && (row.type === "user" || row.type === "assistant") && row.isSidechain === false) return true;
+  return false;
+}
+
+/**
  * Read only what is needed, from one chunk of newly written transcript.
  *
  * A free function taking the marker as an argument, so nothing about which run
@@ -712,6 +750,8 @@ function scan(
     }
 
     if (typeof row.sessionId === "string") state.sessionId = row.sessionId;
+    // Dated, but not the session doing anything: skipped before the clock.
+    if (isBookkeeping(row, state)) continue;
     /*
       Only a line that says when it was written moves the activity clock.
 
@@ -750,8 +790,11 @@ function scan(
       const message = isRecord(row.message) ? row.message : undefined;
       const blocks = Array.isArray(message?.content) ? message.content : [];
 
+      // The pasted workflow is the session's to have been given. A subagent
+      // handed the same text, or a fork carrying its parent's history, is
+      // not the run starting again (ANT-317).
       const carries = (value: unknown) =>
-        typeof value === "string" && textCarriesMarker(value, marker);
+        !state.delegate && typeof value === "string" && textCarriesMarker(value, marker);
 
       // The whole of what Claude Code writes when somebody stops it. Matched
       // exactly, and only as a message's entire text: the phrase inside a
@@ -812,6 +855,10 @@ function scan(
               receipt?.isAsync === true ||
               receipt?.status === "async_launched" ||
               resultText(block.content).startsWith("Async agent launched");
+            // Work handed off for good, whether or not the call asked: the
+            // desktop app and VS Code send every subagent to the background
+            // since 2.1.302, with no flag on the call to say so (ANT-317).
+            if (launched) state.dispatched = true;
             events.push({
               ...base,
               kind: "tool.end",
@@ -980,7 +1027,9 @@ function scan(
           events.push({
             ...base,
             kind: isDelegation ? "subagent.start" : "tool.start",
-            title: isDelegation ? "Delegated to a subagent" : name,
+            // A fork is a copy of this conversation, not one of the agents a
+            // workflow names; on by default everywhere since 2.1.302 (ANT-317).
+            title: isDelegation ? (input.subagent_type === "fork" ? "Forked this conversation" : "Delegated to a subagent") : name,
             toolName: name,
             ...(id ? { toolUseId: id } : {}),
             ...(isDelegation && str(input.subagent_type)

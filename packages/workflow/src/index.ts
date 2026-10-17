@@ -95,6 +95,7 @@ export {
   addAgentProfile,
   agentForNode,
   agentProfiles,
+  modelsNoLongerOffered,
   agentSlug,
   assignAgent,
   assignedAgents,

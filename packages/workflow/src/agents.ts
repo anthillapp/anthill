@@ -21,7 +21,7 @@
 
 import type { HarnessTarget, Workflow, WorkflowNode } from "@anthill/workflow-schema";
 
-import { HARNESS_DEFAULT, isConfiguredFor, migrateModels, readAgentModels, type AgentModels } from "./agent-models.js";
+import { HARNESS_DEFAULT, explicitModelFor, isConfiguredFor, migrateModels, readAgentModels, type AgentModels } from "./agent-models.js";
 import { nextIdFor, rememberIdsUnder } from "./id-counter.js";
 import { agentConfig, slugify } from "./workflow.js";
 
@@ -147,6 +147,32 @@ export function agentProfiles(workflow: Workflow): AgentProfile[] {
     if (!profile || seen.has(profile.id)) return [];
     seen.add(profile.id);
     return [profile];
+  });
+}
+
+/**
+ * The agents a run would hand a model the tool no longer offers (ANT-323).
+ *
+ * A model goes away on the vendor's schedule — Codex stopped serving GPT-5.5
+ * to ChatGPT sign-ins on 2026-10-14 — while a workflow saved before keeps
+ * naming it, and its agent file pins it: the run then fails inside the tool
+ * with an error the author did not cause. Only an explicit choice counts, an
+ * inherit names nothing, and only for agents a step uses, since only theirs
+ * become files. An empty `offered` is a list nobody gave, not a tool with no
+ * models, and says nothing.
+ */
+export function modelsNoLongerOffered(
+  workflow: Workflow,
+  target: HarnessTarget,
+  offered: readonly string[],
+): { agent: string; model: string }[] {
+  if (offered.length === 0) return [];
+  const known = new Set(offered);
+  const used = new Set(workflow.nodes.map((node) => agentConfig(node).agentId).filter(Boolean));
+  return agentProfiles(workflow).flatMap((profile) => {
+    if (!used.has(profile.id)) return [];
+    const model = explicitModelFor(profile.models, target);
+    return model && !known.has(model) ? [{ agent: profile.name, model }] : [];
   });
 }
 

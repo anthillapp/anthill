@@ -1374,6 +1374,14 @@ export function foldLiveSession(
         returning.background = true;
         returning.sentOff = true;
       }
+      // A delegation that failed sent nobody off, and nobody will come back
+      // to end it: Codex refusing a spawn's name held its step Working for
+      // the rest of the run (ANT-327).
+      if (event.ok === false && !event.background) {
+        returning.background = false;
+        returning.sentOff = false;
+        returning.delegateEnded = true;
+      }
       release(returning.blockId, event.at);
     }
 

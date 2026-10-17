@@ -36,7 +36,7 @@ import {
 } from "./workflow.js";
 import { ACTION_CATEGORY_LABELS, actionDefinition, type ActionDefinition } from "./actions.js";
 import type { WorkflowAgentConfig } from "./node-config.js";
-import { assignedAgents, type AgentAssignment } from "./agents.js";
+import { assignedAgents, harnessAgentName, type AgentAssignment } from "./agents.js";
 import { describeAgent } from "./agent-description.js";
 
 export type GeneratedFile = {
@@ -209,7 +209,8 @@ function buildAgentFile(
 ): GeneratedFile | undefined {
   if (!harness.agentDir) return undefined;
 
-  const { profile, slug } = assignment;
+  const { profile } = assignment;
+  const slug = harnessAgentName(assignment.slug, harness);
   const steps = assignment.stepIds
     .map((id) => workflow.nodes.find((node) => node.id === id))
     .filter((node): node is WorkflowNode => node !== undefined);
@@ -628,7 +629,7 @@ function buildPrompt(
       const modelNote = harness.supportsPerAgentModel ? ` – model: ${model}` : "";
       const stepCount = stepIds.length > 1 ? ` – ${stepIds.length} steps` : "";
       const role = profile.role?.trim() ? ` – ${profile.role.trim()}` : "";
-      return `- \`${slug}\` (${profile.name})${role}${stepCount}${modelNote}`;
+      return `- \`${harnessAgentName(slug, harness)}\` (${profile.name})${role}${stepCount}${modelNote}`;
     });
     sections.push(
       [
@@ -706,7 +707,7 @@ function buildPrompt(
     steps.push("");
     const heading = assignment
       ? usesSubagents
-        ? `### ${step}. ${node.name} – delegate to the \`${assignment.slug}\` subagent`
+        ? `### ${step}. ${node.name} – delegate to the \`${harnessAgentName(assignment.slug, harness)}\` subagent`
         : `### ${step}. ${node.name} – act as ${assignment.profile.name}`
       : `### ${step}. ${node.name}`;
     steps.push(heading);

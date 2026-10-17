@@ -834,18 +834,21 @@ function scan(
       if (payload.type === "function_call_output" || payload.type === "custom_tool_call_output") {
         const call = str(payload.call_id);
         const spawnReceipt = call !== undefined && state.spawnCalls?.has(call);
-        if (spawnReceipt && call) {
-          // The path the subagent will name itself by.
-          const receipt = parseArguments(payload.output);
-          const path = str(receipt?.task_name);
-          if (path) spawns.set(path, call);
-        }
+        // The path the subagent will name itself by. A spawn Codex refused
+        // answers in plain words instead — "agent_name must use only
+        // lowercase letters, digits, and underscores" — and sends nothing
+        // off, so nothing will ever end it: it is a failed call, not a
+        // subagent at work (ANT-327).
+        const path = spawnReceipt ? str(parseArguments(payload.output)?.task_name) : undefined;
+        if (call && path) spawns.set(path, call);
+        const refused = spawnReceipt && !path;
         events.push({
           ...base,
           kind: "tool.end",
           title: "Tool finished",
           ...(call ? { toolUseId: call } : {}),
-          ...(spawnReceipt ? { background: true } : {}),
+          ...(spawnReceipt && !refused ? { background: true } : {}),
+          ...(refused ? { ok: false } : {}),
         });
         const plan = call ? state.pendingPlans?.get(call) : undefined;
         if (call && plan) {

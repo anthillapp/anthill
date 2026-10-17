@@ -3572,6 +3572,33 @@ describe("Codex 0.163 rollouts", () => {
     expect(evidence).toContainEqual(expect.objectContaining({ kind: "completed" }));
   });
 
+  it("reads a spawn Codex refused as a failed call, not a subagent sent off (ANT-327)", async () => {
+    const dir = await root();
+    const spawn = (id: string, name: string, s: number) => ({
+      timestamp: at(s),
+      type: "response_item",
+      payload: { type: "function_call", name: "spawn_agent", call_id: id, arguments: JSON.stringify({ task_name: name, agent_type: name }) },
+    });
+    await writeCodex(
+      dir,
+      "sess-1",
+      lines([
+        meta("sess-1"),
+        user(MARKED_PROMPT, 1),
+        spawn("call-bad", "service-a-developer", 2),
+        output("call-bad", "agent_name must use only lowercase letters, digits, and underscores", 2),
+        spawn("call-good", "service_a_developer", 3),
+        output("call-good", JSON.stringify({ task_name: "/root/service_a_developer" }), 3),
+      ]),
+    );
+    const { events } = await new CodexObserver(dir).poll(live(), new Date().toISOString());
+    const end = (id: string) => events.find((event) => event.kind === "tool.end" && event.toolUseId === id);
+    expect(end("call-bad")).toMatchObject({ ok: false });
+    expect(end("call-bad")?.background).toBeUndefined();
+    expect(end("call-good")).toMatchObject({ background: true });
+    expect(end("call-good")?.ok).toBeUndefined();
+  });
+
   it("pairs read-only calls that ran at once, whatever order they finished in (ANT-321)", async () => {
     const dir = await root();
     await writeCodex(

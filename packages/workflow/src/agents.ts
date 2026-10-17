@@ -208,6 +208,22 @@ export function agentSlug(profile: AgentProfile): string {
   return slugify(profile.name) || slugify(profile.id);
 }
 
+/**
+ * The name a harness knows an agent by: its file name and the name a step
+ * delegates to.
+ *
+ * The slug, except for Codex, whose agents are spawned under a name of
+ * lowercase letters, digits and underscores only. Named `service-a-developer`,
+ * the agent was spawned under that name first and Codex refused it, leaving a
+ * delegation behind that never ended (ANT-327).
+ */
+export function harnessAgentName(
+  slug: string,
+  harness: { agentFileFormat?: "markdown" | "toml" },
+): string {
+  return harness.agentFileFormat === "toml" ? slug.replace(/-/g, "_") : slug;
+}
+
 /** Write the profile list back, dropping the key entirely when it is empty. */
 /** The tally profile ids are counted under, kept apart from the blocks'. */
 const PROFILE_COUNTER = "agentProfile";

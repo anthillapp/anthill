@@ -6,7 +6,7 @@
  * disagreeing. The compiler's rule is the one that matters, and this is it.
  */
 
-import { agentSlug, type AgentProfile, type HarnessProfile } from "@anthill/workflow";
+import { agentSlug, harnessAgentName, type AgentProfile, type HarnessProfile } from "@anthill/workflow";
 
 export function agentFileExtension(harness: Pick<HarnessProfile, "agentFileFormat">): string {
   return harness.agentFileFormat === "toml" ? "toml" : "md";
@@ -16,5 +16,5 @@ export function agentFileName(
   harness: Pick<HarnessProfile, "agentDir" | "agentFileFormat">,
   profile: AgentProfile,
 ): string {
-  return `${harness.agentDir ?? ""}/${agentSlug(profile)}.${agentFileExtension(harness)}`;
+  return `${harness.agentDir ?? ""}/${harnessAgentName(agentSlug(profile), harness)}.${agentFileExtension(harness)}`;
 }

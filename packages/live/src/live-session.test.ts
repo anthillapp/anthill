@@ -1080,6 +1080,27 @@ describe("telling blocks apart", () => {
     expect(done.blocks.test.state).toBe("running");
   });
 
+  /*
+    ANT-327. Codex refused a spawn's name and the session spawned again under
+    a good one. The refused call sent nobody off, so nothing ever ended it,
+    and its step stayed Working for the rest of the run.
+  */
+  it("does not wait on a delegation that failed to start", () => {
+    const tagged = (id: string, s: number) =>
+      tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: id, stepTag: "implement", background: true, at: T(s) });
+    const view = foldLiveSession(workflow, run(), [
+      mark("implement", 1),
+      tagged("call-refused", 2),
+      tx({ kind: "tool.end", title: "Tool finished", toolUseId: "call-refused", ok: false, at: T(2.1) }),
+      tagged("call-a", 3),
+      tx({ kind: "tool.end", title: "Tool finished", toolUseId: "call-a", background: true, at: T(3.1) }),
+      bySub("call-a", { kind: "turn.end", title: "The agent finished its turn", at: T(20) }),
+      mark("test", 21),
+    ]);
+    expect(view.blocks.implement.state).toBe("done");
+    expect(view.blocks.test.state).toBe("running");
+  });
+
   it("does not keep the detour a fan-out looked like before its subagents were started", () => {
     const tagged = (id: string, tag: string, s: number) =>
       tx({ kind: "subagent.start", title: "Delegated to a subagent", toolUseId: id, stepTag: tag, background: true, at: T(s) });

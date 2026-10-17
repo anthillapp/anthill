@@ -27,8 +27,8 @@
  */
 
 import { createReadStream } from "node:fs";
-import { realpath } from "node:fs/promises";
-import { delimiter, join } from "node:path";
+import { readdir, realpath } from "node:fs/promises";
+import { basename, delimiter, dirname, join } from "node:path";
 import { access, constants } from "node:fs/promises";
 
 /** What Anthill can say about the installed CLI's custom-agent support. */
@@ -92,6 +92,40 @@ function fileContains(path: string, marker: string): Promise<boolean | undefined
   });
 }
 
+/**
+ * The native program behind npm's `codex`, or nothing when it cannot be found.
+ *
+ * Installed with `npm install -g @openai/codex`, the `codex` on PATH is
+ * `@openai/codex/bin/codex.js`, a launcher that starts a binary shipped in a
+ * per-platform package (`@openai/codex-darwin-arm64` and the like), nested in
+ * the package or hoisted beside it. The launcher never contains the marker,
+ * so asking it said "unsupported" of a CLI that was fine (ANT-324).
+ */
+async function nativeBehindLauncher(launcher: string): Promise<string | undefined> {
+  const pkg = dirname(dirname(launcher));
+  const scopes = [join(pkg, "node_modules", "@openai"), dirname(pkg)];
+  const vendors = [join(pkg, "vendor")];
+  for (const scope of scopes) {
+    const names = await readdir(scope).catch(() => [] as string[]);
+    for (const name of names) if (name.startsWith("codex-")) vendors.push(join(scope, name, "vendor"));
+  }
+  for (const vendor of vendors) {
+    const triples = await readdir(vendor).catch(() => [] as string[]);
+    for (const triple of triples) {
+      for (const program of ["codex", "codex.exe"]) {
+        const candidate = join(vendor, triple, "bin", program);
+        try {
+          await access(candidate, constants.R_OK);
+          return candidate;
+        } catch {
+          // Not this one.
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
 export async function readCodexAgentSupport(
   path?: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -100,9 +134,13 @@ export async function readCodexAgentSupport(
   // No `codex` to ask. That is a fact about the machine, not about the CLI's
   // abilities, and the connection card already says the tool is missing.
   if (!executable) return "unknown";
+  // npm's launcher is asked about the program it starts; one whose program
+  // cannot be found is a question without an answer, never an old CLI.
+  const program = basename(executable).endsWith(".js") ? await nativeBehindLauncher(executable) : executable;
+  if (!program) return "unknown";
 
   try {
-    const found = await fileContains(executable, MARKER);
+    const found = await fileContains(program, MARKER);
     // Unreadable for any reason — permissions, a broken link, a filesystem
     // that will not stream. Telling somebody to update software that is
     // already fine is the one wrong answer here.

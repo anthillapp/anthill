@@ -8,6 +8,9 @@ Anthill does not start Codex, launch agents, create worktrees, choose
 permissions, or execute workflows.
 
 Verified locally against **Codex CLI 0.153.4** and **Anthill 0.7.5** on macOS.
+Against **Codex CLI 0.163.0**, the hook permission check, `codex exec` as the
+workflow drafter runs it, the plugin and model commands and the custom-agent
+check were confirmed again; the handover through the plugin was not rerun.
 The package uses Codex's native plugin format, shared by the CLI and desktop;
 the desktop plugin UI still needs a manual smoke test because this environment
 cannot automate the Codex app. Other versions are untested rather than

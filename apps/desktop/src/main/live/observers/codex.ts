@@ -124,6 +124,13 @@ type FileState = {
    * settings are applied.
    */
   inheriting?: boolean;
+  /**
+   * A thread forked from another (`forked_from_id`): a person's fork of a
+   * conversation, which Codex starts with a copy of it. The pasted workflow in
+   * that copy is the original's, so it does not make this thread the run's
+   * session a second time (ANT-319).
+   */
+  forkOf?: string;
   /** The calls this file made, by call id: which were `spawn_agent`. */
   spawnCalls?: Set<string>;
   /** The folder the session works in, which paths inside a program are shown under (ANT-311). */
@@ -436,6 +443,13 @@ export class CodexObserver implements LiveSessionObserver {
           const dir = join(this.root, year, month, day);
           const names = await readdir(dir).catch(() => [] as string[]);
           for (const name of names) {
+            /*
+              Plain rollouts only. Codex compresses a rollout to `.jsonl.zst`
+              once it has gone untouched for seven days, in a pass at startup,
+              and turns it back into `.jsonl` before writing to it again on a
+              resume (`materialize_rollout_for_append`, 0.163). So a session
+              written since this run began is never compressed (ANT-325).
+            */
             if (!name.endsWith(".jsonl")) continue;
             const path = join(dir, name);
             const info = await stat(path).catch(() => undefined);
@@ -698,6 +712,7 @@ function scan(
       }
       const id = session ?? thread;
       if (id) state.sessionId = id;
+      if (str(payload.forked_from_id)) state.forkOf = str(payload.forked_from_id);
       if (stamped) state.lastActivityAt = stamped;
       state.opening = {
         at,
@@ -740,7 +755,7 @@ function scan(
       if (payload.role === "user") {
         // A subagent's task is the session's message to it, not the author's.
         if (state.delegate) continue;
-        if (textCarriesMarker(messageText(payload), marker)) {
+        if (!state.forkOf && textCarriesMarker(messageText(payload), marker)) {
           state.matched = true;
           events.push({ ...base, kind: "prompt.submit", title: "The workflow was pasted in" });
         }
@@ -895,7 +910,13 @@ function scan(
         }
         continue;
       }
-      if (payload.type === "task_started" && !state.delegate) state.awaitingAt = undefined;
+      if (payload.type === "task_started" && !state.delegate) {
+        state.awaitingAt = undefined;
+        // A new turn after an error is the session going on. Since 0.163 an
+        // incomplete response is a terminal error for its turn, and the
+        // person's "go on" that follows it is not a failed session (ANT-320).
+        state.failure = undefined;
+      }
       // A turn that ended on an Approval Gate, with no done line: the gate's
       // question put to a person, not the session finishing (ANT-210).
       // The step and the done line may each have been said in this record or
@@ -923,9 +944,23 @@ function scan(
       }
       // Stopped by the person. In the session's own file that is the session
       // stopping; in a subagent's, only that subagent (ANT-208).
+      /*
+        Not every aborted turn is somebody pressing Stop (ANT-320). Codex
+        writes `replaced` when it ends a turn to start the next one — a
+        compaction, or a task that takes over — and `review_ended` when a
+        review finishes; the session goes straight on, and calling either a
+        stop held a working session down as stopped. `budget_limited` is the
+        turn running out of budget: stopped, though not by hand.
+      */
       if (payload.type === "turn_aborted") {
+        const reason = str(payload.reason);
+        if (reason === "replaced" || reason === "review_ended") continue;
         if (!state.delegate) state.interruptedAt = at;
-        events.push({ ...base, kind: "notification", title: "Stopped by hand" });
+        events.push({
+          ...base,
+          kind: "notification",
+          title: reason === "budget_limited" ? "Stopped at its budget" : "Stopped by hand",
+        });
       }
       if (payload.type === "error" || payload.type === "stream_error") {
         const message = str(payload.message) ?? "Codex recorded an error.";

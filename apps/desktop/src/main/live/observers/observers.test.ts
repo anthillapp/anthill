@@ -3468,3 +3468,132 @@ describe("Claude Code records that are not the session working", () => {
     );
   });
 });
+
+/**
+ * What Codex 0.161 to 0.163 started writing, read against what it means for a
+ * run (ANT-319, ANT-320, ANT-321).
+ */
+describe("Codex 0.163 rollouts", () => {
+  const at = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString();
+  const lines = (rows: unknown[]) => rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+  const meta = (id: string, extra: Record<string, unknown> = {}) => ({
+    timestamp: at(0),
+    type: "session_meta",
+    payload: { session_id: id, id, cwd: "/tmp/scratch", cli_version: "0.163.0", ...extra },
+  });
+  const user = (text: string, s: number) => ({
+    timestamp: at(s),
+    type: "response_item",
+    payload: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+  });
+  const event = (payload: Record<string, unknown>, s: number) => ({ timestamp: at(s), type: "event_msg", payload });
+  const call = (id: string, cmd: string, s: number) => ({
+    timestamp: at(s),
+    type: "response_item",
+    payload: { type: "function_call", name: "exec_command", call_id: id, arguments: JSON.stringify({ cmd }) },
+  });
+  const output = (id: string, text: string, s: number) => ({
+    timestamp: at(s),
+    type: "response_item",
+    payload: { type: "function_call_output", call_id: id, output: text },
+  });
+  const live = () => ({ ...pending("codex"), detectedSessionId: "sess-1", state: "detected_live" as const });
+
+  it("does not take a person's fork of the session for a second session of the run (ANT-319)", async () => {
+    const dir = await root();
+    await writeCodex(dir, "sess-a", lines([meta("sess-a"), user(MARKED_PROMPT, 1)]));
+    // The fork starts with a copy of the conversation, the pasted workflow in it.
+    await writeCodex(dir, "sess-b", lines([meta("sess-b", { forked_from_id: "sess-a" }), user(MARKED_PROMPT, 1), user("Try it the other way.", 5)]));
+    const { evidence } = await new CodexObserver(dir).poll(pending("codex"), new Date().toISOString());
+    expect(evidence.filter((item) => item.kind === "ambiguous")).toEqual([]);
+    expect(evidence).toContainEqual(expect.objectContaining({ kind: "match", sessionId: "sess-a" }));
+  });
+
+  it("does not call a turn Codex replaced with the next one a stop (ANT-320)", async () => {
+    const dir = await root();
+    await writeCodex(
+      dir,
+      "sess-1",
+      lines([meta("sess-1"), user(MARKED_PROMPT, 1), event({ type: "task_started", turn_id: "t1" }, 2), event({ type: "turn_aborted", turn_id: "t1", reason: "replaced" }, 3)]),
+    );
+    const { evidence, events } = await new CodexObserver(dir).poll(live(), new Date().toISOString());
+    expect(evidence.filter((item) => item.kind === "interrupted")).toEqual([]);
+    expect(events.filter((item) => item.kind === "notification")).toEqual([]);
+  });
+
+  it("still reports a person's stop, and says when the budget stopped it", async () => {
+    const dir = await root();
+    await writeCodex(
+      dir,
+      "sess-1",
+      lines([meta("sess-1"), user(MARKED_PROMPT, 1), event({ type: "task_started", turn_id: "t1" }, 2), event({ type: "turn_aborted", turn_id: "t1", reason: "budget_limited" }, 3)]),
+    );
+    const { evidence, events } = await new CodexObserver(dir).poll(live(), new Date().toISOString());
+    expect(evidence).toContainEqual(expect.objectContaining({ kind: "interrupted" }));
+    expect(events).toContainEqual(expect.objectContaining({ kind: "notification", title: "Stopped at its budget" }));
+  });
+
+  it("is not failed by an error the session went on from (ANT-320)", async () => {
+    const dir = await root();
+    await writeCodex(
+      dir,
+      "sess-1",
+      lines([
+        meta("sess-1"),
+        user(MARKED_PROMPT, 1),
+        event({ type: "task_started", turn_id: "t1" }, 2),
+        event({ type: "error", message: "Incomplete response returned" }, 3),
+        user("Go on.", 10),
+        event({ type: "task_started", turn_id: "t2" }, 11),
+      ]),
+    );
+    const { evidence } = await new CodexObserver(dir).poll(live(), new Date().toISOString());
+    expect(evidence.filter((item) => item.kind === "failed")).toEqual([]);
+  });
+
+  it("reads a message that steers a running turn as neither a new run nor its end (ANT-320)", async () => {
+    const dir = await root();
+    await writeCodex(
+      dir,
+      "sess-1",
+      lines([
+        meta("sess-1"),
+        user(MARKED_PROMPT, 1),
+        event({ type: "task_started", turn_id: "t1" }, 2),
+        call("c1", "ls", 3),
+        // Typed while Codex was working, delivered into the same turn.
+        user("Also check the README.", 4),
+        output("c1", "a.txt", 5),
+        event({ type: "task_complete", turn_id: "t1" }, 6),
+      ]),
+    );
+    const { evidence, events } = await new CodexObserver(dir).poll(live(), new Date().toISOString());
+    expect(events.filter((item) => item.kind === "prompt.submit")).toHaveLength(1);
+    expect(evidence).toContainEqual(expect.objectContaining({ kind: "completed" }));
+  });
+
+  it("pairs read-only calls that ran at once, whatever order they finished in (ANT-321)", async () => {
+    const dir = await root();
+    await writeCodex(
+      dir,
+      "sess-1",
+      lines([
+        meta("sess-1"),
+        user(MARKED_PROMPT, 1),
+        event({ type: "task_started", turn_id: "t1" }, 2),
+        call("c1", "cat a.txt", 3),
+        call("c2", "rg TODO", 3),
+        call("c3", "ls", 3),
+        output("c3", "a.txt", 4),
+        output("c1", `ANTHILL-STEP ${RUN_ID} ${NONCE} read`, 5),
+        output("c2", "nothing", 6),
+      ]),
+    );
+    const { events } = await new CodexObserver(dir).poll(live(), new Date().toISOString());
+    const started = events.filter((item) => item.kind === "tool.start").map((item) => item.toolUseId);
+    const ended = events.filter((item) => item.kind === "tool.end").map((item) => item.toolUseId);
+    expect(started).toEqual(["c1", "c2", "c3"]);
+    expect([...ended].sort()).toEqual(["c1", "c2", "c3"]);
+    expect(events).toContainEqual(expect.objectContaining({ kind: "step.marker", blockId: "read", printedBy: "c1" }));
+  });
+});

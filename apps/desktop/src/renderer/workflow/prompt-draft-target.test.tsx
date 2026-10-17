@@ -6,7 +6,8 @@
 
 import { afterEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { INTERPRETERS, WORKFLOWNER_DRAFT_VERSION, type Workflow } from "@anthill/workflow";
+import { INTERPRETERS, WORKFLOWNER_DRAFT_VERSION } from "@anthill/workflow";
+import type { Workflow } from "@anthill/workflow-schema";
 
 import type { PromptDraftResponse } from "../../shared/ipc.js";
 import { PromptToWorkflowSheet } from "./PromptToWorkflowSheet.js";

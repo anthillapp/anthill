@@ -1257,6 +1257,54 @@ describe("a handover the user asked to watch", () => {
     expect(screen.queryByRole("button", { name: /Open session/i })).toBeNull();
   });
 
+  /*
+   * A cold start (ANT-329): the harness bound its run while the app was still
+   * starting, so the run arrives before the exchange says the handover is a
+   * watch. Nothing may be announced on the strength of a mode not read yet.
+   */
+  it("does not announce a watched run that arrives before the handover's mode", async () => {
+    const early = { ...run, anthillRunId: "ANT-COLD0001" };
+    let answer: () => void = () => undefined;
+    const api = stubApi();
+    Object.assign(api, {
+      openWorkflow: vi.fn(async () => ({
+        ok: true as const,
+        opened: { workflow: WATCHED, path: PATH },
+      })),
+      exchangeRead: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            answer = () =>
+              resolve({
+                workflowId: "workflow-2",
+                revision: 1,
+                digest: "sha256:abc",
+                state: "bound" as const,
+                mode: "watch",
+                source: { harness: "claude-code" as const, sessionId: "s2", taskText: "Fix the crash" },
+                problems: [],
+                bindings: [{ runId: early.anthillRunId, revision: 1 }],
+              });
+          }),
+      ),
+    });
+    api.liveSnapshot.mockResolvedValue({ runs: [early], capabilities: [] });
+    render(
+      <WorkflowScreen
+        onExit={onExit}
+        onSettings={() => undefined}
+        start={{ kind: "open", path: PATH }}
+      />,
+    );
+    await waitFor(() => expect(api.liveSnapshot).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    act(() => answer());
+    await screen.findByText("Anthill is observing, not running");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("stays on the canvas for a handover the user is meant to read", async () => {
     open("design", [run]);
     // The same run, the same graph: the mode is the only difference.

@@ -29,11 +29,21 @@ export type ExchangeAccess = {
   view?: ExchangeView;
   /** What the last read failed with. Not the same as a refusal. */
   error?: string;
+  /**
+   * Whether the exchange has answered for this workflow yet, with a view, with
+   * nothing or with an error. Until it has, `view` being absent says nothing
+   * about whether this workflow was handed over (ANT-329).
+   */
+  answered: boolean;
 };
 
 export function useExchange(workflowId: string, path?: string, reread?: unknown): ExchangeAccess {
   const [view, setView] = useState<ExchangeView>();
   const [error, setError] = useState<string>();
+  // Which read has answered, by what it read: a flag set back in the effect
+  // would still say "answered" for the render in which the path arrives.
+  const [answeredFor, setAnsweredFor] = useState<string>();
+  const key = `${path ?? ""}\0${workflowId}`;
 
   useEffect(() => {
     let current = true;
@@ -51,9 +61,13 @@ export function useExchange(workflowId: string, path?: string, reread?: unknown)
         if (current) {
           setView(next);
           setError(undefined);
+          setAnsweredFor(key);
         }
       } catch (problem) {
-        if (current) setError(String(problem));
+        if (current) {
+          setError(String(problem));
+          setAnsweredFor(key);
+        }
       } finally {
         reading = false;
       }
@@ -64,7 +78,8 @@ export function useExchange(workflowId: string, path?: string, reread?: unknown)
       current = false;
       clearInterval(timer);
     };
-  }, [path, workflowId, reread]);
+  }, [path, workflowId, reread, key]);
 
-  return { ...(view ? { view } : {}), ...(error ? { error } : {}) };
+  const answered = !path || !window.anthill?.exchangeRead || answeredFor === key;
+  return { ...(view ? { view } : {}), ...(error ? { error } : {}), answered };
 }

@@ -754,15 +754,24 @@ export function WorkflowScreen({ onExit, onSettings, start }: WorkflowScreenProp
    * for nothing else is a dialog with one answer. Nor is a run already open in
    * the Live session tab: the dialog would be waiting on the canvas, offering
    * the session they just came from.
+   *
+   * Nothing is announced before the exchange has answered. On a cold start the
+   * harness has bound its run while the app was still starting, so the run
+   * reaches this screen before the handover's mode does, and a `watch` would be
+   * announced and then sent to Live underneath its own dialog (ANT-329).
    */
   const [announcing, setAnnouncing] = useState<PendingRun | null>(null);
   const openRunId = liveRun?.anthillRunId;
   useEffect(() => {
-    if (!watched || opensLive || !shouldAnnounce(watched)) return;
+    if (!watched || !exchange.answered || opensLive || !shouldAnnounce(watched)) return;
     markAnnounced(watched.anthillRunId);
     if (watched.anthillRunId === openRunId) return;
     setAnnouncing(watched);
-  }, [watched, opensLive, openRunId]);
+  }, [watched, exchange.answered, opensLive, openRunId]);
+  // A run opened in Live by any other way is no longer news.
+  useEffect(() => {
+    if (announcing && announcing.anthillRunId === openRunId) setAnnouncing(null);
+  }, [announcing, openRunId]);
 
   /**
    * A `watch` handover goes to its session by itself.

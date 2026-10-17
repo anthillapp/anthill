@@ -26,7 +26,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { WORKFLOW_FORMAT_VERSION } from "@anthill/workflow-exchange";
-import { DRAFT_CLARIFICATION, SERVER_INSTRUCTIONS } from "./instructions.js";
+import { DRAFT_CLARIFICATION, DRAFT_GATE, HARNESS_TEXT_LIMIT, SERVER_INSTRUCTIONS } from "./instructions.js";
+import { pluginDriftNotice } from "./plugin-drift.js";
 
 /** The compiled server, which is what a harness is configured to run. */
 const SERVER = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "server.js");
@@ -144,9 +145,36 @@ describe("the built server over stdio", () => {
     const tools = listed.result?.tools as { name: string; description: string }[];
     const create = tools.find((tool) => tool.name === "create_workflow_draft")!;
     expect(create.description).toContain(DRAFT_CLARIFICATION);
-    expect(SERVER_INSTRUCTIONS).toContain(DRAFT_CLARIFICATION);
+    expect(SERVER_INSTRUCTIONS).toContain(DRAFT_GATE);
     // This is host guidance, not a claimed conversation-attestation mechanism.
     // Existing create/bind protocol tests still accept the unchanged contract.
+  }, 20_000);
+
+  /*
+    ANT-314. Claude Code cuts server instructions and every tool description
+    it sends up front, silently: at 2,048 characters up to 2.1.295 and at
+    4,096 since. The instructions had grown to 4.3k, so on 2.1.292 the model
+    never saw get_ready_revision or bind_run. Held to the older limit, with
+    the longest drift notice an installed plugin can put in front of them.
+  */
+  it("keeps the instructions and each tool description within what a harness passes on", async () => {
+    const session = await connect();
+    expect(String(session.instructions).length).toBeLessThanOrEqual(HARNESS_TEXT_LIMIT);
+    const notices = [
+      pluginDriftNotice("0.8.1", "codex", "0.8.13"),
+      pluginDriftNotice("0.8.1", "claude-code", "0.8.13"),
+      pluginDriftNotice("0.8.14", "vscode", "0.8.13", "/opt/anthill/server.js"),
+      pluginDriftNotice("0.8.14+codex.20261017000000", "codex", "0.8.13", "/Users/someone/dev/apps/anthill/apps/mcp/dist/server.js"),
+    ];
+    for (const notice of notices) {
+      expect(`${notice}\n\n${SERVER_INSTRUCTIONS}`.length).toBeLessThanOrEqual(HARNESS_TEXT_LIMIT);
+    }
+    const listed = await session.request("tools/list");
+    const tools = listed.result?.tools as { name: string; description: string }[];
+    const over = tools
+      .filter((tool) => tool.description.length > HARNESS_TEXT_LIMIT)
+      .map((tool) => `${tool.name}: ${tool.description.length}`);
+    expect(over).toEqual([]);
   }, 20_000);
 
   it("creates, retrieves and idempotently binds the exact draft over JSON-RPC", async () => {

@@ -3314,16 +3314,21 @@ describe("Codex follow-ups after steps announced together", () => {
     rollout({ kind: "turn.end", title: "Codex finished the turn", parentToolUseId: call, author: { kind: "subagent", name }, completion: "task_complete", at: T(s) });
   const followup = (to: string, s: number) =>
     rollout({ kind: "tool.start", title: "followup_task", toolName: "followup_task", toolUseId: `fu-${to}-${s}`, to, at: T(s) });
+  const said = (call: string, name: string, stepTag: string, s: number) =>
+    rollout({ kind: "message", title: "Message", parentToolUseId: call, author: { kind: "subagent", name }, stepTag, at: T(s) });
 
   const journal = [
     marker("context", 0),
     ...own("ctx", 2),
     ...spawn("call-q", "quill", 5),
     ...spawn("call-r", "rowan", 6),
-    // Both wake, look around and wait to be told what to do.
+    // Both wake, look around and wait to be told what to do — saying so
+    // under the step the session is on, which is not theirs.
     sub("call-q", "quill", "exec", 8),
+    said("call-q", "quill", "context", 8.8),
     turnEnd("call-q", "quill", 9),
     sub("call-r", "rowan", "exec", 8.5),
+    said("call-r", "rowan", "context", 9.2),
     sub("call-r", "rowan", "wait_agent", 9.5),
     marker("author-a", 12),
     marker("author-b", 12),
@@ -3358,6 +3363,12 @@ describe("Codex follow-ups after steps announced together", () => {
     expect(view.blocks["rowan-review"].state).toBe("done");
     // Quill waited for its task before the step's line: one pass, not two.
     expect(view.blocks["author-a"].passes).toBe(1);
+    // Waiting under the session's step did not make it theirs: the spawns go
+    // to their own steps, context ends when the authors start, and nothing
+    // reads as started early.
+    expect(view.events.find((item) => item.toolUseId === "call-q" && item.kind === "subagent.start")?.mapping.blockId).toBe("author-a");
+    expect(view.spans.find((span) => span.blockId === "context")?.endedAt).toBe(T(12));
+    expect(view.overlaps).toEqual([]);
   });
 });
 

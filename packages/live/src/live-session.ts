@@ -993,6 +993,14 @@ export function foldLiveSession(
     Known up front, like `plumbing`, because the spawn is read first.
   */
   const saysItWorksOn = new Map<string, string>();
+  /*
+    Every tag each subagent's messages carry, in order. One Codex spawned to
+    wait for its task said it worked on the step the session was on — another
+    agent's — and was held there until its follow-up, keeping that step open
+    and the authors' steps "started early" (ANT-330). A subagent named after an
+    agent is taken at the first tag on a step that agent runs.
+  */
+  const tagsOf = new Map<string, string[]>();
   for (const event of journal) {
     if (event.printedBy) plumbing.add(event.printedBy);
     if (event.kind === "subagent.start" && event.toolUseId) plumbing.add(event.toolUseId);
@@ -1009,7 +1017,16 @@ export function foldLiveSession(
     ) {
       saysItWorksOn.set(event.parentToolUseId, event.stepTag);
     }
+    if (event.kind === "message" && event.parentToolUseId && event.stepTag) {
+      tagsOf.set(event.parentToolUseId, [...(tagsOf.get(event.parentToolUseId) ?? []), event.stepTag]);
+    }
   }
+  const agentOfStep = new Map(index.blocks.map((block) => [block.id, block.agentSlug]));
+  const ownStep = (call: string, spawnName: string | undefined): string | undefined => {
+    const agents = agentsNamedBy(index, spawnName);
+    if (agents.size === 0) return saysItWorksOn.get(call);
+    return tagsOf.get(call)?.find((tag) => agents.has(agentOfStep.get(tag) ?? ""));
+  };
   const announcedAsDispatched = stepsAnnouncedAsDispatched(journal, index);
   for (const event of journal) {
     // A command sent to run in the background is at work until its own
@@ -1306,7 +1323,7 @@ export function foldLiveSession(
       every subagent looked like the last-announced step's (ANT-163).
     */
     if (event.kind === "subagent.start" && event.toolUseId) {
-      const own = saysItWorksOn.get(event.toolUseId);
+      const own = ownStep(event.toolUseId, event.agentName);
       // The agent it runs, when exactly one step has that agent (ANT-217).
       const named = stepForAgent(index, event.agentName) ?? stepForAgent(index, event.detail, true);
       const late = announcedAsDispatched.get(event.toolUseId);

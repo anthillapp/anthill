@@ -2,7 +2,7 @@
   "name": "anthill",
   "private": true,
   "license": "MIT",
-  "version": "0.8.13",
+  "version": "0.8.14",
   "workspaces": [
     "packages/*",
     "apps/*"

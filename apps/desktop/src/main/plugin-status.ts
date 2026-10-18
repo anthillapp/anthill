@@ -230,7 +230,9 @@ export async function codexStatus(home: string, appVersion?: string): Promise<Pl
     ...base,
     // Listed in the config is added; a cached copy is what makes it installed.
     installed: installedVersion !== undefined,
-    enabled: config.plugins[key].enabled !== false,
+    // A plugin with no `enabled` of its own takes `[plugins._default]`'s,
+    // which Codex reads since 0.163 (ANT-322).
+    enabled: (config.plugins[key].enabled ?? config.plugins._default?.enabled) !== false,
     ...(installedVersion ? { installedVersion } : {}),
     marketplace,
     ...(source ? { source } : {}),

@@ -10,7 +10,7 @@
  * somebody to update software that is already fine is the one wrong direction.
  */
 
-import { chmod, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -83,5 +83,39 @@ describe("finding the codex the author actually runs", () => {
 
     expect(await codexExecutablePath({ PATH: dir })).toBe(real);
     expect(await readCodexAgentSupport(undefined, { PATH: dir })).toBe("supported");
+  });
+});
+
+/*
+  ANT-324. Installed from npm, the \`codex\` on PATH is a JavaScript launcher,
+  and the program it starts sits in a per-platform package beside it. Asked
+  directly, the launcher said "unsupported" of a CLI that was fine.
+*/
+describe("an npm install of Codex", () => {
+  async function npmInstall(hoisted: boolean, program?: string): Promise<string> {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "anthill-codex-npm-")));
+    const pkg = join(root, "node_modules", "@openai", "codex");
+    await mkdir(join(pkg, "bin"), { recursive: true });
+    const launcher = join(pkg, "bin", "codex.js");
+    await writeFile(launcher, "#!/usr/bin/env node\nrequire('child_process');\n");
+    if (program !== undefined) {
+      const platform = hoisted
+        ? join(root, "node_modules", "@openai", "codex-darwin-arm64")
+        : join(pkg, "node_modules", "@openai", "codex-darwin-arm64");
+      const bin = join(platform, "vendor", "aarch64-apple-darwin", "bin");
+      await mkdir(bin, { recursive: true });
+      await writeFile(join(bin, "codex"), program);
+    }
+    return launcher;
+  }
+
+  it("asks the program the launcher starts, hoisted or nested", async () => {
+    expect(await readCodexAgentSupport(await npmInstall(true, "... .codex/agents ..."))).toBe("supported");
+    expect(await readCodexAgentSupport(await npmInstall(false, "... .codex/agents ..."))).toBe("supported");
+    expect(await readCodexAgentSupport(await npmInstall(true, "an older build"))).toBe("unsupported");
+  });
+
+  it("does not know, rather than calling it old, when the program is missing", async () => {
+    expect(await readCodexAgentSupport(await npmInstall(true))).toBe("unknown");
   });
 });

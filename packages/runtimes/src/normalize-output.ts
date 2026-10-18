@@ -104,14 +104,20 @@ export function normalizeProcessOutput(
 }
 
 /**
- * Scans `text` for the first balanced `{...}` block that parses as JSON and
- * looks like an `AgentResult` (a valid `status` plus a string `summary`).
- * Deliberately lenient: agent CLIs routinely print banners, log lines or
- * markdown fences around their JSON.
+ * Scans `text` for balanced `{...}` blocks that parse as JSON and look like an
+ * `AgentResult` (a valid `status` plus a string `summary`), and returns the
+ * **last** one. Deliberately lenient: agent CLIs routinely print banners, log
+ * lines or markdown fences around their JSON.
+ *
+ * The last, because the answer is what an agent ends on. Since Claude Code
+ * 2.1.295, `claude -p` prints every turn's response rather than only the last
+ * when background work started another turn, so an early draft or a quoted
+ * earlier result can come before the real one (ANT-318).
  *
  * Returns the coerced result, or `undefined` when nothing matches.
  */
 export function extractAgentResult(text: string): AgentResult | undefined {
+  let found: AgentResult | undefined;
   for (let i = 0; i < text.length; i += 1) {
     if (text[i] !== "{") continue;
     const end = findBalancedObjectEnd(text, i);
@@ -125,9 +131,11 @@ export function extractAgentResult(text: string): AgentResult | undefined {
       continue;
     }
     if (!looksLikeAgentResult(parsed)) continue;
-    return coerceAgentResult(parsed);
+    found = coerceAgentResult(parsed);
+    // Whatever is nested inside a result is part of it, not another one.
+    i = end;
   }
-  return undefined;
+  return found;
 }
 
 /**

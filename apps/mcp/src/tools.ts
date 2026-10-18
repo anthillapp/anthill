@@ -79,25 +79,14 @@ export function registerExchangeTools(server: McpServer, handlers: Handlers): vo
 
 ${DRAFT_CLARIFICATION}
 
-Returns an outcome of:
-  created         stored, and nothing is missing from it.
-  already_exists  this same handover was stored before, under this idempotency key.
-  incomplete      not stored; questions have to be answered before any work may
-                  start. The text of the result is the list of questions; put them
-                  to the user in their own words.
-  invalid         nothing was stored, and the problems say why.
+Outcomes: created (stored, complete); already_exists (stored before under this
+idempotency key); incomplete (not stored: the result text lists questions to
+put to the user); invalid (nothing stored; the problems say why). A stored
+result carries the workflow id, its revision and a link the user can open.
 
-The result also carries the workflow id and, where something was stored, the
-revision the content is now at and a link the user can open (anthill://, or
-the web shell's http:// link). A
-refusal carries no link, because there would be nothing of yours behind it.
-
-Pass open: false to store the workflow without opening Anthill yet – when there
-is something to ask the user first – and call open_workflow afterwards.
-
-Every handover carries idempotencyKey, mode, source – harness, sessionId and
-taskText – and workflow. A call that leaves one of them out is answered with
-which one, and nothing is stored.`,
+open: false stores without opening Anthill, so you can ask the user first; then
+call open_workflow. Every handover needs idempotencyKey, mode, source (harness,
+sessionId, taskText) and workflow; a missing one is named and nothing stored.`,
       inputSchema: {
         open: z
           .unknown()

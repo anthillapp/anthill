@@ -244,6 +244,9 @@ export class HookLogObserver {
     const events: ObservationEventDraft[] = [];
     /** Positions in `events` of tool calls made after the done line (ANT-218). */
     const notWork = new Set<number>();
+    // Events shown in the feed that say nothing about the session being here:
+    // a compaction Claude Code started on its own (ANT-315).
+    const quiet = new Set<number>();
     /** The session saying it is over, if this read contained that. */
     let ended: { at: string; cli: MarkerCli; detail: string } | undefined;
     for (const line of chunk.lines) {
@@ -388,6 +391,15 @@ export class HookLogObserver {
         continue;
       }
 
+      // Claude Code compacting, which it does by itself to a long session left
+      // idle (2.1.299): its SessionStart is not the session starting, nor
+      // anybody coming back to it (ANT-315).
+      if (name === "SessionStart" && data.source === "compact") {
+        quiet.add(events.length);
+        events.push({ ...base, title: "Context compacted" });
+        continue;
+      }
+
       if (name === "Notification") {
         // The one field here is the CLI's own short message about what it is
         // waiting for. It is written for a person to read, not model prose.
@@ -433,7 +445,7 @@ export class HookLogObserver {
     }
 
     const latest = events.reduce<ObservationEventDraft | undefined>(
-      (kept, event) => (kept && kept.at >= event.at ? kept : event),
+      (kept, event, index) => (quiet.has(index) || (kept && kept.at >= event.at) ? kept : event),
       undefined,
     );
     const newest = latest?.at;

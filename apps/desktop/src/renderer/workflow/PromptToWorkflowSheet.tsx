@@ -284,6 +284,9 @@ export function PromptToWorkflowSheet({ onAccept, onCancel, workflowName }: Prom
     const review = reviewDraft(parsed.draft, parsed.warnings, {
       prompt,
       interpreter: chosen,
+      // The tool that drafted it is the one the author has and picked; the
+      // workflow is for it, not for Claude Code by default (ANT-328).
+      target: chosen,
       command: response.command,
       ...(folder ? { folder: folder.path } : {}),
     });
@@ -316,6 +319,7 @@ export function PromptToWorkflowSheet({ onAccept, onCancel, workflowName }: Prom
       const review = reviewDraft(draft, phase.review.warnings, {
         prompt,
         interpreter: chosen,
+        target: chosen,
         command: phase.command,
         ...(folder ? { folder: folder.path } : {}),
       });

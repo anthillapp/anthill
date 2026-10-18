@@ -2626,6 +2626,40 @@ describe("a session's delegates", () => {
     requestShape: "background",
   };
 
+  /*
+    ANT-317. A fork starts from its parent's conversation. What it carries
+    over is not marked as a sidechain, and the pasted workflow is in it: read
+    as the fork's own, the run was pasted in a second time and the parent's
+    calls were drawn again under the fork.
+  */
+  it("reads only a fork's own rows, not the conversation it inherited", async () => {
+    const { events } = await followed(
+      [
+        {
+          type: "user",
+          sessionId: "sess-1",
+          isSidechain: false,
+          timestamp: at(1_000),
+          message: { role: "user", content: MARKED_PROMPT },
+        },
+        {
+          type: "assistant",
+          sessionId: "sess-1",
+          isSidechain: false,
+          timestamp: at(2_000),
+          message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_parent", name: "Bash", input: { command: "ls" } }] },
+        },
+        { type: "fork-context-ref", sessionId: "sess-1", timestamp: at(3_000) },
+        said("Trying the other fix.", 10_000, "end_turn"),
+      ],
+      { ...META, agentType: "fork" },
+    );
+    // The parent's own file is pasted in once; nothing from the fork's is.
+    expect(events.filter((event) => event.kind === "prompt.submit" && event.parentToolUseId === "toolu_01DGF")).toEqual([]);
+    expect(events.filter((event) => event.toolUseId === "toolu_parent")).toEqual([]);
+    expect(events).toContainEqual(expect.objectContaining({ kind: "message", detail: "Trying the other fix." }));
+  });
+
   it("carries the call that started the delegate on everything it wrote (ANT-163)", async () => {
     const { events } = await followed(
       [said("[ANTHILL implement] Editing calc.py.", 10_000), said("Done.", 12_000, "end_turn")],
@@ -3251,5 +3285,342 @@ describe("what a Codex program did", () => {
     expect(all).not.toContain("PRIVATE-OUTPUT");
     expect(all).not.toContain("PRIVATE-CONTENT");
     expect(all).not.toContain("PRIVATE-REASONING");
+  });
+});
+
+/**
+ * What Claude Code 2.1.299 to 2.1.302 started writing into a transcript, read
+ * against what it means for a run (ANT-315, ANT-316, ANT-317).
+ */
+describe("Claude Code records that are not the session working", () => {
+  const at = (s: number) => new Date(Date.now() - 600_000 + s * 1000).toISOString();
+  const lines = (rows: unknown[]) => rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+  const prompt = (text: string, s: number) => ({
+    type: "user",
+    sessionId: "sess-1",
+    timestamp: at(s),
+    message: { role: "user", content: text },
+  });
+  const reply = (text: string, s: number, stop = "end_turn") => ({
+    type: "assistant",
+    sessionId: "sess-1",
+    timestamp: at(s),
+    message: { id: `msg-${s}`, role: "assistant", stop_reason: stop, content: [{ type: "text", text }] },
+  });
+  /** A run that started just before these fixtures, so nothing predates it. */
+  const live = () => ({
+    ...createPendingRun({
+      anthillRunId: RUN_ID,
+      correlationNonce: NONCE,
+      selectedCli: "claude-code",
+      promptVersion: "1",
+      bootstrapPromptHash: "abcd1234",
+      now: at(-1),
+    }),
+    detectedSessionId: "sess-1",
+    state: "detected_live" as const,
+  });
+  const path = (dir: string) => join(dir, "-tmp-scratch", "sess-1.jsonl");
+
+  /** A run whose session said it was done, polled once so the done is read. */
+  async function finished() {
+    const dir = await root();
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      lines([prompt(MARKED_PROMPT, 0), reply(`All done.\nANTHILL-DONE ${RUN_ID} ${NONCE}`, 30)]),
+    );
+    const observer = new ClaudeCodeObserver(dir);
+    const first = await observer.poll(live(), at(40));
+    expect(first.evidence).toContainEqual(expect.objectContaining({ kind: "completed" }));
+    return { dir, observer };
+  }
+
+  it("does not read a logged API request as the session working (ANT-316)", async () => {
+    const { dir, observer } = await finished();
+    // A prompt suggestion made after the turn ended, logged the 2.1.300 way.
+    await appendFile(
+      path(dir),
+      lines([
+        { type: "api-request-shape", sessionId: "sess-1", shapeHash: "a1", timestamp: at(90) },
+        { type: "api-request-blob", sessionId: "sess-1", hash: "b1", timestamp: at(90) },
+        { type: "api-request", sessionId: "sess-1", id: "r1", timestamp: at(91), querySource: "prompt_suggestion", params: { model: "x" } },
+      ]),
+    );
+    const { evidence, events } = await observer.poll(live(), at(100));
+    expect(evidence.filter((item) => item.kind === "activity")).toEqual([]);
+    expect(events).toEqual([]);
+  });
+
+  it("keeps a person's stop standing through a request logged after it (ANT-316)", async () => {
+    const dir = await root();
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      lines([
+        prompt(MARKED_PROMPT, 0),
+        { type: "user", sessionId: "sess-1", timestamp: at(20), message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] } },
+        { type: "api-request", sessionId: "sess-1", id: "r1", timestamp: at(25), querySource: "session_title" },
+      ]),
+    );
+    const { evidence } = await new ClaudeCodeObserver(dir).poll(live(), at(30));
+    expect(evidence).toContainEqual(expect.objectContaining({ kind: "interrupted" }));
+  });
+
+  it("does not reopen a finished run when the session compacts, quoting the workflow (ANT-315)", async () => {
+    const { dir, observer } = await finished();
+    // An idle compaction an hour later: the boundary and the summary, which
+    // quotes the pasted workflow, marker included.
+    await appendFile(
+      path(dir),
+      lines([
+        { type: "system", subtype: "compact_boundary", sessionId: "sess-1", timestamp: at(3600), content: "Conversation compacted" },
+        {
+          type: "user",
+          sessionId: "sess-1",
+          timestamp: at(3601),
+          isCompactSummary: true,
+          isVisibleInTranscriptOnly: true,
+          message: { role: "user", content: `This session is being continued from a previous conversation.\n\n${MARKED_PROMPT}` },
+        },
+      ]),
+    );
+    const { evidence, events } = await observer.poll(live(), at(3610));
+    expect(events.filter((event) => event.kind === "prompt.submit")).toEqual([]);
+    expect(evidence.filter((item) => item.kind === "activity" || item.kind === "match")).toEqual([]);
+  });
+
+  it("still reads a prompt typed after a compaction as the session going on", async () => {
+    const { dir, observer } = await finished();
+    await appendFile(
+      path(dir),
+      lines([
+        { type: "user", sessionId: "sess-1", timestamp: at(3601), isCompactSummary: true, message: { role: "user", content: "Summary." } },
+        prompt("One more thing.", 3700),
+      ]),
+    );
+    const { evidence } = await observer.poll(live(), at(3710));
+    expect(evidence).toContainEqual(expect.objectContaining({ kind: "activity", resumes: true }));
+  });
+
+  it("is not finished by silence while a subagent the app sent to the background works (ANT-317)", async () => {
+    const dir = await root();
+    // No run_in_background on the call: the desktop app decides, and only the
+    // receipt says so.
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      lines([
+        prompt(MARKED_PROMPT, 0),
+        {
+          type: "assistant",
+          sessionId: "sess-1",
+          timestamp: at(10),
+          message: {
+            id: "msg-10",
+            role: "assistant",
+            stop_reason: "tool_use",
+            content: [{ type: "tool_use", id: "toolu_bg", name: "Agent", input: { subagent_type: "developer", description: "Build it", prompt: "Build it." } }],
+          },
+        },
+        {
+          type: "user",
+          sessionId: "sess-1",
+          timestamp: at(11),
+          toolUseResult: { status: "async_launched", isAsync: true },
+          message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_bg", content: "Async agent launched successfully." }] },
+        },
+        reply("The developer is on it.", 12),
+      ]),
+    );
+    const observer = new ClaudeCodeObserver(dir);
+    await observer.poll(live(), at(20));
+    const later = await observer.poll(live(), at(20 + 6 * 60));
+    expect(later.evidence.filter((item) => item.kind === "completed")).toEqual([]);
+  });
+
+  it("calls a fork a fork, not one of the workflow's agents (ANT-317)", async () => {
+    const dir = await root();
+    await writeClaude(
+      dir,
+      "-tmp-scratch",
+      "sess-1",
+      lines([
+        prompt(MARKED_PROMPT, 0),
+        {
+          type: "assistant",
+          sessionId: "sess-1",
+          timestamp: at(10),
+          message: {
+            id: "msg-10",
+            role: "assistant",
+            content: [{ type: "tool_use", id: "toolu_fork", name: "Agent", input: { subagent_type: "fork", description: "Try the other fix", prompt: "Try it." } }],
+          },
+        },
+      ]),
+    );
+    const { events } = await new ClaudeCodeObserver(dir).poll(live(), at(20));
+    expect(events).toContainEqual(
+      expect.objectContaining({ kind: "subagent.start", title: "Forked this conversation", agentName: "fork" }),
+    );
+  });
+});
+
+/**
+ * What Codex 0.161 to 0.163 started writing, read against what it means for a
+ * run (ANT-319, ANT-320, ANT-321).
+ */
+describe("Codex 0.163 rollouts", () => {
+  const at = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString();
+  const lines = (rows: unknown[]) => rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+  const meta = (id: string, extra: Record<string, unknown> = {}) => ({
+    timestamp: at(0),
+    type: "session_meta",
+    payload: { session_id: id, id, cwd: "/tmp/scratch", cli_version: "0.163.0", ...extra },
+  });
+  const user = (text: string, s: number) => ({
+    timestamp: at(s),
+    type: "response_item",
+    payload: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+  });
+  const event = (payload: Record<string, unknown>, s: number) => ({ timestamp: at(s), type: "event_msg", payload });
+  const call = (id: string, cmd: string, s: number) => ({
+    timestamp: at(s),
+    type: "response_item",
+    payload: { type: "function_call", name: "exec_command", call_id: id, arguments: JSON.stringify({ cmd }) },
+  });
+  const output = (id: string, text: string, s: number) => ({
+    timestamp: at(s),
+    type: "response_item",
+    payload: { type: "function_call_output", call_id: id, output: text },
+  });
+  const live = () => ({ ...pending("codex"), detectedSessionId: "sess-1", state: "detected_live" as const });
+
+  it("does not take a person's fork of the session for a second session of the run (ANT-319)", async () => {
+    const dir = await root();
+    await writeCodex(dir, "sess-a", lines([meta("sess-a"), user(MARKED_PROMPT, 1)]));
+    // The fork starts with a copy of the conversation, the pasted workflow in it.
+    await writeCodex(dir, "sess-b", lines([meta("sess-b", { forked_from_id: "sess-a" }), user(MARKED_PROMPT, 1), user("Try it the other way.", 5)]));
+    const { evidence } = await new CodexObserver(dir).poll(pending("codex"), new Date().toISOString());
+    expect(evidence.filter((item) => item.kind === "ambiguous")).toEqual([]);
+    expect(evidence).toContainEqual(expect.objectContaining({ kind: "match", sessionId: "sess-a" }));
+  });
+
+  it("does not call a turn Codex replaced with the next one a stop (ANT-320)", async () => {
+    const dir = await root();
+    await writeCodex(
+      dir,
+      "sess-1",
+      lines([meta("sess-1"), user(MARKED_PROMPT, 1), event({ type: "task_started", turn_id: "t1" }, 2), event({ type: "turn_aborted", turn_id: "t1", reason: "replaced" }, 3)]),
+    );
+    const { evidence, events } = await new CodexObserver(dir).poll(live(), new Date().toISOString());
+    expect(evidence.filter((item) => item.kind === "interrupted")).toEqual([]);
+    expect(events.filter((item) => item.kind === "notification")).toEqual([]);
+  });
+
+  it("still reports a person's stop, and says when the budget stopped it", async () => {
+    const dir = await root();
+    await writeCodex(
+      dir,
+      "sess-1",
+      lines([meta("sess-1"), user(MARKED_PROMPT, 1), event({ type: "task_started", turn_id: "t1" }, 2), event({ type: "turn_aborted", turn_id: "t1", reason: "budget_limited" }, 3)]),
+    );
+    const { evidence, events } = await new CodexObserver(dir).poll(live(), new Date().toISOString());
+    expect(evidence).toContainEqual(expect.objectContaining({ kind: "interrupted" }));
+    expect(events).toContainEqual(expect.objectContaining({ kind: "notification", title: "Stopped at its budget" }));
+  });
+
+  it("is not failed by an error the session went on from (ANT-320)", async () => {
+    const dir = await root();
+    await writeCodex(
+      dir,
+      "sess-1",
+      lines([
+        meta("sess-1"),
+        user(MARKED_PROMPT, 1),
+        event({ type: "task_started", turn_id: "t1" }, 2),
+        event({ type: "error", message: "Incomplete response returned" }, 3),
+        user("Go on.", 10),
+        event({ type: "task_started", turn_id: "t2" }, 11),
+      ]),
+    );
+    const { evidence } = await new CodexObserver(dir).poll(live(), new Date().toISOString());
+    expect(evidence.filter((item) => item.kind === "failed")).toEqual([]);
+  });
+
+  it("reads a message that steers a running turn as neither a new run nor its end (ANT-320)", async () => {
+    const dir = await root();
+    await writeCodex(
+      dir,
+      "sess-1",
+      lines([
+        meta("sess-1"),
+        user(MARKED_PROMPT, 1),
+        event({ type: "task_started", turn_id: "t1" }, 2),
+        call("c1", "ls", 3),
+        // Typed while Codex was working, delivered into the same turn.
+        user("Also check the README.", 4),
+        output("c1", "a.txt", 5),
+        event({ type: "task_complete", turn_id: "t1" }, 6),
+      ]),
+    );
+    const { evidence, events } = await new CodexObserver(dir).poll(live(), new Date().toISOString());
+    expect(events.filter((item) => item.kind === "prompt.submit")).toHaveLength(1);
+    expect(evidence).toContainEqual(expect.objectContaining({ kind: "completed" }));
+  });
+
+  it("reads a spawn Codex refused as a failed call, not a subagent sent off (ANT-327)", async () => {
+    const dir = await root();
+    const spawn = (id: string, name: string, s: number) => ({
+      timestamp: at(s),
+      type: "response_item",
+      payload: { type: "function_call", name: "spawn_agent", call_id: id, arguments: JSON.stringify({ task_name: name, agent_type: name }) },
+    });
+    await writeCodex(
+      dir,
+      "sess-1",
+      lines([
+        meta("sess-1"),
+        user(MARKED_PROMPT, 1),
+        spawn("call-bad", "service-a-developer", 2),
+        output("call-bad", "agent_name must use only lowercase letters, digits, and underscores", 2),
+        spawn("call-good", "service_a_developer", 3),
+        output("call-good", JSON.stringify({ task_name: "/root/service_a_developer" }), 3),
+      ]),
+    );
+    const { events } = await new CodexObserver(dir).poll(live(), new Date().toISOString());
+    const end = (id: string) => events.find((event) => event.kind === "tool.end" && event.toolUseId === id);
+    expect(end("call-bad")).toMatchObject({ ok: false });
+    expect(end("call-bad")?.background).toBeUndefined();
+    expect(end("call-good")).toMatchObject({ background: true });
+    expect(end("call-good")?.ok).toBeUndefined();
+  });
+
+  it("pairs read-only calls that ran at once, whatever order they finished in (ANT-321)", async () => {
+    const dir = await root();
+    await writeCodex(
+      dir,
+      "sess-1",
+      lines([
+        meta("sess-1"),
+        user(MARKED_PROMPT, 1),
+        event({ type: "task_started", turn_id: "t1" }, 2),
+        call("c1", "cat a.txt", 3),
+        call("c2", "rg TODO", 3),
+        call("c3", "ls", 3),
+        output("c3", "a.txt", 4),
+        output("c1", `ANTHILL-STEP ${RUN_ID} ${NONCE} read`, 5),
+        output("c2", "nothing", 6),
+      ]),
+    );
+    const { events } = await new CodexObserver(dir).poll(live(), new Date().toISOString());
+    const started = events.filter((item) => item.kind === "tool.start").map((item) => item.toolUseId);
+    const ended = events.filter((item) => item.kind === "tool.end").map((item) => item.toolUseId);
+    expect(started).toEqual(["c1", "c2", "c3"]);
+    expect([...ended].sort()).toEqual(["c1", "c2", "c3"]);
+    expect(events).toContainEqual(expect.objectContaining({ kind: "step.marker", blockId: "read", printedBy: "c1" }));
   });
 });

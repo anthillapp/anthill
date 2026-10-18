@@ -90,6 +90,7 @@ function harness(over: Record<string, unknown> = {}) {
 function stub(
   setup: Record<string, unknown> = harness(),
   agentSupport: "supported" | "unsupported" | "unknown" = "supported",
+  models: { id: string; label: string; efforts: [] }[] = [],
 ) {
   const order: string[] = [];
   const copied: string[] = [];
@@ -97,7 +98,7 @@ function stub(
   const listeners: ((snapshot: { runs: unknown[]; capabilities: unknown[] }) => void)[] = [];
   const api = {
     chooseRunFolder: vi.fn(async (): Promise<string | null> => CHOSEN),
-    codexModels: vi.fn(async () => ({ models: [], agentSupport })),
+    codexModels: vi.fn(async () => ({ models, agentSupport })),
     capabilities: vi.fn(async (): Promise<IpcCapabilities> => ({ contract: 12, channels: [] })),
     liveSetupStatus: vi.fn(async () => ({ dismissed: true, trigger: "", harnesses: [setup] })),
     liveSetupDecline: vi.fn(async () => {}),
@@ -416,6 +417,40 @@ describe("the three steps", () => {
     open({ ...withRoot(CHOSEN), target: "codex" });
     await toHandover();
     expect(screen.queryByText(/does not read/)).toBeNull();
+  });
+
+  /*
+   * ANT-323. Codex stopped serving GPT-5.5 to ChatGPT sign-ins on 2026-10-14,
+   * and a workflow saved before still names it for an agent.
+   */
+  it("warns before the handover about a model Codex no longer offers", async () => {
+    const retired: Workflow = {
+      ...withRoot(CHOSEN),
+      target: "codex",
+      metadata: {
+        workflow: {
+          formatVersion: 4,
+          agents: [{ id: "agent-1", name: "Reader", models: { codex: { id: "gpt-5.5" } } }],
+          runRoot: CHOSEN,
+        },
+      },
+    };
+    stub(harness(), "supported", [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol", efforts: [] }]);
+    open(retired);
+    await toHandover();
+    expect(
+      await screen.findByText(
+        (_text, element) =>
+          element?.tagName === "P" && (element.textContent ?? "").includes("Codex no longer offers gpt-5.5, the model chosen for Reader"),
+      ),
+    ).toBeTruthy();
+  });
+
+  it("says nothing of a model when Codex gave no list", async () => {
+    stub(harness(), "supported");
+    open({ ...withRoot(CHOSEN), target: "codex" });
+    await toHandover();
+    expect(screen.queryByText(/no longer offers/)).toBeNull();
   });
 
   it("names the CLI from the harness, not from the file count", async () => {

@@ -258,4 +258,16 @@ describe("extractAgentResult", () => {
   it("returns undefined when summary is missing", () => {
     expect(extractAgentResult('{"status":"success"}')).toBeUndefined();
   });
+
+  // ANT-318. Since Claude Code 2.1.295 `claude -p` prints every turn's
+  // response, so an earlier result can come before the one the agent ends on.
+  it("takes the last result when the output holds more than one", () => {
+    const output = [
+      "First turn:",
+      '{"status":"blocked","summary":"waiting for the tests"}',
+      "Background work finished. Second turn:",
+      '{"status":"success","summary":"all tests pass"}',
+    ].join("\n");
+    expect(extractAgentResult(output)).toEqual(expect.objectContaining({ status: "success", summary: "all tests pass" }));
+  });
 });

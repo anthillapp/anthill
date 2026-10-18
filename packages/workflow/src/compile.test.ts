@@ -257,6 +257,26 @@ describe("compile – agent files", () => {
     ]);
   });
 
+  /*
+    ANT-327. Codex spawns an agent under a name of lowercase letters, digits
+    and underscores only. Named `service-a-developer`, the agent was spawned
+    under that name first, Codex refused it, and the refused call stayed open
+    as a delegation that never ended.
+  */
+  it("names a Codex agent the way Codex can spawn it", () => {
+    const workflow = reviewLoop("codex");
+    const agents = (workflow.metadata as { workflow: { agents: { name: string }[] } }).workflow.agents;
+    agents[0].name = "Service A Developer";
+    const { files, prompt } = compile(workflow);
+    const file = files.find((f) => f.path === ".codex/agents/service_a_developer.toml");
+    expect(file?.content).toContain('name = "service_a_developer"');
+    expect(prompt).toContain("delegate to the `service_a_developer` subagent");
+    expect(prompt).not.toContain("service-a-developer");
+    // Claude Code keeps the slug it always had.
+    const claude = compile({ ...workflow, target: "claude-code" });
+    expect(claude.files.map((f) => f.path)).toContain(".claude/agents/service-a-developer.md");
+  });
+
   it("writes the keys Codex documents, and no others", () => {
     const workflow = reviewLoop("codex");
     const agents = (workflow.metadata as { workflow: { agents: { models?: unknown }[] } }).workflow

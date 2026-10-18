@@ -596,3 +596,25 @@ describe("whether the log is holding a claim of work", () => {
     expect(new HookLogObserver("/nonexistent").waiting(RUN_ID, NOW)).toBe(false);
   });
 });
+
+/*
+  ANT-315. Claude Code fires SessionStart with source "compact" after it
+  compacts, and since 2.1.299 a long session left idle compacts by itself an
+  hour after its last word. That is not the session starting or anybody
+  coming back to it.
+*/
+describe("a compaction's SessionStart", () => {
+  it("is shown, and is not the session being here", async () => {
+    const path = await log([line({ hook_event_name: "SessionStart", source: "compact" })]);
+    const { evidence, events } = await new HookLogObserver(path).poll(pending(), new Date().toISOString());
+    expect(events).toEqual([expect.objectContaining({ title: "Context compacted" })]);
+    expect(evidence.filter((item) => item.kind === "activity")).toEqual([]);
+  });
+
+  it("leaves an ordinary SessionStart as it was", async () => {
+    const path = await log([line({ hook_event_name: "SessionStart", source: "startup" })]);
+    const { evidence, events } = await new HookLogObserver(path).poll(pending(), new Date().toISOString());
+    expect(events).toEqual([expect.objectContaining({ title: "Session started" })]);
+    expect(evidence).toContainEqual(expect.objectContaining({ kind: "activity" }));
+  });
+});

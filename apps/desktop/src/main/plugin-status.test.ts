@@ -171,6 +171,18 @@ describe("Codex", () => {
     });
   });
 
+  // ANT-322. Codex 0.163 reads `[plugins._default] enabled` for a plugin
+  // that names no `enabled` of its own.
+  it("takes the default plugin activation when the plugin names none", async () => {
+    const dir = await home();
+    await put(join(dir, ".codex/config.toml"), `[plugins._default]\nenabled = false\n\n[plugins."anthill@anthill-local"]\n`);
+    await put(join(dir, ".codex/plugins/cache/anthill-local/anthill/0.8.13+codex.1/.keep"), "");
+    expect(await codexStatus(dir)).toMatchObject({ installed: true, enabled: false });
+
+    await put(join(dir, ".codex/config.toml"), `[plugins._default]\nenabled = false\n\n[plugins."anthill@anthill-local"]\nenabled = true\n`);
+    expect(await codexStatus(dir)).toMatchObject({ installed: true, enabled: true });
+  });
+
   it("does not call a plugin installed that is only listed, with nothing cached", async () => {
     const dir = await home();
     await put(join(dir, ".codex/config.toml"), `[plugins."anthill@anthill-local"]\nenabled = true\n`);

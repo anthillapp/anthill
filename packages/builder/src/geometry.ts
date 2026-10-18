@@ -213,6 +213,38 @@ export function entryPoint(
   return { x: rect.left, y: clamp(from.y, rect.top + 12, bottom - 12), side: "left" };
 }
 
+/**
+ * Whether a landing is on the side of its block that faces away from where the
+ * line comes from, so that reaching it means crossing the block itself.
+ *
+ * A connection made by clicking a block keeps the clicked point, and the
+ * landing goes to the side nearest it: a click in the lower half of a block
+ * below its source landed on that block's bottom, and the line ran down
+ * through the card to an arrowhead pointing back up into it (ANT-326).
+ */
+export function facesAway(rect: Rect, landing: EntryPoint, from: Point): boolean {
+  switch (landing.side) {
+    case "top":
+      return from.y > rect.top + rect.h;
+    case "bottom":
+      return from.y < rect.top;
+    case "left":
+      return from.x > rect.left + rect.w;
+    default:
+      return from.x < rect.left;
+  }
+}
+
+/**
+ * Where an arrow the author pointed lands: where they pointed, unless that is
+ * the far side of the block from the line's source. Then the side facing the
+ * source, chosen as for an arrow nobody pointed (ANT-326).
+ */
+export function pointedEntryPoint(rect: Rect, from: Point, anchor: AnchorPoint): EntryPoint {
+  const pointed = entryPoint(rect, from, anchor);
+  return facesAway(rect, pointed, from) ? entryPoint(rect, from) : pointed;
+}
+
 /** A port whose side may be left out, in which case it leaves to the right. */
 type LooseFrom = Point & { side?: Side };
 

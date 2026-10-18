@@ -30,6 +30,7 @@ import {
   anchorFromPoint,
   bendFromPoint,
   entryPoint,
+  pointedEntryPoint,
   route,
   type Point,
 } from "./geometry";
@@ -636,7 +637,7 @@ export function WorkflowCanvas({
 
     const target = snapped ? workflow.nodes.find((node) => node.id === snapped) : undefined;
     const landing = target
-      ? entryPoint(blockRect(target), linkingPort, anchorFromPoint(blockRect(target), pointer))
+      ? pointedEntryPoint(blockRect(target), linkingPort, anchorFromPoint(blockRect(target), pointer))
       : {
           ...pointer,
           // A free end faces back the way the line came, so the curve arrives

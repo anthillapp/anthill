@@ -30,8 +30,8 @@ export const CLAUDE_DEFAULT_COMMAND = "claude";
 /**
  * Builds the argv for a single non-interactive Claude Code invocation.
  *
- * !!! ASSUMPTION — VERIFY AGAINST THE REAL CLI !!!
- * The shape assumed here is:
+ * Every flag here is in `claude --help` as of 2.1.292 (checked for ANT-318);
+ * that the output is read as intended is still only unit tested. The shape:
  *
  *   claude -p --output-format text [--model <model>] [--permission-mode <mode>] [...extra]
  *

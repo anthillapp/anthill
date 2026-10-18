@@ -9,6 +9,7 @@ import {
   assignAgent,
   assignedAgents,
   findAgentProfile,
+  modelsNoLongerOffered,
   newAgentId,
   removeAgentProfile,
   retargetWorkflow,
@@ -588,5 +589,35 @@ describe("rebuilding a workflow for another tool", () => {
   it("is the same rebuild every time, so the same file makes the same revision", () => {
     const workflow = written("claude-code", [{ id: "a", name: "Author", models: { "claude-code": { id: "opus" } } }]);
     expect(retargetWorkflow(workflow, "codex").workflow).toEqual(retargetWorkflow(workflow, "codex").workflow);
+  });
+});
+
+/*
+  ANT-323. Codex stopped serving GPT-5.5 to ChatGPT sign-ins on 2026-10-14; a
+  workflow saved before still names it, and its agent file would pin it.
+*/
+describe("models a tool no longer offers", () => {
+  const workflow = makeWorkflow(
+    [
+      { id: "agent-1", name: "Developer", models: { codex: { id: "gpt-5.5" } } } as AgentProfile,
+      { id: "agent-2", name: "Reviewer", models: { codex: { id: "gpt-6.1-sol" } } } as AgentProfile,
+      { id: "agent-3", name: "Writer", models: { codex: { id: "__default__" } } } as AgentProfile,
+      { id: "agent-4", name: "Spare", models: { codex: { id: "gpt-5.5" } } } as AgentProfile,
+    ],
+    [step("a", "Build", "agent-1"), step("b", "Review", "agent-2"), step("c", "Write", "agent-3")],
+  );
+
+  it("names each used agent whose chosen model is not in the list", () => {
+    expect(modelsNoLongerOffered(workflow, "codex", ["gpt-6.1-sol", "gpt-6-astra"])).toEqual([
+      { agent: "Developer", model: "gpt-5.5" },
+    ]);
+  });
+
+  it("says nothing without a list, which is not a tool with no models", () => {
+    expect(modelsNoLongerOffered(workflow, "codex", [])).toEqual([]);
+  });
+
+  it("reads only the tool asked about", () => {
+    expect(modelsNoLongerOffered(workflow, "claude-code", ["sonnet"])).toEqual([]);
   });
 });

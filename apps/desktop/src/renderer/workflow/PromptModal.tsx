@@ -28,7 +28,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ValidationResult, Workflow } from "@anthill/workflow-schema";
-import { DEFAULT_TARGET, HARNESS_PROFILES, WorkflowCompileError, runRoot } from "@anthill/workflow";
+import { DEFAULT_TARGET, HARNESS_PROFILES, WorkflowCompileError, modelsNoLongerOffered, runRoot } from "@anthill/workflow";
 import {
   MARKER_VERSION,
   buildBootstrapPrompt,
@@ -128,16 +128,24 @@ export function PromptModal({
    * the prompt is pasted rather than after the run looks wrong.
    */
   const [codexReadsAgents, setCodexReadsAgents] = useState<boolean | undefined>();
+  /**
+   * The models Codex offers here, from the same answer. A saved workflow can
+   * name one Codex has since stopped serving, and its agent file would pin
+   * it: said before the hand-over, not by the run failing (ANT-323).
+   */
+  const [codexOffered, setCodexOffered] = useState<string[]>([]);
   useEffect(() => {
     if (workflow.target !== "codex") return;
     let live = true;
     void window.anthill
       .codexModels()
       .then((found) => {
+        if (!live || !found) return;
+        setCodexOffered(found.models.map((model) => model.id));
         // `unknown` leaves it unsaid — and unsaid means `undefined`, not
         // `false`: warning on a question that could not be answered would send
         // people to update software that is already fine.
-        if (!live || !found || found.agentSupport === "unknown") return;
+        if (found.agentSupport === "unknown") return;
         setCodexReadsAgents(found.agentSupport === "supported");
       })
       .catch(() => undefined);
@@ -738,6 +746,16 @@ export function PromptModal({
                   starts with. Update Codex to have the models you chose applied.
                 </p>
               ) : null}
+
+              {target === "codex"
+                ? modelsNoLongerOffered(workflow, "codex", codexOffered).map(({ agent, model }) => (
+                    <p key={`retired-${agent}`} className="hint warn">
+                      Codex no longer offers <code>{model}</code>, the model chosen for {agent}. Its
+                      agent file would ask for it and the step would fail. Choose another model for{" "}
+                      {agent}, or Default, before handing this over.
+                    </p>
+                  ))
+                : null}
 
               {result.warnings.map((warning) => (
                 <p key={warning} className="hint warn">

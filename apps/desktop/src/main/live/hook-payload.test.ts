@@ -41,6 +41,13 @@ describe("reducing a hook payload", () => {
       .toEqual({ hook_event_name: "SessionEnd", reason: "logout" });
   });
 
+  it("keeps what started a session, so a compaction is told from a start (ANT-315)", () => {
+    expect(minimalHookPayload({ hook_event_name: "SessionStart", source: "compact" }))
+      .toEqual({ hook_event_name: "SessionStart", source: "compact" });
+    expect(minimalHookPayload({ hook_event_name: "SessionStart", source: "not a token at all" }))
+      .toEqual({ hook_event_name: "SessionStart" });
+  });
+
   it("keeps which subagent a SubagentStop names, and not its words or transcript (ANT-245)", () => {
     expect(minimalHookPayload({
       hook_event_name: "SubagentStop",

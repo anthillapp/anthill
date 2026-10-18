@@ -1,4 +1,4 @@
-// Anthill MCP server 0.8.13, built by scripts/build-plugin-server.mjs
+// Anthill MCP server 0.8.14, built by scripts/build-plugin-server.mjs
 // from https://github.com/anthillapp/anthill. Do not edit: run
 // `npm run plugin:bundle` to write it again. MIT licensed.
 import { createRequire as __anthillCreateRequire } from "node:module";
@@ -36100,6 +36100,10 @@ function agentSlug(profile) {
   return slugify2(profile.name) || slugify2(profile.id);
 }
 __name(agentSlug, "agentSlug");
+function harnessAgentName(slug, harness) {
+  return harness.agentFileFormat === "toml" ? slug.replace(/-/g, "_") : slug;
+}
+__name(harnessAgentName, "harnessAgentName");
 var PROFILE_COUNTER = "agentProfile";
 function withProfiles(workflow, profiles) {
   workflow = rememberIdsUnder(workflow, PROFILE_COUNTER, profiles.map((profile) => profile.id));
@@ -36233,7 +36237,8 @@ __name(actionLabel, "actionLabel");
 function buildAgentFile(assignment, workflow, harness) {
   if (!harness.agentDir)
     return void 0;
-  const { profile, slug } = assignment;
+  const { profile } = assignment;
+  const slug = harnessAgentName(assignment.slug, harness);
   const steps = assignment.stepIds.map((id) => workflow.nodes.find((node) => node.id === id)).filter((node) => node !== void 0);
   const description = profile.description?.trim() || describeAgent(profile, steps, workflow);
   const model = modelFor(profile.models, harness.target);
@@ -36496,7 +36501,7 @@ function buildPrompt(workflow, harness, ordered, options) {
       const modelNote = harness.supportsPerAgentModel ? ` \u2013 model: ${model}` : "";
       const stepCount = stepIds.length > 1 ? ` \u2013 ${stepIds.length} steps` : "";
       const role = profile.role?.trim() ? ` \u2013 ${profile.role.trim()}` : "";
-      return `- \`${slug}\` (${profile.name})${role}${stepCount}${modelNote}`;
+      return `- \`${harnessAgentName(slug, harness)}\` (${profile.name})${role}${stepCount}${modelNote}`;
     });
     sections.push([
       "## Agents",
@@ -36563,7 +36568,7 @@ function buildPrompt(workflow, harness, ordered, options) {
     const assignment = agentOf.get(node.id);
     const action = config2.actionKind ? actionDefinition(config2.actionKind) : void 0;
     steps.push("");
-    const heading = assignment ? usesSubagents ? `### ${step}. ${node.name} \u2013 delegate to the \`${assignment.slug}\` subagent` : `### ${step}. ${node.name} \u2013 act as ${assignment.profile.name}` : `### ${step}. ${node.name}`;
+    const heading = assignment ? usesSubagents ? `### ${step}. ${node.name} \u2013 delegate to the \`${harnessAgentName(assignment.slug, harness)}\` subagent` : `### ${step}. ${node.name} \u2013 act as ${assignment.profile.name}` : `### ${step}. ${node.name}`;
     steps.push(heading);
     steps.push(...waitsFor(node.id));
     const opening = options.stepOpening?.({ id: node.id, delegated: Boolean(assignment && usesSubagents) }) ?? [];
@@ -40494,77 +40499,23 @@ function opensIt(link2) {
 __name(opensIt, "opensIt");
 
 // apps/mcp/dist/instructions.js
-var DRAFT_CLARIFICATION = `For every new handover submitted with mode "design", ask the user before create_workflow_draft:
-confirm the project/directory and scope, constraints and what must be preserved,
-success criteria, and decisions already made or explicitly delegated to you.
-If the request already gives
-the answers, summarize them and ask for confirmation rather than repeating the
-questions. Wait for the user's actual answers or confirmation; when asking in
-chat, finish your turn without submitting. A partial reply requires follow-up
-on what remains unanswered. Do not invent answers, count a future clarification
-block as this conversation, or infer permission to create a project from an empty
-directory. Read-only environment findings are not user decisions. Schema
-validation cannot establish that the user agreed. Preserve the original request
-and the user's clarification answers in source.taskText and the workflow brief.
-Status reads, unchanged retries and resuming an agreed scope do not require a
-new questionnaire. Asking whether to start, once the workflow is on screen, is
-a separate question from these and does not replace them.
+var DRAFT_CLARIFICATION = `mode "design": before create_workflow_draft, ask the user to confirm the project directory and scope, constraints and what must be kept, success criteria, and decisions already made or left to you. If the request already answers these, summarize them and ask for confirmation instead. Wait for their actual answers (when asking in chat, end your turn without submitting) and follow up on whatever a partial reply leaves open. Never invent answers, and never take an empty directory, repository findings or passing validation as the user's agreement. Put their request and answers in source.taskText and the workflow brief. Status reads, retries and resuming an agreed scope need no new questions; asking whether to start is a separate question.
 
-mode "watch" is the user asking to watch you work rather than to write the plan,
-and answering with a questionnaire is the opposite of what they asked for. Do
-not run it. Decide the scope from what they said and from the repository, say
-in one line what you took the job to be, and submit. What this does not excuse
-is a job larger than the one described: creating a project they never named or
-working outside the directory in question is still a question for them.`;
-var SERVER_INSTRUCTIONS = `These tools store a workflow locally for Anthill and queue desktop display or
-observation requests. Queueing is not acknowledgement: this server cannot confirm
-that the desktop opened the workflow or that Live Session observation is active.
+mode "watch": the user wants to watch you work, so ask nothing. Decide the scope from their words and the repository, say in one line what you took the job to be, and submit. A job larger than the one described, such as a new project or another directory, is still a question for them.`;
+var DRAFT_GATE = `Under mode "design", ask the user the questions in create_workflow_draft's description before calling it, and wait for their answers. Under "watch", ask nothing: say in one line what you took the job to be and submit.`;
+var SERVER_INSTRUCTIONS = `Anthill stores workflows locally and queues requests for its desktop app to show or observe them. A queued request is not an acknowledgement. Anthill starts and drives nothing: you do the work and it observes.
 
-Anthill starts nothing and drives nothing. You keep doing the work; Anthill can only observe it.
+Once per handover:
+0. ${DRAFT_GATE}
+1. create_workflow_draft: submit. An incomplete handover is refused with questions; put them to the user, fix the document and resubmit. Never answer them yourself.
+2. get_ready_revision: the revision to work from, which is the user's latest and may not be yours. There is no approval to wait for.
+3. bind_run: pass that exact revision and digest, and a stable idempotencyKey (the same key on a retry; a new key is a new run). Report progress with the commands it returns.
 
-The sequence, once per handover:
+get_workflow says where a handover stands. revise_workflow stores a new version when the user asks you to change the plan; tell them what changed and ask. A bound run keeps its revision when the user edits later.
 
-0. ${DRAFT_CLARIFICATION}
+run_workflow is the user's command to run a saved workflow.json again, and the go-ahead: no questions, no draft; carry out the prompt it returns.
 
-1. create_workflow_draft \u2013 submit the workflow. An incomplete handover is refused
-   without reserving its identity. Ask the returned questions, correct the
-   document after the user answers, and resubmit it. Never answer missing
-   requirements yourself to make validation pass. A queued display request does not confirm that
-   the desktop has opened it.
-
-2. get_ready_revision \u2013 ask which revision to work from. It is the latest the
-   user has, which may not be what you submitted, because they can edit it.
-   There is no approval to wait for: Anthill records the work, it does not
-   authorise it, and nothing here can stop you starting. Under "design" what
-   should stop you is that you asked the user and they have not answered yet;
-   under "watch" they answered by running the command. A revision is
-   refused only when the graph itself cannot be compiled into a prompt, and the
-   questions to put to the user come back with the refusal.
-
-3. bind_run \u2013 pass the exact revision and digest you retrieved, plus a stable
-   idempotencyKey for this request. Retry the same payload/key after a lost
-   answer; a new key means an intentional new run. A stale revision is refused.
-   The returned commands report progress; Anthill does not start your session.
-   A binding and a queued registration are not evidence of live activity.
-
-get_workflow answers where a handover stands, at any point.
-
-revise_workflow stores a later version of a workflow that already exists, for
-when the user asks you to change the plan rather than changing it themselves. It
-decides nothing: the revision a run is bound to never changes, and a revision you
-wrote is not a revision the user has agreed to. Tell them what you changed and
-ask.
-
-The user may edit the workflow while you work. That makes a new revision; the run
-you bound keeps the one it started from, so nothing changes underneath you.
-
-run_workflow is the user's command to run a saved workflow again: run "<path>".
-It does the handover, the bind and the prompt in one call, for the workflow.json
-the user named. Their command is the go-ahead: no questionnaire, no draft of
-your own, no asking whether to start. Carry out the prompt it returns.
-
-None of these tools runs a command or reaches the network, and run_workflow's
-workflow.json is the only file any of them reads.`;
+No tool runs a command or reaches the network; run_workflow's workflow.json is the only file read.`;
 
 // apps/mcp/dist/options.js
 import { isAbsolute as isAbsolute2, resolve as resolve4 } from "node:path";
@@ -40716,25 +40667,14 @@ function registerExchangeTools(server, handlers) {
 
 ${DRAFT_CLARIFICATION}
 
-Returns an outcome of:
-  created         stored, and nothing is missing from it.
-  already_exists  this same handover was stored before, under this idempotency key.
-  incomplete      not stored; questions have to be answered before any work may
-                  start. The text of the result is the list of questions; put them
-                  to the user in their own words.
-  invalid         nothing was stored, and the problems say why.
+Outcomes: created (stored, complete); already_exists (stored before under this
+idempotency key); incomplete (not stored: the result text lists questions to
+put to the user); invalid (nothing stored; the problems say why). A stored
+result carries the workflow id, its revision and a link the user can open.
 
-The result also carries the workflow id and, where something was stored, the
-revision the content is now at and a link the user can open (anthill://, or
-the web shell's http:// link). A
-refusal carries no link, because there would be nothing of yours behind it.
-
-Pass open: false to store the workflow without opening Anthill yet \u2013 when there
-is something to ask the user first \u2013 and call open_workflow afterwards.
-
-Every handover carries idempotencyKey, mode, source \u2013 harness, sessionId and
-taskText \u2013 and workflow. A call that leaves one of them out is answered with
-which one, and nothing is stored.`,
+open: false stores without opening Anthill, so you can ask the user first; then
+call open_workflow. Every handover needs idempotencyKey, mode, source (harness,
+sessionId, taskText) and workflow; a missing one is named and nothing stored.`,
     inputSchema: {
       open: external_exports.unknown().optional().describe("false to store the workflow without opening Anthill, so you can ask the user something first; then call open_workflow. Leave it out to open Anthill at once."),
       idempotencyKey: external_exports.unknown().optional().describe("Your own key for this handover, repeated verbatim if you retry it. It is not an address: a submission lands on the id its workflow document carries, and this key is your promise that a second submission under that id is the same call rather than different work. The same key under a different document id creates a second workflow rather than revising the first."),
@@ -40938,7 +40878,7 @@ __name(registerExchangeTools, "registerExchangeTools");
 
 // apps/mcp/dist/server.js
 var SERVER_NAME = "anthill";
-var SERVER_VERSION = true ? "0.8.13" : String(createRequire(import.meta.url)("../package.json").version ?? "0.0.0");
+var SERVER_VERSION = true ? "0.8.14" : String(createRequire(import.meta.url)("../package.json").version ?? "0.0.0");
 var TRANSPORT_FAILURE_EXIT_CODE = 1;
 function transportFailureLine(error51) {
   const reason = error51 instanceof Error ? error51.message : String(error51);
